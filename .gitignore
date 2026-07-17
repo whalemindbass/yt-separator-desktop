@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# Large binaries (bundled separately by electron-builder)
+vendor/yt-dlp/*.exe
+vendor/yt-dlp/yt-dlp
+vendor/ffmpeg/**
+models/*.onnx
+
+# Editor
+.vscode/
+.idea/

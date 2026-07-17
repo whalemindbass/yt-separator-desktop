@@ -1,0 +1,100 @@
+{
+  "name": "yt-separator-desktop",
+  "version": "0.1.0",
+  "description": "YT Separator — Desktop app for real-time stem separation of local audio/video files",
+  "main": "main.js",
+  "author": "rowonss",
+  "license": "GPL-3.0",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --inspect=9229",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.rowonss.yt-separator",
+    "productName": "YT Separator",
+    "copyright": "© 2026 rowonss",
+    "asar": true,
+    "asarUnpack": [
+      "renderer/lib/**/*",
+      "renderer/workers/**/*"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "!**/*.map",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}",
+      "icon": "build/icon.png",
+      "signAndEditExecutable": false,
+      "signtoolOptions": null,
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "YT Separator",
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-Portable.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "rowonss",
+        "repo": "yt-separator-desktop",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

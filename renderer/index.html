@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep:;" />
+  <title>YT Separator</title>
+  <link rel="stylesheet" href="./styles/app.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="logo">YS</div>
+      <div class="titles">
+        <h1>YT Separator</h1>
+        <p class="sub">Desktop</p>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab on" data-view="separate">새 분리</button>
+      <button class="tab" data-view="library">라이브러리</button>
+    </nav>
+    <div class="meta">
+      <span id="platform">…</span>
+      <span id="v">v?</span>
+      <button id="update-badge" class="update-badge" hidden></button>
+    </div>
+  </header>
+
+  <div id="update-dialog" class="update-dialog" hidden>
+    <div class="update-dialog-card">
+      <div class="update-dialog-title" id="update-dialog-title">업데이트</div>
+      <div class="update-dialog-body" id="update-dialog-body"></div>
+      <div class="update-dialog-progress" id="update-dialog-progress" hidden>
+        <div class="progress-bar"><div id="update-fill" class="progress-fill"></div></div>
+        <div id="update-info" class="info"></div>
+      </div>
+      <div class="update-dialog-actions">
+        <button id="update-close" class="btn">닫기</button>
+        <button id="update-download" class="btn primary" hidden>다운로드</button>
+        <button id="update-install" class="btn primary" hidden>지금 재시작 & 설치</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- View 1: 분리 처리 -->
+  <main class="body view" data-view="separate">
+    <section class="hero">
+      <h2>YouTube 링크를 붙여넣으세요</h2>
+      <p class="muted">영상과 오디오를 로컬로 받아와 스템으로 분리합니다.</p>
+
+      <div class="url-row">
+        <input id="url" class="url" type="text" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocomplete="off" />
+        <button id="probe-btn" class="btn">확인</button>
+        <button id="dl-btn" class="btn primary" disabled>다운로드</button>
+      </div>
+
+      <div class="settings-row">
+        <span class="settings-label">처리 장치</span>
+        <div class="pill-row" id="provider-pills">
+          <button class="pill on" data-provider="auto">자동</button>
+          <button class="pill" data-provider="webgpu">GPU (WebGPU)</button>
+          <button class="pill" data-provider="wasm">CPU (WASM)</button>
+        </div>
+        <span id="provider-status" class="settings-hint"></span>
+      </div>
+
+      <div id="probe-result" class="probe-card" hidden>
+        <img id="probe-thumb" alt="" />
+        <div class="probe-meta">
+          <div id="probe-title" class="probe-title"></div>
+          <div id="probe-sub" class="probe-sub"></div>
+        </div>
+      </div>
+
+      <div id="existing-banner" class="existing-banner" hidden>
+        <div class="existing-banner-icon"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="existing-banner-text">
+          <div class="existing-banner-title">이미 처리한 영상입니다</div>
+          <div id="existing-banner-sub" class="existing-banner-sub"></div>
+        </div>
+        <button id="existing-open-btn" class="btn primary">라이브러리에서 열기</button>
+      </div>
+
+      <div id="progress-wrap" class="progress-wrap" hidden>
+        <div class="progress-head">
+          <span id="progress-phase" class="phase">준비</span>
+          <span id="progress-pct" class="pct">0%</span>
+          <span id="progress-speed" class="speed"></span>
+          <button id="cancel-btn" class="link-btn">취소</button>
+        </div>
+        <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+        <div id="progress-info" class="info"></div>
+      </div>
+
+      <div id="done-card" class="done-card" hidden>
+        <div>
+          <div class="done-title"><span class="done-icon"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>다운로드 완료</div>
+          <div id="done-path" class="done-path muted"></div>
+        </div>
+        <div class="done-actions">
+          <button id="open-folder-btn" class="btn">폴더 열기</button>
+          <button id="separate-btn" class="btn primary">스템 분리 시작</button>
+        </div>
+      </div>
+
+      <div id="sep-wrap" class="progress-wrap" hidden>
+        <div class="progress-head">
+          <span id="sep-phase" class="phase">준비</span>
+          <span id="sep-pct" class="pct">0%</span>
+          <span id="sep-detail" class="speed"></span>
+        </div>
+        <div class="progress-bar"><div id="sep-fill" class="progress-fill"></div></div>
+        <div id="sep-info" class="info"></div>
+      </div>
+
+      <div id="stems-done" class="done-card" hidden>
+        <div>
+          <div class="done-title"><span class="done-icon"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.2 11.5L13 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>스템 분리 완료</div>
+          <div id="stems-list" class="done-path muted"></div>
+        </div>
+        <div class="done-actions">
+          <button id="open-stems-btn" class="btn">스템 폴더 열기</button>
+          <button id="go-library-btn" class="btn primary">라이브러리에서 재생</button>
+        </div>
+      </div>
+
+      <div id="err" class="err" hidden></div>
+    </section>
+  </main>
+
+  <!-- View 2: 라이브러리 + 플레이어 -->
+  <main class="body view library-body" data-view="library" hidden>
+    <aside class="lib-side">
+      <div class="lib-side-head">
+        <h3>라이브러리</h3>
+        <button id="lib-refresh" class="link-btn" title="새로고침">↻</button>
+      </div>
+      <ul id="lib-list" class="lib-list"><!-- rendered by library.js --></ul>
+      <div id="lib-empty" class="lib-empty muted" hidden>
+        <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 9H21" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>처리한 영상이 없습니다.</span>
+      </div>
+    </aside>
+
+    <section class="lib-main">
+      <div id="player-empty" class="player-empty muted">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>좌측에서 항목을 선택하세요.</span>
+      </div>
+
+      <div id="player-section" class="player" hidden>
+        <div class="player-head">
+          <div class="player-name-wrap">
+            <input id="player-name" class="player-name" type="text" spellcheck="false" />
+            <span class="player-name-hint">Enter로 저장</span>
+          </div>
+          <div class="player-meta">
+            <span id="player-provider" class="settings-hint"></span>
+            <button id="player-beep" class="btn" title="440Hz sine 500ms — 오디오 그래프 정상 여부 진단">🔊 톤</button>
+            <button id="player-stem-test" class="btn" title="vocals stem을 destination에 직접 연결해 3초 재생">🎤 stem 직접</button>
+            <button id="player-delete" class="link-btn">삭제</button>
+          </div>
+        </div>
+
+        <div id="player-status" class="player-status"></div>
+
+        <div class="player-video-wrap">
+          <video id="player-video" controls muted preload="metadata" playsinline></video>
+        </div>
+
+        <div class="mixer">
+          <div class="mixer-master">
+            <label class="mixer-label">MASTER</label>
+            <input id="master-vol" class="mixer-slider" type="range" min="0" max="150" value="100" />
+            <span id="master-val" class="mixer-val">100%</span>
+          </div>
+          <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>
+        </div>
+
+        <div id="player-loading" class="player-loading muted" hidden>스템 로드 중…</div>
+        <div id="player-err" class="err" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./scripts/app.js"></script>
+</body>
+</html>
