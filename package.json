@@ -10,7 +10,11 @@
     "start": "electron .",
     "dev": "electron . --inspect=9229",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --publish never"
+    "dist": "electron-builder --win --publish never",
+    "release": "node scripts/release.js",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major",
+    "release:rebuild": "node scripts/release.js --no-bump --no-git"
   },
   "devDependencies": {
     "electron": "^43.1.1",

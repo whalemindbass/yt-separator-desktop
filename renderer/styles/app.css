@@ -591,6 +591,7 @@ body { display: flex; flex-direction: column; }
   display: grid;
   grid-template-columns: 260px 1fr 320px;
   grid-template-areas: "side center right";
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   padding: 0;
   overflow: hidden;
@@ -602,15 +603,21 @@ body { display: flex; flex-direction: column; }
   grid-template-columns: 260px 1fr;
   grid-template-areas: "side center";
 }
-/* 중간 폭: 우측 컨트롤이 아래로 (center + right 같은 컬럼) */
-@media (max-width: 1280px) {
+/* 좁은 폭 OR 짧은 세로: 우측 컨트롤이 하단으로 이동.
+   가로가 넉넉해도 세로가 짧으면 mixer가 우측 컬럼에서 잘리므로 강제로 stack 형태 사용. */
+@media (max-width: 1280px), (max-height: 780px) {
   .library-body:has(#player-section:not([hidden])) {
     grid-template-columns: 260px 1fr;
     grid-template-areas:
       "side center"
       "side right";
+    grid-template-rows: minmax(0, 1fr) minmax(200px, 42%);
   }
-  .lib-right { border-left: 0 !important; border-top: 1px solid var(--border); }
+  .lib-right {
+    border-left: 0 !important;
+    border-top: 1px solid var(--border);
+    max-height: none;
+  }
 }
 /* 좁은 폭: 사이드바도 상단으로 */
 @media (max-width: 780px) {
@@ -619,12 +626,19 @@ body { display: flex; flex-direction: column; }
   .library-body:not(:has(#player-section:not([hidden]))) {
     grid-template-columns: 1fr;
     grid-template-areas: "side" "center" "right";
+    grid-template-rows: 180px minmax(0, 1fr) minmax(200px, 42%);
   }
-  .lib-side { max-height: 200px; }
+  .lib-side { max-height: none; height: auto; }
 }
 
 .lib-side  { grid-area: side; }
-.lib-center{ grid-area: center; min-width: 0; padding: 24px 28px 40px; overflow-y: auto; }
+.lib-center{
+  grid-area: center;
+  min-width: 0; min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
 .lib-right { grid-area: right; border-left: 1px solid var(--border); padding: 20px 18px; overflow-y: auto; background: var(--surface); }
 
 .lib-side {
@@ -713,13 +727,15 @@ body { display: flex; flex-direction: column; }
 }
 .lib-empty svg { width: 26px; height: 26px; color: var(--tx-4); }
 .player-empty {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 70px 20px;
   text-align: center;
   font-size: 13px;
   background: var(--surface);
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  border: 0;
+  border-radius: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
 }
 .player-empty svg { width: 30px; height: 30px; color: var(--tx-4); }
 .player-loading {
@@ -920,16 +936,58 @@ body { display: flex; flex-direction: column; }
 }
 .lib-group-head:first-child { border-top: 0; margin-top: 0; }
 
-/* Player */
+/* Player — 비디오 편집 프로그램 스타일 (header 고정 + video 최대화) */
 .player {
   padding: 0;
   background: transparent;
   border: 0;
   border-radius: 0;
   display: flex; flex-direction: column;
-  gap: 16px;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
-/* lib-right 안의 mixer는 자체 카드 장식 제거 (lib-right가 이미 surface) */
+/* 상단 고정 헤더 (제목·그룹·삭제·provider) */
+.player .player-head {
+  flex-shrink: 0;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+/* 영상 미리보기 영역 — 남는 공간 안에서 16:9 캔버스로. 절대 잘림 없음. */
+.player-video-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.player-video-wrap video {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  display: block;
+  object-fit: contain;
+  border-radius: 0;
+  background: #000;
+}
+/* 로드/에러 표시는 헤더처럼 flex-shrink: 0로 하단 배치 */
+#player-loading, #player-err { flex-shrink: 0; margin: 0 24px 12px; }
+
+/* 좁은 폭에서는 lib-center 내부의 padding·간격 축소 */
+@media (max-width: 1280px) {
+  .player .player-head { padding: 12px 18px; }
+}
+
+/* lib-right 안의 mixer는 자체 카드 장식 제거 */
 .lib-right .mixer { background: transparent; border: 0; padding: 0; }
 .player-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -940,19 +998,6 @@ body { display: flex; flex-direction: column; }
   letter-spacing: -.005em;
 }
 .player-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-
-.player-video-wrap {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 6px;
-  overflow: hidden;
-}
-.player-video-wrap video {
-  width: 100%; height: 100%;
-  display: block;
-  object-fit: contain;
-}
 
 .mixer {
   display: flex; flex-direction: column;
