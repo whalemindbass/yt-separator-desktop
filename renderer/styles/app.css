@@ -256,9 +256,40 @@ body { display: flex; flex-direction: column; }
 .update-dialog-body {
   font-size: 13px;
   color: var(--tx-2);
-  line-height: 1.55;
-  white-space: pre-wrap;
-  max-height: 240px; overflow-y: auto;
+  line-height: 1.6;
+  max-height: 320px; overflow-y: auto;
+  padding-right: 4px;
+}
+.update-dialog-body h1,
+.update-dialog-body h2,
+.update-dialog-body h3 {
+  font-size: 13.5px; font-weight: 700;
+  color: var(--tx-1);
+  margin: 10px 0 4px;
+}
+.update-dialog-body h1:first-child,
+.update-dialog-body h2:first-child,
+.update-dialog-body h3:first-child { margin-top: 0; }
+.update-dialog-body ul,
+.update-dialog-body ol {
+  margin: 4px 0 8px;
+  padding-left: 22px;
+}
+.update-dialog-body li { margin: 2px 0; }
+.update-dialog-body p { margin: 4px 0; }
+.update-dialog-body code {
+  padding: 1px 5px;
+  background: var(--input);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.update-dialog-body a { color: var(--accent); text-decoration: none; }
+.update-dialog-body a:hover { color: var(--accent-hover); }
+.update-dialog-body strong { color: var(--tx-1); font-weight: 600; }
+.update-dialog-body hr {
+  border: 0; height: 1px;
+  background: var(--border);
+  margin: 10px 0;
 }
 .update-dialog-progress { margin-top: 14px; }
 .update-dialog-actions {

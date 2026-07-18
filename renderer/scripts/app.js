@@ -578,7 +578,14 @@ api.update.onEvent((d) => {
       updBadge.textContent = `v${d.version} 사용 가능`;
       updBadge.hidden = false;
       updTitle.textContent = `새 버전 v${d.version} 있음`;
-      updBody.textContent = (typeof d.notes === 'string' && d.notes) ? d.notes : '릴리즈 노트 없음.';
+      // GitHub 릴리즈 노트는 마크다운→HTML로 변환되어 옴. 태그를 렌더링해 표시.
+      if (typeof d.notes === 'string' && d.notes) {
+        const looksHtml = /<[a-z][\s\S]*>/i.test(d.notes);
+        if (looksHtml) updBody.innerHTML = d.notes;
+        else updBody.textContent = d.notes;
+      } else {
+        updBody.textContent = '릴리즈 노트 없음.';
+      }
       updDownload.hidden = false;
       updInstall.hidden = true;
       updProg.hidden = true;
