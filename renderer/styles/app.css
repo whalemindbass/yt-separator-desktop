@@ -1048,7 +1048,8 @@ body { display: flex; flex-direction: column; }
 /* 라이브러리 플레이어 헤더의 모든 액션 버튼을 통일 */
 .player-meta > .btn,
 .player-meta > .link-btn,
-.player-meta .group-picker > .btn {
+.player-meta .group-picker > .btn,
+.player-meta .download-picker > .btn {
   padding: 6px 12px;
   height: 30px;
   font-size: 12px; font-weight: 500;
