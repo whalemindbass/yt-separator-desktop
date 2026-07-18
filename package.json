@@ -69,8 +69,6 @@
       ],
       "artifactName": "${productName}-${version}-${arch}-${target}.${ext}",
       "icon": "build/icon.png",
-      "signAndEditExecutable": false,
-      "signtoolOptions": null,
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
@@ -80,8 +78,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "YT Separator",
-      "artifactName": "${productName}-${version}-Setup.${ext}",
-      "publisherName": "Whale Mind"
+      "artifactName": "${productName}-${version}-Setup.${ext}"
     },
     "portable": {
       "artifactName": "${productName}-${version}-Portable.${ext}"
