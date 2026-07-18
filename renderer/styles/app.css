@@ -890,7 +890,8 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
 }
 
-/* Group picker */
+/* Download picker + group picker (공통) */
+.download-picker,
 .group-picker { position: relative; }
 /* group-picker-btn 은 .player-meta 통일 규칙 사용 */
 .group-menu {

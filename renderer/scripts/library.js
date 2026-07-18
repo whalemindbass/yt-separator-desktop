@@ -463,6 +463,104 @@ function updateGroupPickerLabel() {
   const it = currentItem();
   groupVal.textContent = it?.group || '그룹 없음';
 }
+// ── 저장 (개별 스템 · 믹스 · 폴더 열기) ─────────────
+const downloadBtn  = $('player-download-btn');
+const downloadMenu = $('download-menu');
+
+function sanitizeFileName(s) {
+  return String(s || 'export').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 80) || 'export';
+}
+
+async function handleDownload(action) {
+  const it = currentItem();
+  if (!it || !currentPlayer) return;
+  const baseName = sanitizeFileName(it.name);
+
+  if (action === 'folder') {
+    if (it.outDir) await api.openPath(it.outDir);
+    return;
+  }
+
+  if (action === 'stems') {
+    const res = await api.dialog.pickFolder('개별 스템 저장 폴더 선택');
+    if (!res.ok) return;
+    const dir = res.dir;
+    const sep = dir.includes('/') && !dir.includes('\\') ? '/' : '\\';
+    let ok = 0, fail = 0;
+    for (const [name, src] of Object.entries(it.stemPaths || {})) {
+      const dst = `${dir}${sep}${baseName}_${name}.wav`;
+      const r = await api.fs.copyFile(src, dst);
+      if (r.ok) ok++; else fail++;
+    }
+    alert(`스템 저장 완료 — 성공 ${ok}개${fail ? `, 실패 ${fail}개` : ''}`);
+    return;
+  }
+
+  if (action === 'mix') {
+    const res = await api.dialog.saveAs(`${baseName}_mix.wav`, ['wav']);
+    if (!res.ok) return;
+    const savePath = res.filePath;
+
+    // encoder-worker 재사용
+    const w = ensureEncoderWorker();
+    const { stems, sampleRate } = currentPlayer.getStemsForExport();
+    const weights = currentPlayer.getCurrentWeights();
+
+    downloadBtn.disabled = true;
+    downloadBtn.querySelector('span').textContent = '믹싱 중…';
+    try {
+      const wavBuf = await new Promise((resolve, reject) => {
+        const id = Math.random().toString(36).slice(2);
+        const onMsg = (e) => {
+          if (e.data?.id !== id) return;
+          w.removeEventListener('message', onMsg);
+          if (e.data.error) reject(new Error(e.data.error));
+          else if (e.data.data) resolve(e.data.data);
+          else reject(new Error('unexpected response'));
+        };
+        w.addEventListener('message', onMsg);
+        const transferables = [];
+        const stemsForWorker = {};
+        for (const [n, [L, R]] of Object.entries(stems)) {
+          const Lc = new Float32Array(L);
+          const Rc = new Float32Array(R);
+          stemsForWorker[n] = [Lc, Rc];
+          transferables.push(Lc.buffer, Rc.buffer);
+        }
+        w.postMessage({ type: 'mixAndEncode', id, stems: stemsForWorker, weights, sampleRate }, transferables);
+      });
+      const bytes = new Uint8Array(wavBuf);
+      const saveRes = await api.fs.writeBuffer(savePath, bytes);
+      if (!saveRes.ok) throw new Error(saveRes.error);
+      alert(`믹스 저장 완료\n${savePath}`);
+    } catch (e) {
+      alert(`믹스 실패: ${e.message}`);
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.querySelector('span').textContent = '저장';
+    }
+    return;
+  }
+}
+
+downloadBtn?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  downloadMenu.hidden = !downloadMenu.hidden;
+});
+downloadMenu?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const li = e.target.closest('li');
+  if (!li || li.classList.contains('divider')) return;
+  downloadMenu.hidden = true;
+  handleDownload(li.dataset.action);
+});
+document.addEventListener('click', (e) => {
+  if (!downloadMenu) return;
+  if (downloadMenu.contains(e.target)) return;
+  if (downloadBtn?.contains(e.target)) return;
+  downloadMenu.hidden = true;
+});
+
 groupBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
   if (!groupMenu.hidden) { groupMenu.hidden = true; return; }

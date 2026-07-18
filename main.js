@@ -239,6 +239,33 @@ ipcMain.handle('window:maxToggle',  () => {
 ipcMain.handle('window:close',      () => { mainWindow?.close(); });
 ipcMain.handle('window:isMaximized',() => !!mainWindow?.isMaximized());
 ipcMain.handle('clipboard:read',    () => clipboard.readText() || '');
+ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
+  const filters = [{ name: 'WAV', extensions: exts || ['wav'] }];
+  const res = await dialog.showSaveDialog(mainWindow || null, {
+    title: '저장 위치 선택',
+    defaultPath: defaultName || 'export.wav',
+    filters,
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  return { ok: true, filePath: res.filePath };
+});
+ipcMain.handle('dialog:pickFolder', async (_ev, title) => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: title || '폴더 선택',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, dir: res.filePaths[0] };
+});
+ipcMain.handle('fs:copyFile', async (_ev, src, dst) => {
+  try { fs.copyFileSync(src, dst); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('fs:writeBuffer', async (_ev, path, data) => {
+  try { fs.writeFileSync(path, Buffer.from(data)); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('dialog:pickMedia', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
     title: '분리할 영상/오디오 파일 선택',

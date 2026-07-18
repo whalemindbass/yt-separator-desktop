@@ -30,9 +30,15 @@ contextBridge.exposeInMainWorld('yssApi', {
     read: () => ipcRenderer.invoke('clipboard:read'),
   },
 
-  // 로컬 파일 선택
+  // 로컬 파일/폴더 선택 · 저장
   dialog: {
-    pickMedia: () => ipcRenderer.invoke('dialog:pickMedia'),
+    pickMedia:  ()               => ipcRenderer.invoke('dialog:pickMedia'),
+    saveAs:     (name, exts)     => ipcRenderer.invoke('dialog:saveAs', name, exts),
+    pickFolder: (title)          => ipcRenderer.invoke('dialog:pickFolder', title),
+  },
+  fs: {
+    copyFile:    (src, dst)      => ipcRenderer.invoke('fs:copyFile', src, dst),
+    writeBuffer: (path, data)    => ipcRenderer.invoke('fs:writeBuffer', path, data),
   },
 
   // 외부

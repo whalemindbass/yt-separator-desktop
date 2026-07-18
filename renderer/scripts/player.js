@@ -368,6 +368,28 @@ export class Player {
     console.log(`[Player] direct stem test scheduled, buf.duration=${buf.duration.toFixed(2)}s buf.sampleRate=${buf.sampleRate} ctx.sampleRate=${this.audioCtx.sampleRate}`);
   }
 
+  /** 현재 재생용 stem buffer들을 Float32 [L,R]로 반환 (내보내기용) */
+  getStemsForExport() {
+    const out = {};
+    let sr = this._sampleRate;
+    for (const [name, buf] of Object.entries(this.stemBuffers)) {
+      const L = new Float32Array(buf.getChannelData(0));
+      const R = new Float32Array(buf.numberOfChannels > 1 ? buf.getChannelData(1) : buf.getChannelData(0));
+      out[name] = [L, R];
+      sr = buf.sampleRate;
+    }
+    return { stems: out, sampleRate: sr };
+  }
+
+  /** 현재 mixer 상태(볼륨/뮤트) 기반 가중치 반환 */
+  getCurrentWeights() {
+    const w = {};
+    for (const name of Object.keys(this.stemBuffers)) {
+      w[name] = this.stemMuted[name] ? 0 : this.stemVolumes[name];
+    }
+    return w;
+  }
+
   /** 진단: masterGain 경유로 500ms 440Hz sine. 들리면 audio graph 자체는 정상 */
   async testBeep() {
     if (this.audioCtx.state === 'suspended') {
