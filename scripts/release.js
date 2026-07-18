@@ -27,7 +27,7 @@ const path = require('path');
 const https = require('https');
 
 // ── 설정 ────────────────────────────────────────
-const REPO_OWNER = 'rowonss';
+const REPO_OWNER = 'whalemindbass';
 const REPO_NAME  = 'yt-separator-desktop';
 const REPO       = `${REPO_OWNER}/${REPO_NAME}`;
 

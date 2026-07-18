@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 # ── 설정 ────────────────────────────────────────────
-REPO_OWNER = "rowonss"
+REPO_OWNER = "whalemindbass"
 REPO_NAME  = "yt-separator-desktop"
 REPO       = f"{REPO_OWNER}/{REPO_NAME}"
 PROJECT_DIR = Path(__file__).resolve().parent.parent

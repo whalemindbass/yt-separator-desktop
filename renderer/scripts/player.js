@@ -3,17 +3,22 @@
 // Video 이벤트(play/pause/seek/ratechange)에 stem source를 sync.
 
 export const STEM_META = {
-  vocals: { label: '보컬',    color: '#e15b5b' },
-  drums:  { label: '드럼',    color: '#e6c33a' },
-  bass:   { label: '베이스',  color: '#4b7bff' },
-  other:  { label: '기타(그외)', color: '#e75ea0' },
-  guitar: { label: '기타',    color: '#f97316' },
-  piano:  { label: '피아노',  color: '#a78bfa' },
+  vocals: { label: '보컬',    color: '#e15b5b', icon: 'stem_vocals.png' },
+  drums:  { label: '드럼',    color: '#e6c33a', icon: 'stem_drums.png' },
+  bass:   { label: '베이스',  color: '#4b7bff', icon: 'stem_bass.png' },
+  other:  { label: '기타(그외)', color: '#e75ea0', icon: 'stem_other.png' },
+  guitar: { label: '기타',    color: '#f97316', icon: 'stem_other.png' },   // 6-stem guitar는 확장에서 stem_other.png 재사용
+  piano:  { label: '피아노',  color: '#a78bfa', icon: 'stem_piano.png' },
 };
 export const STEM_ORDER   = ['vocals', 'bass', 'drums', 'other'];
 export const STEM_ORDER_6 = ['vocals', 'guitar', 'bass', 'drums', 'piano', 'other'];
 export function stemOrderFor(modelKey) {
   return modelKey === '6stem' ? STEM_ORDER_6 : STEM_ORDER;
+}
+/** 6-stem 모드에서는 other 아이콘을 stem_other_6.png 로 오버라이드 */
+export function stemIconFor(name, modelKey) {
+  if (name === 'other' && modelKey === '6stem') return './assets/stem-icons/stem_other_6.png';
+  return './assets/stem-icons/' + (STEM_META[name]?.icon || `stem_${name}.png`);
 }
 
 /** 파일 시스템 경로 → ytsep://f/... URL */

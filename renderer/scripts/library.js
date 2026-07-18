@@ -1,7 +1,7 @@
 'use strict';
 // Library view — 좌측 리스트 + 우측 플레이어
 
-import { Player, STEM_META, stemOrderFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
+import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -55,12 +55,27 @@ function groupSort(a, b) {
   return (b.createdAt || 0) - (a.createdAt || 0);
 }
 
+/** videoPath 기준 중복 제거 — 같은 영상의 4/6-stem 중 대표 하나만 반환
+ *  선택된 항목이 있으면 그것을 대표로, 없으면 최신 createdAt. */
+function representativeItems() {
+  const byVideo = new Map();
+  for (const it of items) {
+    const key = it.videoPath || it.id;
+    const cur = byVideo.get(key);
+    if (!cur) { byVideo.set(key, it); continue; }
+    if (it.id === selectedId)  { byVideo.set(key, it); continue; }
+    if (cur.id === selectedId) { continue; }
+    if ((it.createdAt || 0) > (cur.createdAt || 0)) byVideo.set(key, it);
+  }
+  return [...byVideo.values()];
+}
+
 function renderList() {
   listEl.innerHTML = '';
   if (!items.length) { emptyEl.hidden = false; return; }
   emptyEl.hidden = true;
 
-  const sorted = items.slice().sort(groupSort);
+  const sorted = representativeItems().sort(groupSort);
   let lastHeader = null;
   const addHeader = (label) => {
     if (lastHeader === label) return;
@@ -104,13 +119,13 @@ function renderList() {
       startInlineRename(li, it);
     });
 
-    // 즐겨찾기 토글
+    // 즐겨찾기 토글 (sibling 동기화)
     li.querySelector('.lib-fav').addEventListener('click', async (e) => {
       e.stopPropagation();
       const nowFav = !it.favorite;
       const res = await api.library.setFavorite(it.id, nowFav);
       if (res.ok) {
-        it.favorite = res.favorite;
+        syncSiblings(it.videoPath, { favorite: !!res.favorite });
         renderList();
       }
     });
@@ -133,7 +148,7 @@ function startInlineRename(li, item) {
     if (save && newName && newName !== item.name) {
       const res = await api.library.rename(item.id, newName);
       if (res.ok) {
-        item.name = newName;
+        syncSiblings(item.videoPath, { name: newName });
         if (item.id === selectedId) playerName.value = newName;
       }
     }
@@ -179,12 +194,13 @@ async function mountPlayer(item) {
     for (const name of stemOrderFor(item.modelKey || '4stem')) {
       if (!stems[name]) continue;
       const meta = STEM_META[name];
+      const iconUrl = stemIconFor(name, item.modelKey || '4stem');
       const row = document.createElement('div');
       row.className = 'mixer-track';
       row.dataset.stem = name;
       row.innerHTML = `
         <div class="mixer-track-name">
-          <span class="mixer-track-dot" style="background:${meta.color}"></span>
+          <img class="mixer-track-icon" src="${iconUrl}" alt="" style="--stem-color:${meta.color}" />
           <span>${meta.label}</span>
         </div>
         <button class="mixer-mute" data-stem="${name}">M</button>
@@ -217,7 +233,7 @@ async function mountPlayer(item) {
     resetSourceToggle();
     resetKeyUI();
     updateGroupPickerLabel();
-    updateReseparateLabel(item);
+    updateReseparateAndToggle(item);
   } catch (e) {
     console.error(e);
     setErr('로드 실패: ' + e.message);
@@ -232,17 +248,49 @@ masterVol.addEventListener('input', () => {
   currentPlayer?.setMasterVolume(v);
 });
 
-// ── 다른 모델로 재분리 ─────────────────────────────
+// ── 다른 모델로 재분리 + 모델 토글 ─────────────────
 const reseparateBtn      = $('player-reseparate');
 const reseparateLabelEl  = $('player-reseparate-label');
+const modelToggle        = $('player-model-toggle');
 
-function updateReseparateLabel(item) {
-  if (!reseparateLabelEl) return;
-  const cur = item?.modelKey || '4stem';
-  const alt = cur === '4stem' ? '6stem' : '4stem';
-  reseparateLabelEl.textContent = alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리';
-  reseparateBtn.dataset.targetModel = alt;
+function siblingItem(item) {
+  if (!item?.videoPath) return null;
+  const curKey = item.modelKey || '4stem';
+  return items.find(x =>
+    x.id !== item.id &&
+    x.videoPath === item.videoPath &&
+    (x.modelKey || '4stem') !== curKey
+  );
 }
+
+function updateReseparateAndToggle(item) {
+  const cur = item?.modelKey || '4stem';
+  const sib = siblingItem(item);
+  if (sib) {
+    // 두 모델 다 있음 → 토글 표시, 재분리 버튼 숨김
+    modelToggle.hidden = false;
+    modelToggle.querySelectorAll('.model-tog-btn').forEach(b => b.classList.toggle('on', b.dataset.key === cur));
+    reseparateBtn.hidden = true;
+  } else {
+    modelToggle.hidden = true;
+    reseparateBtn.hidden = false;
+    const alt = cur === '4stem' ? '6stem' : '4stem';
+    if (reseparateLabelEl) reseparateLabelEl.textContent = alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리';
+    reseparateBtn.dataset.targetModel = alt;
+  }
+}
+
+modelToggle?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.model-tog-btn');
+  if (!btn || btn.classList.contains('on')) return;
+  const targetKey = btn.dataset.key;
+  const it = currentItem();
+  if (!it) return;
+  const sib = siblingItem(it);
+  if (sib && (sib.modelKey || '4stem') === targetKey) {
+    selectItem(sib.id);
+  }
+});
 reseparateBtn?.addEventListener('click', () => {
   const it = currentItem();
   if (!it) return;
@@ -389,6 +437,16 @@ function showNewGroupInput() {
   });
 }
 
+function syncSiblings(videoPath, patch) {
+  for (const x of items) {
+    if (x.videoPath !== videoPath) continue;
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === undefined || v === '') delete x[k];
+      else x[k] = v;
+    }
+  }
+}
+
 async function handleGroupPick(value) {
   groupMenu.hidden = true;
   const it = currentItem();
@@ -396,7 +454,7 @@ async function handleGroupPick(value) {
   const group = String(value || '').trim();
   const res = await api.library.setGroup(it.id, group);
   if (res.ok) {
-    if (group) it.group = group; else delete it.group;
+    syncSiblings(it.videoPath, { group: group || null });
     updateGroupPickerLabel();
     renderList();
   }
@@ -419,15 +477,15 @@ document.addEventListener('click', (e) => {
 });
 
 
-// 이름 변경
+// 이름 변경 (sibling 동기화)
 async function commitRename() {
   if (!selectedId) return;
   const name = playerName.value.trim() || 'Untitled';
   const item = items.find(x => x.id === selectedId);
   if (item && item.name === name) return;
   const res = await api.library.rename(selectedId, name);
-  if (res.ok) {
-    if (item) item.name = name;
+  if (res.ok && item) {
+    syncSiblings(item.videoPath, { name });
     renderList();
   }
 }

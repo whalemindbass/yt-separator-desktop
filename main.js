@@ -391,7 +391,7 @@ const MODELS = {
     sources:  4,
     stems:    ['drums', 'bass', 'other', 'vocals'],
     size:     174735359,    // 대략 크기 (진행률용). 실제 크기가 달라도 무해.
-    url:      'https://github.com/rowonss/yt-separator-desktop/releases/download/models-v1/htdemucs_core.onnx',
+    url:      'https://github.com/whalemindbass/yt-separator-desktop/releases/download/models-v1/htdemucs_core.onnx',
   },
   '6stem': {
     key:      '6stem',
@@ -400,7 +400,7 @@ const MODELS = {
     sources:  6,
     stems:    ['drums', 'bass', 'other', 'vocals', 'guitar', 'piano'],
     size:     115343360,
-    url:      'https://github.com/rowonss/yt-separator-desktop/releases/download/models-v1/htdemucs_6s.onnx',
+    url:      'https://github.com/whalemindbass/yt-separator-desktop/releases/download/models-v1/htdemucs_6s.onnx',
   },
 };
 const DEFAULT_MODEL_KEY = '4stem';
@@ -646,6 +646,46 @@ ipcMain.handle('library:list', () => {
   const items = readLibrary().filter(it => {
     try { return fs.existsSync(it.videoPath); } catch { return false; }
   });
+
+  // 정규화: 같은 videoPath 를 공유하는 항목들의 name/favorite/group 을 통일
+  //   기준: createdAt 최대인 항목의 값 (가장 최근에 사용자가 편집했을 확률 높음).
+  //   차이가 있으면 자동으로 파일에 반영해 저장.
+  const groups = new Map();
+  for (const it of items) {
+    const k = it.videoPath;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(it);
+  }
+  let dirty = false;
+  for (const [, arr] of groups) {
+    if (arr.length < 2) continue;
+    // 대표 값 선택 (createdAt 최대)
+    const rep = arr.reduce((a, b) => (a.createdAt || 0) >= (b.createdAt || 0) ? a : b);
+    const canonName = rep.name;
+    const canonFav  = !!rep.favorite;
+    const canonGrp  = rep.group;
+    for (const it of arr) {
+      if (it.name !== canonName)                     { it.name = canonName; dirty = true; }
+      if (!!it.favorite !== canonFav)                { it.favorite = canonFav; dirty = true; }
+      if ((it.group || '') !== (canonGrp || ''))     {
+        if (canonGrp) it.group = canonGrp; else delete it.group;
+        dirty = true;
+      }
+    }
+  }
+  if (dirty) {
+    // 원본에도 반영 (필터에서 제외된 항목 유지)
+    const raw = readLibrary();
+    for (const r of raw) {
+      const canon = items.find(it => it.id === r.id);
+      if (!canon) continue;
+      r.name = canon.name;
+      r.favorite = canon.favorite;
+      if (canon.group) r.group = canon.group; else delete r.group;
+    }
+    writeLibrary(raw);
+  }
+
   return items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 });
 
@@ -672,40 +712,54 @@ ipcMain.handle('library:register', (_ev, entry) => {
     createdAt: Date.now(),
     meta: entry.meta || {},
   };
-  // 같은 videoPath는 중복 방지 (덮어쓰기)
-  const idx = items.findIndex(it => it.videoPath === rec.videoPath);
+  // 같은 videoPath + 같은 modelKey 조합만 덮어쓰기.
+  // videoPath 같아도 modelKey 다르면 새 항목 (4-stem/6-stem 동시 보유).
+  const recKey = rec.modelKey || '4stem';
+  const idx = items.findIndex(it => it.videoPath === rec.videoPath && (it.modelKey || '4stem') === recKey);
   if (idx >= 0) items[idx] = { ...items[idx], ...rec, createdAt: items[idx].createdAt || rec.createdAt };
   else items.push(rec);
   writeLibrary(items);
   return { ok: true, id: rec.id };
 });
 
+/** 같은 videoPath 를 공유하는 모든 항목의 인덱스 반환 (4/6-stem sibling 포함) */
+function siblingIndices(items, videoPath) {
+  if (!videoPath) return [];
+  return items
+    .map((it, i) => (it.videoPath === videoPath ? i : -1))
+    .filter(i => i >= 0);
+}
+
 ipcMain.handle('library:rename', (_ev, id, name) => {
   const items = readLibrary();
   const idx = items.findIndex(it => it.id === id);
   if (idx < 0) return { ok: false, error: 'not found' };
-  items[idx].name = String(name || 'Untitled').slice(0, 200);
+  const newName = String(name || 'Untitled').slice(0, 200);
+  for (const i of siblingIndices(items, items[idx].videoPath)) items[i].name = newName;
   writeLibrary(items);
   return { ok: true };
 });
 
-/** 즐겨찾기 토글 */
+/** 즐겨찾기 토글 — 같은 영상의 모든 변형에 동일 적용 */
 ipcMain.handle('library:setFavorite', (_ev, id, fav) => {
   const items = readLibrary();
   const idx = items.findIndex(it => it.id === id);
   if (idx < 0) return { ok: false, error: 'not found' };
-  items[idx].favorite = !!fav;
+  const val = !!fav;
+  for (const i of siblingIndices(items, items[idx].videoPath)) items[i].favorite = val;
   writeLibrary(items);
-  return { ok: true, favorite: items[idx].favorite };
+  return { ok: true, favorite: val };
 });
 
-/** 그룹 지정 (빈 문자열이면 그룹 해제) */
+/** 그룹 지정 — 같은 영상의 모든 변형에 동일 적용 */
 ipcMain.handle('library:setGroup', (_ev, id, group) => {
   const items = readLibrary();
   const idx = items.findIndex(it => it.id === id);
   if (idx < 0) return { ok: false, error: 'not found' };
   const g = String(group || '').slice(0, 80).trim();
-  if (g) items[idx].group = g; else delete items[idx].group;
+  for (const i of siblingIndices(items, items[idx].videoPath)) {
+    if (g) items[i].group = g; else delete items[i].group;
+  }
   writeLibrary(items);
   return { ok: true };
 });
@@ -745,13 +799,14 @@ ipcMain.handle('library:cleanup', () => {
     return { ok: true, removed: 0, removedFiles: 0, freedBytes: 0, deletedPaths: [] };
   }
 
-  // meta.id 로 그룹화
+  // (meta.id + modelKey) 조합으로 그룹화 — 4/6-stem 공존은 dedup 대상 아님
   const byId = new Map();
   rawItems.forEach((it, i) => {
     const id = it && it.meta && it.meta.id;
     if (!id) return;
-    if (!byId.has(id)) byId.set(id, []);
-    byId.get(id).push(i);
+    const key = `${id}::${it.modelKey || '4stem'}`;
+    if (!byId.has(key)) byId.set(key, []);
+    byId.get(key).push(i);
   });
   const toRemoveIdx = new Set();
   for (const [, idxs] of byId) {

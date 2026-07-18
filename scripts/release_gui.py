@@ -28,7 +28,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-REPO_OWNER = "rowonss"
+REPO_OWNER = "whalemindbass"
 REPO_NAME  = "yt-separator-desktop"
 REPO       = f"{REPO_OWNER}/{REPO_NAME}"
 

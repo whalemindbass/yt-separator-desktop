@@ -24,7 +24,7 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.rowonss.yt-separator",
+    "appId": "com.whalemindbass.yt-separator",
     "productName": "YT Separator",
     "copyright": "© 2026 Whale Mind",
     "asar": true,
@@ -86,7 +86,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "rowonss",
+        "owner": "whalemindbass",
         "repo": "yt-separator-desktop",
         "releaseType": "release"
       }
