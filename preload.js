@@ -7,6 +7,34 @@ contextBridge.exposeInMainWorld('yssApi', {
   getPlatform:     () => ipcRenderer.invoke('app:platform'),
   getDownloadsDir: () => ipcRenderer.invoke('app:downloadsDir'),
 
+  // Window controls (frameless titlebar)
+  window: {
+    minimize:    () => ipcRenderer.invoke('window:minimize'),
+    maxToggle:   () => ipcRenderer.invoke('window:maxToggle'),
+    close:       () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    onState: (fn) => {
+      const h = (_ev, data) => fn(data);
+      ipcRenderer.on('window:state', h);
+      return () => ipcRenderer.off('window:state', h);
+    },
+    onFocus: (fn) => {
+      const h = () => fn();
+      ipcRenderer.on('window:focus', h);
+      return () => ipcRenderer.off('window:focus', h);
+    },
+  },
+
+  // 클립보드
+  clipboard: {
+    read: () => ipcRenderer.invoke('clipboard:read'),
+  },
+
+  // 로컬 파일 선택
+  dialog: {
+    pickMedia: () => ipcRenderer.invoke('dialog:pickMedia'),
+  },
+
   // 외부
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath:     (p)   => ipcRenderer.invoke('shell:openPath', p),
@@ -49,5 +77,10 @@ contextBridge.exposeInMainWorld('yssApi', {
     rename:          (id, name)        => ipcRenderer.invoke('library:rename', id, name),
     remove:          (id, alsoFiles)   => ipcRenderer.invoke('library:delete', id, alsoFiles),
     findByVideoId:   (id)              => ipcRenderer.invoke('library:findByVideoId', id),
+    cleanup:         ()                => ipcRenderer.invoke('library:cleanup'),
+    previewOrphans:  ()                => ipcRenderer.invoke('library:previewOrphans'),
+    deleteOrphan:    (p)               => ipcRenderer.invoke('library:deleteOrphan', p),
+    setFavorite:     (id, fav)         => ipcRenderer.invoke('library:setFavorite', id, fav),
+    setGroup:        (id, group)       => ipcRenderer.invoke('library:setGroup', id, group),
   },
 });

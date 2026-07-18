@@ -36,6 +36,14 @@ async function pickProvider() {
 }
 
 export function getUsedProvider() { return usedProvider; }
+
+let cancelRequested = false;
+export function cancelSeparation() {
+  cancelRequested = true;
+  if (worker) { try { worker.terminate(); } catch {} worker = null; modelReady = false; usedProvider = null; }
+}
+export function isCancelled() { return cancelRequested; }
+function resetCancelFlag() { cancelRequested = false; }
 export async function probeProviders() {
   return {
     webgpuAvailable: await detectWebGPU(),
@@ -142,9 +150,12 @@ function peakOf(arr) {
 }
 
 export async function separatePipeline(videoPath, baseName, onStep) {
+  resetCancelFlag();
+  const throwIfCancel = () => { if (cancelRequested) throw new Error('취소됨'); };
   onStep?.('init', 0.02, '워커 초기화');
   ensureWorker();
   await initWorker();
+  throwIfCancel();
 
   onStep?.('model', 0.05, '모델 로드 (166MB)');
   await loadModel();

@@ -8,24 +8,44 @@
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <div class="logo">YS</div>
-      <div class="titles">
-        <h1>YT Separator</h1>
-        <p class="sub">Desktop</p>
+  <div class="titlebar">
+    <div class="titlebar-drag">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="7" fill="var(--accent)"/>
+            <g fill="var(--accent-fg)">
+              <rect x="7"  y="11" width="3" height="10" rx="1.5"/>
+              <rect x="12" y="8"  width="3" height="16" rx="1.5"/>
+              <rect x="17" y="13" width="3" height="6"  rx="1.5"/>
+              <rect x="22" y="10" width="3" height="12" rx="1.5"/>
+            </g>
+          </svg>
+        </div>
+        <div class="titles">
+          <h1>YT Separator <span class="sub">Desktop</span></h1>
+        </div>
       </div>
     </div>
     <nav class="tabs">
       <button class="tab on" data-view="separate">새 분리</button>
       <button class="tab" data-view="library">라이브러리</button>
     </nav>
-    <div class="meta">
-      <span id="platform">…</span>
-      <span id="v">v?</span>
+    <div class="titlebar-meta">
+      <button id="theme-toggle" class="icon-btn" title="테마 전환">
+        <svg class="theme-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <svg class="theme-moon" viewBox="0 0 20 20" fill="none"><path d="M15 12.5a6 6 0 1 1-7.5-8 5 5 0 0 0 7.5 8Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+      <span id="platform" class="meta-text">…</span>
+      <span id="v" class="meta-text">v?</span>
       <button id="update-badge" class="update-badge" hidden></button>
     </div>
-  </header>
+    <div class="titlebar-controls">
+      <button id="win-min"   class="win-btn" title="최소화"><svg viewBox="0 0 12 12"><line x1="2" y1="6" x2="10" y2="6" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button id="win-max"   class="win-btn" title="최대화"><svg class="ico-max" viewBox="0 0 12 12" fill="none"><rect x="2.5" y="2.5" width="7" height="7" stroke="currentColor" stroke-width="1"/></svg><svg class="ico-restore" viewBox="0 0 12 12" fill="none"><rect x="3.5" y="2" width="6" height="6" stroke="currentColor" stroke-width="1"/><rect x="2" y="3.5" width="6" height="6" fill="var(--surface)" stroke="currentColor" stroke-width="1"/></svg></button>
+      <button id="win-close" class="win-btn win-close" title="닫기"><svg viewBox="0 0 12 12"><line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke="currentColor" stroke-width="1.2"/><line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke="currentColor" stroke-width="1.2"/></svg></button>
+    </div>
+  </div>
 
   <div id="update-dialog" class="update-dialog" hidden>
     <div class="update-dialog-card">
@@ -53,6 +73,14 @@
         <input id="url" class="url" type="text" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false" autocomplete="off" />
         <button id="probe-btn" class="btn">확인</button>
         <button id="dl-btn" class="btn primary" disabled>다운로드</button>
+        <button id="reset-btn" class="btn" title="입력·진행·완료 상태 초기화">초기화</button>
+      </div>
+      <div class="local-row">
+        <button id="local-btn" class="btn" title="로컬 영상/오디오 파일 선택">
+          <svg viewBox="0 0 16 16" fill="none" style="width:14px;height:14px;vertical-align:-2px;margin-right:6px"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h3l1.5 2h4.5A1.5 1.5 0 0 1 14 5.5v7A1.5 1.5 0 0 1 12.5 14h-9A1.5 1.5 0 0 1 2 12.5v-9Z" stroke="currentColor" stroke-width="1.3"/></svg>
+          로컬 파일 열기
+        </button>
+        <span class="settings-hint">인터넷 없이 로컬 파일도 분리 가능</span>
       </div>
 
       <div class="settings-row">
@@ -63,6 +91,19 @@
           <button class="pill" data-provider="wasm">CPU (WASM)</button>
         </div>
         <span id="provider-status" class="settings-hint"></span>
+      </div>
+
+      <div class="settings-row">
+        <span class="settings-label">영상 화질</span>
+        <div class="pill-row" id="quality-pills">
+          <button class="pill" data-quality="2160">2160p</button>
+          <button class="pill" data-quality="1440">1440p</button>
+          <button class="pill on" data-quality="1080">1080p</button>
+          <button class="pill" data-quality="720">720p</button>
+          <button class="pill" data-quality="480">480p</button>
+          <button class="pill" data-quality="360">360p</button>
+        </div>
+        <span class="settings-hint">낮을수록 용량↓</span>
       </div>
 
       <div id="probe-result" class="probe-card" hidden>
@@ -109,6 +150,7 @@
           <span id="sep-phase" class="phase">준비</span>
           <span id="sep-pct" class="pct">0%</span>
           <span id="sep-detail" class="speed"></span>
+          <button id="sep-cancel-btn" class="link-btn">취소</button>
         </div>
         <div class="progress-bar"><div id="sep-fill" class="progress-fill"></div></div>
         <div id="sep-info" class="info"></div>
@@ -134,7 +176,10 @@
     <aside class="lib-side">
       <div class="lib-side-head">
         <h3>라이브러리</h3>
-        <button id="lib-refresh" class="link-btn" title="새로고침">↻</button>
+        <div class="lib-side-actions">
+          <button id="lib-cleanup" class="link-btn" title="중복/orphan 파일 정리">정리</button>
+          <button id="lib-refresh" class="link-btn" title="새로고침">↻</button>
+        </div>
       </div>
       <ul id="lib-list" class="lib-list"><!-- rendered by library.js --></ul>
       <div id="lib-empty" class="lib-empty muted" hidden>
@@ -143,7 +188,7 @@
       </div>
     </aside>
 
-    <section class="lib-main">
+    <section class="lib-center">
       <div id="player-empty" class="player-empty muted">
         <svg viewBox="0 0 24 24" fill="none"><path d="M8 5v14l11-7z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
         <span>좌측에서 항목을 선택하세요.</span>
@@ -153,35 +198,60 @@
         <div class="player-head">
           <div class="player-name-wrap">
             <input id="player-name" class="player-name" type="text" spellcheck="false" />
+            <svg class="player-name-edit-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.3 2.7a1.6 1.6 0 0 1 2.3 2.3L6 12.5l-3 .8.8-3 7.5-7.6Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
             <span class="player-name-hint">Enter로 저장</span>
           </div>
           <div class="player-meta">
             <span id="player-provider" class="settings-hint"></span>
-            <button id="player-beep" class="btn" title="440Hz sine 500ms — 오디오 그래프 정상 여부 진단">🔊 톤</button>
-            <button id="player-stem-test" class="btn" title="vocals stem을 destination에 직접 연결해 3초 재생">🎤 stem 직접</button>
+            <div class="group-picker">
+              <button id="group-picker-btn" class="btn" type="button" title="그룹 지정">
+                <svg viewBox="0 0 16 16" fill="none" style="width:12px;height:12px;vertical-align:-1px;margin-right:5px"><path d="M2 4h5l1 1.5h6V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+                <span id="group-picker-val">그룹 없음</span>
+              </button>
+              <ul id="group-picker-menu" class="group-menu" hidden></ul>
+            </div>
             <button id="player-delete" class="link-btn">삭제</button>
           </div>
         </div>
 
-        <div id="player-status" class="player-status"></div>
-
         <div class="player-video-wrap">
-          <video id="player-video" controls muted preload="metadata" playsinline></video>
-        </div>
-
-        <div class="mixer">
-          <div class="mixer-master">
-            <label class="mixer-label">MASTER</label>
-            <input id="master-vol" class="mixer-slider" type="range" min="0" max="150" value="100" />
-            <span id="master-val" class="mixer-val">100%</span>
-          </div>
-          <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>
+          <video id="player-video" controls muted preload="metadata" playsinline crossorigin="anonymous"></video>
         </div>
 
         <div id="player-loading" class="player-loading muted" hidden>스템 로드 중…</div>
         <div id="player-err" class="err" hidden></div>
       </div>
     </section>
+
+    <aside class="lib-right">
+      <div class="mixer">
+        <div class="mixer-master">
+          <label class="mixer-label">MASTER</label>
+          <input id="master-vol" class="mixer-slider" type="range" min="0" max="150" value="100" />
+          <span id="master-val" class="mixer-val">100%</span>
+        </div>
+        <div class="mixer-master">
+          <label class="mixer-label">오디오</label>
+          <div class="source-toggle" id="source-toggle">
+            <button class="source-btn on" data-src="stem">스템 믹스</button>
+            <button class="source-btn"    data-src="orig">원본</button>
+          </div>
+        </div>
+        <div class="mixer-master mixer-key">
+          <label class="mixer-label">키</label>
+          <div class="key-controls">
+            <div class="key-adjust">
+              <button id="key-down"  class="key-btn" title="반음 내림">−</button>
+              <span   id="key-target" class="key-val">0</span>
+              <button id="key-up"    class="key-btn" title="반음 올림">+</button>
+            </div>
+            <button id="key-apply" class="btn key-apply" disabled>적용</button>
+            <span id="key-status" class="key-status"></span>
+          </div>
+        </div>
+        <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>
+      </div>
+    </aside>
   </main>
 
   <script type="module" src="./scripts/app.js"></script>

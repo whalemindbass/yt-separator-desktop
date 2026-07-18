@@ -1,13 +1,22 @@
 'use strict';
 // YT Separator Desktop — Electron main process
 
-const { app, BrowserWindow, ipcMain, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { pathToFileURL } = require('url');
+const { Readable } = require('stream');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+
+function mimeFor(p) {
+  const ext = path.extname(p).toLowerCase();
+  return {
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
+    '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.flac': 'audio/flac',
+  }[ext] || 'application/octet-stream';
+}
 
 /** 안전한 파일 base name — Windows 금지 문자 제거, 앞에서 60자, 6자 랜덤 suffix */
 function makeFileBase(title, fallback = 'video') {
@@ -59,8 +68,10 @@ function createMainWindow() {
     height: 780,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0f1114',
     show: false,
+    frame: false,                    // 자체 titlebar 사용
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -69,6 +80,9 @@ function createMainWindow() {
       webSecurity: true,
     },
   });
+  mainWindow.on('maximize',   () => mainWindow.webContents.send('window:state', { maximized: true }));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:state', { maximized: false }));
+  mainWindow.on('focus',      () => mainWindow.webContents.send('window:focus'));
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.once('ready-to-show', () => {
     if (mainWindow) mainWindow.show();
@@ -87,20 +101,54 @@ function createMainWindow() {
 app.whenReady().then(() => {
   // ytsep://f/<encoded absolute path> → 파일 스트리밍 응답
   //   호스트('f')는 무시, pathname('/C:/...')만 사용
+  // HTTP Range 지원 — <video> seek 필수. 브라우저가 Range 요청 보내면 206으로 응답.
   protocol.handle('ytsep', async (req) => {
     try {
       const u = new URL(req.url);
       let p = decodeURIComponent(u.pathname);
       if (p.startsWith('/')) p = p.slice(1);
       if (process.platform === 'win32') p = p.replace(/\//g, '\\');
-      const fileUrl = pathToFileURL(p).toString();
-      const res = await net.fetch(fileUrl);
-      // CORS 헤더 추가 (Electron 43+ 필수)
-      const headers = new Headers(res.headers);
-      headers.set('Access-Control-Allow-Origin', '*');
-      headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      headers.set('Access-Control-Allow-Headers', '*');
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+
+      const stat = fs.statSync(p);
+      const size = stat.size;
+      const type = mimeFor(p);
+
+      const commonHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Accept-Ranges': 'bytes',
+        'Content-Type': type,
+      };
+
+      const rangeHdr = req.headers.get('range');
+      const m = rangeHdr && /^bytes=(\d+)-(\d+)?$/.exec(rangeHdr);
+      if (m) {
+        const start = parseInt(m[1], 10);
+        const end   = m[2] ? Math.min(parseInt(m[2], 10), size - 1) : (size - 1);
+        if (isNaN(start) || start > end || start >= size) {
+          return new Response(null, {
+            status: 416, headers: { ...commonHeaders, 'Content-Range': `bytes */${size}` },
+          });
+        }
+        const chunk = end - start + 1;
+        const stream = Readable.toWeb(fs.createReadStream(p, { start, end }));
+        return new Response(stream, {
+          status: 206,
+          headers: {
+            ...commonHeaders,
+            'Content-Length': String(chunk),
+            'Content-Range':  `bytes ${start}-${end}/${size}`,
+          },
+        });
+      }
+
+      // 전체 요청
+      const stream = Readable.toWeb(fs.createReadStream(p));
+      return new Response(stream, {
+        status: 200,
+        headers: { ...commonHeaders, 'Content-Length': String(size) },
+      });
     } catch (e) {
       return new Response('not found: ' + e.message, { status: 404 });
     }
@@ -142,6 +190,30 @@ function checkForUpdates() {
   }
   autoUpdater.checkForUpdates().catch((err) => sendUpdate({ type: 'error', message: err.message }));
 }
+
+// Window controls (frameless)
+ipcMain.handle('window:minimize',   () => { mainWindow?.minimize(); });
+ipcMain.handle('window:maxToggle',  () => {
+  if (!mainWindow) return { maximized: false };
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+  return { maximized: mainWindow.isMaximized() };
+});
+ipcMain.handle('window:close',      () => { mainWindow?.close(); });
+ipcMain.handle('window:isMaximized',() => !!mainWindow?.isMaximized());
+ipcMain.handle('clipboard:read',    () => clipboard.readText() || '');
+ipcMain.handle('dialog:pickMedia', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: '분리할 영상/오디오 파일 선택',
+    properties: ['openFile'],
+    filters: [
+      { name: '영상/오디오', extensions: ['mp4','mkv','webm','mov','avi','m4a','mp3','wav','flac','aac','ogg'] },
+      { name: '모든 파일', extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePath: res.filePaths[0] };
+});
 
 ipcMain.handle('update:check',    () => { checkForUpdates(); return { ok: true }; });
 ipcMain.handle('update:download', async () => {
@@ -216,17 +288,20 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
   }
 
   const outDir = downloadsDir();
-  // 파일명: <제목-앞60자>-<6자hex>.<ext>  (중복 방지)
   const base = makeFileBase(opts.title, opts.id || 'video');
   const outTemplate = path.join(outDir, base + '.%(ext)s');
-  // 진행률을 파싱하기 쉬운 형식으로
   const progressTpl = 'PROG {"status":"downloading","dl":%(progress.downloaded_bytes)s,"total":%(progress.total_bytes)s,"tot_est":%(progress.total_bytes_estimate)s,"speed":%(progress.speed)s,"eta":%(progress.eta)s}';
+
+  // 화질 선택 (용량 절약)
+  const quality = String(opts.quality || '1080').toLowerCase();
+  const heightCap = ({ '2160': 2160, '1440': 1440, '1080': 1080, '720': 720, '480': 480, '360': 360 })[quality] || 1080;
+  const formatSpec = `bv*[height<=${heightCap}][ext=mp4]+ba[ext=m4a]/b[height<=${heightCap}]/best`;
 
   const args = [
     '--newline',
     '--no-warnings',
     '--no-playlist',
-    '-f', 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/best',
+    '-f', formatSpec,
     '--merge-output-format', 'mp4',
     '--ffmpeg-location', FFMPEG_DIR,
     '-o', outTemplate,
@@ -465,6 +540,142 @@ ipcMain.handle('library:rename', (_ev, id, name) => {
   items[idx].name = String(name || 'Untitled').slice(0, 200);
   writeLibrary(items);
   return { ok: true };
+});
+
+/** 즐겨찾기 토글 */
+ipcMain.handle('library:setFavorite', (_ev, id, fav) => {
+  const items = readLibrary();
+  const idx = items.findIndex(it => it.id === id);
+  if (idx < 0) return { ok: false, error: 'not found' };
+  items[idx].favorite = !!fav;
+  writeLibrary(items);
+  return { ok: true, favorite: items[idx].favorite };
+});
+
+/** 그룹 지정 (빈 문자열이면 그룹 해제) */
+ipcMain.handle('library:setGroup', (_ev, id, group) => {
+  const items = readLibrary();
+  const idx = items.findIndex(it => it.id === id);
+  if (idx < 0) return { ok: false, error: 'not found' };
+  const g = String(group || '').slice(0, 80).trim();
+  if (g) items[idx].group = g; else delete items[idx].group;
+  writeLibrary(items);
+  return { ok: true };
+});
+
+/**
+ * 정리 — orphan 삭제는 위험해서 완전히 제외.
+ *
+ * "정리"의 정의를 아래로 국한:
+ *   - library.json 내부에서 meta.id 중복 항목만 제거
+ *   - 삭제되는 항목의 videoPath / stemPaths 파일도 함께 삭제 (안전 경로 검사 포함)
+ *
+ *  disk 상의 orphan 파일은 별도 API `library:preview`로 나열만 하고, 삭제는 사용자가 개별 확인해야 함.
+ */
+function safeDeleteInDownloads(p) {
+  const dlDir   = downloadsDir();
+  const stemDir = path.join(dlDir, 'stems');
+  const isInside = (parent, child) => {
+    const rel = path.relative(parent, child);
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const abs = path.normalize(String(p || ''));
+  if (!abs) return null;
+  if (!isInside(dlDir, abs) && !isInside(stemDir, abs)) return null;
+  try {
+    if (!fs.existsSync(abs)) return null;
+    const st = fs.statSync(abs);
+    if (!st.isFile()) return null;
+    const size = st.size;
+    fs.rmSync(abs, { force: true });
+    return { path: abs, size };
+  } catch { return null; }
+}
+
+ipcMain.handle('library:cleanup', () => {
+  const rawItems = readLibrary();
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return { ok: true, removed: 0, removedFiles: 0, freedBytes: 0, deletedPaths: [] };
+  }
+
+  // meta.id 로 그룹화
+  const byId = new Map();
+  rawItems.forEach((it, i) => {
+    const id = it && it.meta && it.meta.id;
+    if (!id) return;
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(i);
+  });
+  const toRemoveIdx = new Set();
+  for (const [, idxs] of byId) {
+    if (idxs.length < 2) continue;
+    let keepIdx = idxs[0];
+    for (const i of idxs) {
+      if ((rawItems[i].createdAt || 0) > (rawItems[keepIdx].createdAt || 0)) keepIdx = i;
+    }
+    for (const i of idxs) if (i !== keepIdx) toRemoveIdx.add(i);
+  }
+
+  const deletedPaths = [];
+  let removed = 0, removedFiles = 0, freedBytes = 0;
+  const keptItems = [];
+
+  rawItems.forEach((it, i) => {
+    if (!toRemoveIdx.has(i)) { keptItems.push(it); return; }
+    const paths = [it.videoPath, ...Object.values(it.stemPaths || {})];
+    for (const p of paths) {
+      const r = safeDeleteInDownloads(p);
+      if (r) { deletedPaths.push(r.path); freedBytes += r.size; removedFiles++; }
+    }
+    removed++;
+  });
+
+  writeLibrary(keptItems);
+  return { ok: true, removed, removedFiles, freedBytes, deletedPaths, libraryCount: keptItems.length };
+});
+
+/**
+ * 미리보기 — disk에 있는 파일 중 library에서 참조되지 않는 것을 나열 (삭제 안 함).
+ * UI에서 개별 확인 후 사용자가 원하면 별도 삭제.
+ */
+ipcMain.handle('library:previewOrphans', () => {
+  const rawItems = readLibrary();
+  const dlDir = downloadsDir();
+  const stemDir = path.join(dlDir, 'stems');
+  const normKey = (p) => {
+    if (!p) return '';
+    const abs = path.normalize(String(p));
+    return process.platform === 'win32' ? abs.toLowerCase() : abs;
+  };
+  const referenced = new Set();
+  rawItems.forEach(it => {
+    if (it.videoPath) referenced.add(normKey(it.videoPath));
+    Object.values(it.stemPaths || {}).forEach(p => p && referenced.add(normKey(p)));
+  });
+  const collect = (dir, extRe) => {
+    if (!fs.existsSync(dir)) return [];
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) continue;
+      if (extRe && !extRe.test(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (referenced.has(normKey(full))) continue;
+      try { out.push({ path: full, size: fs.statSync(full).size }); } catch {}
+    }
+    return out;
+  };
+  return {
+    ok: true,
+    libraryCount: rawItems.length,
+    videos: collect(dlDir,   /\.(mp4|webm|mkv|m4a)$/i),
+    stems:  collect(stemDir, /\.wav$/i),
+  };
+});
+
+/** 개별 orphan 파일 삭제 (allowed dir 내부만) */
+ipcMain.handle('library:deleteOrphan', (_ev, p) => {
+  const r = safeDeleteInDownloads(p);
+  return r ? { ok: true, freedBytes: r.size } : { ok: false, error: '삭제 실패 또는 경로 불허' };
 });
 
 ipcMain.handle('library:delete', (_ev, id, alsoFiles) => {

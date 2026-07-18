@@ -4,7 +4,7 @@
 //   - 새 분리 뷰의 URL 입력 → 다운로드 → 스템 분리 → 라이브러리 등록
 //   - 재생 UI는 library.js가 담당
 
-import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider } from './separator.js';
+import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider, cancelSeparation } from './separator.js';
 import { Library } from './library.js';
 
 const $ = (id) => document.getElementById(id);
@@ -18,6 +18,28 @@ const api = window.yssApi;
     $('platform').textContent = p;
   } catch (err) { console.error(err); }
 })();
+
+// ── Titlebar: window controls ───────────────────
+const titlebarEl = document.querySelector('.titlebar');
+$('win-min')  .addEventListener('click', () => api.window.minimize());
+$('win-max')  .addEventListener('click', () => api.window.maxToggle());
+$('win-close').addEventListener('click', () => api.window.close());
+api.window.isMaximized().then(m => titlebarEl.classList.toggle('maximized', m));
+api.window.onState(({ maximized }) => titlebarEl.classList.toggle('maximized', maximized));
+
+// ── Theme toggle (dark/light) ───────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('theme');
+  const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const initial = saved || (sysDark ? 'dark' : 'light');
+  document.documentElement.dataset.theme = initial;
+})();
+$('theme-toggle').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('theme', next);
+});
 
 // ── 탭 라우팅 ─────────────────────────────────
 const tabs = document.querySelectorAll('.tab');
@@ -48,6 +70,19 @@ const providerStatus = $('provider-status');
     providerStatus.textContent = pref === 'auto' ? 'WebGPU 자동 사용' : (pref === 'webgpu' ? 'WebGPU 강제 사용' : 'CPU 강제 사용');
   }
 })();
+// Video quality selection
+const qualityPills = document.querySelectorAll('#quality-pills .pill');
+let currentQuality = localStorage.getItem('videoQuality') || '1080';
+qualityPills.forEach(b => b.classList.toggle('on', b.dataset.quality === currentQuality));
+qualityPills.forEach(btn => {
+  btn.addEventListener('click', () => {
+    qualityPills.forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    currentQuality = btn.dataset.quality;
+    localStorage.setItem('videoQuality', currentQuality);
+  });
+});
+
 providerPills.forEach(btn => {
   btn.addEventListener('click', () => {
     if (btn.disabled) return;
@@ -92,6 +127,7 @@ const sepPct = $('sep-pct');
 const sepPhase = $('sep-phase');
 const sepDetail = $('sep-detail');
 const sepInfo = $('sep-info');
+const sepCancelBtn = $('sep-cancel-btn');
 const stemsDone = $('stems-done');
 const stemsList = $('stems-list');
 const openStemsBtn = $('open-stems-btn');
@@ -126,21 +162,78 @@ const existingSub    = $('existing-banner-sub');
 const existingOpen   = $('existing-open-btn');
 let existingLibItemId = null;
 
-urlInput.addEventListener('input', () => {
-  const ok = isValidUrl(urlInput.value);
-  probeBtn.disabled = !ok;
+function resetSeparateView(alsoClearUrl = false) {
+  if (alsoClearUrl) { urlInput.value = ''; lastClipboardSeen = ''; }
+  probeBtn.disabled = !isValidUrl(urlInput.value);
+  dlBtn.disabled = true;
   $('probe-result').hidden = true;
   doneCard.hidden = true;
   stemsDone.hidden = true;
-  dlBtn.disabled = true;
-  currentProbe = null;
+  progWrap.hidden = true;
+  sepWrap.hidden = true;
   existingBanner.hidden = true;
+  errBox.hidden = true; errBox.textContent = '';
+  currentProbe = null;
+  currentVideoPath = null;
+  currentBaseName = null;
   existingLibItemId = null;
+  lastRegisteredId = null;
+}
+
+urlInput.addEventListener('input', () => resetSeparateView(false));
+$('reset-btn').addEventListener('click', () => { resetSeparateView(true); urlInput.focus(); });
+
+// ── 로컬 파일로 분리 ─────────────────────────────
+$('local-btn').addEventListener('click', async () => {
+  const res = await api.dialog.pickMedia();
+  if (!res.ok) return;
+  const filePath = res.filePath;
+  const fileName = filePath.split(/[\\/]/).pop();
+  const base = fileName.replace(/\.[^.]+$/, '');
+  resetSeparateView(true);
+  currentVideoPath = filePath;
+  currentBaseName  = base;
+  currentProbe = {
+    id:       'local-' + Math.random().toString(36).slice(2, 8),
+    title:    base,
+    uploader: '(로컬 파일)',
+    duration: 0,
+    thumbnail: null,
+  };
+  donePath.textContent = filePath;
+  doneCard.hidden = false;
+  urlInput.value = '';
 });
 probeBtn.disabled = true;
 urlInput.addEventListener('paste', () => {
   setTimeout(() => { if (isValidUrl(urlInput.value)) probeBtn.click(); }, 30);
 });
+
+// ── 클립보드 YouTube 링크 자동 감지 ───────────
+const YT_RE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]+/i;
+let lastClipboardSeen = '';
+
+async function tryPasteFromClipboard() {
+  // 다운로드/분리 진행 중이면 방해 X
+  if (urlInput.disabled) return;
+  // 이미 입력창에 뭔가 있으면 방해 X
+  if (urlInput.value.trim()) return;
+
+  let text = '';
+  try { text = (await api.clipboard.read() || '').trim(); } catch { return; }
+  if (!text || text === lastClipboardSeen) return;
+  lastClipboardSeen = text;
+  if (!YT_RE.test(text)) return;
+
+  urlInput.value = text;
+  urlInput.dispatchEvent(new Event('input'));  // input 이벤트로 다른 리스너 갱신 (probeBtn 활성화 등)
+  // 자동 probe
+  if (!probeBtn.disabled) probeBtn.click();
+}
+api.window.onFocus(() => tryPasteFromClipboard());
+document.addEventListener('DOMContentLoaded', () => tryPasteFromClipboard());
+// 첫 실행 (모듈 로드 시점) — DOMContentLoaded는 module의 경우 이미 지나갔을 수 있어 즉시도 호출
+tryPasteFromClipboard();
 
 probeBtn.addEventListener('click', async () => {
   const url = urlInput.value.trim();
@@ -223,7 +316,7 @@ dlBtn.addEventListener('click', async () => {
   });
 
   const res = await api.ytdlp.download(urlInput.value.trim(), {
-    title: currentProbe?.title, id: currentProbe?.id,
+    title: currentProbe?.title, id: currentProbe?.id, quality: currentQuality,
   });
   unsubProgress?.(); unsubProgress = null;
   cancelBtn.hidden = true;
@@ -252,6 +345,11 @@ const PHASE_LABELS_SEP = {
   done: '완료',
 };
 
+sepCancelBtn.addEventListener('click', () => {
+  cancelSeparation();
+  sepInfo.textContent = '취소 중…';
+});
+
 separateBtn.addEventListener('click', async () => {
   if (!currentVideoPath) return;
   setError('');
@@ -261,6 +359,7 @@ separateBtn.addEventListener('click', async () => {
   sepPhase.textContent = PHASE_LABELS_SEP.init;
   sepDetail.textContent = ''; sepInfo.textContent = '';
   separateBtn.disabled = true;
+  sepCancelBtn.hidden = false;
 
   const t0 = performance.now();
   try {
@@ -303,9 +402,16 @@ separateBtn.addEventListener('click', async () => {
     lastRegisteredId = reg.id;
   } catch (err) {
     console.error(err);
-    setError('스템 분리 실패: ' + err.message);
+    if (err.message === '취소됨') {
+      setError('');
+      sepPhase.textContent = '취소됨';
+      sepInfo.textContent = '';
+    } else {
+      setError('스템 분리 실패: ' + err.message);
+    }
   } finally {
     separateBtn.disabled = false;
+    sepCancelBtn.hidden = true;
   }
 });
 

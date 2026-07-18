@@ -48,6 +48,8 @@ export async function loadStemFilesToBuffers(stemPaths) {
 }
 
 export class Player {
+  static _cache = new WeakMap();  // videoEl → { ctx, source }
+
   /**
    * @param {HTMLVideoElement} videoEl
    * @param {string} videoUrl file:// URL
@@ -56,24 +58,59 @@ export class Player {
    */
   constructor(videoEl, videoUrl, stems, sampleRate) {
     this.videoEl = videoEl;
+    // MediaElementAudioSource가 CORS로 무음 되는 것 방지 — src 세팅 전에 crossOrigin 지정
+    if (!this.videoEl.crossOrigin) this.videoEl.crossOrigin = 'anonymous';
     this.videoEl.src = videoUrl;
-    this.videoEl.muted = true;
-    this.videoEl.volume = 0;
+    this.videoEl.volume = 1;
 
-    // 시스템 기본 sampleRate 사용 — mismatch가 있어도 AudioBufferSource가 자동 리샘플
-    // 확장에서 검증된 방식: buffer SR과 매칭해서 리샘플 이슈 배제
-    // (일부 시스템에서 44100 buffer → 48000 ctx 리샘플 시 무음 이슈)
-    try {
-      this.audioCtx = new AudioContext({ sampleRate });
-    } catch {
-      this.audioCtx = new AudioContext();
+    // MediaElementSource는 video 요소당 1회만 생성 가능 → ctx+source 캐시
+    let cache = Player._cache.get(videoEl);
+    if (cache && cache.ctx.state === 'closed') cache = null;
+    if (cache) {
+      this.audioCtx = cache.ctx;
+      this.videoSource = cache.source;
+    } else {
+      try { this.audioCtx = new AudioContext({ sampleRate }); }
+      catch { this.audioCtx = new AudioContext(); }
+      try {
+        this.videoSource = this.audioCtx.createMediaElementSource(this.videoEl);
+      } catch (e) { console.warn('[Player] MES', e.message); this.videoSource = null; }
+      Player._cache.set(videoEl, { ctx: this.audioCtx, source: this.videoSource });
     }
-    console.log(`[Player] AudioContext state=${this.audioCtx.state} ctxSR=${this.audioCtx.sampleRate} bufSR=${sampleRate}`);
+    this._sampleRate = sampleRate;
+    console.log(`[Player] ctx state=${this.audioCtx.state} ctxSR=${this.audioCtx.sampleRate} bufSR=${sampleRate}`);
 
-    // Master gain — 직접 destination에 연결 (limiter 제거해서 무음 원인 배제)
+    // 그래프: masterGain → destination
     this.masterGain = this.audioCtx.createGain();
     this.masterGain.gain.value = 1.0;
     this.masterGain.connect(this.audioCtx.destination);
+
+    // 스템 → stemMixGain → masterGain
+    this.stemMixGain = this.audioCtx.createGain();
+    this.stemMixGain.gain.value = 1.0;
+    this.stemMixGain.connect(this.masterGain);
+
+    // 원본 오디오 → origMixGain → masterGain
+    this.origMixGain = this.audioCtx.createGain();
+    this.origMixGain.gain.value = 0;
+    if (this.videoSource) {
+      try { this.videoSource.disconnect(); } catch {}
+      this.videoSource.connect(this.origMixGain);
+    } else {
+      // MES 실패 → 원본 오디오 제어 불가 → 안전하게 mute
+      this.videoEl.muted = true;
+      this.videoEl.volume = 0;
+    }
+    this.origMixGain.connect(this.masterGain);
+
+    // 원본 Float32 (pitch shift 재처리용) 복사 저장
+    this.stemsOrig = {};
+    for (const name of STEM_ORDER) {
+      if (!stems[name]) continue;
+      const [L, R] = stems[name];
+      this.stemsOrig[name] = [new Float32Array(L), new Float32Array(R)];
+    }
+    this._currentKey = 0;
 
     // 각 stem AudioBuffer + GainNode
     this.stemBuffers = {};
@@ -99,7 +136,7 @@ export class Player {
       this.stemBuffers[name] = buf;
       const g = this.audioCtx.createGain();
       g.gain.value = 1.0;
-      g.connect(this.masterGain);
+      g.connect(this.stemMixGain);
       this.stemGains[name] = g;
       this.stemVolumes[name] = 1.0;
       this.stemMuted[name] = false;
@@ -218,6 +255,75 @@ export class Player {
     this.masterGain.gain.setTargetAtTime(Math.max(0, Math.min(2, v)), this.audioCtx.currentTime, 0.02);
   }
 
+  /** 원본/스템 crossfade — 0 = 스템 only, 1 = 원본 only, 사이는 blend */
+  setOriginalMix(v) {
+    const mix = Math.max(0, Math.min(1, v));
+    // 등파워 크로스페이드: stem = cos(mix·π/2), orig = sin(mix·π/2)
+    const stemG = Math.cos(mix * Math.PI / 2);
+    const origG = Math.sin(mix * Math.PI / 2);
+    const t = this.audioCtx.currentTime;
+    this.stemMixGain.gain.setTargetAtTime(stemG, t, 0.02);
+    this.origMixGain.gain.setTargetAtTime(origG, t, 0.02);
+  }
+
+  /** 키 변경 — encoder-worker로 pitch shift 후 buffer 교체
+   * @param {number} semitones -6..+6 정수
+   * @param {Worker} encoderWorker — 사용자가 관리하는 encoder-worker 인스턴스
+   */
+  async setKeyShift(semitones, encoderWorker) {
+    semitones = Math.max(-6, Math.min(6, Math.round(semitones)));
+    if (semitones === this._currentKey) return;
+    let newStems;
+    if (semitones === 0) {
+      newStems = {};
+      for (const [n, [L, R]] of Object.entries(this.stemsOrig)) {
+        newStems[n] = [new Float32Array(L), new Float32Array(R)];
+      }
+    } else {
+      const SKIP = new Set(['drums']);   // 드럼은 피치 시 부자연스러움
+      const toSend = {};
+      for (const [n, [L, R]] of Object.entries(this.stemsOrig)) {
+        if (SKIP.has(n)) continue;
+        toSend[n] = [new Float32Array(L), new Float32Array(R)];
+      }
+      const res = await new Promise((resolve, reject) => {
+        const id = Math.random().toString(36).slice(2);
+        const onMsg = (e) => {
+          if (e.data?.id !== id) return;
+          encoderWorker.removeEventListener('message', onMsg);
+          if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data);
+        };
+        encoderWorker.addEventListener('message', onMsg);
+        const transferables = [];
+        for (const [, [l, r]] of Object.entries(toSend)) transferables.push(l.buffer, r.buffer);
+        encoderWorker.postMessage({ type: 'pitchShift', id, stems: toSend, semitones }, transferables);
+      });
+      newStems = res.stems;
+      for (const [n, [L, R]] of Object.entries(this.stemsOrig)) {
+        if (!SKIP.has(n)) continue;
+        newStems[n] = [new Float32Array(L), new Float32Array(R)];
+      }
+    }
+
+    // buffer 교체 (재생 중이면 잠시 정지 → 재시작)
+    const wasPlaying = this._playing;
+    const seekTo = this.videoEl.currentTime;
+    if (wasPlaying) this._stopAll();
+    const sr = this._sampleRate;
+    for (const [n, [L, R]] of Object.entries(newStems)) {
+      const buf = this.audioCtx.createBuffer(2, L.length, sr);
+      buf.copyToChannel(new Float32Array(L), 0);
+      buf.copyToChannel(new Float32Array(R), 1);
+      this.stemBuffers[n] = buf;
+    }
+    this._currentKey = semitones;
+    if (wasPlaying) {
+      this._startAll(seekTo);
+      this._playStartCtxTime = this.audioCtx.currentTime;
+      this._playStartOffset  = seekTo;
+    }
+  }
+
   setStemVolume(name, v) {
     if (!this.stemGains[name]) return;
     this.stemVolumes[name] = Math.max(0, Math.min(2, v));
@@ -285,7 +391,11 @@ export class Player {
   destroy() {
     this._stopAll();
     this._unbindVideoEvents();
-    try { this.audioCtx.close(); } catch {}
+    // ctx는 재사용하기 위해 close하지 않음 (MediaElementSource 재바인딩 방지)
+    try { this.stemMixGain?.disconnect(); } catch {}
+    try { this.origMixGain?.disconnect(); } catch {}
+    try { this.masterGain?.disconnect(); } catch {}
+    for (const g of Object.values(this.stemGains)) { try { g.disconnect(); } catch {} }
     try { this.videoEl.pause(); this.videoEl.removeAttribute('src'); this.videoEl.load(); } catch {}
   }
 }
