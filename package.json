@@ -3,7 +3,10 @@
   "version": "1.1.0",
   "description": "YT Separator — Desktop app for real-time stem separation of local audio/video files",
   "main": "main.js",
-  "author": "rowonss",
+  "author": {
+    "name": "Whale Mind",
+    "email": "wkq321@gmail.com"
+  },
   "license": "GPL-3.0",
   "private": true,
   "scripts": {
@@ -23,7 +26,7 @@
   "build": {
     "appId": "com.rowonss.yt-separator",
     "productName": "YT Separator",
-    "copyright": "© 2026 rowonss",
+    "copyright": "© 2026 Whale Mind",
     "asar": true,
     "asarUnpack": [
       "renderer/lib/**/*",
@@ -77,7 +80,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "YT Separator",
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "artifactName": "${productName}-${version}-Setup.${ext}",
+      "publisherName": "Whale Mind"
     },
     "portable": {
       "artifactName": "${productName}-${version}-Portable.${ext}"

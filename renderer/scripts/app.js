@@ -509,6 +509,30 @@ goLibraryBtn.addEventListener('click', async () => {
   if (lastRegisteredId) await Library.selectItem(lastRegisteredId);
 });
 
+// ── 라이브러리에서 "다른 모델로 재분리" 요청 ────────
+document.addEventListener('yss:preload-separation', (ev) => {
+  const { videoPath, baseName, probe, modelKey } = ev.detail || {};
+  if (!videoPath) return;
+  resetSeparateView(true);
+  currentVideoPath = videoPath;
+  currentBaseName  = baseName;
+  currentProbe     = probe;
+  // 모델 pill 설정
+  if (modelKey && ['4stem', '6stem'].includes(modelKey)) {
+    currentModelKey = modelKey;
+    localStorage.setItem('modelKey', modelKey);
+    modelPills.forEach(b => b.classList.toggle('on', b.dataset.model === modelKey));
+    updateModelStatusLabel();
+  }
+  donePath.textContent = videoPath;
+  doneCard.hidden = false;
+  switchView('separate');
+  // 사용자 검토 후 클릭할 수 있도록 안내
+  setError('');
+  // 자동 스크롤 유도
+  doneCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
 // ── Auto-updater UI ────────────────────────────────
 const updBadge   = $('update-badge');
 const updDialog  = $('update-dialog');

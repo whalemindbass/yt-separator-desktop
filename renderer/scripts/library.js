@@ -212,11 +212,12 @@ async function mountPlayer(item) {
       });
     });
 
-    // master / source / key / group 초기화
+    // master / source / key / group / reseparate 초기화
     masterVol.value = 100; masterVal.textContent = '100%';
     resetSourceToggle();
     resetKeyUI();
     updateGroupPickerLabel();
+    updateReseparateLabel(item);
   } catch (e) {
     console.error(e);
     setErr('로드 실패: ' + e.message);
@@ -229,6 +230,38 @@ masterVol.addEventListener('input', () => {
   const v = Number(masterVol.value) / 100;
   masterVal.textContent = masterVol.value + '%';
   currentPlayer?.setMasterVolume(v);
+});
+
+// ── 다른 모델로 재분리 ─────────────────────────────
+const reseparateBtn      = $('player-reseparate');
+const reseparateLabelEl  = $('player-reseparate-label');
+
+function updateReseparateLabel(item) {
+  if (!reseparateLabelEl) return;
+  const cur = item?.modelKey || '4stem';
+  const alt = cur === '4stem' ? '6stem' : '4stem';
+  reseparateLabelEl.textContent = alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리';
+  reseparateBtn.dataset.targetModel = alt;
+}
+reseparateBtn?.addEventListener('click', () => {
+  const it = currentItem();
+  if (!it) return;
+  const targetModel = reseparateBtn.dataset.targetModel || '6stem';
+  if (!confirm(`이 영상을 ${targetModel === '6stem' ? '6-stem' : '4-stem'} 모델로 다시 분리합니다.\n\n"새 분리" 탭으로 이동하고 준비 상태로 세팅됩니다. 계속할까요?`)) return;
+  document.dispatchEvent(new CustomEvent('yss:preload-separation', {
+    detail: {
+      videoPath: it.videoPath,
+      baseName: (it.videoPath || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, ''),
+      probe: {
+        id:        (it.meta && it.meta.id) || 'local-' + Math.random().toString(36).slice(2, 8),
+        title:     it.name,
+        uploader:  (it.meta && it.meta.uploader) || '(라이브러리 재분리)',
+        duration:  (it.meta && it.meta.duration) || 0,
+        thumbnail: (it.meta && it.meta.thumbnail) || null,
+      },
+      modelKey: targetModel,
+    },
+  }));
 });
 
 // ── 오디오 소스 토글 (스템 / 원본) ────────────────

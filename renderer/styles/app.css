@@ -797,17 +797,20 @@ body { display: flex; flex-direction: column; }
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   overflow: hidden;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .source-btn {
-  padding: 6px 14px;
+  padding: 5px 10px;
   background: transparent;
   border: 0;
   border-right: 1px solid var(--border);
   color: var(--tx-2);
   font-family: inherit;
-  font-size: 12px; font-weight: 500;
+  font-size: 11.5px; font-weight: 500;
   cursor: pointer;
   transition: color .12s, background .12s;
+  white-space: nowrap;
 }
 .source-btn:last-child { border-right: 0; }
 .source-btn:hover:not(.on) { color: var(--tx-1); background: rgba(127,127,127,.06); }
