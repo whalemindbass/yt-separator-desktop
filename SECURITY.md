@@ -12,7 +12,7 @@ We provide security fixes for the latest minor version line.
 ## Reporting a Vulnerability
 
 If you discover a security issue, please **do not** open a public issue.
-Instead, email **wkq321@gmail.com** with:
+Instead, email **whalemindbass@gmail.com** with:
 
 - A description of the issue.
 - Steps to reproduce (if possible).

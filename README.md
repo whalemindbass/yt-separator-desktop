@@ -53,4 +53,4 @@ Copyright © 2026 Whale Mind. All rights reserved.
 ## 링크
 
 - **다운로드**: https://ytseparator.com
-- **이슈 신고 · 문의**: wkq321@gmail.com
+- **이슈 신고 · 문의**: whalemindbass@gmail.com
