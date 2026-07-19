@@ -10,6 +10,10 @@ const $ = (id) => document.getElementById(id);
 const listEl        = $('lib-list');
 const emptyEl       = $('lib-empty');
 const refreshBtn    = $('lib-refresh');
+const searchEl      = $('lib-search');
+const sortEl        = $('lib-sort');
+const collapseBtn   = $('lib-collapse');
+const expandBtn     = $('lib-expand');
 const playerEmpty   = $('player-empty');
 const playerSection = $('player-section');
 const playerVideo   = $('player-video');
@@ -57,6 +61,7 @@ const saveKey       = (k)         => _mutateSettings(s => { s.keyShift = k; });
 const saveLoop      = (a, b, en)  => _mutateSettings(s => { s.loopA = a; s.loopB = b; s.loopEnabled = !!en; });
 const saveTrackVol  = (stem, vol) => _mutateSettings(s => { (s.trackVols  = s.trackVols  || {})[stem] = vol; });
 const saveTrackMute = (stem, mu)  => _mutateSettings(s => { (s.trackMutes = s.trackMutes || {})[stem] = !!mu; });
+const saveTrackSolo = (stem, so)  => _mutateSettings(s => { (s.trackSolos = s.trackSolos || {})[stem] = !!so; });
 
 function setErr(msg) {
   if (!msg) { playerErr.hidden = true; playerErr.textContent = ''; return; }
@@ -79,6 +84,46 @@ function starSvg(filled) {
     ? `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.6l1.9 4 4.4.6-3.2 3 .8 4.3L8 11.6 4.1 13.5l.8-4.3-3.2-3 4.4-.6z"/></svg>`
     : `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.6l1.9 4 4.4.6-3.2 3 .8 4.3L8 11.6 4.1 13.5l.8-4.3-3.2-3 4.4-.6z"/></svg>`;
 }
+
+// ── 검색 / 정렬 상태 (localStorage 유지) ─────────────
+let _searchQuery = '';
+let _sortMode = (() => {
+  try { return localStorage.getItem('yss:lib-sort') || 'group'; } catch { return 'group'; }
+})();
+if (sortEl) sortEl.value = _sortMode;
+
+searchEl?.addEventListener('input', () => {
+  _searchQuery = searchEl.value.trim().toLowerCase();
+  renderList();
+});
+sortEl?.addEventListener('change', () => {
+  _sortMode = sortEl.value;
+  try { localStorage.setItem('yss:lib-sort', _sortMode); } catch {}
+  renderList();
+});
+
+// ── 사이드바 접기 / 펼치기 ──────────────────────────
+const libBody = document.querySelector('.library-body');
+const sideEl  = document.querySelector('.lib-side');
+let _sideCollapsed = (() => {
+  try { return localStorage.getItem('yss:lib-collapsed') === '1'; } catch { return false; }
+})();
+function applySideCollapsed() {
+  libBody?.classList.toggle('side-collapsed', _sideCollapsed);
+  sideEl?.classList.toggle('collapsed', _sideCollapsed);
+  if (expandBtn) expandBtn.hidden = !_sideCollapsed;
+}
+applySideCollapsed();
+collapseBtn?.addEventListener('click', () => {
+  _sideCollapsed = true;
+  try { localStorage.setItem('yss:lib-collapsed', '1'); } catch {}
+  applySideCollapsed();
+});
+expandBtn?.addEventListener('click', () => {
+  _sideCollapsed = false;
+  try { localStorage.setItem('yss:lib-collapsed', '0'); } catch {}
+  applySideCollapsed();
+});
 
 function groupSort(a, b) {
   // 즐겨찾기 최우선, 그룹 이름 순, 그 다음 최신순
@@ -108,7 +153,22 @@ function renderList() {
   if (!items.length) { emptyEl.hidden = false; return; }
   emptyEl.hidden = true;
 
-  const sorted = representativeItems().sort(groupSort);
+  // 검색 필터 + 정렬 모드 적용
+  let filtered = representativeItems();
+  if (_searchQuery) {
+    filtered = filtered.filter(it =>
+      (it.name || '').toLowerCase().includes(_searchQuery) ||
+      (it.group || '').toLowerCase().includes(_searchQuery)
+    );
+  }
+  const sortFn = ({
+    group: groupSort,
+    date:  (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+    name:  (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }),
+  })[_sortMode] || groupSort;
+  const sorted = filtered.sort(sortFn);
+  const useGroupHeaders = _sortMode === 'group';
+
   let lastHeader = null;
   const addHeader = (label) => {
     if (lastHeader === label) return;
@@ -121,8 +181,10 @@ function renderList() {
 
   const isEn = getLocale() === 'en';
   for (const it of sorted) {
-    const header = it.favorite ? (isEn ? '★  Favorites' : '★  즐겨찾기') : (it.group ? it.group : (isEn ? 'Other' : '기타'));
-    addHeader(header);
+    if (useGroupHeaders) {
+      const header = it.favorite ? (isEn ? '★  Favorites' : '★  즐겨찾기') : (it.group ? it.group : (isEn ? 'Other' : '기타'));
+      addHeader(header);
+    }
 
     const li = document.createElement('li');
     li.className = 'lib-item' + (it.id === selectedId ? ' on' : '');
@@ -207,6 +269,7 @@ async function selectItem(id) {
 function destroyPlayer() {
   if (currentPlayer) { try { currentPlayer.destroy(); } catch {} currentPlayer = null; }
   mixerTracks.innerHTML = '';
+  mixerTracks.classList.remove('has-solo');
 }
 
 async function mountPlayer(item) {
@@ -248,7 +311,8 @@ async function mountPlayer(item) {
           <img class="mixer-track-icon" src="${iconUrl}" alt="" style="--stem-color:${meta.color}" />
           <span>${meta.label}</span>
         </div>
-        <button class="mixer-mute" data-stem="${name}">M</button>
+        <button class="mixer-solo" data-stem="${name}" title="Solo — 이 트랙만 재생">S</button>
+        <button class="mixer-mute" data-stem="${name}" title="Mute">M</button>
         <input class="mixer-slider" type="range" min="0" max="150" value="100" data-stem="${name}" />
         <span class="mixer-val" data-val="${name}">100%</span>
       `;
@@ -272,6 +336,17 @@ async function mountPlayer(item) {
         const row = mixerTracks.querySelector(`.mixer-track[data-stem="${stem}"]`);
         row?.classList.toggle('muted', muted);
         saveTrackMute(stem, muted);
+      });
+    });
+    mixerTracks.querySelectorAll('.mixer-solo').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const stem = btn.dataset.stem;
+        const soloed = currentPlayer.toggleSolo(stem);
+        btn.classList.toggle('on', soloed);
+        const row = mixerTracks.querySelector(`.mixer-track[data-stem="${stem}"]`);
+        row?.classList.toggle('soloed', soloed);
+        mixerTracks.classList.toggle('has-solo', currentPlayer.isAnySolo());
+        saveTrackSolo(stem, soloed);
       });
     });
 
@@ -319,13 +394,24 @@ async function restoreSongSettings(item) {
     if (s.trackMutes) {
       for (const [stem, muted] of Object.entries(s.trackMutes)) {
         if (!muted) continue;
-        // toggleMute 는 상태 반전 → 현재 unmuted 상태에서 한 번 호출하면 mute됨
         const nowMuted = currentPlayer?.toggleMute(stem);
         const btn = mixerTracks.querySelector(`.mixer-mute[data-stem="${stem}"]`);
         const row = mixerTracks.querySelector(`.mixer-track[data-stem="${stem}"]`);
         btn?.classList.toggle('on', !!nowMuted);
         row?.classList.toggle('muted', !!nowMuted);
       }
+    }
+    // 트랙 Solo
+    if (s.trackSolos) {
+      for (const [stem, soloed] of Object.entries(s.trackSolos)) {
+        if (!soloed) continue;
+        const nowSolo = currentPlayer?.toggleSolo(stem);
+        const btn = mixerTracks.querySelector(`.mixer-solo[data-stem="${stem}"]`);
+        const row = mixerTracks.querySelector(`.mixer-track[data-stem="${stem}"]`);
+        btn?.classList.toggle('on', !!nowSolo);
+        row?.classList.toggle('soloed', !!nowSolo);
+      }
+      mixerTracks.classList.toggle('has-solo', !!currentPlayer?.isAnySolo());
     }
     // Source
     if (s.source === 'orig' && srcToggle) {
@@ -368,9 +454,10 @@ masterVol.addEventListener('input', () => {
   saveMaster(Number(masterVol.value));
 });
 
-// ── 다른 모델로 재분리 + 모델 토글 ─────────────────
+// ── 재분리 (같은/다른 모델) + 모델 토글 ─────────────
 const reseparateBtn      = $('player-reseparate');
 const reseparateLabelEl  = $('player-reseparate-label');
+const reseparateMenu     = $('reseparate-menu');
 const modelToggle        = $('player-model-toggle');
 
 function siblingItem(item) {
@@ -386,23 +473,20 @@ function siblingItem(item) {
 function updateReseparateAndToggle(item) {
   const cur = item?.modelKey || '4stem';
   const sib = siblingItem(item);
+  // 재분리 버튼은 항상 노출 (같은/다른 모델 선택 가능)
   if (sib) {
-    // 두 모델 다 있음 → 토글 표시, 재분리 버튼 숨김
+    // 두 모델 다 있음 → 토글 표시
     modelToggle.hidden = false;
     modelToggle.querySelectorAll('.model-tog-btn').forEach(b => b.classList.toggle('on', b.dataset.key === cur));
-    reseparateBtn.hidden = true;
   } else {
     modelToggle.hidden = true;
-    reseparateBtn.hidden = false;
-    const alt = cur === '4stem' ? '6stem' : '4stem';
-    if (reseparateLabelEl) {
-      const isEn = getLocale() === 'en';
-      reseparateLabelEl.textContent = isEn
-        ? (alt === '6stem' ? 'Separate as 6-stem' : 'Separate as 4-stem')
-        : (alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리');
-    }
-    reseparateBtn.dataset.targetModel = alt;
   }
+  reseparateBtn.hidden = false;
+  if (reseparateLabelEl) {
+    const isEn = getLocale() === 'en';
+    reseparateLabelEl.textContent = isEn ? 'Reseparate' : '다시 분리';
+  }
+  reseparateBtn.dataset.targetModel = cur;   // 기본값 (메뉴에서 선택 가능)
 }
 
 modelToggle?.addEventListener('click', (e) => {
@@ -416,10 +500,9 @@ modelToggle?.addEventListener('click', (e) => {
     selectItem(sib.id);
   }
 });
-reseparateBtn?.addEventListener('click', () => {
+function triggerReseparation(targetModel) {
   const it = currentItem();
   if (!it) return;
-  const targetModel = reseparateBtn.dataset.targetModel || '6stem';
   const isEn = getLocale() === 'en';
   const label = targetModel === '6stem' ? '6-stem' : '4-stem';
   const msg = isEn
@@ -440,6 +523,24 @@ reseparateBtn?.addEventListener('click', () => {
       modelKey: targetModel,
     },
   }));
+}
+reseparateBtn?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!reseparateMenu) return;
+  reseparateMenu.hidden = !reseparateMenu.hidden;
+});
+reseparateMenu?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const li = e.target.closest('li[data-model]');
+  if (!li) return;
+  reseparateMenu.hidden = true;
+  triggerReseparation(li.dataset.model);
+});
+document.addEventListener('click', (e) => {
+  if (!reseparateMenu || reseparateMenu.hidden) return;
+  if (reseparateMenu.contains(e.target)) return;
+  if (reseparateBtn?.contains(e.target)) return;
+  reseparateMenu.hidden = true;
 });
 
 // ── A-B 구간 반복 ─────────────────────────────

@@ -161,6 +161,7 @@ export class Player {
     this.stemGains   = {};
     this.stemVolumes = {};
     this.stemMuted   = {};
+    this.stemSolo    = {};
     this._stemBlobUrls = {};
 
     for (const name of Object.keys(stems)) {
@@ -200,6 +201,7 @@ export class Player {
       this.stemGains[name] = g;
       this.stemVolumes[name] = 1.0;
       this.stemMuted[name] = false;
+      this.stemSolo[name]  = false;
     }
 
     this.sources = {};
@@ -457,20 +459,49 @@ export class Player {
     }
   }
 
+  /** Solo가 하나라도 켜져있으면 mute solo되지 않은 트랙. mute > solo 우선순위.
+   *  @returns {number} 해당 stem의 실제 적용 gain 값 */
+  _effectiveGainFor(name) {
+    if (this.stemMuted[name]) return 0;
+    const anySolo = Object.values(this.stemSolo || {}).some(Boolean);
+    if (anySolo && !this.stemSolo[name]) return 0;
+    return this.stemVolumes[name] ?? 1;
+  }
+  _applyEffectiveGain(name) {
+    if (!this.stemGains[name]) return;
+    const v = this._effectiveGainFor(name);
+    this.stemGains[name].gain.setTargetAtTime(v, this.audioCtx.currentTime, 0.02);
+  }
+  _applyAllStemGains() {
+    for (const name of Object.keys(this.stemGains)) this._applyEffectiveGain(name);
+  }
+
   setStemVolume(name, v) {
     if (!this.stemGains[name]) return;
     this.stemVolumes[name] = Math.max(0, Math.min(2, v));
-    if (!this.stemMuted[name]) {
-      this.stemGains[name].gain.setTargetAtTime(this.stemVolumes[name], this.audioCtx.currentTime, 0.02);
-    }
+    this._applyEffectiveGain(name);
   }
 
   toggleMute(name) {
     if (!this.stemGains[name]) return this.stemMuted[name] || false;
     this.stemMuted[name] = !this.stemMuted[name];
-    const val = this.stemMuted[name] ? 0 : this.stemVolumes[name];
-    this.stemGains[name].gain.setTargetAtTime(val, this.audioCtx.currentTime, 0.02);
+    this._applyEffectiveGain(name);
     return this.stemMuted[name];
+  }
+
+  toggleSolo(name) {
+    if (!this.stemGains[name]) return this.stemSolo[name] || false;
+    this.stemSolo[name] = !this.stemSolo[name];
+    // Solo 상태 변경은 모든 stem에 영향 (다른 stem들도 mute 여부 재계산)
+    this._applyAllStemGains();
+    return this.stemSolo[name];
+  }
+
+  isSolo(name)   { return !!(this.stemSolo && this.stemSolo[name]); }
+  isAnySolo()    { return Object.values(this.stemSolo || {}).some(Boolean); }
+  clearSolos()   {
+    for (const n of Object.keys(this.stemSolo)) this.stemSolo[n] = false;
+    this._applyAllStemGains();
   }
 
   /** 진단: vocals stem을 destination에 직접 연결해 3초 재생. 들리면 buffer/graph는 정상 */

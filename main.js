@@ -1030,8 +1030,16 @@ ipcMain.handle('library:delete', (_ev, id, alsoFiles) => {
   if (idx < 0) return { ok: false, error: 'not found' };
   const it = items[idx];
   if (alsoFiles) {
-    try { fs.rmSync(it.outDir, { recursive: true, force: true }); } catch {}
-    try { fs.rmSync(it.videoPath, { force: true }); } catch {}
+    // outDir 은 여러 항목의 stem 파일을 공유하는 폴더일 수 있으므로 절대 recursive 삭제 금지.
+    // 대상 항목의 stemPaths 만 개별 삭제.
+    for (const p of Object.values(it.stemPaths || {})) {
+      try { fs.rmSync(p, { force: true }); } catch {}
+    }
+    // videoPath 는 4/6-stem sibling 이 공유 → 다른 형제가 남아있으면 유지
+    const otherRefs = items.filter((x, i) => i !== idx && x.videoPath === it.videoPath);
+    if (otherRefs.length === 0) {
+      try { fs.rmSync(it.videoPath, { force: true }); } catch {}
+    }
   }
   items.splice(idx, 1);
   writeLibrary(items);

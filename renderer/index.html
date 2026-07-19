@@ -195,7 +195,16 @@
         <div class="lib-side-actions">
           <button id="lib-cleanup" class="link-btn" data-i18n="lib.cleanup" data-i18n-title="lib.cleanup.title" title="중복/orphan 파일 정리">정리</button>
           <button id="lib-refresh" class="link-btn" data-i18n-title="lib.refresh.title" title="새로고침">↻</button>
+          <button id="lib-collapse" class="lib-collapse-btn" title="접기" aria-label="접기"><span>‹</span></button>
         </div>
+      </div>
+      <div class="lib-side-tools">
+        <input id="lib-search" class="lib-search" type="text" placeholder="검색…" data-i18n-placeholder="lib.search.placeholder" spellcheck="false" autocomplete="off" />
+        <select id="lib-sort" class="lib-sort" title="정렬">
+          <option value="group"  data-i18n="lib.sort.group">그룹</option>
+          <option value="date"   data-i18n="lib.sort.date">최근</option>
+          <option value="name"   data-i18n="lib.sort.name">이름</option>
+        </select>
       </div>
       <ul id="lib-list" class="lib-list"><!-- rendered by library.js --></ul>
       <div id="lib-empty" class="lib-empty muted" hidden>
@@ -203,6 +212,7 @@
         <span data-i18n="lib.empty">처리한 영상이 없습니다.</span>
       </div>
     </aside>
+    <button id="lib-expand" class="lib-expand" title="펼치기" hidden>›</button>
 
     <section class="lib-center">
       <div id="player-empty" class="player-empty muted">
@@ -235,10 +245,16 @@
                 <li data-action="folder" data-i18n="player.dl.folder">스템 폴더 열기</li>
               </ul>
             </div>
-            <button id="player-reseparate" class="btn" type="button" data-i18n-title="player.reseparate.title" title="다른 모델로 다시 분리">
-              <svg viewBox="0 0 16 16" fill="none" style="width:12px;height:12px;vertical-align:-1px;margin-right:5px"><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9M13.5 8a5.5 5.5 0 0 1-9.4 3.9M11 4.6h2.5V2M5 11.4H2.5V14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span id="player-reseparate-label" data-i18n="player.reseparate">다른 모델로 분리</span>
-            </button>
+            <div class="reseparate-picker">
+              <button id="player-reseparate" class="btn" type="button" data-i18n-title="player.reseparate.title" title="다시 분리">
+                <svg viewBox="0 0 16 16" fill="none" style="width:12px;height:12px;vertical-align:-1px;margin-right:5px"><path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9M13.5 8a5.5 5.5 0 0 1-9.4 3.9M11 4.6h2.5V2M5 11.4H2.5V14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span id="player-reseparate-label" data-i18n="player.reseparate">다시 분리</span>
+              </button>
+              <ul id="reseparate-menu" class="group-menu" hidden>
+                <li data-model="4stem">4-stem</li>
+                <li data-model="6stem">6-stem</li>
+              </ul>
+            </div>
             <div class="group-picker">
               <button id="group-picker-btn" class="btn" type="button" data-i18n-title="player.group.title" title="그룹 지정">
                 <svg viewBox="0 0 16 16" fill="none" style="width:12px;height:12px;vertical-align:-1px;margin-right:5px"><path d="M2 4h5l1 1.5h6V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
