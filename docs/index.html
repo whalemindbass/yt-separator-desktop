@@ -48,6 +48,9 @@
       padding: 20px 0;
       border-bottom: 1px solid var(--border);
     }
+    .header-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    }
     .brand {
       display: flex; align-items: center; gap: 12px;
     }
@@ -61,6 +64,27 @@
     }
     .brand-sub {
       font-size: 11px; color: var(--tx-3);
+    }
+    .lang-switch {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 2px;
+      font-size: 12px;
+    }
+    .lang-switch button {
+      background: transparent; border: 0;
+      color: var(--tx-2);
+      padding: 5px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font: 600 12px/1 var(--sans);
+      transition: background .12s, color .12s;
+    }
+    .lang-switch button:hover { color: var(--tx-1); }
+    .lang-switch button.on {
+      background: var(--elev);
+      color: var(--tx-1);
     }
 
     .hero {
@@ -178,13 +202,19 @@
 <body>
   <header>
     <div class="container">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">
-          <img src="./icon.png" alt="" />
+      <div class="header-row">
+        <div class="brand">
+          <div class="logo" aria-hidden="true">
+            <img src="./icon.png" alt="" />
+          </div>
+          <div>
+            <div class="brand-title">YT Separator</div>
+            <div class="brand-sub">Desktop · Windows</div>
+          </div>
         </div>
-        <div>
-          <div class="brand-title">YT Separator</div>
-          <div class="brand-sub">Desktop · Windows</div>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button data-lang="ko">한국어</button>
+          <button data-lang="en">English</button>
         </div>
       </div>
     </div>
@@ -192,20 +222,20 @@
 
   <section class="hero">
     <div class="container">
-      <h1>영상에서 <span>스템</span>을 분리해 <br />로컬에서 재생하세요</h1>
-      <p>YouTube 링크 또는 로컬 파일에서 보컬 · 베이스 · 드럼 · 기타 · 피아노를 분리해 원본 영상과 동기화 재생합니다. 완전히 오프라인에서 처리됩니다.</p>
+      <h1 data-i18n-html="hero.title">영상에서 <span>스템</span>을 분리해 <br />로컬에서 재생하세요</h1>
+      <p data-i18n="hero.sub">YouTube 링크 또는 로컬 파일에서 보컬 · 베이스 · 드럼 · 기타 · 피아노를 분리해 원본 영상과 동기화 재생합니다. 완전히 오프라인에서 처리됩니다.</p>
 
       <div class="download-card">
         <span class="version-tag" id="version">Loading…</span>
         <a class="download-btn" id="setup-btn" href="#" rel="noopener">
-          Windows 설치 파일 다운로드
+          <span data-i18n="dl.setup">Windows 설치 파일 다운로드</span>
           <span class="download-sub" id="setup-size">Setup.exe</span>
         </a>
-        <a class="download-alt" id="portable-btn" href="#" rel="noopener">
+        <a class="download-alt" id="portable-btn" href="#" rel="noopener" data-i18n="dl.portable">
           Portable 버전 (설치 없이 실행) →
         </a>
         <div class="warn">
-          <strong>Windows Defender SmartScreen</strong> 경고가 표시될 수 있습니다 (코드 서명 미적용). "추가 정보" → "실행" 으로 진행하세요.
+          <strong data-i18n="dl.warn.strong">Windows Defender SmartScreen</strong> <span data-i18n="dl.warn.msg">경고가 표시될 수 있습니다 (코드 서명 미적용). "추가 정보" → "실행" 으로 진행하세요.</span>
         </div>
       </div>
     </div>
@@ -213,49 +243,49 @@
 
   <section class="features">
     <div class="container">
-      <h2>기능</h2>
+      <h2 data-i18n="feat.head">기능</h2>
       <div class="feat-grid">
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><path d="M8 1L2 4v5c0 3.5 2.7 6 6 6s6-2.5 6-6V4L8 1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-            로컬 처리
+            <span data-i18n="feat.local.title">로컬 처리</span>
           </div>
-          <p>영상·오디오가 서버로 전송되지 않고 사용자 컴퓨터에서 온전히 처리됩니다.</p>
+          <p data-i18n="feat.local.desc">영상·오디오가 서버로 전송되지 않고 사용자 컴퓨터에서 온전히 처리됩니다.</p>
         </div>
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><rect x="3" y="6" width="2" height="8" rx="1" fill="currentColor"/><rect x="7" y="3" width="2" height="11" rx="1" fill="currentColor"/><rect x="11" y="8" width="2" height="6" rx="1" fill="currentColor"/></svg>
-            4-stem · 6-stem
+            <span data-i18n="feat.stems.title">4-stem · 6-stem</span>
           </div>
-          <p>htdemucs / htdemucs_6s 두 모델. 6-stem은 기타·피아노를 추가로 분리합니다.</p>
+          <p data-i18n="feat.stems.desc">htdemucs / htdemucs_6s 두 모델. 6-stem은 기타·피아노를 추가로 분리합니다.</p>
         </div>
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2 2M11 11l2 2M3 13l2-2M11 5l2-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-            WebGPU 가속
+            <span data-i18n="feat.gpu.title">WebGPU 가속</span>
           </div>
-          <p>가능한 시스템에서는 GPU로 처리해 CPU 대비 훨씬 빠릅니다. 실패 시 CPU 자동 fallback.</p>
+          <p data-i18n="feat.gpu.desc">가능한 시스템에서는 GPU로 처리해 CPU 대비 훨씬 빠릅니다. 실패 시 CPU 자동 fallback.</p>
         </div>
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><path d="M8 2L2.5 5v4c0 3.3 2.4 5.7 5.5 6.5 3.1-.8 5.5-3.2 5.5-6.5V5L8 2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 8l1.5 1.5L10 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            영상 sync 재생
+            <span data-i18n="feat.sync.title">영상 sync 재생</span>
           </div>
-          <p>영상과 스템 오디오가 정확히 sync되어 재생. seek·pause·재생속도 변경 모두 대응.</p>
+          <p data-i18n="feat.sync.desc">영상과 스템 오디오가 정확히 sync되어 재생. seek·pause·재생속도 변경 모두 대응.</p>
         </div>
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-            키 변경
+            <span data-i18n="feat.key.title">키 변경</span>
           </div>
-          <p>반음 단위 ±6까지 피치 이동. 드럼은 원본 유지해 리듬 자연스러움.</p>
+          <p data-i18n="feat.key.desc">반음 단위 ±6까지 피치 이동. 드럼은 원본 유지해 리듬 자연스러움.</p>
         </div>
         <div class="feat">
           <div class="feat-title">
             <svg viewBox="0 0 16 16" fill="none"><path d="M2 4h5l1 1.5h6V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-            라이브러리
+            <span data-i18n="feat.lib.title">라이브러리</span>
           </div>
-          <p>처리한 영상을 저장·재사용. 즐겨찾기, 그룹, 이름 편집, 4↔6-stem 재분리 지원.</p>
+          <p data-i18n="feat.lib.desc">처리한 영상을 저장·재사용. 즐겨찾기, 그룹, 이름 편집, 4↔6-stem 재분리 지원.</p>
         </div>
       </div>
     </div>
@@ -264,18 +294,128 @@
   <footer>
     <div class="container">
       <div>
-        <a href="https://github.com/whalemindbass/yt-separator-desktop" rel="noopener">GitHub</a>
-        <a href="https://github.com/whalemindbass/yt-separator-desktop/releases" rel="noopener">모든 릴리즈</a>
-        <a href="https://github.com/whalemindbass/yt-separator-desktop/issues" rel="noopener">이슈 신고</a>
+        <a href="https://github.com/whalemindbass/yt-separator-releases" rel="noopener">GitHub</a>
+        <a href="https://github.com/whalemindbass/yt-separator-releases/releases" rel="noopener" data-i18n="footer.releases">모든 릴리즈</a>
+        <a href="https://github.com/whalemindbass/yt-separator-releases/issues" rel="noopener" data-i18n="footer.issues">이슈 신고</a>
       </div>
-      <div style="margin-top: 10px;">© 2026 Whale Mind · GPL-3.0</div>
+      <div style="margin-top: 10px;">© 2026 Whale Mind · All rights reserved</div>
     </div>
   </footer>
 
   <script>
+    // ── i18n ────────────────────────────────
+    const DICT = {
+      ko: {
+        'title':          'YT Separator — 데스크톱 스템 분리 도구',
+        'hero.title':     '영상에서 <span>스템</span>을 분리해 <br />로컬에서 재생하세요',
+        'hero.sub':       'YouTube 링크 또는 로컬 파일에서 보컬 · 베이스 · 드럼 · 기타 · 피아노를 분리해 원본 영상과 동기화 재생합니다. 완전히 오프라인에서 처리됩니다.',
+        'dl.setup':       'Windows 설치 파일 다운로드',
+        'dl.portable':    'Portable 버전 (설치 없이 실행) →',
+        'dl.warn.strong': 'Windows Defender SmartScreen',
+        'dl.warn.msg':    '경고가 표시될 수 있습니다 (코드 서명 미적용). "추가 정보" → "실행" 으로 진행하세요.',
+        'feat.head':      '기능',
+        'feat.local.title':'로컬 처리',
+        'feat.local.desc': '영상·오디오가 서버로 전송되지 않고 사용자 컴퓨터에서 온전히 처리됩니다.',
+        'feat.stems.title':'4-stem · 6-stem',
+        'feat.stems.desc': 'htdemucs / htdemucs_6s 두 모델. 6-stem은 기타·피아노를 추가로 분리합니다.',
+        'feat.gpu.title':  'WebGPU 가속',
+        'feat.gpu.desc':   '가능한 시스템에서는 GPU로 처리해 CPU 대비 훨씬 빠릅니다. 실패 시 CPU 자동 fallback.',
+        'feat.sync.title': '영상 sync 재생',
+        'feat.sync.desc':  '영상과 스템 오디오가 정확히 sync되어 재생. seek·pause·재생속도 변경 모두 대응.',
+        'feat.key.title':  '키 변경',
+        'feat.key.desc':   '반음 단위 ±6까지 피치 이동. 드럼은 원본 유지해 리듬 자연스러움.',
+        'feat.lib.title':  '라이브러리',
+        'feat.lib.desc':   '처리한 영상을 저장·재사용. 즐겨찾기, 그룹, 이름 편집, 4↔6-stem 재분리 지원.',
+        'footer.releases': '모든 릴리즈',
+        'footer.issues':   '이슈 신고',
+        'ver.prefix':      '버전 ',
+        'ver.latest':      '최신 버전',
+      },
+      en: {
+        'title':          'YT Separator — Desktop stem separator',
+        'hero.title':     'Separate <span>stems</span> from any video<br />and play them locally',
+        'hero.sub':       'Split vocals · bass · drums · other · guitar · piano from YouTube links or local files, and play them in sync with the original video. Fully offline.',
+        'dl.setup':       'Download Windows installer',
+        'dl.portable':    'Portable version (no install) →',
+        'dl.warn.strong': 'Windows Defender SmartScreen',
+        'dl.warn.msg':    'may show a warning (no code signing yet). Click "More info" → "Run anyway".',
+        'feat.head':      'Features',
+        'feat.local.title':'Local processing',
+        'feat.local.desc': 'Video and audio never leave your computer. Everything runs on-device.',
+        'feat.stems.title':'4-stem · 6-stem',
+        'feat.stems.desc': 'Two models: htdemucs / htdemucs_6s. 6-stem extracts guitar and piano additionally.',
+        'feat.gpu.title':  'WebGPU acceleration',
+        'feat.gpu.desc':   'Uses the GPU when available for much faster processing. Falls back to CPU automatically.',
+        'feat.sync.title': 'Video-synced playback',
+        'feat.sync.desc':  'Stems play perfectly in sync with the original video. Seek, pause, and speed change all supported.',
+        'feat.key.title':  'Key change',
+        'feat.key.desc':   'Pitch shift ±6 semitones. Drums stay unshifted for a natural rhythm.',
+        'feat.lib.title':  'Library',
+        'feat.lib.desc':   'Save and reuse processed videos. Favorites, groups, rename, 4↔6-stem reseparation supported.',
+        'footer.releases': 'All releases',
+        'footer.issues':   'Report an issue',
+        'ver.prefix':      'Version ',
+        'ver.latest':      'Latest',
+      },
+    };
+
+    const LS_KEY = 'yss:site-lang';
+    let lang = (() => {
+      try {
+        const saved = localStorage.getItem(LS_KEY);
+        if (saved === 'ko' || saved === 'en') return saved;
+      } catch {}
+      // 브라우저 언어 감지 — ko가 기본. 명시적 en일 때만 en으로.
+      const nav = (navigator.language || '').toLowerCase();
+      if (nav.startsWith('en')) return 'en';
+      return 'ko';
+    })();
+
+    function t(key) {
+      const d = DICT[lang] || DICT.ko;
+      return d[key] ?? DICT.ko[key] ?? key;
+    }
+    function applyI18n() {
+      document.documentElement.setAttribute('lang', lang);
+      document.title = t('title');
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.getAttribute('data-i18n'));
+      });
+      document.querySelectorAll('[data-i18n-html]').forEach(el => {
+        el.innerHTML = t(el.getAttribute('data-i18n-html'));
+      });
+      document.querySelectorAll('.lang-switch button').forEach(b => {
+        b.classList.toggle('on', b.dataset.lang === lang);
+      });
+      updateVersionLabel();
+    }
+    function updateVersionLabel() {
+      const versionEl = document.getElementById('version');
+      const cur = versionEl.textContent;
+      // 이미 v X.Y.Z 로 채워진 경우 언어 접두어만 교체
+      const m = cur.match(/\bv?(\d+\.\d+\.\d+)/);
+      if (m) {
+        versionEl.textContent = t('ver.prefix') + 'v' + m[1];
+      } else if (cur === 'Loading…' || cur === '') {
+        // 그대로 유지
+      } else {
+        versionEl.textContent = t('ver.latest');
+      }
+    }
+
+    document.querySelectorAll('.lang-switch button').forEach(b => {
+      b.addEventListener('click', () => {
+        lang = b.dataset.lang;
+        try { localStorage.setItem(LS_KEY, lang); } catch {}
+        applyI18n();
+      });
+    });
+
+    applyI18n();
+
     // 최신 릴리즈 자동 조회
     (async () => {
-      const REPO = 'whalemindbass/yt-separator-desktop';
+      const REPO = 'whalemindbass/yt-separator-releases';
       const versionEl  = document.getElementById('version');
       const setupBtn   = document.getElementById('setup-btn');
       const setupSize  = document.getElementById('setup-size');
@@ -286,7 +426,7 @@
         if (!res.ok) throw new Error('latest release not found');
         const rel = await res.json();
         const tag = rel.tag_name || '';
-        versionEl.textContent = `버전 ${tag}`;
+        versionEl.textContent = t('ver.prefix') + tag;
 
         const assets = rel.assets || [];
         const setup    = assets.find(a => /Setup\.exe$/i.test(a.name));
@@ -304,7 +444,7 @@
           portableBtn.href = `https://github.com/${REPO}/releases/latest`;
         }
       } catch (e) {
-        versionEl.textContent = '최신 버전';
+        versionEl.textContent = t('ver.latest');
         setupBtn.href    = `https://github.com/${REPO}/releases/latest`;
         portableBtn.href = `https://github.com/${REPO}/releases/latest`;
       }

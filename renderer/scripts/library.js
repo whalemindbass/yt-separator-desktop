@@ -2,6 +2,7 @@
 // Library view — 좌측 리스트 + 우측 플레이어
 
 import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
+import { t, getLocale } from './i18n.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -86,8 +87,9 @@ function renderList() {
     listEl.appendChild(h);
   };
 
+  const isEn = getLocale() === 'en';
   for (const it of sorted) {
-    const header = it.favorite ? '★  즐겨찾기' : (it.group ? it.group : '기타');
+    const header = it.favorite ? (isEn ? '★  Favorites' : '★  즐겨찾기') : (it.group ? it.group : (isEn ? 'Other' : '기타'));
     addHeader(header);
 
     const li = document.createElement('li');
@@ -99,7 +101,7 @@ function renderList() {
           <div class="lib-item-title"></div>
           <div class="lib-item-sub"></div>
         </div>
-        <button class="lib-fav ${it.favorite ? 'on' : ''}" title="즐겨찾기">${starSvg(!!it.favorite)}</button>
+        <button class="lib-fav ${it.favorite ? 'on' : ''}" title="${isEn ? 'Favorite' : '즐겨찾기'}">${starSvg(!!it.favorite)}</button>
       </div>
     `;
     const titleEl = li.querySelector('.lib-item-title');
@@ -282,7 +284,12 @@ function updateReseparateAndToggle(item) {
     modelToggle.hidden = true;
     reseparateBtn.hidden = false;
     const alt = cur === '4stem' ? '6stem' : '4stem';
-    if (reseparateLabelEl) reseparateLabelEl.textContent = alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리';
+    if (reseparateLabelEl) {
+      const isEn = getLocale() === 'en';
+      reseparateLabelEl.textContent = isEn
+        ? (alt === '6stem' ? 'Separate as 6-stem' : 'Separate as 4-stem')
+        : (alt === '6stem' ? '6-stem으로 분리' : '4-stem으로 분리');
+    }
     reseparateBtn.dataset.targetModel = alt;
   }
 }
@@ -302,7 +309,12 @@ reseparateBtn?.addEventListener('click', () => {
   const it = currentItem();
   if (!it) return;
   const targetModel = reseparateBtn.dataset.targetModel || '6stem';
-  if (!confirm(`이 영상을 ${targetModel === '6stem' ? '6-stem' : '4-stem'} 모델로 다시 분리합니다.\n\n"새 분리" 탭으로 이동하고 준비 상태로 세팅됩니다. 계속할까요?`)) return;
+  const isEn = getLocale() === 'en';
+  const label = targetModel === '6stem' ? '6-stem' : '4-stem';
+  const msg = isEn
+    ? `Reseparate this video with the ${label} model.\n\nThe "New" tab will be opened and prepared. Continue?`
+    : `이 영상을 ${label} 모델로 다시 분리합니다.\n\n"새 분리" 탭으로 이동하고 준비 상태로 세팅됩니다. 계속할까요?`;
+  if (!confirm(msg)) return;
   document.dispatchEvent(new CustomEvent('yss:preload-separation', {
     detail: {
       videoPath: it.videoPath,
@@ -310,7 +322,7 @@ reseparateBtn?.addEventListener('click', () => {
       probe: {
         id:        (it.meta && it.meta.id) || 'local-' + Math.random().toString(36).slice(2, 8),
         title:     it.name,
-        uploader:  (it.meta && it.meta.uploader) || '(라이브러리 재분리)',
+        uploader:  (it.meta && it.meta.uploader) || (isEn ? '(library reseparate)' : '(라이브러리 재분리)'),
         duration:  (it.meta && it.meta.duration) || 0,
         thumbnail: (it.meta && it.meta.thumbnail) || null,
       },
@@ -359,7 +371,9 @@ loopToggle?.addEventListener('click', () => {
   const st = currentPlayer.getLoopState();
   // 활성화하려면 A와 B가 모두 설정되고 B > A 여야 함
   if (!st.enabled && (st.a == null || st.b == null || st.b <= st.a)) {
-    alert('A와 B 지점을 먼저 설정하세요 (B는 A보다 뒤).');
+    alert(getLocale() === 'en'
+      ? 'Set both A and B first (B must be after A).'
+      : 'A와 B 지점을 먼저 설정하세요 (B는 A보다 뒤).');
     return;
   }
   currentPlayer.setLoopEnabled(!st.enabled);
@@ -426,9 +440,11 @@ function updateKeyUI() {
   keyDown.disabled = keyProcessing || keyTarget <= -6;
   keyUp.disabled   = keyProcessing || keyTarget >=  6;
   keyApply.disabled = keyProcessing || keyTarget === cur;
-  keyApply.textContent = keyTarget === cur ? '적용됨' : '적용';
-  if (!keyProcessing && !keyStatus.textContent.startsWith('실패')) {
-    keyStatus.textContent = cur !== 0 ? `현재 ${fmtKey(cur)}` : '';
+  const isEn = getLocale() === 'en';
+  keyApply.textContent = keyTarget === cur ? (isEn ? 'Applied' : '적용됨') : (isEn ? 'Apply' : '적용');
+  const failPrefix = isEn ? 'Failed' : '실패';
+  if (!keyProcessing && !keyStatus.textContent.startsWith(failPrefix)) {
+    keyStatus.textContent = cur !== 0 ? (isEn ? `Now ${fmtKey(cur)}` : `현재 ${fmtKey(cur)}`) : '';
   }
 }
 keyDown?.addEventListener('click', () => { keyTarget = Math.max(-6, keyTarget - 1); updateKeyUI(); });
@@ -438,12 +454,13 @@ keyApply?.addEventListener('click', async () => {
   if (keyTarget === currentPlayer._currentKey) return;
   keyProcessing = true;
   updateKeyUI();
-  keyStatus.textContent = '처리 중…';
+  const isEn = getLocale() === 'en';
+  keyStatus.textContent = isEn ? 'Processing…' : '처리 중…';
   try {
     await currentPlayer.setKeyShift(keyTarget, ensureEncoderWorker());
     keyStatus.textContent = '';
   } catch (e) {
-    keyStatus.textContent = '실패: ' + e.message;
+    keyStatus.textContent = (isEn ? 'Failed: ' : '실패: ') + e.message;
   } finally {
     keyProcessing = false;
     updateKeyUI();
@@ -484,20 +501,21 @@ function renderGroupMenu() {
     });
     groupMenu.appendChild(li);
   };
-  mkItem('(그룹 없음)', '');
+  const isEn = getLocale() === 'en';
+  mkItem(isEn ? '(No group)' : '(그룹 없음)', '');
   if (groups.length) {
-    mkItem('기존 그룹', null, true);
+    mkItem(isEn ? 'Existing groups' : '기존 그룹', null, true);
     for (const g of groups) mkItem(g, g);
   }
-  mkItem('신규', null, true);
-  mkItem('+ 새 그룹 만들기…', '__new__', false, true);
+  mkItem(isEn ? 'New' : '신규', null, true);
+  mkItem(isEn ? '+ Create new group…' : '+ 새 그룹 만들기…', '__new__', false, true);
 }
 
 function showNewGroupInput() {
   groupMenu.innerHTML = '';
   const li = document.createElement('li');
   li.className = 'group-input-row';
-  li.innerHTML = `<input class="group-input" placeholder="그룹 이름" maxlength="80" />`;
+  li.innerHTML = `<input class="group-input" placeholder="${getLocale() === 'en' ? 'Group name' : '그룹 이름'}" maxlength="80" />`;
   li.addEventListener('click', (e) => e.stopPropagation());
   groupMenu.appendChild(li);
   const input = li.querySelector('input');
@@ -541,7 +559,7 @@ async function handleGroupPick(value) {
 }
 function updateGroupPickerLabel() {
   const it = currentItem();
-  groupVal.textContent = it?.group || '그룹 없음';
+  groupVal.textContent = it?.group || t('player.group.none');
 }
 // ── 저장 (개별 스템 · 믹스 · 폴더 열기) ─────────────
 const downloadBtn  = $('player-download-btn');
@@ -562,7 +580,8 @@ async function handleDownload(action) {
   }
 
   if (action === 'stems') {
-    const res = await api.dialog.pickFolder('개별 스템 저장 폴더 선택');
+    const isEn = getLocale() === 'en';
+    const res = await api.dialog.pickFolder(isEn ? 'Choose folder for individual stems' : '개별 스템 저장 폴더 선택');
     if (!res.ok) return;
     const dir = res.dir;
     const sep = dir.includes('/') && !dir.includes('\\') ? '/' : '\\';
@@ -572,7 +591,9 @@ async function handleDownload(action) {
       const r = await api.fs.copyFile(src, dst);
       if (r.ok) ok++; else fail++;
     }
-    alert(`스템 저장 완료 — 성공 ${ok}개${fail ? `, 실패 ${fail}개` : ''}`);
+    alert(isEn
+      ? `Stems saved — ${ok} succeeded${fail ? `, ${fail} failed` : ''}`
+      : `스템 저장 완료 — 성공 ${ok}개${fail ? `, 실패 ${fail}개` : ''}`);
     return;
   }
 
@@ -586,8 +607,9 @@ async function handleDownload(action) {
     const { stems, sampleRate } = currentPlayer.getStemsForExport();
     const weights = currentPlayer.getCurrentWeights();
 
+    const isEn = getLocale() === 'en';
     downloadBtn.disabled = true;
-    downloadBtn.querySelector('span').textContent = '믹싱 중…';
+    downloadBtn.querySelector('span').textContent = isEn ? 'Mixing…' : '믹싱 중…';
     try {
       const wavBuf = await new Promise((resolve, reject) => {
         const id = Math.random().toString(36).slice(2);
@@ -612,12 +634,12 @@ async function handleDownload(action) {
       const bytes = new Uint8Array(wavBuf);
       const saveRes = await api.fs.writeBuffer(savePath, bytes);
       if (!saveRes.ok) throw new Error(saveRes.error);
-      alert(`믹스 저장 완료\n${savePath}`);
+      alert(isEn ? `Mix saved\n${savePath}` : `믹스 저장 완료\n${savePath}`);
     } catch (e) {
-      alert(`믹스 실패: ${e.message}`);
+      alert(isEn ? `Mix failed: ${e.message}` : `믹스 실패: ${e.message}`);
     } finally {
       downloadBtn.disabled = false;
-      downloadBtn.querySelector('span').textContent = '저장';
+      downloadBtn.querySelector('span').textContent = t('player.save');
     }
     return;
   }
@@ -682,7 +704,10 @@ playerDel.addEventListener('click', async () => {
   if (!selectedId) return;
   const item = items.find(x => x.id === selectedId);
   if (!item) return;
-  const yes = confirm(`"${item.name}" 을(를) 라이브러리에서 제거하시겠습니까?\n\n원본 파일(영상, 스템 wav)도 함께 삭제됩니다.`);
+  const isEn = getLocale() === 'en';
+  const yes = confirm(isEn
+    ? `Remove "${item.name}" from the library?\n\nOriginal files (video, stem wavs) are deleted too.`
+    : `"${item.name}" 을(를) 라이브러리에서 제거하시겠습니까?\n\n원본 파일(영상, 스템 wav)도 함께 삭제됩니다.`);
   if (!yes) return;
   await api.library.remove(selectedId, true);
   destroyPlayer();
@@ -701,21 +726,26 @@ cleanupBtn?.addEventListener('click', async () => {
   // Step 2: disk의 orphan 파일 미리보기 (삭제는 개별 승인)
   const preview = await api.library.previewOrphans();
 
+  const isEn = getLocale() === 'en';
   const dupMsg = dupRes.removed > 0
-    ? `라이브러리 중복 ${dupRes.removed}개 통합 · 파일 ${dupRes.removedFiles}개 삭제 (${(dupRes.freedBytes/1024/1024).toFixed(1)} MB)`
-    : '라이브러리에 중복 없음';
+    ? (isEn
+        ? `Merged ${dupRes.removed} duplicate(s) · deleted ${dupRes.removedFiles} file(s) (${(dupRes.freedBytes/1024/1024).toFixed(1)} MB)`
+        : `라이브러리 중복 ${dupRes.removed}개 통합 · 파일 ${dupRes.removedFiles}개 삭제 (${(dupRes.freedBytes/1024/1024).toFixed(1)} MB)`)
+    : (isEn ? 'No library duplicates' : '라이브러리에 중복 없음');
 
   const orphans = [...(preview.videos || []), ...(preview.stems || [])];
   if (orphans.length === 0) {
     await refresh();
-    alert(`${dupMsg}\n\n라이브러리에 없는 파일 없음 — 깨끗함.`);
+    alert(`${dupMsg}\n\n${isEn ? 'No orphan files — all clean.' : '라이브러리에 없는 파일 없음 — 깨끗함.'}`);
     return;
   }
 
   const totalMb = (orphans.reduce((s, x) => s + x.size, 0) / 1024 / 1024).toFixed(1);
   const list = orphans.slice(0, 30).map(x => `  · ${x.path.split(/[\\/]/).pop()}  (${(x.size/1024/1024).toFixed(1)} MB)`).join('\n');
-  const suffix = orphans.length > 30 ? `\n  ... 외 ${orphans.length - 30}개` : '';
-  const msg = `${dupMsg}\n\n라이브러리에 등록되지 않은 파일 ${orphans.length}개 (${totalMb} MB 확보 가능):\n${list}${suffix}\n\n이 파일들을 모두 삭제할까요?\n(현재 라이브러리에 있는 파일은 절대 삭제되지 않습니다)`;
+  const suffix = orphans.length > 30 ? (isEn ? `\n  ... and ${orphans.length - 30} more` : `\n  ... 외 ${orphans.length - 30}개`) : '';
+  const msg = isEn
+    ? `${dupMsg}\n\n${orphans.length} orphan file(s) (${totalMb} MB reclaimable):\n${list}${suffix}\n\nDelete all of these?\n(Files currently in the library will never be deleted)`
+    : `${dupMsg}\n\n라이브러리에 등록되지 않은 파일 ${orphans.length}개 (${totalMb} MB 확보 가능):\n${list}${suffix}\n\n이 파일들을 모두 삭제할까요?\n(현재 라이브러리에 있는 파일은 절대 삭제되지 않습니다)`;
 
   if (!confirm(msg)) {
     await refresh();
@@ -727,7 +757,9 @@ cleanupBtn?.addEventListener('click', async () => {
     if (r.ok) { ok++; freed += r.freedBytes; }
   }
   await refresh();
-  alert(`추가 정리 완료: ${ok}개 파일, ${(freed/1024/1024).toFixed(1)} MB 확보`);
+  alert(isEn
+    ? `Cleanup complete: ${ok} file(s), ${(freed/1024/1024).toFixed(1)} MB reclaimed`
+    : `추가 정리 완료: ${ok}개 파일, ${(freed/1024/1024).toFixed(1)} MB 확보`);
 });
 
 export const Library = {

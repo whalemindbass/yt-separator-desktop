@@ -23,7 +23,7 @@ We'll acknowledge within 72 hours and aim to release a fix in the next patch ver
 ## Supply-chain Notes
 
 - The app is built with `electron-builder` and published to
-  [GitHub Releases](https://github.com/whalemindbass/yt-separator-desktop/releases)
+  [GitHub Releases](https://github.com/whalemindbass/yt-separator-releases/releases)
   via a scripted release flow that verifies asset checksums (`sha512` in `latest.yml`).
 - Auto-updates use `electron-updater` and verify updates against the same manifest.
 - ONNX model files are hosted on a dedicated GitHub Release

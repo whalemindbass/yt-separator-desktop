@@ -28,7 +28,7 @@ const https = require('https');
 
 // ── 설정 ────────────────────────────────────────
 const REPO_OWNER = 'whalemindbass';
-const REPO_NAME  = 'yt-separator-desktop';
+const REPO_NAME  = 'yt-separator-releases';   // 배포용 public 레포 (소스 없음)
 const REPO       = `${REPO_OWNER}/${REPO_NAME}`;
 
 // ── 인자 파싱 ───────────────────────────────────

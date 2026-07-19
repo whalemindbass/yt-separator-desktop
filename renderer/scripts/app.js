@@ -6,6 +6,10 @@
 
 import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider, cancelSeparation } from './separator.js';
 import { Library } from './library.js';
+import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
+
+// 최초 로드 즉시 i18n 적용
+applyI18n(document);
 
 const $ = (id) => document.getElementById(id);
 const api = window.yssApi;
@@ -91,6 +95,7 @@ function fmtBytes2(n) {
   return v.toFixed(v < 10 ? 2 : (v < 100 ? 1 : 0)) + ' ' + u[i];
 }
 
+const sLangPills     = document.querySelectorAll('#s-lang-pills .pill');
 const sModelPills    = document.querySelectorAll('#s-model-pills .pill');
 const sProviderPills = document.querySelectorAll('#s-provider-pills .pill');
 const sQualityPills  = document.querySelectorAll('#s-quality-pills .pill');
@@ -109,6 +114,10 @@ const sAppInfo       = $('s-app-info');
 const sReleaseNotes  = $('s-release-notes');
 
 async function refreshSettingsView() {
+  // 언어 pill sync
+  const curLang = getLocale();
+  sLangPills.forEach(b => b.classList.toggle('on', b.dataset.lang === curLang));
+
   // 모델 pill sync (localStorage와 통일)
   const modelKey = localStorage.getItem('modelKey') || '4stem';
   sModelPills.forEach(b => b.classList.toggle('on', b.dataset.model === modelKey));
@@ -131,7 +140,7 @@ async function refreshSettingsView() {
   try {
     const dir = await api.settings.downloadsDir();
     sDownloadsDir.textContent = dir;
-  } catch (e) { sDownloadsDir.textContent = '오류: ' + e.message; }
+  } catch (e) { sDownloadsDir.textContent = t('common.error') + ': ' + e.message; }
 
   // Disk usage
   refreshDiskUsage();
@@ -143,20 +152,48 @@ async function refreshSettingsView() {
   try {
     const info = await api.settings.appInfo();
     sAppInfo.textContent = `v${info.appVersion} · Electron ${info.electronVersion} · Chromium ${info.chromeVersion} · Node ${info.nodeVersion}`;
-    sUpdateStatus.textContent = `현재 버전 v${info.appVersion}`;
+    sUpdateStatus.textContent = (getLocale() === 'en' ? 'Current: v' : '현재 버전 v') + info.appVersion;
   } catch {}
 }
 
+sLangPills.forEach(btn => btn.addEventListener('click', () => {
+  const lang = btn.dataset.lang;
+  setLocale(lang);   // data-i18n 요소들 자동 갱신 + 'yss:locale-change' 이벤트 dispatch
+  sLangPills.forEach(b => b.classList.toggle('on', b.dataset.lang === lang));
+  refreshSettingsView();
+  refreshModelsList();
+  updateModelStatusLabel();
+  // provider status 갱신
+  const pref = localStorage.getItem('executionProvider') || 'auto';
+  const blocked = localStorage.getItem('webgpuBlocked') === '1';
+  if (providerStatus) {
+    if (blocked) providerStatus.textContent = t('prov.webgpu.nan');
+    else providerStatus.textContent = pref === 'auto' ? t('prov.auto') : (pref === 'webgpu' ? t('prov.webgpu') : t('prov.cpu'));
+  }
+  // 현재 선택된 라이브러리 아이템 있으면 다시 렌더링
+  if (Library && typeof Library.refresh === 'function') Library.refresh().catch(()=>{});
+}));
+
 async function refreshDiskUsage() {
-  sDiskUsage.textContent = '계산 중…';
+  sDiskUsage.textContent = t('progress.calculating');
   try {
     const u = await api.settings.calcDiskUsage();
-    sDiskUsage.textContent = `총 ${fmtBytes2(u.total)} (다운로드 ${fmtBytes2(u.downloads)} + 모델 ${fmtBytes2(u.models)})`;
-  } catch (e) { sDiskUsage.textContent = '오류'; }
+    const isEn = getLocale() === 'en';
+    sDiskUsage.textContent = isEn
+      ? `Total ${fmtBytes2(u.total)} (downloads ${fmtBytes2(u.downloads)} + models ${fmtBytes2(u.models)})`
+      : `총 ${fmtBytes2(u.total)} (다운로드 ${fmtBytes2(u.downloads)} + 모델 ${fmtBytes2(u.models)})`;
+  } catch (e) { sDiskUsage.textContent = t('common.error'); }
 }
 
 async function refreshModelsList() {
   sModels.innerHTML = '';
+  const isEn = getLocale() === 'en';
+  const L = {
+    downloaded:    isEn ? 'Downloaded'    : '다운로드됨',
+    notDownloaded: isEn ? 'Not downloaded': '미다운로드',
+    delete:        isEn ? 'Delete'        : '삭제',
+    downloadNow:   isEn ? 'Download now'  : '지금 다운로드',
+  };
   try {
     const res = await api.stem.models();
     if (!res.ok) return;
@@ -168,11 +205,11 @@ async function refreshModelsList() {
           <div class="settings-model-name">${m.label}</div>
           <div class="settings-model-meta">${fmtBytes2(m.size)}</div>
         </div>
-        <span class="settings-model-status ${m.downloaded ? 'on' : 'off'}">${m.downloaded ? '다운로드됨' : '미다운로드'}</span>
+        <span class="settings-model-status ${m.downloaded ? 'on' : 'off'}">${m.downloaded ? L.downloaded : L.notDownloaded}</span>
         <div class="settings-actions">
           ${m.downloaded
-            ? `<button class="btn" data-act="delete" data-key="${key}">삭제</button>`
-            : `<button class="btn" data-act="download" data-key="${key}">지금 다운로드</button>`}
+            ? `<button class="btn" data-act="delete" data-key="${key}">${L.delete}</button>`
+            : `<button class="btn" data-act="download" data-key="${key}">${L.downloadNow}</button>`}
         </div>
       `;
       sModels.appendChild(row);
@@ -186,7 +223,7 @@ sModels?.addEventListener('click', async (e) => {
   const key = btn.dataset.key;
   const act = btn.dataset.act;
   if (act === 'delete') {
-    if (!confirm('이 모델을 삭제할까요? 다음 사용 시 다시 다운로드됩니다.')) return;
+    if (!confirm(t('err.delete.confirm'))) return;
     await api.settings.deleteModel(key);
     await refreshModelsList();
     await refreshDiskUsage();
@@ -195,7 +232,7 @@ sModels?.addEventListener('click', async (e) => {
       await ensureModelBeforeSeparation(key);
       await refreshModelsList();
       await refreshDiskUsage();
-    } catch (e) { alert('다운로드 실패: ' + e.message); }
+    } catch (e) { alert(t('err.download.fail') + ': ' + e.message); }
   }
 });
 
@@ -243,26 +280,30 @@ sCleanup?.addEventListener('click', async () => {
   const dupRes = await api.library.cleanup();
   const preview = await api.library.previewOrphans();
   const orphans = [...(preview.videos || []), ...(preview.stems || [])];
+  const isEn = getLocale() === 'en';
   const dupMsg = dupRes.removed > 0
-    ? `중복 ${dupRes.removed}개 통합됨.`
-    : '중복 없음.';
+    ? (isEn ? `${dupRes.removed} duplicate(s) merged.` : `중복 ${dupRes.removed}개 통합됨.`)
+    : (isEn ? 'No duplicates.' : '중복 없음.');
   if (!orphans.length) {
-    alert(`${dupMsg}\n라이브러리에 없는 파일도 없음 — 깨끗함.`);
+    alert(`${dupMsg}\n${isEn ? 'No orphan files either — all clean.' : '라이브러리에 없는 파일도 없음 — 깨끗함.'}`);
     refreshDiskUsage(); return;
   }
   const totalMb = (orphans.reduce((s,x)=>s+x.size,0)/1024/1024).toFixed(1);
-  if (confirm(`${dupMsg}\n라이브러리에 없는 파일 ${orphans.length}개 (${totalMb} MB)를 삭제할까요?`)) {
+  const prompt = isEn
+    ? `${dupMsg}\nDelete ${orphans.length} orphan file(s) (${totalMb} MB)?`
+    : `${dupMsg}\n라이브러리에 없는 파일 ${orphans.length}개 (${totalMb} MB)를 삭제할까요?`;
+  if (confirm(prompt)) {
     for (const o of orphans) await api.library.deleteOrphan(o.path);
-    alert('정리 완료');
+    alert(isEn ? 'Cleanup complete' : '정리 완료');
   }
   refreshDiskUsage();
 });
 sCheckUpdate?.addEventListener('click', () => {
-  sUpdateStatus.textContent = '확인 중…';
+  sUpdateStatus.textContent = t('common.checking');
   api.update.check();
 });
 sReleaseNotes?.addEventListener('click', () => {
-  api.openExternal('https://github.com/whalemindbass/yt-separator-desktop/releases');
+  api.openExternal('https://github.com/whalemindbass/yt-separator-releases/releases');
 });
 
 // 설정 뷰 진입 시 상태 갱신
@@ -290,12 +331,12 @@ const providerStatus = $('provider-status');
   const webgpuBtn = document.querySelector('#provider-pills [data-provider="webgpu"]');
   if (!info.webgpuAvailable) {
     if (webgpuBtn) webgpuBtn.disabled = true;
-    providerStatus.textContent = 'WebGPU 미지원 시스템 — CPU만 사용 가능';
+    providerStatus.textContent = t('prov.webgpu.unsupported');
   } else if (blocked) {
     if (webgpuBtn) webgpuBtn.disabled = false;
-    providerStatus.textContent = '이전 세션에서 WebGPU NaN 발생 → CPU 권장 (WebGPU 다시 시도 가능)';
+    providerStatus.textContent = t('prov.webgpu.nan');
   } else {
-    providerStatus.textContent = pref === 'auto' ? 'WebGPU 자동 사용' : (pref === 'webgpu' ? 'WebGPU 강제 사용' : 'CPU 강제 사용');
+    providerStatus.textContent = pref === 'auto' ? t('prov.auto') : (pref === 'webgpu' ? t('prov.webgpu') : t('prov.cpu'));
   }
 })();
 // ── 모델 선택 (4-stem / 6-stem) ────────────────
@@ -324,8 +365,8 @@ async function refreshModelStatus() {
 function updateModelStatusLabel() {
   const info = modelsInfo[currentModelKey];
   if (!info) { modelStatus.textContent = ''; return; }
-  if (info.downloaded) modelStatus.textContent = '준비됨';
-  else modelStatus.textContent = `첫 사용 시 ${(info.size/1024/1024).toFixed(0)}MB 다운로드`;
+  if (info.downloaded) modelStatus.textContent = t('model.state.ready');
+  else modelStatus.textContent = t('model.state.willDl', { size: (info.size/1024/1024).toFixed(0) });
 }
 refreshModelStatus();
 
@@ -344,9 +385,13 @@ async function ensureModelBeforeSeparation(modelKey) {
   const info = modelsInfo[modelKey];
   if (info && info.downloaded) return true;
 
-  modelDlTitle.textContent = `${modelKey === '6stem' ? '6-stem' : '4-stem'} 모델 다운로드`;
+  const isEn = getLocale() === 'en';
+  const kLabel = modelKey === '6stem' ? '6-stem' : '4-stem';
+  modelDlTitle.textContent = isEn ? `${kLabel} model download` : `${kLabel} 모델 다운로드`;
   const mb = info ? (info.size / 1024 / 1024).toFixed(0) : '?';
-  modelDlBody.textContent = `첫 사용을 위해 모델 파일(약 ${mb}MB)을 다운로드합니다.\n인터넷 연결이 필요합니다.`;
+  modelDlBody.textContent = isEn
+    ? `Downloading the model file (~${mb}MB) for first use.\nInternet connection required.`
+    : `첫 사용을 위해 모델 파일(약 ${mb}MB)을 다운로드합니다.\n인터넷 연결이 필요합니다.`;
   modelDlFill.style.width = '0%';
   modelDlInfo.textContent = '';
   modelDlDialog.hidden = false;
@@ -363,14 +408,14 @@ async function ensureModelBeforeSeparation(modelKey) {
     }
     if (d.phase === 'done') {
       modelDlFill.style.width = '100%';
-      modelDlInfo.textContent = '완료';
+      modelDlInfo.textContent = t('common.done');
     }
   });
 
   const res = await api.stem.ensureModel(modelKey);
   modelDlUnsub?.(); modelDlUnsub = null;
   modelDlDialog.hidden = true;
-  if (!res.ok) throw new Error('모델 다운로드 실패: ' + res.error);
+  if (!res.ok) throw new Error((isEn ? 'Model download failed: ' : '모델 다운로드 실패: ') + res.error);
   await refreshModelStatus();
   return true;
 }
@@ -402,12 +447,12 @@ providerPills.forEach(btn => {
     setProviderPreference(btn.dataset.provider);
     probeProviders().then(info => {
       if (!info.webgpuAvailable && btn.dataset.provider !== 'wasm') {
-        providerStatus.textContent = 'WebGPU 미지원 — CPU로 fallback';
+        providerStatus.textContent = t('prov.fallback');
       } else {
         providerStatus.textContent = ({
-          auto: 'WebGPU 자동 사용',
-          webgpu: 'WebGPU 강제 사용',
-          wasm: 'CPU 강제 사용',
+          auto:   t('prov.auto'),
+          webgpu: t('prov.webgpu'),
+          wasm:   t('prov.cpu'),
         })[btn.dataset.provider];
       }
     });
@@ -505,7 +550,7 @@ $('local-btn').addEventListener('click', async () => {
   currentProbe = {
     id:       'local-' + Math.random().toString(36).slice(2, 8),
     title:    base,
-    uploader: '(로컬 파일)',
+    uploader: getLocale() === 'en' ? '(local file)' : '(로컬 파일)',
     duration: 0,
     thumbnail: null,
   };
@@ -549,11 +594,15 @@ probeBtn.addEventListener('click', async () => {
   if (!isValidUrl(url)) return;
   setError('');
   probeBtn.disabled = true;
-  probeBtn.textContent = '확인 중…';
+  probeBtn.textContent = t('sep.probing');
   const res = await api.ytdlp.probe(url);
   probeBtn.disabled = false;
-  probeBtn.textContent = '확인';
-  if (!res.ok) { setError('영상 정보를 가져오지 못했습니다: ' + res.error); return; }
+  probeBtn.textContent = t('sep.probe');
+  if (!res.ok) {
+    const isEn = getLocale() === 'en';
+    setError((isEn ? 'Could not fetch video info: ' : '영상 정보를 가져오지 못했습니다: ') + res.error);
+    return;
+  }
   currentProbe = res.info;
   renderProbe(res.info);
   dlBtn.disabled = false;
@@ -567,9 +616,9 @@ probeBtn.addEventListener('click', async () => {
       existingLibItemId = existing.id;
       existingSub.textContent = `${existing.name} · ${new Date(existing.createdAt).toLocaleDateString()}`;
       existingBanner.hidden = false;
-      dlBtn.textContent = '다시 다운로드';
+      dlBtn.textContent = t('sep.redownload');
     } else {
-      dlBtn.textContent = '다운로드';
+      dlBtn.textContent = t('sep.download');
     }
   }
 });
@@ -594,7 +643,13 @@ function renderProbe(info) {
 }
 
 // ── yt-dlp 다운로드 ────────────────────────────
-const PHASE_LABELS_DL = { video: '영상 다운로드', audio: '오디오 다운로드', merge: 'MP4 병합', done: '완료', error: '오류' };
+const phaseLabelsDl = () => ({
+  video: t('phase.dl.video'),
+  audio: t('phase.dl.audio'),
+  merge: t('phase.dl.merge'),
+  done:  t('phase.dl.done'),
+  error: t('phase.dl.error'),
+});
 let unsubProgress = null;
 
 dlBtn.addEventListener('click', async () => {
@@ -603,7 +658,8 @@ dlBtn.addEventListener('click', async () => {
   doneCard.hidden = true; stemsDone.hidden = true;
   progWrap.hidden = false;
   progFill.style.width = '0%'; progPct.textContent = '0%';
-  progPhase.textContent = PHASE_LABELS_DL.video;
+  const dlLabels = phaseLabelsDl();
+  progPhase.textContent = dlLabels.video;
   progSpeed.textContent = ''; progInfo.textContent = '';
   cancelBtn.hidden = false;
   dlBtn.disabled = true; probeBtn.disabled = true; urlInput.disabled = true;
@@ -611,7 +667,7 @@ dlBtn.addEventListener('click', async () => {
   unsubProgress?.();
   unsubProgress = api.ytdlp.onProgress((p) => {
     if (p.phase === 'error') { setError('yt-dlp: ' + (p.message || 'unknown')); return; }
-    if (p.phase && PHASE_LABELS_DL[p.phase]) progPhase.textContent = PHASE_LABELS_DL[p.phase];
+    if (p.phase && dlLabels[p.phase]) progPhase.textContent = dlLabels[p.phase];
     if (typeof p.ratio === 'number') {
       const pct = Math.max(0, Math.min(100, Math.round(p.ratio * 100)));
       progFill.style.width = pct + '%'; progPct.textContent = pct + '%';
@@ -631,7 +687,7 @@ dlBtn.addEventListener('click', async () => {
   cancelBtn.hidden = true;
   dlBtn.disabled = false; probeBtn.disabled = false; urlInput.disabled = false;
 
-  if (!res.ok) { setError('다운로드 실패: ' + res.error); progWrap.hidden = true; return; }
+  if (!res.ok) { setError(t('err.dlpFailed') + ': ' + res.error); progWrap.hidden = true; return; }
   currentVideoPath = res.filePath;
   currentBaseName = res.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
   donePath.textContent = res.filePath;
@@ -645,18 +701,18 @@ openFolderBtn.addEventListener('click', async () => {
 });
 
 // ── 스템 분리 ──────────────────────────────────
-const PHASE_LABELS_SEP = {
-  init: '워커 초기화',
-  model: '모델 로드',
-  extract: '오디오 추출',
-  separate: '스템 분리',
-  save: 'WAV 저장',
-  done: '완료',
-};
+const phaseLabelsSep = () => ({
+  init:     t('phase.sep.init'),
+  model:    t('phase.sep.model'),
+  extract:  t('phase.sep.extract'),
+  separate: t('phase.sep.separate'),
+  save:     t('phase.sep.save'),
+  done:     t('phase.sep.done'),
+});
 
 sepCancelBtn.addEventListener('click', () => {
   cancelSeparation();
-  sepInfo.textContent = '취소 중…';
+  sepInfo.textContent = t('phase.sep.canceling');
 });
 
 separateBtn.addEventListener('click', async () => {
@@ -665,7 +721,8 @@ separateBtn.addEventListener('click', async () => {
   stemsDone.hidden = true;
   sepWrap.hidden = false;
   sepFill.style.width = '0%'; sepPct.textContent = '0%';
-  sepPhase.textContent = PHASE_LABELS_SEP.init;
+  const sepLabels = phaseLabelsSep();
+  sepPhase.textContent = sepLabels.init;
   sepDetail.textContent = ''; sepInfo.textContent = '';
   separateBtn.disabled = true;
   sepCancelBtn.hidden = false;
@@ -674,7 +731,7 @@ separateBtn.addEventListener('click', async () => {
   try {
     await ensureModelBeforeSeparation(currentModelKey);
     const result = await separatePipeline(currentVideoPath, currentBaseName, (phase, ratio, detail) => {
-      if (PHASE_LABELS_SEP[phase]) sepPhase.textContent = PHASE_LABELS_SEP[phase];
+      if (sepLabels[phase]) sepPhase.textContent = sepLabels[phase];
       if (typeof ratio === 'number') {
         const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
         sepFill.style.width = pct + '%'; sepPct.textContent = pct + '%';
@@ -683,7 +740,7 @@ separateBtn.addEventListener('click', async () => {
     }, { modelKey: currentModelKey });
     const dt = ((performance.now() - t0) / 1000).toFixed(1);
     const ep = getUsedProvider() || '?';
-    sepInfo.textContent = `${dt}s 소요 · ${ep === 'webgpu' ? 'WebGPU' : 'CPU (WASM)'} 사용`;
+    sepInfo.textContent = t('sep.done.detail', { time: dt, provider: ep === 'webgpu' ? 'WebGPU' : 'CPU (WASM)' });
     stemsList.innerHTML = '';
     for (const [name, p] of Object.entries(result.stemPaths)) {
       const div = document.createElement('div');
@@ -713,12 +770,12 @@ separateBtn.addEventListener('click', async () => {
     lastRegisteredId = reg.id;
   } catch (err) {
     console.error(err);
-    if (err.message === '취소됨') {
+    if (err.message === '취소됨' || err.message === 'Canceled') {
       setError('');
-      sepPhase.textContent = '취소됨';
+      sepPhase.textContent = t('phase.sep.canceled');
       sepInfo.textContent = '';
     } else {
-      setError('스템 분리 실패: ' + err.message);
+      setError(t('err.sepFailed') + ': ' + err.message);
     }
   } finally {
     separateBtn.disabled = false;
@@ -793,10 +850,10 @@ updDownload.addEventListener('click', async () => {
   updDownload.hidden = true;
   updState = 'downloading';
   updProg.hidden = false;
-  updBody.textContent = '업데이트 다운로드 중…';
+  updBody.textContent = t('upd.downloading');
   const res = await api.update.download();
   if (!res.ok) {
-    updBody.textContent = '다운로드 실패: ' + res.error;
+    updBody.textContent = t('upd.dlFail') + ': ' + res.error;
     updDownload.hidden = false;
   }
 });
@@ -809,24 +866,24 @@ api.update.onEvent((d) => {
     case 'available':
       updVersion = d.version;
       updState = 'available';
-      updBadge.textContent = `v${d.version} 사용 가능`;
+      updBadge.textContent = t('upd.badge', { version: d.version });
       updBadge.hidden = false;
-      updTitle.textContent = `새 버전 v${d.version} 있음`;
+      updTitle.textContent = t('upd.newVersion', { version: d.version });
       // 릴리즈 노트 렌더링 — HTML이면 그대로, 마크다운이면 간단 변환
       if (typeof d.notes === 'string' && d.notes) {
         const looksHtml = /<[a-z][\s\S]*>/i.test(d.notes);
         updBody.innerHTML = looksHtml ? d.notes : mdToHtml(d.notes);
       } else {
-        updBody.textContent = '릴리즈 노트 없음.';
+        updBody.textContent = t('upd.notes.none');
       }
       updDownload.hidden = false;
       updInstall.hidden = true;
       updProg.hidden = true;
       if (d.portable && d.releaseUrl) {
-        updDownload.textContent = '다운로드 페이지 열기';
+        updDownload.textContent = t('upd.openPage');
         updDownload.dataset.portableUrl = d.releaseUrl;
       } else {
-        updDownload.textContent = '다운로드';
+        updDownload.textContent = t('upd.download');
         delete updDownload.dataset.portableUrl;
       }
       break;
@@ -840,21 +897,25 @@ api.update.onEvent((d) => {
       updInfo.textContent = `${pct}% · ${speed}`;
       break;
     }
-    case 'downloaded':
+    case 'downloaded': {
+      const isEn = getLocale() === 'en';
       updState = 'downloaded';
-      updBadge.textContent = `v${d.version} 준비됨`;
+      updBadge.textContent = isEn ? `v${d.version} ready` : `v${d.version} 준비됨`;
       updBadge.hidden = false;
-      updTitle.textContent = `v${d.version} 설치 준비 완료`;
-      updBody.textContent = '앱을 재시작해 업데이트를 적용합니다.';
+      updTitle.textContent = isEn ? `v${d.version} ready to install` : `v${d.version} 설치 준비 완료`;
+      updBody.textContent = isEn
+        ? 'Restart the app to apply the update.'
+        : '앱을 재시작해 업데이트를 적용합니다.';
       updProg.hidden = true;
       updDownload.hidden = true;
       updInstall.hidden = false;
       showDialog();
       break;
+    }
     case 'error':
       console.error('[update]', d.message);
       if (updDialog.hidden === false) {
-        updBody.textContent = '오류: ' + d.message;
+        updBody.textContent = t('common.error') + ': ' + d.message;
       }
       break;
   }

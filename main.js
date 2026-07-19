@@ -215,7 +215,7 @@ function cmpVer(a, b) {
 
 async function checkForUpdatesPortable() {
   try {
-    const res = await net.fetch(`https://api.github.com/repos/whalemindbass/yt-separator-desktop/releases/latest`, {
+    const res = await net.fetch(`https://api.github.com/repos/whalemindbass/yt-separator-releases/releases/latest`, {
       headers: { 'User-Agent': 'yt-separator-desktop', 'Accept': 'application/vnd.github+json' },
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -228,7 +228,7 @@ async function checkForUpdatesPortable() {
         version: latest,
         notes: rel.body || null,
         portable: true,
-        releaseUrl: rel.html_url || `https://github.com/whalemindbass/yt-separator-desktop/releases/tag/${rel.tag_name}`,
+        releaseUrl: rel.html_url || `https://github.com/whalemindbass/yt-separator-releases/releases/tag/${rel.tag_name}`,
       });
     } else {
       sendUpdate({ type: 'not-available', version: current });
@@ -535,7 +535,7 @@ const MODELS = {
     sources:  4,
     stems:    ['drums', 'bass', 'other', 'vocals'],
     size:     174735359,    // 대략 크기 (진행률용). 실제 크기가 달라도 무해.
-    url:      'https://github.com/whalemindbass/yt-separator-desktop/releases/download/models-v1/htdemucs_core.onnx',
+    url:      'https://github.com/whalemindbass/yt-separator-releases/releases/download/models-v1/htdemucs_core.onnx',
   },
   '6stem': {
     key:      '6stem',
@@ -544,7 +544,7 @@ const MODELS = {
     sources:  6,
     stems:    ['drums', 'bass', 'other', 'vocals', 'guitar', 'piano'],
     size:     115343360,
-    url:      'https://github.com/whalemindbass/yt-separator-desktop/releases/download/models-v1/htdemucs_6s.onnx',
+    url:      'https://github.com/whalemindbass/yt-separator-releases/releases/download/models-v1/htdemucs_6s.onnx',
   },
 };
 const DEFAULT_MODEL_KEY = '4stem';
