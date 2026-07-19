@@ -266,34 +266,49 @@
           <input id="master-vol" class="mixer-slider" type="range" min="0" max="150" value="100" />
           <span id="master-val" class="mixer-val">100%</span>
         </div>
-        <div class="mixer-master mixer-master-inline">
-          <label class="mixer-label">오디오</label>
-          <div class="source-toggle" id="source-toggle">
-            <button class="source-btn on" data-src="stem">스템믹스</button>
-            <button class="source-btn"    data-src="orig">원본</button>
-          </div>
-        </div>
-        <div class="mixer-master mixer-master-inline">
-          <label class="mixer-label">속도</label>
-          <div class="speed-controls">
-            <button id="speed-down" class="key-btn" title="-5%">−</button>
-            <input id="speed-slider" class="speed-slider" type="range" min="50" max="200" step="5" value="100" />
-            <button id="speed-up"   class="key-btn" title="+5%">+</button>
-            <span   id="speed-val" class="speed-val">100%</span>
-            <button id="speed-reset" class="link-btn" title="1x로 초기화">×1</button>
-          </div>
-        </div>
-
-        <div class="mixer-master mixer-key mixer-master-inline">
-          <label class="mixer-label">키</label>
-          <div class="key-controls">
-            <div class="key-adjust">
-              <button id="key-down"  class="key-btn" title="반음 내림">−</button>
-              <span   id="key-target" class="key-val">0</span>
-              <button id="key-up"    class="key-btn" title="반음 올림">+</button>
+        <div class="mixer-inline-row">
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label">오디오</label>
+            <div class="source-toggle" id="source-toggle">
+              <button class="source-btn on" data-src="stem">스템믹스</button>
+              <button class="source-btn"    data-src="orig">원본</button>
             </div>
-            <button id="key-apply" class="btn key-apply" disabled>적용</button>
-            <span id="key-status" class="key-status"></span>
+          </div>
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label">속도</label>
+            <div class="speed-controls">
+              <button id="speed-down" class="key-btn" title="-5%">−</button>
+              <input id="speed-slider" class="speed-slider" type="range" min="50" max="200" step="5" value="100" />
+              <button id="speed-up"   class="key-btn" title="+5%">+</button>
+              <span   id="speed-val" class="speed-val">100%</span>
+              <button id="speed-reset" class="link-btn" title="1x로 초기화">×1</button>
+            </div>
+          </div>
+
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label">구간반복</label>
+            <div class="loop-controls">
+              <button id="loop-a-btn" class="key-btn" title="현재 위치를 A로 설정">A</button>
+              <span   id="loop-a-val" class="loop-val">—</span>
+              <span class="loop-arrow">↔</span>
+              <span   id="loop-b-val" class="loop-val">—</span>
+              <button id="loop-b-btn" class="key-btn" title="현재 위치를 B로 설정">B</button>
+              <button id="loop-toggle" class="btn" title="A~B 반복 재생 켜기/끄기">반복</button>
+              <button id="loop-reset"  class="link-btn" title="A/B 초기화">초기화</button>
+            </div>
+          </div>
+
+          <div class="mixer-master mixer-key mixer-master-inline">
+            <label class="mixer-label">키</label>
+            <div class="key-controls">
+              <div class="key-adjust">
+                <button id="key-down"  class="key-btn" title="반음 내림">−</button>
+                <span   id="key-target" class="key-val">0</span>
+                <button id="key-up"    class="key-btn" title="반음 올림">+</button>
+              </div>
+              <button id="key-apply" class="btn key-apply" disabled>적용</button>
+              <span id="key-status" class="key-status"></span>
+            </div>
           </div>
         </div>
         <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>

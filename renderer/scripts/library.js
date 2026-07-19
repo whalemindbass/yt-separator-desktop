@@ -233,10 +233,11 @@ async function mountPlayer(item) {
       });
     });
 
-    // master / source / speed / key / group / reseparate 초기화
+    // master / source / speed / loop / key / group / reseparate 초기화
     masterVol.value = 100; masterVal.textContent = '100%';
     resetSourceToggle();
     resetSpeedUI();
+    resetLoopUI();
     resetKeyUI();
     updateGroupPickerLabel();
     updateReseparateAndToggle(item);
@@ -316,6 +317,57 @@ reseparateBtn?.addEventListener('click', () => {
       modelKey: targetModel,
     },
   }));
+});
+
+// ── A-B 구간 반복 ─────────────────────────────
+const loopABtn    = $('loop-a-btn');
+const loopBBtn    = $('loop-b-btn');
+const loopAVal    = $('loop-a-val');
+const loopBVal    = $('loop-b-val');
+const loopToggle  = $('loop-toggle');
+const loopReset   = $('loop-reset');
+
+function fmtLoopTime(t) {
+  if (t == null || isNaN(t)) return '—';
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  const c = Math.floor((t - Math.floor(t)) * 10);   // 소수점 1자리 (100ms 단위)
+  return `${m}:${String(s).padStart(2, '0')}.${c}`;
+}
+function refreshLoopUI() {
+  const st = currentPlayer?.getLoopState() || { a: null, b: null, enabled: false };
+  loopAVal.textContent = fmtLoopTime(st.a);
+  loopBVal.textContent = fmtLoopTime(st.b);
+  loopToggle.classList.toggle('on', !!st.enabled);
+}
+function resetLoopUI() {
+  currentPlayer?.resetLoop();
+  refreshLoopUI();
+}
+loopABtn?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  currentPlayer.setLoopA(playerVideo.currentTime);
+  refreshLoopUI();
+});
+loopBBtn?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  currentPlayer.setLoopB(playerVideo.currentTime);
+  refreshLoopUI();
+});
+loopToggle?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  const st = currentPlayer.getLoopState();
+  // 활성화하려면 A와 B가 모두 설정되고 B > A 여야 함
+  if (!st.enabled && (st.a == null || st.b == null || st.b <= st.a)) {
+    alert('A와 B 지점을 먼저 설정하세요 (B는 A보다 뒤).');
+    return;
+  }
+  currentPlayer.setLoopEnabled(!st.enabled);
+  refreshLoopUI();
+});
+loopReset?.addEventListener('click', () => {
+  currentPlayer?.resetLoop();
+  refreshLoopUI();
 });
 
 // ── 재생 속도 (5% 단위, 50% ~ 200%) ────────────────

@@ -953,14 +953,74 @@ body { display: flex; flex-direction: column; }
   margin-top: 12px;
 }
 
-/* mixer-master-inline: 3-col grid 대신 flex — 컨텐츠 크기에 맞춤 */
+/* ── mixer-inline-row: 오디오/속도/구간반복/키 4개 블록 ─────────────
+   기본(우측 컬럼): 각 블록 한 줄씩, 라벨은 컨트롤 위쪽.
+   하단(스택 모드): 2x2 그리드, 라벨은 좌측, 셀 테두리로 구분.
+   ─────────────────────────────────────────────────────────────*/
+
+/* 기본 (우측 컬럼) — 세로 stack, 라벨 상단 */
+.mixer .mixer-inline-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
 .mixer-master.mixer-master-inline {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+.mixer-master.mixer-master-inline:last-child { border-bottom: 0; padding-bottom: 4px; }
+.mixer-master.mixer-master-inline > .mixer-label {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .mixer-master.mixer-master-inline .source-toggle,
-.mixer-master.mixer-master-inline .key-controls { flex-shrink: 0; }
+.mixer-master.mixer-master-inline .key-controls,
+.mixer-master.mixer-master-inline .speed-controls,
+.mixer-master.mixer-master-inline .loop-controls { flex-shrink: 0; }
+
+/* 하단 (스택 모드) — 2x2 그리드, 라벨 좌측 */
+@media (max-width: 1280px), (max-height: 780px) {
+  .mixer .mixer-inline-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 0;
+    /* 마스터 볼륨 아래 이미 border-bottom 있으므로 여기엔 border-top 안 넣음 */
+  }
+  .mixer-master.mixer-master-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    border-right:  1px solid var(--border);
+  }
+  /* 라벨 폭 통일 + 글자 가운데 정렬 */
+  .mixer-master.mixer-master-inline > .mixer-label {
+    min-width: 64px;
+    text-align: center;
+  }
+  .mixer-master.mixer-master-inline:nth-child(2n)  { border-right: 0; }
+  .mixer-master.mixer-master-inline:nth-child(n+3) { border-bottom: 0; }
+}
+
+/* mixer 컨테이너 자체 폭이 좁으면 (구간반복 셀이 넘칠 만큼): 1-column 그리드로 fallback.
+   viewport가 아닌 mixer container 폭 기준. 우측/하단 모드 상관없이 오버플로우 감지. */
+@container mixer (max-width: 760px) {
+  .mixer .mixer-inline-row {
+    grid-template-columns: 1fr;
+  }
+  .mixer-master.mixer-master-inline {
+    border-right: 0;
+  }
+  .mixer-master.mixer-master-inline:nth-child(n+2)  { border-bottom: 1px solid var(--border); }
+  .mixer-master.mixer-master-inline:last-child      { border-bottom: 0; }
+}
 
 /* Source toggle (스템 / 원본) */
 .source-toggle {
@@ -991,17 +1051,48 @@ body { display: flex; flex-direction: column; }
   font-weight: 700;
 }
 
+/* Loop controls (A-B 구간 반복) */
+.loop-controls {
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  min-width: 0;
+}
+.loop-val {
+  font-size: 12px; font-weight: 600;
+  color: var(--tx-2);
+  min-width: 42px; text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 6px;
+  background: var(--input);
+  border-radius: 4px;
+}
+.loop-arrow {
+  color: var(--tx-4);
+  font-size: 13px;
+  margin: 0 2px;
+}
+#loop-toggle {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+#loop-toggle.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+  font-weight: 700;
+}
+
 /* Speed controls */
 .speed-controls { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .speed-slider {
   -webkit-appearance: none;
   appearance: none;
-  width: 150px;
+  width: 110px;
   height: 4px;
   background: var(--input);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
+  flex-shrink: 0;
 }
 .speed-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -1261,6 +1352,8 @@ body { display: flex; flex-direction: column; }
   background: var(--elev);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  container-type: inline-size;
+  container-name: mixer;
 }
 
 .mixer-master {

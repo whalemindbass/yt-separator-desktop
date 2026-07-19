@@ -237,6 +237,20 @@ export class Player {
     this._onSeekedL = () => { if (!v.paused) scheduleSync('seek'); };
     this._onPauseL  = () => { if (v.ended) return this._onEndedL(); scheduleStop(); };
     this._onEndedL  = () => { cancelStop(); this._stopAll(); this._playing = false; };
+    // A-B 구간 반복
+    this._loopA = null;
+    this._loopB = null;
+    this._loopEnabled = false;
+    this._onTimeUpdateL = () => {
+      if (!this._loopEnabled) return;
+      if (this._loopA == null || this._loopB == null) return;
+      if (this._loopB <= this._loopA) return;
+      // B에 도달하면 A로 seek (video seek → stem audios 자동 sync)
+      if (v.currentTime >= this._loopB - 0.05) {
+        v.currentTime = Math.max(0, this._loopA);
+      }
+    };
+
     this._onRateL   = () => {
       const r = v.playbackRate || 1;
       if (this.usePitchPreserve) {
@@ -265,6 +279,7 @@ export class Player {
     v.addEventListener('ended',        this._onEndedL);
     v.addEventListener('ratechange',   this._onRateL);
     v.addEventListener('volumechange', this._onVolL);
+    v.addEventListener('timeupdate',   this._onTimeUpdateL);
   }
 
   /** debounce 후 video 위치에 맞춰 stem을 재동기화 */
@@ -298,7 +313,15 @@ export class Player {
     if (this._onEndedL)  v.removeEventListener('ended',        this._onEndedL);
     if (this._onRateL)   v.removeEventListener('ratechange',   this._onRateL);
     if (this._onVolL)    v.removeEventListener('volumechange', this._onVolL);
+    if (this._onTimeUpdateL) v.removeEventListener('timeupdate', this._onTimeUpdateL);
   }
+
+  /** A-B 구간 반복 제어 */
+  setLoopA(t)         { this._loopA = (t == null) ? null : Math.max(0, +t); }
+  setLoopB(t)         { this._loopB = (t == null) ? null : Math.max(0, +t); }
+  setLoopEnabled(v)   { this._loopEnabled = !!v; }
+  getLoopState()      { return { a: this._loopA, b: this._loopB, enabled: this._loopEnabled }; }
+  resetLoop()         { this._loopA = null; this._loopB = null; this._loopEnabled = false; }
 
   _startAll(offset) {
     const rate = this.videoEl.playbackRate || 1;
