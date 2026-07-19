@@ -1,6 +1,6 @@
 {
   "name": "yt-separator-desktop",
-  "version": "1.1.10",
+  "version": "1.1.11",
   "description": "YT Separator — Desktop app for real-time stem separation of local audio/video files",
   "main": "main.js",
   "author": {
