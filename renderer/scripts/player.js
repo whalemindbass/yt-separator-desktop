@@ -2,6 +2,8 @@
 // Player — <video>(무음) + Web Audio API로 stem mixing
 // Video 이벤트(play/pause/seek/ratechange)에 stem source를 sync.
 
+import { pitchShiftStereo } from './pitch-shift.js';
+
 export const STEM_META = {
   vocals: { label: '보컬',    color: '#e15b5b', icon: 'stem_vocals.png' },
   drums:  { label: '드럼',    color: '#e6c33a', icon: 'stem_drums.png' },
@@ -400,28 +402,22 @@ export class Player {
       }
     } else {
       const SKIP = new Set(['drums']);   // 드럼은 피치 시 부자연스러움
-      const toSend = {};
+      newStems = {};
+      // Signalsmith Stretch 로 개별 스템 병렬 처리 (offline audio context 렌더링)
+      const tasks = [];
       for (const [n, [L, R]] of Object.entries(this.stemsOrig)) {
-        if (SKIP.has(n)) continue;
-        toSend[n] = [new Float32Array(L), new Float32Array(R)];
+        if (SKIP.has(n)) {
+          newStems[n] = [new Float32Array(L), new Float32Array(R)];
+          continue;
+        }
+        // 보컬만 formant 보존 (베이스·기타는 formant 개념 없음 → 처리 부담 절감)
+        const formant = (n === 'vocals');
+        tasks.push(
+          pitchShiftStereo(L, R, this._sampleRate, semitones, { formantCompensation: formant })
+            .then(({ L: nL, R: nR }) => { newStems[n] = [nL, nR]; })
+        );
       }
-      const res = await new Promise((resolve, reject) => {
-        const id = Math.random().toString(36).slice(2);
-        const onMsg = (e) => {
-          if (e.data?.id !== id) return;
-          encoderWorker.removeEventListener('message', onMsg);
-          if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data);
-        };
-        encoderWorker.addEventListener('message', onMsg);
-        const transferables = [];
-        for (const [, [l, r]] of Object.entries(toSend)) transferables.push(l.buffer, r.buffer);
-        encoderWorker.postMessage({ type: 'pitchShift', id, stems: toSend, semitones }, transferables);
-      });
-      newStems = res.stems;
-      for (const [n, [L, R]] of Object.entries(this.stemsOrig)) {
-        if (!SKIP.has(n)) continue;
-        newStems[n] = [new Float32Array(L), new Float32Array(R)];
-      }
+      await Promise.all(tasks);
     }
 
     // 재생 중이면 잠시 정지 → 재시작
