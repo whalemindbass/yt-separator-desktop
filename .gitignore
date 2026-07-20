@@ -24,3 +24,4 @@ scripts/__pycache__/
 # 코드 서명 인증서 (자체 서명, 개인 키 포함)
 build/cert.pfx
 build/cert.cer
+sample/

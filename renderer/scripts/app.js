@@ -692,6 +692,7 @@ dlBtn.addEventListener('click', async () => {
   currentBaseName = res.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
   donePath.textContent = res.filePath;
   doneCard.hidden = false;
+  progWrap.hidden = true;   // 다운로드 progress 는 완료됐으니 감춤 — done-card 만 남겨 흐름 명확화
 });
 
 cancelBtn.addEventListener('click', async () => { await api.ytdlp.cancel(); });
@@ -718,6 +719,10 @@ sepCancelBtn.addEventListener('click', () => {
 separateBtn.addEventListener('click', async () => {
   if (!currentVideoPath) return;
   setError('');
+  // 스템 분리 진입: 다운로드 완료 카드는 감춤 (중복 정보 · "폴더 열기" 오클릭 방지)
+  doneCard.hidden = true;
+  progWrap.hidden = true;
+  existingBanner.hidden = true;
   stemsDone.hidden = true;
   sepWrap.hidden = false;
   sepFill.style.width = '0%'; sepPct.textContent = '0%';
@@ -748,6 +753,7 @@ separateBtn.addEventListener('click', async () => {
       stemsList.appendChild(div);
     }
     stemsDone.hidden = false;
+    sepWrap.hidden = true;    // 분리 완료 → progress 는 감춤, 완료 카드만 남김
     openStemsBtn.dataset.dir = result.outDir;
 
     // 라이브러리 등록
@@ -770,10 +776,11 @@ separateBtn.addEventListener('click', async () => {
     lastRegisteredId = reg.id;
   } catch (err) {
     console.error(err);
+    // 분리 취소·실패 시 → 이전 단계(다운로드 완료) 복원해서 재시도 가능하게
+    sepWrap.hidden = true;
+    doneCard.hidden = false;
     if (err.message === '취소됨' || err.message === 'Canceled') {
       setError('');
-      sepPhase.textContent = t('phase.sep.canceled');
-      sepInfo.textContent = '';
     } else {
       setError(t('err.sepFailed') + ': ' + err.message);
     }
@@ -792,6 +799,12 @@ goLibraryBtn.addEventListener('click', async () => {
   switchView('library');
   await Library.refresh();
   if (lastRegisteredId) await Library.selectItem(lastRegisteredId);
+});
+
+$('new-song-btn')?.addEventListener('click', () => {
+  resetSeparateView(true);
+  urlInput.focus();
+  urlInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
 // ── 라이브러리에서 "다른 모델로 재분리" 요청 ────────
@@ -862,6 +875,21 @@ updInstall.addEventListener('click', async () => {
 });
 
 api.update.onEvent((d) => {
+  // 설정 · 지금 확인 상태 라벨 갱신 (available / not-available / error 시)
+  const isEn = getLocale() === 'en';
+  if (sUpdateStatus) {
+    if (d.type === 'available') {
+      sUpdateStatus.textContent = isEn ? `v${d.version} available` : `v${d.version} 사용 가능`;
+    } else if (d.type === 'not-available') {
+      sUpdateStatus.textContent = isEn
+        ? `Up to date (v${d.version || ''})`
+        : `최신 버전입니다 (v${d.version || ''})`;
+    } else if (d.type === 'error') {
+      sUpdateStatus.textContent = (isEn ? 'Check failed: ' : '확인 실패: ') + (d.message || '');
+    } else if (d.type === 'downloaded') {
+      sUpdateStatus.textContent = isEn ? `v${d.version} ready to install` : `v${d.version} 설치 준비 완료`;
+    }
+  }
   switch (d.type) {
     case 'available':
       updVersion = d.version;

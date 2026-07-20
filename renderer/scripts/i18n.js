@@ -58,6 +58,7 @@ const LOCALES = {
     'sep.stems.done':     '스템 분리 완료',
     'sep.stems.openFolder':'스템 폴더 열기',
     'sep.stems.goLibrary': '라이브러리에서 재생',
+    'sep.stems.newSong':   '새 곡 처리',
     // 라이브러리
     'lib.head':          '라이브러리',
     'lib.cleanup':       '정리',
@@ -243,6 +244,7 @@ const LOCALES = {
     'sep.stems.done':     'Stem separation complete',
     'sep.stems.openFolder':'Open stems folder',
     'sep.stems.goLibrary': 'Play in library',
+    'sep.stems.newSong':   'Process another',
     'lib.head':          'Library',
     'lib.cleanup':       'Clean up',
     'lib.cleanup.title': 'Remove duplicates / orphan files',

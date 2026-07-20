@@ -40,12 +40,16 @@ async function pickProvider() {
 export function getUsedProvider() { return usedProvider; }
 
 let cancelRequested = false;
+const pendingRejects = new Set();   // worker 메시지 응답 대기 중인 Promise reject 콜백들
 export function cancelSeparation() {
   cancelRequested = true;
   if (worker) { try { worker.terminate(); } catch {} worker = null; modelReady = false; usedProvider = null; }
+  // 대기 중인 모든 promise 를 즉시 reject → separatePipeline catch 로 흐름 반환
+  for (const rej of pendingRejects) { try { rej(new Error('취소됨')); } catch {} }
+  pendingRejects.clear();
 }
 export function isCancelled() { return cancelRequested; }
-function resetCancelFlag() { cancelRequested = false; }
+function resetCancelFlag() { cancelRequested = false; pendingRejects.clear(); }
 export async function probeProviders() {
   return {
     webgpuAvailable: await detectWebGPU(),
@@ -69,15 +73,15 @@ function ensureWorker(onProgress) {
 
 async function initWorker() {
   await new Promise((resolve, reject) => {
+    pendingRejects.add(reject);
+    const done = (fn, val) => { pendingRejects.delete(reject); worker?.removeEventListener('message', onMsg); fn(val); };
     const onMsg = (e) => {
       const d = e.data;
-      if (d.type === 'INIT_OK')    { worker.removeEventListener('message', onMsg); resolve(); }
-      if (d.type === 'INIT_ERROR') { worker.removeEventListener('message', onMsg); reject(new Error(d.error)); }
+      if (d.type === 'INIT_OK')    done(resolve);
+      if (d.type === 'INIT_ERROR') done(reject, new Error(d.error));
     };
     worker.addEventListener('message', onMsg);
-    worker.addEventListener('error', (e) => reject(new Error(e.message || 'worker error')));
-    // stem-worker.js는 data.runtimeUrl + 'lib/xxx.mjs' 형태로 ORT를 로드.
-    // renderer/index.html 기준의 URL을 넘겨줌 → 워커에서 renderer/lib/... 접근
+    worker.addEventListener('error', (e) => done(reject, new Error(e.message || 'worker error')));
     const runtimeUrl = new URL('../', import.meta.url).href;
     worker.postMessage({ type: 'INIT', runtimeUrl });
   });
@@ -94,10 +98,12 @@ async function loadModelWith(provider, modelKey) {
   const sources = res.sources || 4;
   currentModelInfo = { sources, stems: res.stems };
   await new Promise((resolve, reject) => {
+    pendingRejects.add(reject);
+    const done = (fn, val) => { pendingRejects.delete(reject); worker?.removeEventListener('message', onMsg); fn(val); };
     const onMsg = (e) => {
       const d = e.data;
-      if (d.type === 'MODEL_OK')    { worker.removeEventListener('message', onMsg); modelReady = true; usedProvider = d.ep || provider; resolve(); }
-      if (d.type === 'MODEL_ERROR') { worker.removeEventListener('message', onMsg); reject(new Error(d.error)); }
+      if (d.type === 'MODEL_OK')    { modelReady = true; usedProvider = d.ep || provider; done(resolve); }
+      if (d.type === 'MODEL_ERROR') done(reject, new Error(d.error));
       if (d.type === 'MODEL_DIAG')  { usedProvider = d.ep || provider; console.log('[stem] diag:', JSON.stringify(d)); }
     };
     worker.addEventListener('message', onMsg);
@@ -126,19 +132,13 @@ let STEM_ORDER = ['drums', 'bass', 'other', 'vocals'];
 
 async function process(left, right, totalSamples, onProgress) {
   return await new Promise((resolve, reject) => {
+    pendingRejects.add(reject);
+    const done = (fn, val) => { pendingRejects.delete(reject); worker?.removeEventListener('message', onMsg); fn(val); };
     const onMsg = (e) => {
       const d = e.data;
-      if (d.type === 'PROGRESS') { onProgress?.(d.value); return; }
-      if (d.type === 'PROCESS_OK') {
-        worker.removeEventListener('message', onMsg);
-        resolve(d.stems);
-        return;
-      }
-      if (d.type === 'PROCESS_ERROR') {
-        worker.removeEventListener('message', onMsg);
-        reject(new Error(d.error));
-        return;
-      }
+      if (d.type === 'PROGRESS')      { onProgress?.(d.value); return; }
+      if (d.type === 'PROCESS_OK')    { done(resolve, d.stems); return; }
+      if (d.type === 'PROCESS_ERROR') { done(reject, new Error(d.error)); return; }
     };
     worker.addEventListener('message', onMsg);
     worker.postMessage(
