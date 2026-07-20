@@ -234,13 +234,19 @@ export class Player {
         this._stopAll();
         this._playing = false;
         this._playStartCtxTime = null;
+        this._stopMetroScheduler();
       }, 100);
     };
 
     this._onPlayL   = () => { cancelStop(); scheduleSync('play'); };
-    this._onSeekedL = () => { if (!v.paused) scheduleSync('seek'); };
+    this._onSeekedL = () => {
+      // 메트로놈: seek 시 이전에 스케줄된 미래 클릭들을 강제 취소하고 새 위치 기준으로 재시작.
+      // (Web Audio 는 스케줄 후 취소 불가 → gain 노드 disconnect 로 무음 처리)
+      if (this._metroEnabled) this._startMetroScheduler();
+      if (!v.paused) scheduleSync('seek');
+    };
     this._onPauseL  = () => { if (v.ended) return this._onEndedL(); scheduleStop(); };
-    this._onEndedL  = () => { cancelStop(); this._stopAll(); this._playing = false; };
+    this._onEndedL  = () => { cancelStop(); this._stopAll(); this._playing = false; this._stopMetroScheduler(); };
     // A-B 구간 반복
     this._loopA = null;
     this._loopB = null;
@@ -308,6 +314,8 @@ export class Player {
     this._playing = true;
     this._playStartCtxTime = this.audioCtx.currentTime;
     this._playStartOffset  = v.currentTime;
+    // 메트로놈 활성이면 재생 시작·재sync 마다 다시 스케줄
+    if (this._metroEnabled) this._startMetroScheduler();
   }
   _unbindVideoEvents() {
     const v = this.videoEl;
@@ -566,7 +574,99 @@ export class Player {
     };
   }
 
+  /* ── 메트로놈 (곡 sync 자동 재생) ────────────────────
+     detectBeats() 로 얻은 beats 배열을 곡 재생 시간에 맞춰 클릭 스케줄. */
+  setBeats(beats, beatInterval, tempo, downbeat) {
+    // 워커의 linear regression 결과가 있으면 그대로 사용 (drift 최소화)
+    // 없으면 beats[0] 사용
+    this._metroDownbeat = (typeof downbeat === 'number' && isFinite(downbeat)) ? downbeat
+                         : ((Array.isArray(beats) && beats.length) ? beats[0] : 0);
+    this._metroInterval = (beatInterval && beatInterval > 0) ? beatInterval
+                         : (tempo ? 60 / tempo : 0.5);
+    this._metroTempo = tempo || (60 / this._metroInterval);
+    this._metroBeats = Array.isArray(beats) ? beats.slice() : [];
+  }
+  setMetronomeEnabled(v) {
+    this._metroEnabled = !!v;
+    if (this._metroEnabled && this._playing) this._startMetroScheduler();
+    else this._stopMetroScheduler();
+  }
+  setMetronomeVolume(v) {
+    this._metroVolume = Math.max(0, Math.min(1, v));
+    // 실행 중 실시간 반영 (기존엔 다음 _startMetroScheduler 까지 반영 안 됨)
+    if (this._metroGain) {
+      try {
+        this._metroGain.gain.setTargetAtTime(this._metroVolume, this.audioCtx.currentTime, 0.02);
+      } catch {}
+    }
+  }
+  getMetronomeInfo() {
+    return {
+      enabled: !!this._metroEnabled,
+      tempo: this._metroTempo || 0,
+      hasBeats: (this._metroBeats && this._metroBeats.length > 0),
+      volume: this._metroVolume ?? 0.5,
+    };
+  }
+  _startMetroScheduler() {
+    this._stopMetroScheduler();
+    if (!this._metroBeats?.length || !this._metroInterval) return;
+    if (this._metroGain) { try { this._metroGain.disconnect(); } catch {} }
+    this._metroGain = this.audioCtx.createGain();
+    this._metroGain.gain.value = this._metroVolume ?? 0.5;
+    this._metroGain.connect(this.audioCtx.destination);
+    this._metroLastScheduledN = -Infinity;   // seek/재시작마다 초기화
+    this._metroTimer = setInterval(() => this._scheduleUpcomingBeats(), 120);
+    this._scheduleUpcomingBeats();
+  }
+  _stopMetroScheduler() {
+    if (this._metroTimer) { clearInterval(this._metroTimer); this._metroTimer = null; }
+    if (this._metroGain) { try { this._metroGain.disconnect(); } catch {} this._metroGain = null; }
+    this._metroLastScheduledN = -Infinity;
+  }
+  _scheduleUpcomingBeats() {
+    if (!this._metroEnabled || !this._metroInterval) return;
+    const v = this.videoEl;
+    if (v.paused) return;
+    const rate = v.playbackRate || 1;
+    const ctxNow = this.audioCtx.currentTime;
+    const songNow = v.currentTime;
+    const lookAhead = 0.25;
+    const downbeat = this._metroDownbeat;
+    const interval = this._metroInterval;
+    // 균일 그리드 기준 다음 박자 index 계산 (downbeat 이전은 음수 → 스킵)
+    let n = Math.ceil((songNow - downbeat) / interval);
+    if (n < 0) n = 0;
+    if (n <= this._metroLastScheduledN) n = this._metroLastScheduledN + 1;
+    let nextT = downbeat + n * interval;
+    while (nextT <= songNow + lookAhead * rate) {
+      if (nextT >= songNow - 0.01) {
+        const when = ctxNow + (nextT - songNow) / rate;
+        this._playClick(when, false);
+        this._metroLastScheduledN = n;
+      }
+      n++;
+      nextT = downbeat + n * interval;
+    }
+  }
+  _playClick(when, isDown) {
+    if (!this._metroGain) return;
+    const ctx = this.audioCtx;
+    // 짧은 신디사이즈드 클릭 — 강박(현재 unused)/약박 톤 구분
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.frequency.setValueAtTime(isDown ? 1600 : 1000, when);
+    env.gain.setValueAtTime(0, when);
+    env.gain.linearRampToValueAtTime(0.85, when + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.001, when + 0.06);
+    osc.connect(env);
+    env.connect(this._metroGain);
+    osc.start(when);
+    osc.stop(when + 0.08);
+  }
+
   destroy() {
+    this._stopMetroScheduler();
     this._stopAll();
     this._unbindVideoEvents();
     // stem audio 요소 정리

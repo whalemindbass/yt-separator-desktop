@@ -1070,16 +1070,84 @@ body { display: flex; flex-direction: column; }
 .mixer-master.mixer-master-inline .source-toggle,
 .mixer-master.mixer-master-inline .key-controls,
 .mixer-master.mixer-master-inline .speed-controls,
-.mixer-master.mixer-master-inline .loop-controls { flex-shrink: 0; }
+.mixer-master.mixer-master-inline .loop-controls,
+.mixer-master.mixer-master-inline .metro-controls,
+.mixer-master.mixer-master-inline .master-controls { flex-shrink: 0; }
 
-/* 하단 (스택 모드) — 2x2 그리드, 라벨 좌측 */
+/* Master 볼륨 (그룹 안에 들어옴) */
+.master-controls { display: flex; align-items: center; gap: 8px; }
+.master-slider { width: 130px; }
+
+/* 믹서 그룹 내 모든 버튼 · 인터랙션 요소 높이 통일 (26px) */
+.mixer-master-inline .btn,
+.mixer-master-inline .key-btn,
+.mixer-master-inline .source-btn,
+.mixer-master-inline .source-toggle {
+  height: 26px;
+  box-sizing: border-box;
+}
+.mixer-master-inline .btn {
+  padding: 0 12px;
+  font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1;
+  border-radius: 5px;
+}
+.mixer-master-inline .source-btn {
+  padding: 0 12px;
+  display: inline-flex; align-items: center;
+}
+/* Loop toggle · metro toggle 이 켜졌을 때 accent 색 */
+.mixer-master-inline #loop-toggle.on,
+.mixer-master-inline #metro-toggle.on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* Metronome */
+.metro-controls { display: flex; align-items: center; gap: 8px; }
+.exp-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 8.5px; font-weight: 700;
+  letter-spacing: .06em;
+  background: rgba(224,197,90,.14);
+  color: #e0c55a;
+  border: 1px solid rgba(224,197,90,.35);
+  border-radius: 3px;
+  vertical-align: middle;
+  cursor: help;
+  text-transform: uppercase;
+}
+.metro-bpm {
+  font-family: var(--mono);
+  font-size: 11.5px; font-weight: 700;
+  color: var(--tx-3);
+  min-width: 44px; text-align: center;
+  padding: 3px 6px;
+  background: var(--input);
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.metro-bpm.detected { color: var(--tx-1); }
+.metro-vol {
+  -webkit-appearance: none; appearance: none;
+  width: 70px; height: 4px;
+  background: var(--input);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+/* 하단 (스택 모드) — 2×3 그리드 (6 셀), 라벨 좌측 */
 @media (max-width: 1280px), (max-height: 780px) {
   .mixer .mixer-inline-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto;
+    grid-auto-rows: auto;
     gap: 0;
-    /* 마스터 볼륨 아래 이미 border-bottom 있으므로 여기엔 border-top 안 넣음 */
   }
   .mixer-master.mixer-master-inline {
     flex-direction: row;
@@ -1089,13 +1157,14 @@ body { display: flex; flex-direction: column; }
     border-bottom: 1px solid var(--border);
     border-right:  1px solid var(--border);
   }
-  /* 라벨 폭 통일 + 글자 가운데 정렬 */
   .mixer-master.mixer-master-inline > .mixer-label {
     min-width: 64px;
     text-align: center;
   }
+  /* 우측 컬럼: border-right 없음 */
   .mixer-master.mixer-master-inline:nth-child(2n)  { border-right: 0; }
-  .mixer-master.mixer-master-inline:nth-child(n+3) { border-bottom: 0; }
+  /* 마지막 행: border-bottom 없음 (6개면 5,6번째) */
+  .mixer-master.mixer-master-inline:nth-last-child(-n+2) { border-bottom: 0; }
 }
 
 /* mixer 컨테이너 자체 폭이 좁으면 (구간반복 셀이 넘칠 만큼): 1-column 그리드로 fallback.

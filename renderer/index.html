@@ -278,12 +278,15 @@
 
     <aside class="lib-right">
       <div class="mixer">
-        <div class="mixer-master">
-          <label class="mixer-label" data-i18n="mixer.master">MASTER</label>
-          <input id="master-vol" class="mixer-slider" type="range" min="0" max="150" value="100" />
-          <span id="master-val" class="mixer-val">100%</span>
-        </div>
         <div class="mixer-inline-row">
+          <!-- Row 1: 마스터 / 오디오 -->
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label" data-i18n="mixer.master">MASTER</label>
+            <div class="master-controls">
+              <input id="master-vol" class="mixer-slider master-slider" type="range" min="0" max="150" value="100" />
+              <span id="master-val" class="mixer-val">100%</span>
+            </div>
+          </div>
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.audio">오디오</label>
             <div class="source-toggle" id="source-toggle">
@@ -291,17 +294,8 @@
               <button class="source-btn"    data-src="orig" data-i18n="mixer.src.orig">원본</button>
             </div>
           </div>
-          <div class="mixer-master mixer-master-inline">
-            <label class="mixer-label" data-i18n="mixer.speed">속도</label>
-            <div class="speed-controls">
-              <button id="speed-down" class="key-btn" data-i18n-title="mixer.speed.down" title="-5%">−</button>
-              <input id="speed-slider" class="speed-slider" type="range" min="50" max="200" step="5" value="100" />
-              <button id="speed-up"   class="key-btn" data-i18n-title="mixer.speed.up" title="+5%">+</button>
-              <span   id="speed-val" class="speed-val">100%</span>
-              <button id="speed-reset" class="link-btn" data-i18n-title="mixer.speed.reset" title="1x로 초기화">×1</button>
-            </div>
-          </div>
 
+          <!-- Row 2: 구간반복 / 메트로놈 -->
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.loop">구간반복</label>
             <div class="loop-controls">
@@ -311,10 +305,20 @@
               <span   id="loop-b-val" class="loop-val">—</span>
               <button id="loop-b-btn" class="key-btn" data-i18n-title="mixer.loop.b" title="현재 위치를 B로 설정">B</button>
               <button id="loop-toggle" class="btn" data-i18n="mixer.loop.toggle" data-i18n-title="mixer.loop.toggle.title" title="A~B 반복 재생 켜기/끄기">반복</button>
-              <button id="loop-reset"  class="link-btn" data-i18n="mixer.loop.reset" data-i18n-title="mixer.loop.reset.title" title="A/B 초기화">초기화</button>
+              <button id="loop-reset"  class="key-btn" data-i18n-title="mixer.loop.reset.title" title="A/B 초기화">↺</button>
+            </div>
+          </div>
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label" data-i18n="mixer.metro">메트로놈</label>
+            <div class="metro-controls">
+              <button id="metro-toggle" class="btn" data-i18n="mixer.metro.toggle" data-i18n-title="mixer.metro.toggle.title" title="곡 sync 메트로놈 켜기/끄기">클릭</button>
+              <span id="metro-bpm" class="metro-bpm">—</span>
+              <input id="metro-vol" class="metro-vol" type="range" min="0" max="100" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨" />
+              <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="mixer.metro.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>
             </div>
           </div>
 
+          <!-- Row 3: 키 / 속도 -->
           <div class="mixer-master mixer-key mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.key">키</label>
             <div class="key-controls">
@@ -325,6 +329,16 @@
               </div>
               <button id="key-apply" class="btn key-apply" data-i18n="mixer.key.apply" disabled>적용</button>
               <span id="key-status" class="key-status"></span>
+            </div>
+          </div>
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label" data-i18n="mixer.speed">속도</label>
+            <div class="speed-controls">
+              <button id="speed-down" class="key-btn" data-i18n-title="mixer.speed.down" title="-5%">−</button>
+              <input id="speed-slider" class="speed-slider" type="range" min="50" max="200" step="5" value="100" />
+              <button id="speed-up"   class="key-btn" data-i18n-title="mixer.speed.up" title="+5%">+</button>
+              <span   id="speed-val" class="speed-val">100%</span>
+              <button id="speed-reset" class="key-btn" data-i18n-title="mixer.speed.reset" title="1x로 초기화">×1</button>
             </div>
           </div>
         </div>

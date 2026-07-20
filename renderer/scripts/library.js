@@ -3,6 +3,7 @@
 
 import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
 import { t, getLocale } from './i18n.js';
+import { detectBeats } from './beat-detect.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -25,6 +26,9 @@ const playerErr     = $('player-err');
 const mixerTracks   = $('mixer-tracks');
 const masterVol     = $('master-vol');
 const masterVal     = $('master-val');
+const metroToggleEl = $('metro-toggle');
+const metroBpmEl    = $('metro-bpm');
+const metroVolEl    = $('metro-vol');
 
 let items = [];
 let selectedId = null;
@@ -62,6 +66,10 @@ const saveLoop      = (a, b, en)  => _mutateSettings(s => { s.loopA = a; s.loopB
 const saveTrackVol  = (stem, vol) => _mutateSettings(s => { (s.trackVols  = s.trackVols  || {})[stem] = vol; });
 const saveTrackMute = (stem, mu)  => _mutateSettings(s => { (s.trackMutes = s.trackMutes || {})[stem] = !!mu; });
 const saveTrackSolo = (stem, so)  => _mutateSettings(s => { (s.trackSolos = s.trackSolos || {})[stem] = !!so; });
+const saveMetro     = (patch)     => _mutateSettings(s => { s.metro = { ...(s.metro || {}), ...patch }; });
+const saveBeatCache = (tempo, beats, beatInterval, downbeat, fitStdMs) => _mutateSettings(s => {
+  s.beatCache = { tempo, beats, beatInterval, downbeat, fitStdMs, at: Date.now() };
+});
 
 function setErr(msg) {
   if (!msg) { playerErr.hidden = true; playerErr.textContent = ''; return; }
@@ -270,7 +278,97 @@ function destroyPlayer() {
   if (currentPlayer) { try { currentPlayer.destroy(); } catch {} currentPlayer = null; }
   mixerTracks.innerHTML = '';
   mixerTracks.classList.remove('has-solo');
+  // 메트로놈 UI 리셋
+  if (metroToggleEl) metroToggleEl.classList.remove('on');
+  if (metroBpmEl) { metroBpmEl.textContent = '—'; metroBpmEl.classList.remove('detected'); }
 }
+
+// ── 메트로놈 (곡 sync 자동) ───────────────────────
+async function prepareMetronome(item, stems, sampleRate) {
+  if (!currentPlayer || !metroBpmEl) return;
+  const settings = loadSongSettings(item) || {};
+  const cached = settings.beatCache;
+  const wantEnabled = !!(settings.metro && settings.metro.enabled);
+  // 볼륨: 저장값이 없으면 슬라이더 현재값 (default 60) 을 Player 로 sync
+  if (!(settings.metro && typeof settings.metro.volume === 'number') && metroVolEl) {
+    currentPlayer.setMetronomeVolume(Number(metroVolEl.value) / 100);
+  }
+
+  // 캐시된 beats 우선 사용 — downbeat 필드 있으면 v2 캐시 (linear regression 결과)
+  const cacheValid = cached && Array.isArray(cached.beats) && cached.beats.length > 0
+                     && typeof cached.downbeat === 'number';
+  if (cacheValid) {
+    currentPlayer.setBeats(cached.beats, cached.beatInterval, cached.tempo, cached.downbeat);
+    metroBpmEl.textContent = `${Math.round(cached.tempo)} BPM`;
+    metroBpmEl.classList.add('detected');
+    if (wantEnabled) {
+      currentPlayer.setMetronomeEnabled(true);
+      metroToggleEl?.classList.add('on');
+    }
+    return;
+  }
+  // 없으면 drums 스템에서 백그라운드 감지
+  const drums = stems?.drums;
+  if (!drums || !drums[0] || !drums[1]) {
+    metroBpmEl.textContent = '—';
+    metroBpmEl.classList.remove('detected');
+    return;
+  }
+  // fallback: 모든 스템 합쳐 재시도용 mix 생성
+  let fbL = null, fbR = null;
+  for (const arr of Object.values(stems)) {
+    if (!arr || !arr[0] || !arr[1]) continue;
+    if (!fbL) { fbL = new Float32Array(arr[0]); fbR = new Float32Array(arr[1]); continue; }
+    const n = Math.min(fbL.length, arr[0].length);
+    for (let i = 0; i < n; i++) { fbL[i] += arr[0][i]; fbR[i] += arr[1][i]; }
+  }
+  metroBpmEl.textContent = '분석 중…';
+  metroBpmEl.classList.remove('detected');
+  try {
+    const cur = item;
+    const res = await detectBeats(drums[0], drums[1], sampleRate, fbL ? [fbL, fbR] : null);
+    // 완료 시점 다른 곡이면 캐시만 저장 · 현재 세션에 반영 X
+    if (currentItem()?.id !== cur.id) {
+      const oldKey = songKeyOf(cur);
+      if (oldKey) {
+        try {
+          const raw = localStorage.getItem(oldKey);
+          const s = raw ? JSON.parse(raw) : {};
+          s.beatCache = { tempo: res.tempo, beats: res.beats, beatInterval: res.beatInterval, downbeat: res.downbeat, fitStdMs: res.fitStdMs, at: Date.now() };
+          localStorage.setItem(oldKey, JSON.stringify(s));
+        } catch {}
+      }
+      return;
+    }
+    saveBeatCache(res.tempo, res.beats, res.beatInterval, res.downbeat, res.fitStdMs);
+    currentPlayer.setBeats(res.beats, res.beatInterval, res.tempo, res.downbeat);
+    metroBpmEl.textContent = `${Math.round(res.tempo)} BPM`;
+    metroBpmEl.classList.add('detected');
+    if (wantEnabled) {
+      currentPlayer.setMetronomeEnabled(true);
+      metroToggleEl?.classList.add('on');
+    }
+  } catch (e) {
+    console.warn('[beat-detect]', e);
+    metroBpmEl.textContent = '감지 실패';
+  }
+}
+
+metroToggleEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  const info = currentPlayer.getMetronomeInfo();
+  if (!info.hasBeats) return;   // 아직 분석 중이거나 실패
+  const next = !info.enabled;
+  currentPlayer.setMetronomeEnabled(next);
+  metroToggleEl.classList.toggle('on', next);
+  saveMetro({ enabled: next });
+});
+
+metroVolEl?.addEventListener('input', () => {
+  const v = Number(metroVolEl.value);
+  currentPlayer?.setMetronomeVolume(v / 100);
+  saveMetro({ volume: v });
+});
 
 async function mountPlayer(item) {
   const myMountId = ++_mountId;
@@ -361,6 +459,9 @@ async function mountPlayer(item) {
 
     // 저장된 곡별 설정 복원
     await restoreSongSettings(item);
+
+    // 메트로놈: 캐시된 beats 있으면 즉시 세팅, 없으면 백그라운드로 감지 후 저장
+    prepareMetronome(item, stems, sampleRate);
   } catch (e) {
     console.error(e);
     setErr('로드 실패: ' + e.message);
@@ -400,6 +501,14 @@ async function restoreSongSettings(item) {
         btn?.classList.toggle('on', !!nowMuted);
         row?.classList.toggle('muted', !!nowMuted);
       }
+    }
+    // 메트로놈 볼륨·활성 상태 (beats 는 prepareMetronome 에서 별도 세팅)
+    if (s.metro) {
+      if (typeof s.metro.volume === 'number') {
+        currentPlayer?.setMetronomeVolume(s.metro.volume / 100);
+        if (metroVolEl) metroVolEl.value = s.metro.volume;
+      }
+      // enabled 는 beats 세팅 후에 적용해야 함 → prepareMetronome 안에서 처리
     }
     // 트랙 Solo
     if (s.trackSolos) {
