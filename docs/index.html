@@ -1053,9 +1053,15 @@
       const portableBtn = document.getElementById('portable-btn');
 
       try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
-        if (!res.ok) throw new Error('latest release not found');
-        const rel = await res.json();
+        // 한 번의 요청으로 모든 릴리즈 얻기 (models-v1 포함, 최신 앱 릴리즈도 여기서 뽑음)
+        const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`);
+        if (!res.ok) throw new Error('releases not found');
+        const releases = await res.json();
+        if (!Array.isArray(releases) || releases.length === 0) throw new Error('empty releases');
+
+        // 최신 앱 릴리즈: tag 가 v로 시작 (models-v1 등은 제외)
+        const appReleases = releases.filter(r => /^v\d/i.test(r.tag_name || ''));
+        const rel = appReleases[0] || releases[0];   // 신순 정렬 (GitHub 기본)
         const tag = rel.tag_name || '';
         nameCache.versionTag = tag;
         versionText.textContent = t('ver.prefix') + tag;
@@ -1064,10 +1070,16 @@
         const setup    = assets.find(a => /Setup\.exe$/i.test(a.name));
         const portable = assets.find(a => /Portable\.exe$/i.test(a.name));
 
+        // 총 다운로드 = 모든 릴리즈의 Setup+Portable(.exe) + 모델(.onnx)
+        // latest.yml · blockmap 은 자동 업데이터 트래픽이라 제외 (허수 방지)
         let totalDl = 0;
-        for (const a of assets) totalDl += (a.download_count || 0);
-        // 모든 릴리즈 합계는 별도 요청 필요 — 여기서는 최신 릴리즈만 표시
-        if (setup)    totalDl = setup.download_count + (portable?.download_count || 0);
+        for (const r of releases) {
+          for (const a of (r.assets || [])) {
+            if (/\.exe$/i.test(a.name) || /\.onnx$/i.test(a.name)) {
+              totalDl += (a.download_count || 0);
+            }
+          }
+        }
         nameCache.dlCount = totalDl;
 
         if (setup) {
