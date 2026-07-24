@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>커버 · Cover Share</title>
+  <link rel="icon" type="image/png" href="../icon.png" />
+  <meta name="theme-color" content="#0f1114" />
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+  <style>
+    :root {
+      --bg:#0f1114; --surface:#161a20; --elev:#1c2028; --elev-2:#232833;
+      --border:rgba(255,255,255,.08); --border-mid:rgba(255,255,255,.16);
+      --tx-1:#ececef; --tx-2:#9aa4b2; --tx-3:#6b7280; --tx-4:#4a5261;
+      --accent:#35d1a6; --accent-hover:#48deb4; --accent-fg:#071913;
+      --danger:#e05a5a;
+      --sans:'Pretendard Variable',Pretendard,ui-sans-serif,system-ui,-apple-system,'Segoe UI','Noto Sans KR',sans-serif;
+      --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{background:var(--bg);color:var(--tx-1);font-family:var(--sans);line-height:1.62;-webkit-font-smoothing:antialiased;min-height:100vh}
+    html[lang="ko"]{word-break:keep-all}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{color:var(--accent-hover)}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+    .container{max-width:860px;margin:0 auto;padding:0 20px}
+
+    header{padding:16px 0;border-bottom:1px solid var(--border);background:rgba(15,17,20,.72);backdrop-filter:blur(10px);position:sticky;top:0;z-index:20}
+    .header-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .brand img{width:32px;height:32px}
+    .brand .name{font-size:14.5px;font-weight:700}
+    .brand .sub{font-size:11px;color:var(--tx-3);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+    .header-actions{display:flex;align-items:center;gap:10px}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:var(--elev);color:var(--tx-1);border:1px solid var(--border);border-radius:6px;font:600 12.5px/1 var(--sans);cursor:pointer;transition:border-color .14s,background .14s,color .14s}
+    .btn:hover{border-color:var(--border-mid);background:var(--elev-2)}
+    .btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+    .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--accent-fg)}
+    .btn.ghost{background:transparent}
+    .btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+    .btn.danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent);border-color:var(--danger)}
+    .avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;border:1px solid var(--border)}
+
+    main{padding:30px 0 80px}
+    .back-link{display:inline-flex;align-items:center;gap:6px;color:var(--tx-3);font-size:12.5px;margin-bottom:20px}
+    .back-link:hover{color:var(--accent)}
+
+    .video-wrap{
+      background:#000;border-radius:10px;overflow:hidden;border:1px solid var(--border);
+      aspect-ratio:16/9;position:relative;
+    }
+    .video-wrap iframe{width:100%;height:100%;border:0;display:block}
+
+    .post-head{margin-top:20px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .post-head h1{font-size:20px;font-weight:700;letter-spacing:-.015em;line-height:1.35;flex:1;min-width:0}
+    .post-actions{display:flex;gap:8px;flex-shrink:0;align-items:flex-start}
+    .like-btn{display:inline-flex;align-items:center;gap:6px}
+    .like-btn.liked{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent);background:color-mix(in srgb,var(--danger) 10%,transparent)}
+
+    .post-meta{
+      display:flex;align-items:center;gap:10px;margin-top:12px;
+      color:var(--tx-3);font-size:12.5px;flex-wrap:wrap;
+    }
+    .post-meta .author{display:flex;align-items:center;gap:6px;color:var(--tx-2)}
+    .post-meta .author img{width:22px;height:22px;border-radius:50%}
+    .sep{color:var(--tx-4)}
+    .instrument-badge{display:inline-flex;align-items:center;padding:2px 8px;font:600 10.5px/1 var(--sans);border-radius:999px;background:var(--elev);border:1px solid var(--border)}
+
+    .desc{
+      margin-top:22px;padding:16px 18px;
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      font-size:13.5px;color:var(--tx-2);white-space:pre-wrap;
+    }
+    .desc.hide{display:none}
+
+    /* Comments */
+    section.comments{margin-top:36px}
+    section.comments h2{font-size:14px;font-weight:700;color:var(--tx-1);margin-bottom:14px;display:flex;align-items:baseline;gap:8px}
+    section.comments h2 .count{color:var(--tx-4);font-size:11.5px;font-family:var(--mono)}
+
+    .comment-form{
+      display:flex;flex-direction:column;gap:10px;
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:14px;margin-bottom:20px;
+    }
+    .comment-form textarea{
+      background:var(--elev);border:1px solid var(--border);color:var(--tx-1);
+      padding:10px 12px;border-radius:6px;font:500 13px/1.5 var(--sans);
+      min-height:70px;resize:vertical;outline:none;transition:border-color .14s;
+    }
+    .comment-form textarea:focus{border-color:var(--accent)}
+    .comment-form .row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .comment-form .hint{font-size:11px;color:var(--tx-4)}
+    .comment-list{display:flex;flex-direction:column;gap:12px}
+    .comment{
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:12px 14px;display:flex;gap:12px;
+    }
+    .comment .c-avatar{width:32px;height:32px;border-radius:50%;flex-shrink:0;background:var(--elev)}
+    .comment .c-body{flex:1;min-width:0}
+    .comment .c-head{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+    .comment .c-name{font-weight:600;font-size:12.5px;color:var(--tx-1)}
+    .comment .c-when{font-size:11px;color:var(--tx-4)}
+    .comment .c-text{font-size:13px;color:var(--tx-2);white-space:pre-wrap;line-height:1.55}
+    .comment .c-actions{margin-top:4px;display:flex;gap:8px}
+    .comment .c-actions button{background:none;border:0;color:var(--tx-4);font-size:11px;cursor:pointer;padding:0}
+    .comment .c-actions button:hover{color:var(--danger)}
+
+    .empty{text-align:center;padding:40px 20px;color:var(--tx-4);font-size:13px}
+
+    .error{
+      background:color-mix(in srgb,var(--danger) 12%,transparent);
+      border:1px solid color-mix(in srgb,var(--danger) 30%,transparent);
+      color:#ff9090;padding:12px 14px;border-radius:6px;font-size:13px;
+    }
+
+    footer{padding:36px 0;text-align:center;border-top:1px solid var(--border);color:var(--tx-4);font-size:11.5px;font-family:var(--mono);letter-spacing:.04em}
+    footer a{color:var(--tx-2);margin:0 10px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-row">
+        <a href="./" class="brand" style="text-decoration:none">
+          <img src="../icon.png" alt="" />
+          <div>
+            <div class="name">Cover Share</div>
+            <div class="sub">by YT Separator</div>
+          </div>
+        </a>
+        <div class="header-actions" id="header-actions"></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <a class="back-link" href="./">← 목록으로</a>
+      <div id="post-view">
+        <div class="empty" id="loading">불러오는 중…</div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      <a href="/">홈</a><a href="/community/">커뮤니티</a><a href="mailto:whalemindbass@gmail.com">문의</a>
+      <div style="margin-top:12px">© 2026 Whale Mind</div>
+    </div>
+  </footer>
+
+  <script>
+    const API = 'https://ytseparator.com/community/api';
+    const $ = (id) => document.getElementById(id);
+    const postId = new URLSearchParams(location.search).get('id');
+    let currentUser = null;
+    let currentPost = null;
+
+    async function api(path, opts={}) {
+      const r = await fetch(API + path, { credentials: 'include', ...opts });
+      return { status: r.status, data: await r.json().catch(() => null) };
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function fmtWhen(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60_000) return '방금 전';
+      if (diff < 3600_000) return Math.floor(diff/60_000) + '분 전';
+      if (diff < 86400_000) return Math.floor(diff/3600_000) + '시간 전';
+      if (diff < 7*86400_000) return Math.floor(diff/86400_000) + '일 전';
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    const INST_LABEL = { vocals:'보컬', guitar:'기타', bass:'베이스', drums:'드럼', piano:'피아노', other:'기타' };
+
+    async function loadUser() {
+      const r = await api('/me');
+      currentUser = r.data?.user || null;
+      renderHeader();
+    }
+    function renderHeader() {
+      const el = $('header-actions');
+      if (currentUser) {
+        el.innerHTML = `
+          <img class="avatar" src="${currentUser.avatar || ''}" alt="" />
+          <button class="btn ghost" id="btn-logout">로그아웃</button>
+        `;
+        $('btn-logout').onclick = async () => {
+          await api('/auth/logout', { method: 'POST' });
+          currentUser = null; renderHeader();
+        };
+      } else {
+        el.innerHTML = `<a class="btn primary" href="${API}/auth/google?returnTo=${encodeURIComponent(location.pathname + location.search)}">Google 로그인</a>`;
+      }
+    }
+
+    async function loadPost() {
+      if (!postId) return renderError('잘못된 링크입니다');
+      const r = await api('/posts/' + encodeURIComponent(postId));
+      if (r.status === 404) return renderError('삭제되었거나 존재하지 않는 게시글입니다');
+      if (!r.data || r.data.ok === false) return renderError(r.data?.error || '불러오기 실패');
+      currentPost = r.data;
+      renderPost();
+      loadComments();
+    }
+    function renderError(msg) {
+      $('post-view').innerHTML = `<div class="error">${escapeHtml(msg)}</div>`;
+    }
+
+    function renderPost() {
+      const p = currentPost;
+      document.title = `${p.title} · 커뮤니티`;
+      const inst = p.instrument ? `<span class="instrument-badge">${INST_LABEL[p.instrument] || p.instrument}</span>` : '';
+      $('post-view').innerHTML = `
+        <div class="video-wrap">
+          <iframe src="https://www.youtube.com/embed/${encodeURIComponent(p.video_id)}?rel=0"
+                  loading="lazy" allowfullscreen
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+        </div>
+        <div class="post-head">
+          <h1>${escapeHtml(p.title)}</h1>
+          <div class="post-actions">
+            <button class="btn like-btn ${p.liked_by_me ? 'liked' : ''}" id="btn-like">
+              ♥ <span id="like-count">${p.like_count}</span>
+            </button>
+            ${p.is_mine ? '<button class="btn danger" id="btn-delete">삭제</button>' : ''}
+          </div>
+        </div>
+        <div class="post-meta">
+          <div class="author">
+            ${p.author.avatar ? `<img src="${escapeHtml(p.author.avatar)}" alt="" />` : ''}
+            <span>${escapeHtml(p.author.name)}</span>
+          </div>
+          <span class="sep">·</span>
+          <span>${escapeHtml(p.song_name)}${p.song_artist ? ' · ' + escapeHtml(p.song_artist) : ''}</span>
+          ${inst ? `<span class="sep">·</span>${inst}` : ''}
+          <span class="sep">·</span>
+          <span>${fmtWhen(p.created_at)}</span>
+        </div>
+        ${p.description ? `<div class="desc">${escapeHtml(p.description)}</div>` : '<div class="desc hide"></div>'}
+        <section class="comments">
+          <h2>댓글 <span class="count" id="cmt-count">${p.comment_count}</span></h2>
+          <div id="cmt-form-slot"></div>
+          <div class="comment-list" id="cmt-list"><div class="empty">댓글 로드 중…</div></div>
+        </section>
+      `;
+      $('btn-like').onclick = toggleLike;
+      const del = $('btn-delete'); if (del) del.onclick = deletePost;
+      renderCommentForm();
+    }
+    function renderCommentForm() {
+      const slot = $('cmt-form-slot');
+      if (!currentUser) {
+        slot.innerHTML = `<div class="comment-form"><div style="font-size:13px;color:var(--tx-3);text-align:center;padding:8px 0;">
+          댓글을 작성하려면 <a href="${API}/auth/google?returnTo=${encodeURIComponent(location.pathname + location.search)}">로그인</a> 이 필요합니다
+        </div></div>`;
+        return;
+      }
+      slot.innerHTML = `
+        <div class="comment-form">
+          <textarea id="cmt-input" maxlength="500" placeholder="응원이나 팁 · 감상 나누기 (500자)"></textarea>
+          <div class="row">
+            <span class="hint">500자 이내 · 스팸이나 비방은 삭제됩니다</span>
+            <button class="btn primary" id="cmt-submit">등록</button>
+          </div>
+        </div>
+      `;
+      $('cmt-submit').onclick = submitComment;
+    }
+
+    async function toggleLike() {
+      if (!currentUser) {
+        location.href = `${API}/auth/google?returnTo=${encodeURIComponent(location.pathname + location.search)}`;
+        return;
+      }
+      const r = await api(`/posts/${postId}/like`, { method: 'POST' });
+      if (r.data) {
+        $('like-count').textContent = r.data.like_count;
+        $('btn-like').classList.toggle('liked', r.data.liked);
+      }
+    }
+    async function deletePost() {
+      if (!confirm('이 게시글을 삭제할까요?')) return;
+      const r = await api(`/posts/${postId}`, { method: 'DELETE' });
+      if (r.data?.ok) location.href = './';
+      else alert(r.data?.error || '삭제 실패');
+    }
+
+    async function loadComments() {
+      const r = await api(`/posts/${postId}/comments`);
+      const items = r.data?.items || [];
+      const list = $('cmt-list');
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">첫 댓글을 남겨보세요</div>';
+        return;
+      }
+      list.innerHTML = items.map(c => `
+        <div class="comment" data-id="${c.id}">
+          ${c.author.avatar ? `<img class="c-avatar" src="${escapeHtml(c.author.avatar)}" alt="" />` : '<div class="c-avatar"></div>'}
+          <div class="c-body">
+            <div class="c-head">
+              <span class="c-name">${escapeHtml(c.author.name)}</span>
+              <span class="c-when">${fmtWhen(c.created_at)}</span>
+            </div>
+            <div class="c-text">${escapeHtml(c.body)}</div>
+            ${currentUser && currentUser.id === c.author.id ? '<div class="c-actions"><button data-del="'+c.id+'">삭제</button></div>' : ''}
+          </div>
+        </div>
+      `).join('');
+      list.querySelectorAll('[data-del]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('이 댓글을 삭제할까요?')) return;
+          const id = btn.dataset.del;
+          const r = await api(`/comments/${id}`, { method: 'DELETE' });
+          if (r.data?.ok) loadComments();
+          else alert(r.data?.error || '삭제 실패');
+        });
+      });
+    }
+    async function submitComment() {
+      const input = $('cmt-input');
+      const body = input.value.trim();
+      if (!body) return;
+      $('cmt-submit').disabled = true;
+      const r = await api(`/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+      $('cmt-submit').disabled = false;
+      if (r.data?.ok) {
+        input.value = '';
+        // 댓글 수 업데이트
+        const cur = Number($('cmt-count').textContent) || 0;
+        $('cmt-count').textContent = cur + 1;
+        loadComments();
+      } else {
+        alert(r.data?.error || '등록 실패');
+      }
+    }
+
+    (async () => {
+      await loadUser();
+      await loadPost();
+    })();
+  </script>
+</body>
+</html>
