@@ -111,6 +111,22 @@
 
     .empty{text-align:center;padding:40px 20px;color:var(--tx-4);font-size:13px}
 
+    /* Report modal */
+    .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding:60px 20px 20px;z-index:50}
+    .modal-back.open{display:flex}
+    .modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;overflow:hidden}
+    .modal h2{font-size:14.5px;font-weight:700;padding:14px 18px;border-bottom:1px solid var(--border)}
+    .modal-body{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+    .modal-body p{font-size:12.5px;color:var(--tx-3);line-height:1.55}
+    .modal-body label{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--elev);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px}
+    .modal-body label:hover{border-color:var(--border-mid)}
+    .modal-body label input{margin:0}
+    .modal-body textarea{background:var(--elev);border:1px solid var(--border);color:var(--tx-1);padding:9px 12px;border-radius:6px;font:500 12.5px/1.4 var(--sans);min-height:60px;resize:vertical;outline:none}
+    .modal-body textarea:focus{border-color:var(--accent)}
+    .modal-actions{display:flex;justify-content:flex-end;gap:10px;padding:12px 18px;background:var(--elev);border-top:1px solid var(--border)}
+    .report-link{background:none;border:0;color:var(--tx-4);font-size:11px;cursor:pointer;padding:0}
+    .report-link:hover{color:var(--danger)}
+
     .error{
       background:color-mix(in srgb,var(--danger) 12%,transparent);
       border:1px solid color-mix(in srgb,var(--danger) 30%,transparent);
@@ -145,6 +161,25 @@
       </div>
     </div>
   </main>
+
+  <!-- Report modal -->
+  <div class="modal-back" id="rep-modal">
+    <div class="modal">
+      <h2>신고하기</h2>
+      <div class="modal-body">
+        <p>불건전 · 저작권 침해 · 스팸 등을 신고해 주세요. 신고 내용은 관리자만 확인합니다.</p>
+        <label><input type="radio" name="rep-reason" value="저작권 침해" checked/>저작권 침해</label>
+        <label><input type="radio" name="rep-reason" value="부적절한 콘텐츠"/>부적절한 콘텐츠</label>
+        <label><input type="radio" name="rep-reason" value="스팸/광고"/>스팸/광고</label>
+        <label><input type="radio" name="rep-reason" value="기타"/>기타</label>
+        <textarea id="rep-note" maxlength="500" placeholder="추가 설명 (선택)"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="rep-cancel">취소</button>
+        <button class="btn danger" id="rep-submit">신고</button>
+      </div>
+    </div>
+  </div>
 
   <footer>
     <div class="container">
@@ -228,7 +263,9 @@
             <button class="btn like-btn ${p.liked_by_me ? 'liked' : ''}" id="btn-like">
               ♥ <span id="like-count">${p.like_count}</span>
             </button>
-            ${p.is_mine ? '<button class="btn danger" id="btn-delete">삭제</button>' : ''}
+            ${p.is_mine
+              ? '<button class="btn danger" id="btn-delete">삭제</button>'
+              : '<button class="btn" id="btn-report" title="신고">⚑</button>'}
           </div>
         </div>
         <div class="post-meta">
@@ -251,6 +288,7 @@
       `;
       $('btn-like').onclick = toggleLike;
       const del = $('btn-delete'); if (del) del.onclick = deletePost;
+      const rep = $('btn-report'); if (rep) rep.onclick = () => openReport('post', currentPost.id);
       renderCommentForm();
     }
     function renderCommentForm() {
@@ -299,19 +337,25 @@
         list.innerHTML = '<div class="empty">첫 댓글을 남겨보세요</div>';
         return;
       }
-      list.innerHTML = items.map(c => `
-        <div class="comment" data-id="${c.id}">
-          ${c.author.avatar ? `<img class="c-avatar" src="${escapeHtml(c.author.avatar)}" alt="" />` : '<div class="c-avatar"></div>'}
-          <div class="c-body">
-            <div class="c-head">
-              <span class="c-name">${escapeHtml(c.author.name)}</span>
-              <span class="c-when">${fmtWhen(c.created_at)}</span>
+      list.innerHTML = items.map(c => {
+        const isMine = currentUser && currentUser.id === c.author.id;
+        const actionBtn = isMine
+          ? `<button data-del="${c.id}">삭제</button>`
+          : (currentUser ? `<button data-report="${c.id}">신고</button>` : '');
+        return `
+          <div class="comment" data-id="${c.id}">
+            ${c.author.avatar ? `<img class="c-avatar" src="${escapeHtml(c.author.avatar)}" alt="" />` : '<div class="c-avatar"></div>'}
+            <div class="c-body">
+              <div class="c-head">
+                <span class="c-name">${escapeHtml(c.author.name)}</span>
+                <span class="c-when">${fmtWhen(c.created_at)}</span>
+              </div>
+              <div class="c-text">${escapeHtml(c.body)}</div>
+              ${actionBtn ? `<div class="c-actions">${actionBtn}</div>` : ''}
             </div>
-            <div class="c-text">${escapeHtml(c.body)}</div>
-            ${currentUser && currentUser.id === c.author.id ? '<div class="c-actions"><button data-del="'+c.id+'">삭제</button></div>' : ''}
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
       list.querySelectorAll('[data-del]').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!confirm('이 댓글을 삭제할까요?')) return;
@@ -321,7 +365,50 @@
           else alert(r.data?.error || '삭제 실패');
         });
       });
+      list.querySelectorAll('[data-report]').forEach(btn => {
+        btn.addEventListener('click', () => openReport('comment', btn.dataset.report));
+      });
     }
+
+    // ── Report ───────────────
+    const repModal = $('rep-modal');
+    let repTarget = null;
+    function openReport(kind, id) {
+      if (!currentUser) {
+        location.href = `${API}/auth/google?returnTo=${encodeURIComponent(location.pathname + location.search)}`;
+        return;
+      }
+      repTarget = { kind, id };
+      $('rep-note').value = '';
+      document.querySelector('input[name="rep-reason"][value="저작권 침해"]').checked = true;
+      repModal.classList.add('open');
+    }
+    function closeReport() { repModal.classList.remove('open'); repTarget = null; }
+    $('rep-cancel').onclick = closeReport;
+    repModal.addEventListener('click', (e) => { if (e.target === repModal) closeReport(); });
+    $('rep-submit').onclick = async () => {
+      if (!repTarget) return;
+      const reasonRadio = document.querySelector('input[name="rep-reason"]:checked');
+      const note = $('rep-note').value.trim();
+      const reason = [reasonRadio?.value, note].filter(Boolean).join(' · ');
+      $('rep-submit').disabled = true;
+      const r = await api('/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_kind: repTarget.kind,
+          target_id: repTarget.id,
+          reason,
+        }),
+      });
+      $('rep-submit').disabled = false;
+      if (r.data?.ok) {
+        closeReport();
+        alert('신고가 접수되었습니다. 검토 후 처리하겠습니다.');
+      } else {
+        alert(r.data?.error || '신고 실패');
+      }
+    };
     async function submitComment() {
       const input = $('cmt-input');
       const body = input.value.trim();

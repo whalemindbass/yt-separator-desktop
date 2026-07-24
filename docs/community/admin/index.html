@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Cover Share</title>
+  <link rel="icon" type="image/png" href="../../icon.png" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#0f1114" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+  <style>
+    :root {
+      --bg:#0f1114; --surface:#161a20; --elev:#1c2028; --elev-2:#232833;
+      --border:rgba(255,255,255,.08); --border-mid:rgba(255,255,255,.16);
+      --tx-1:#ececef; --tx-2:#9aa4b2; --tx-3:#6b7280; --tx-4:#4a5261;
+      --accent:#35d1a6; --accent-hover:#48deb4; --accent-fg:#071913;
+      --warn:#e6c33a; --danger:#e05a5a;
+      --sans:'Pretendard Variable',Pretendard,ui-sans-serif,system-ui,-apple-system,'Segoe UI','Noto Sans KR',sans-serif;
+      --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{background:var(--bg);color:var(--tx-1);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+    html[lang="ko"]{word-break:keep-all}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{color:var(--accent-hover)}
+
+    .container{max-width:1100px;margin:0 auto;padding:0 20px}
+
+    header{padding:14px 0;border-bottom:1px solid var(--border);background:var(--surface)}
+    .header-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .brand{display:flex;align-items:center;gap:10px}
+    .brand img{width:26px;height:26px}
+    .brand .name{font-size:13.5px;font-weight:700}
+    .brand .tag{
+      display:inline-block;padding:2px 7px;
+      background:color-mix(in srgb,var(--warn) 15%,transparent);
+      border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+      color:var(--warn);font-family:var(--mono);font-size:9.5px;font-weight:700;
+      letter-spacing:.08em;border-radius:3px;text-transform:uppercase;
+      margin-left:8px;
+    }
+    .header-actions{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--tx-3)}
+
+    main{padding:28px 0 80px}
+
+    .stats-grid{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+      gap:10px;margin-bottom:28px;
+    }
+    .stat{
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:14px 16px;
+    }
+    .stat .label{font-size:11px;font-weight:600;color:var(--tx-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;font-family:var(--mono)}
+    .stat .value{font-size:22px;font-weight:800;color:var(--tx-1);font-variant-numeric:tabular-nums}
+    .stat.warn .value{color:var(--warn)}
+    .stat.danger .value{color:var(--danger)}
+
+    .section-head{
+      display:flex;align-items:center;justify-content:space-between;
+      margin:8px 0 16px;
+    }
+    .section-head h2{font-size:14px;font-weight:700}
+    .tabs{display:flex;gap:6px}
+    .tab{
+      padding:6px 12px;background:var(--surface);border:1px solid var(--border);
+      color:var(--tx-2);font:600 12px/1 var(--sans);border-radius:6px;cursor:pointer;
+    }
+    .tab.on{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+
+    .list{display:flex;flex-direction:column;gap:10px}
+    .report{
+      background:var(--surface);border:1px solid var(--border);border-radius:8px;
+      padding:14px 16px;
+    }
+    .r-head{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      margin-bottom:8px;
+    }
+    .r-badge{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:2px 8px;font:600 10.5px/1 var(--sans);
+      border-radius:999px;letter-spacing:.02em;
+    }
+    .r-badge[data-kind="post"]{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
+    .r-badge[data-kind="comment"]{background:color-mix(in srgb,#a78bfa 12%,transparent);color:#b09aff;border:1px solid color-mix(in srgb,#a78bfa 30%,transparent)}
+    .r-when{font-size:11px;color:var(--tx-4);font-family:var(--mono)}
+    .r-reason{font-size:13px;color:var(--tx-1);margin-bottom:8px;white-space:pre-wrap}
+    .r-reason.empty{color:var(--tx-4);font-style:italic}
+    .r-target{
+      background:var(--elev);border:1px solid var(--border);border-radius:6px;
+      padding:10px 12px;font-size:12.5px;color:var(--tx-2);
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+    }
+    .r-target.removed{opacity:.5}
+    .r-target-title{color:var(--tx-1);font-weight:600}
+    .r-target-meta{font-size:11px;color:var(--tx-4);margin-top:2px;font-family:var(--mono)}
+    .r-target-link{color:var(--tx-3);font-size:11px}
+    .r-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end;flex-wrap:wrap}
+    .r-actions .reporter{color:var(--tx-4);font-size:11px;margin-right:auto;align-self:center}
+    .btn{
+      display:inline-flex;align-items:center;gap:5px;
+      padding:6px 12px;background:var(--elev);border:1px solid var(--border);
+      color:var(--tx-2);border-radius:5px;
+      font:600 11.5px/1 var(--sans);cursor:pointer;
+      transition:color .12s,border-color .12s,background .12s;
+    }
+    .btn:hover{color:var(--tx-1);border-color:var(--border-mid);background:var(--elev-2)}
+    .btn.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 30%,transparent)}
+    .btn.danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent);border-color:var(--danger)}
+    .btn.primary{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
+    .btn.primary:hover{background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:var(--accent)}
+
+    .empty{
+      text-align:center;padding:60px 20px;color:var(--tx-4);font-size:13px;
+      background:var(--surface);border:1px dashed var(--border);border-radius:8px;
+    }
+    .empty h3{color:var(--tx-2);font-size:14px;margin-bottom:6px}
+
+    .forbidden{
+      max-width:520px;margin:80px auto;padding:32px;
+      background:var(--surface);border:1px solid var(--border);border-radius:10px;
+      text-align:center;
+    }
+    .forbidden h1{font-size:18px;margin-bottom:8px}
+    .forbidden p{font-size:13px;color:var(--tx-3)}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-row">
+        <a href="../" class="brand" style="text-decoration:none">
+          <img src="../../icon.png" alt="" />
+          <div><span class="name">Cover Share</span><span class="tag">Admin</span></div>
+        </a>
+        <div class="header-actions">
+          <a href="../" style="color:var(--tx-3);font-size:12px">← 커뮤니티</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container" id="root">
+      <div class="empty">불러오는 중…</div>
+    </div>
+  </main>
+
+  <script>
+    const API = 'https://ytseparator.com/community/api';
+    const $ = (id) => document.getElementById(id);
+    async function api(p, opts={}) {
+      const r = await fetch(API + p, { credentials: 'include', ...opts });
+      return { status: r.status, data: await r.json().catch(() => null) };
+    }
+    function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function fmtWhen(ts) {
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    let currentTab = 'open';
+
+    async function boot() {
+      const chk = await api('/admin/me');
+      if (!chk.data?.is_admin) {
+        $('root').innerHTML = `
+          <div class="forbidden">
+            <h1>접근 권한이 없습니다</h1>
+            <p>관리자 계정으로 <a href="${API}/auth/google?returnTo=/community/admin/">로그인</a> 하거나<br/>커뮤니티로 <a href="../">돌아가기</a></p>
+          </div>`;
+        return;
+      }
+      render();
+      await loadStats();
+      await loadReports();
+    }
+
+    function render() {
+      $('root').innerHTML = `
+        <div class="stats-grid" id="stats"></div>
+        <div class="section-head">
+          <h2>신고</h2>
+          <div class="tabs">
+            <span class="tab on" data-tab="open">열림</span>
+            <span class="tab" data-tab="resolved">처리됨</span>
+          </div>
+        </div>
+        <div class="list" id="list"><div class="empty">불러오는 중…</div></div>
+      `;
+      document.querySelectorAll('.tab').forEach(t => {
+        t.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+          t.classList.add('on');
+          currentTab = t.dataset.tab;
+          loadReports();
+        });
+      });
+    }
+
+    async function loadStats() {
+      const r = await api('/admin/stats');
+      const s = r.data || {};
+      $('stats').innerHTML = `
+        <div class="stat"><div class="label">Users</div><div class="value">${s.users || 0}</div></div>
+        <div class="stat"><div class="label">Posts</div><div class="value">${s.posts || 0}</div></div>
+        <div class="stat"><div class="label">Comments</div><div class="value">${s.comments || 0}</div></div>
+        <div class="stat"><div class="label">Likes</div><div class="value">${s.likes || 0}</div></div>
+        <div class="stat ${s.open_reports ? 'danger' : ''}"><div class="label">Open Reports</div><div class="value">${s.open_reports || 0}</div></div>
+        <div class="stat"><div class="label">Posts / 24h</div><div class="value">${s.posts_last_24h || 0}</div></div>
+      `;
+    }
+
+    async function loadReports() {
+      const r = await api('/admin/reports?status=' + currentTab);
+      const items = r.data?.items || [];
+      const list = $('list');
+      if (!items.length) {
+        list.innerHTML = `<div class="empty"><h3>${currentTab === 'open' ? '열린 신고가 없어요' : '처리된 신고가 없어요'}</h3></div>`;
+        return;
+      }
+      list.innerHTML = items.map(reportCard).join('');
+      list.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const { action, reportId, targetKind, targetId } = btn.dataset;
+          if (action === 'resolve') {
+            if (!confirm('이 신고를 처리 완료로 표시할까요?')) return;
+            await api(`/admin/reports/${reportId}/resolve`, { method: 'POST' });
+          } else if (action === 'delete') {
+            const kindLabel = targetKind === 'post' ? '게시글' : '댓글';
+            if (!confirm(`이 ${kindLabel}을 삭제하시겠습니까? (취소 불가)`)) return;
+            await api(`/admin/${targetKind}s/${targetId}`, { method: 'DELETE' });
+            // 삭제 후 자동으로 신고도 resolve
+            await api(`/admin/reports/${reportId}/resolve`, { method: 'POST' });
+          }
+          loadReports();
+          loadStats();
+        });
+      });
+    }
+
+    function reportCard(r) {
+      const t = r.target;
+      let targetBlock = '';
+      if (r.target_kind === 'post') {
+        targetBlock = t ? `
+          <div class="r-target ${t.removed ? 'removed' : ''}">
+            <div>
+              <div class="r-target-title">${esc(t.title)} ${t.removed ? '(삭제됨)' : ''}</div>
+              <div class="r-target-meta">${esc(t.author_name)} · ${esc(t.song_name)}</div>
+            </div>
+            <a class="r-target-link" href="../post.html?id=${encodeURIComponent(t.id)}" target="_blank" rel="noopener">보기 ↗</a>
+          </div>
+        ` : `<div class="r-target">(원본 없음)</div>`;
+      } else {
+        targetBlock = t ? `
+          <div class="r-target ${t.removed ? 'removed' : ''}">
+            <div style="min-width:0;flex:1">
+              <div class="r-target-title" style="font-size:12.5px;color:var(--tx-2);white-space:pre-wrap">${esc(t.body)}</div>
+              <div class="r-target-meta">${esc(t.author_name)}</div>
+            </div>
+            <a class="r-target-link" href="../post.html?id=${encodeURIComponent(t.post_id)}" target="_blank" rel="noopener">보기 ↗</a>
+          </div>
+        ` : `<div class="r-target">(원본 없음)</div>`;
+      }
+      const removable = t && !t.removed && !r.resolved_at;
+      return `
+        <div class="report">
+          <div class="r-head">
+            <span class="r-badge" data-kind="${r.target_kind}">${r.target_kind}</span>
+            <span class="r-when">${fmtWhen(r.created_at)}</span>
+          </div>
+          <div class="r-reason ${r.reason ? '' : 'empty'}">${r.reason ? esc(r.reason) : '(사유 미기재)'}</div>
+          ${targetBlock}
+          <div class="r-actions">
+            <span class="reporter">신고자: ${r.reporter ? esc(r.reporter.name) : '(익명)'}</span>
+            ${removable ? `<button class="btn danger" data-action="delete" data-report-id="${r.id}" data-target-kind="${r.target_kind}" data-target-id="${r.target_id}">삭제 + 처리</button>` : ''}
+            ${!r.resolved_at ? `<button class="btn primary" data-action="resolve" data-report-id="${r.id}">처리 완료</button>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    boot();
+  </script>
+</body>
+</html>
