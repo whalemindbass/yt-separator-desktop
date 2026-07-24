@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>프로필 · Cover Share</title>
+  <link rel="icon" type="image/png" href="../icon.png" />
+  <meta name="theme-color" content="#0f1114" />
+  <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+  <style>
+    :root {
+      --bg:#0f1114; --surface:#161a20; --elev:#1c2028; --elev-2:#232833;
+      --border:rgba(255,255,255,.08); --border-mid:rgba(255,255,255,.16);
+      --tx-1:#ececef; --tx-2:#9aa4b2; --tx-3:#6b7280; --tx-4:#4a5261;
+      --accent:#35d1a6; --accent-hover:#48deb4; --accent-fg:#071913;
+      --stem-vocal:#e15b5b; --stem-drums:#e6c33a; --stem-bass:#4b7bff;
+      --stem-guitar:#f97316; --stem-piano:#a78bfa; --stem-other:#e75ea0;
+      --sans:'Pretendard Variable',Pretendard,ui-sans-serif,system-ui,-apple-system,'Segoe UI','Noto Sans KR',sans-serif;
+      --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{background:var(--bg);color:var(--tx-1);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+    html[lang="ko"]{word-break:keep-all}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{color:var(--accent-hover)}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+    .container{max-width:900px;margin:0 auto;padding:0 20px}
+
+    header{padding:16px 0;border-bottom:1px solid var(--border);background:rgba(15,17,20,.72);backdrop-filter:blur(10px);position:sticky;top:0;z-index:20}
+    .header-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .brand img{width:32px;height:32px}
+    .brand .name{font-size:14.5px;font-weight:700}
+    .brand .sub{font-size:11px;color:var(--tx-3);font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase}
+    .header-actions{display:flex;align-items:center;gap:10px}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:var(--elev);color:var(--tx-1);border:1px solid var(--border);border-radius:6px;font:600 12.5px/1 var(--sans);cursor:pointer;transition:border-color .14s,background .14s,color .14s}
+    .btn:hover{border-color:var(--border-mid);background:var(--elev-2)}
+    .btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+    .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:var(--accent-fg)}
+    .btn.ghost{background:transparent}
+    .avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;border:1px solid var(--border)}
+
+    main{padding:36px 0 80px}
+    .back-link{display:inline-flex;align-items:center;gap:6px;color:var(--tx-3);font-size:12.5px;margin-bottom:20px}
+    .back-link:hover{color:var(--accent)}
+
+    .profile-head{
+      display:flex;gap:24px;align-items:center;
+      background:var(--surface);border:1px solid var(--border);border-radius:12px;
+      padding:24px;margin-bottom:24px;
+    }
+    .profile-avatar{
+      width:88px;height:88px;border-radius:50%;object-fit:cover;
+      border:2px solid var(--border);flex-shrink:0;background:var(--elev);
+    }
+    .profile-info{flex:1;min-width:0}
+    .profile-name{font-size:20px;font-weight:800;letter-spacing:-.018em;color:var(--tx-1);margin-bottom:4px}
+    .profile-joined{font-size:12px;color:var(--tx-4);font-family:var(--mono)}
+    .stats{display:flex;gap:22px;margin-top:16px;flex-wrap:wrap}
+    .stat{display:flex;align-items:baseline;gap:6px}
+    .stat-value{font-size:18px;font-weight:700;color:var(--tx-1);font-variant-numeric:tabular-nums}
+    .stat-label{font-size:11.5px;color:var(--tx-3);letter-spacing:.02em}
+
+    .section-title{
+      font-size:13px;font-weight:700;color:var(--tx-2);
+      margin:8px 0 14px;letter-spacing:.02em;
+      display:flex;align-items:baseline;gap:8px;
+    }
+    .section-title .count{font-family:var(--mono);font-size:11px;color:var(--tx-4)}
+
+    /* Post cards (feed 페이지와 동일 톤) */
+    .feed{display:grid;grid-template-columns:1fr;gap:10px}
+    .card{
+      background:var(--surface);border:1px solid var(--border);border-radius:10px;
+      overflow:hidden;display:grid;grid-template-columns:160px 1fr;
+      transition:border-color .14s,transform .14s;cursor:pointer;
+    }
+    .card:hover{border-color:var(--border-mid);transform:translateY(-1px)}
+    .thumb{background:var(--elev);position:relative;overflow:hidden;aspect-ratio:16/9}
+    .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .card-body{padding:12px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
+    .card-title{
+      font-size:13.5px;font-weight:700;color:var(--tx-1);
+      overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+      -webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;
+    }
+    .card-song{font-size:12px;color:var(--tx-3);display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+    .card-song .dot{color:var(--tx-4)}
+    .instrument-badge{display:inline-flex;padding:2px 7px;font:600 10px/1 var(--sans);border-radius:999px;background:var(--elev);color:var(--tx-2);border:1px solid var(--border)}
+    .instrument-badge[data-i="vocals"]{color:var(--stem-vocal);border-color:color-mix(in srgb,var(--stem-vocal) 30%,transparent)}
+    .instrument-badge[data-i="drums"]{color:var(--stem-drums);border-color:color-mix(in srgb,var(--stem-drums) 30%,transparent)}
+    .instrument-badge[data-i="bass"]{color:var(--stem-bass);border-color:color-mix(in srgb,var(--stem-bass) 30%,transparent)}
+    .instrument-badge[data-i="guitar"]{color:var(--stem-guitar);border-color:color-mix(in srgb,var(--stem-guitar) 30%,transparent)}
+    .instrument-badge[data-i="piano"]{color:var(--stem-piano);border-color:color-mix(in srgb,var(--stem-piano) 30%,transparent)}
+    .instrument-badge[data-i="other"]{color:var(--stem-other);border-color:color-mix(in srgb,var(--stem-other) 30%,transparent)}
+    .card-meta{display:flex;align-items:center;gap:10px;margin-top:auto;color:var(--tx-3);font-size:11px}
+    .card-meta .sep{color:var(--tx-4)}
+
+    .empty{
+      text-align:center;padding:48px 20px;color:var(--tx-4);font-size:13px;
+      background:var(--surface);border:1px dashed var(--border);border-radius:10px;
+    }
+    .empty h3{color:var(--tx-2);font-size:14.5px;margin-bottom:6px}
+
+    footer{padding:36px 0;text-align:center;border-top:1px solid var(--border);color:var(--tx-4);font-size:11.5px;font-family:var(--mono);letter-spacing:.04em}
+    footer a{color:var(--tx-2);margin:0 10px}
+
+    @media (max-width:620px){
+      .profile-head{flex-direction:column;text-align:center;gap:16px}
+      .stats{justify-content:center}
+      .card{grid-template-columns:120px 1fr}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-row">
+        <a href="./" class="brand" style="text-decoration:none">
+          <img src="../icon.png" alt="" />
+          <div>
+            <div class="name">Cover Share</div>
+            <div class="sub">Profile</div>
+          </div>
+        </a>
+        <div class="header-actions" id="header-actions"></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <a class="back-link" href="./">← 목록으로</a>
+      <div id="root">
+        <div class="empty">불러오는 중…</div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      <a href="/">홈</a><a href="./">커뮤니티</a><a href="mailto:whalemindbass@gmail.com">문의</a>
+      <div style="margin-top:12px">© 2026 Whale Mind</div>
+    </div>
+  </footer>
+
+  <script>
+    const API = 'https://ytseparator.com/community/api';
+    const $ = (id) => document.getElementById(id);
+    async function api(p, opts={}) {
+      const r = await fetch(API + p, { credentials: 'include', ...opts });
+      return { status: r.status, data: await r.json().catch(() => null) };
+    }
+    function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function fmtWhen(ts) {
+      const diff = Date.now() - ts;
+      if (diff < 60_000) return '방금 전';
+      if (diff < 3600_000) return Math.floor(diff/60_000) + '분 전';
+      if (diff < 86400_000) return Math.floor(diff/3600_000) + '시간 전';
+      if (diff < 7*86400_000) return Math.floor(diff/86400_000) + '일 전';
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function fmtJoined(ts) {
+      const d = new Date(ts);
+      return `${d.getFullYear()}년 ${d.getMonth()+1}월 가입`;
+    }
+    const INST_LABEL = { vocals:'보컬', guitar:'기타', bass:'베이스', drums:'드럼', piano:'피아노', other:'기타' };
+
+    let currentUser = null;
+    let profileId = null;
+
+    async function loadMe() {
+      const r = await api('/me');
+      currentUser = r.data?.user || null;
+    }
+    function renderHeader() {
+      const el = $('header-actions');
+      if (currentUser) {
+        el.innerHTML = `
+          <a href="?id=${encodeURIComponent(currentUser.id)}" style="text-decoration:none">
+            <img class="avatar" src="${esc(currentUser.avatar)}" alt="" />
+          </a>
+          <button class="btn ghost" id="btn-logout">로그아웃</button>
+        `;
+        $('btn-logout').onclick = async () => {
+          await api('/auth/logout', { method: 'POST' });
+          currentUser = null; renderHeader();
+        };
+      } else {
+        el.innerHTML = `<a class="btn primary" href="${API}/auth/google?returnTo=${encodeURIComponent(location.pathname + location.search)}">Google 로그인</a>`;
+      }
+    }
+
+    async function loadProfile() {
+      // id 파라미터가 없으면 → 본인 프로필로 리다이렉트
+      profileId = new URLSearchParams(location.search).get('id');
+      if (!profileId) {
+        if (currentUser) {
+          location.replace(`?id=${encodeURIComponent(currentUser.id)}`);
+          return;
+        }
+        $('root').innerHTML = `<div class="empty"><h3>프로필</h3><p>보실 유저를 지정하거나 <a href="${API}/auth/google?returnTo=/community/profile.html">로그인</a> 해서 내 프로필 열람</p></div>`;
+        return;
+      }
+      const r = await api(`/users/${encodeURIComponent(profileId)}`);
+      if (r.status === 404) {
+        $('root').innerHTML = `<div class="empty"><h3>존재하지 않는 유저</h3></div>`;
+        return;
+      }
+      renderProfile(r.data);
+      loadPosts();
+    }
+
+    function renderProfile(u) {
+      document.title = `${u.name} · Cover Share`;
+      const isMe = currentUser && currentUser.id === u.id;
+      $('root').innerHTML = `
+        <div class="profile-head">
+          ${u.avatar ? `<img class="profile-avatar" src="${esc(u.avatar)}" alt="" />` : '<div class="profile-avatar"></div>'}
+          <div class="profile-info">
+            <div class="profile-name">${esc(u.name)}</div>
+            <div class="profile-joined">${fmtJoined(u.joined_at)}${isMe ? ' · 나' : ''}</div>
+            <div class="stats">
+              <div class="stat"><span class="stat-value">${u.stats.posts}</span><span class="stat-label">게시글</span></div>
+              <div class="stat"><span class="stat-value">${u.stats.likes_received}</span><span class="stat-label">받은 좋아요</span></div>
+              <div class="stat"><span class="stat-value">${u.stats.comments}</span><span class="stat-label">댓글</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="section-title">게시한 커버 <span class="count" id="posts-count">${u.stats.posts}</span></div>
+        <div class="feed" id="feed"><div class="empty">불러오는 중…</div></div>
+      `;
+    }
+
+    async function loadPosts() {
+      const params = new URLSearchParams({ user: profileId, sort: 'recent' });
+      const r = await api('/posts?' + params.toString());
+      const items = r.data?.items || [];
+      const feed = $('feed');
+      if (!items.length) {
+        feed.outerHTML = '<div class="empty"><h3>아직 공유한 커버가 없어요</h3></div>';
+        return;
+      }
+      feed.innerHTML = items.map(p => {
+        const thumb = `https://i.ytimg.com/vi/${p.video_id}/mqdefault.jpg`;
+        const inst = p.instrument ? `<span class="instrument-badge" data-i="${p.instrument}">${INST_LABEL[p.instrument] || p.instrument}</span>` : '';
+        return `
+          <div class="card" onclick="location.href='./post.html?id=${encodeURIComponent(p.id)}'">
+            <div class="thumb"><img src="${thumb}" alt="" loading="lazy" /></div>
+            <div class="card-body">
+              <div class="card-title">${esc(p.title)}</div>
+              <div class="card-song">
+                <span>${esc(p.song_name)}</span>
+                ${p.song_artist ? `<span class="dot">·</span><span>${esc(p.song_artist)}</span>` : ''}
+                ${inst ? `<span class="dot">·</span>${inst}` : ''}
+              </div>
+              <div class="card-meta">
+                <span>${fmtWhen(p.created_at)}</span>
+                <span class="sep">·</span><span>♥ ${p.like_count}</span>
+                <span class="sep">·</span><span>💬 ${p.comment_count}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    (async () => {
+      await loadMe();
+      renderHeader();
+      await loadProfile();
+    })();
+  </script>
+</body>
+</html>

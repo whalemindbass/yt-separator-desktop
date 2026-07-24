@@ -286,7 +286,9 @@
       const el = $('header-actions');
       if (currentUser) {
         el.innerHTML = `
-          <img class="avatar" src="${currentUser.avatar || ''}" alt="" />
+          <a href="./profile.html?id=${encodeURIComponent(currentUser.id)}" title="내 프로필">
+            <img class="avatar" src="${currentUser.avatar || ''}" alt="" />
+          </a>
           <button class="btn ghost" id="btn-logout">로그아웃</button>
         `;
         $('btn-logout').onclick = async () => {
@@ -333,10 +335,10 @@
           </div>
         </div>
         <div class="post-meta">
-          <div class="author">
+          <a class="author" href="./profile.html?id=${encodeURIComponent(p.author.id)}" style="text-decoration:none;color:inherit">
             ${p.author.avatar ? `<img src="${escapeHtml(p.author.avatar)}" alt="" />` : ''}
             <span>${escapeHtml(p.author.name)}</span>
-          </div>
+          </a>
           <span class="sep">·</span>
           <span>${escapeHtml(p.song_name)}${p.song_artist ? ' · ' + escapeHtml(p.song_artist) : ''}</span>
           ${inst ? `<span class="sep">·</span>${inst}` : ''}
@@ -400,12 +402,15 @@
       if (currentUser && !isReply) actions.push(`<button class="reply-btn" data-reply="${c.id}">답글</button>`);
       if (isMine) actions.push(`<button class="del-btn" data-del="${c.id}">삭제</button>`);
       else if (currentUser) actions.push(`<button class="rep-btn" data-report="${c.id}">신고</button>`);
+      const profileHref = `./profile.html?id=${encodeURIComponent(c.author.id)}`;
       return `
         <div class="comment ${isReply ? 'reply' : ''}" data-id="${c.id}">
-          ${c.author.avatar ? `<img class="c-avatar" src="${escapeHtml(c.author.avatar)}" alt="" />` : '<div class="c-avatar"></div>'}
+          <a href="${profileHref}">
+            ${c.author.avatar ? `<img class="c-avatar" src="${escapeHtml(c.author.avatar)}" alt="" />` : '<div class="c-avatar"></div>'}
+          </a>
           <div class="c-body">
             <div class="c-head">
-              <span class="c-name">${escapeHtml(c.author.name)}</span>
+              <a class="c-name" href="${profileHref}" style="text-decoration:none;color:inherit">${escapeHtml(c.author.name)}</a>
               <span class="c-when">${fmtWhen(c.created_at)}</span>
             </div>
             <div class="c-text">${escapeHtml(c.body)}</div>
