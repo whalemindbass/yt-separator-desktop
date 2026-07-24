@@ -154,7 +154,9 @@
       .profile-name{font-size:18px}
       .stats{gap:16px}
       .stat-value{font-size:16px}
-      .card{grid-template-columns:120px 1fr}
+      /* 카드: 썸네일 세로 stretch (하단 여백 방지) */
+      .card{grid-template-columns:120px 1fr;align-items:stretch}
+      .thumb{aspect-ratio:auto;min-height:72px}
       .card-title{font-size:12.5px}
       .card-body{padding:10px 12px;gap:4px}
       .tab{padding:10px 12px;font-size:12.5px}

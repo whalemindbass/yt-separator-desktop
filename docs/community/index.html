@@ -276,8 +276,9 @@
       .page-head .btn { align-self: stretch; justify-content: center; padding: 12px 14px; }
       .toolbar { gap: 6px; }
       .toolbar > input#filter-song { width: 100%; min-width: 0; margin-top: 4px; order: 10; }
-      .card { grid-template-columns: 128px 1fr; }
-      .thumb { aspect-ratio: 16 / 9; }
+      /* 카드: 썸네일을 카드 높이만큼 stretch (aspect-ratio 해제 → 하단 여백 방지) */
+      .card { grid-template-columns: 128px 1fr; align-items: stretch; }
+      .thumb { aspect-ratio: auto; min-height: 78px; }
       .card-body { padding: 11px 12px; gap: 4px; }
       .card-title { font-size: 13px; -webkit-line-clamp: 2; }
       .card-song { font-size: 11.5px; }
