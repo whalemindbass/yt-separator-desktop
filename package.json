@@ -17,11 +17,14 @@
     "release": "node scripts/release.js",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
-    "release:rebuild": "node scripts/release.js --no-bump --no-git"
+    "release:rebuild": "node scripts/release.js --no-bump --no-git",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "devDependencies": {
     "electron": "^43.1.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "wrangler": "^4.114.0"
   },
   "build": {
     "appId": "com.whalemindbass.yt-separator",

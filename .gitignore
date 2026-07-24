@@ -25,3 +25,10 @@ scripts/__pycache__/
 build/cert.pfx
 build/cert.cer
 sample/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
