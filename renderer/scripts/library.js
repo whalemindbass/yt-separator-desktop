@@ -29,6 +29,9 @@ const masterVal     = $('master-val');
 const metroToggleEl = $('metro-toggle');
 const metroBpmEl    = $('metro-bpm');
 const metroVolEl    = $('metro-vol');
+const countInToggleEl = $('countin-toggle');
+const countInOverlay  = $('countin-overlay');
+const countInNumberEl = $('countin-number');
 
 let items = [];
 let selectedId = null;
@@ -67,8 +70,9 @@ const saveTrackVol  = (stem, vol) => _mutateSettings(s => { (s.trackVols  = s.tr
 const saveTrackMute = (stem, mu)  => _mutateSettings(s => { (s.trackMutes = s.trackMutes || {})[stem] = !!mu; });
 const saveTrackSolo = (stem, so)  => _mutateSettings(s => { (s.trackSolos = s.trackSolos || {})[stem] = !!so; });
 const saveMetro     = (patch)     => _mutateSettings(s => { s.metro = { ...(s.metro || {}), ...patch }; });
-const saveBeatCache = (tempo, beats, beatInterval, downbeat, fitStdMs) => _mutateSettings(s => {
-  s.beatCache = { tempo, beats, beatInterval, downbeat, fitStdMs, at: Date.now() };
+const saveCountIn   = (patch)     => _mutateSettings(s => { s.countIn = { ...(s.countIn || {}), ...patch }; });
+const saveBeatCache = (tempo, beats, beatInterval, downbeat, fitStdMs, audioStart) => _mutateSettings(s => {
+  s.beatCache = { tempo, beats, beatInterval, downbeat, fitStdMs, audioStart, at: Date.now() };
 });
 
 function setErr(msg) {
@@ -278,9 +282,11 @@ function destroyPlayer() {
   if (currentPlayer) { try { currentPlayer.destroy(); } catch {} currentPlayer = null; }
   mixerTracks.innerHTML = '';
   mixerTracks.classList.remove('has-solo');
-  // 메트로놈 UI 리셋
+  // 메트로놈 · 카운트인 UI 리셋
   if (metroToggleEl) metroToggleEl.classList.remove('on');
   if (metroBpmEl) { metroBpmEl.textContent = '—'; metroBpmEl.classList.remove('detected'); }
+  if (countInToggleEl) countInToggleEl.classList.remove('on');
+  if (countInOverlay)  countInOverlay.hidden = true;
 }
 
 // ── 메트로놈 (곡 sync 자동) ───────────────────────
@@ -294,11 +300,12 @@ async function prepareMetronome(item, stems, sampleRate) {
     currentPlayer.setMetronomeVolume(Number(metroVolEl.value) / 100);
   }
 
-  // 캐시된 beats 우선 사용 — downbeat 필드 있으면 v2 캐시 (linear regression 결과)
+  // 캐시된 beats 우선 사용 — audioStart 필드까지 있어야 v3 캐시 (시작점 감지 포함)
   const cacheValid = cached && Array.isArray(cached.beats) && cached.beats.length > 0
-                     && typeof cached.downbeat === 'number';
+                     && typeof cached.downbeat === 'number'
+                     && 'audioStart' in cached;
   if (cacheValid) {
-    currentPlayer.setBeats(cached.beats, cached.beatInterval, cached.tempo, cached.downbeat);
+    currentPlayer.setBeats(cached.beats, cached.beatInterval, cached.tempo, cached.downbeat, cached.audioStart);
     metroBpmEl.textContent = `${Math.round(cached.tempo)} BPM`;
     metroBpmEl.classList.add('detected');
     if (wantEnabled) {
@@ -334,14 +341,14 @@ async function prepareMetronome(item, stems, sampleRate) {
         try {
           const raw = localStorage.getItem(oldKey);
           const s = raw ? JSON.parse(raw) : {};
-          s.beatCache = { tempo: res.tempo, beats: res.beats, beatInterval: res.beatInterval, downbeat: res.downbeat, fitStdMs: res.fitStdMs, at: Date.now() };
+          s.beatCache = { tempo: res.tempo, beats: res.beats, beatInterval: res.beatInterval, downbeat: res.downbeat, fitStdMs: res.fitStdMs, audioStart: res.audioStart, at: Date.now() };
           localStorage.setItem(oldKey, JSON.stringify(s));
         } catch {}
       }
       return;
     }
-    saveBeatCache(res.tempo, res.beats, res.beatInterval, res.downbeat, res.fitStdMs);
-    currentPlayer.setBeats(res.beats, res.beatInterval, res.tempo, res.downbeat);
+    saveBeatCache(res.tempo, res.beats, res.beatInterval, res.downbeat, res.fitStdMs, res.audioStart);
+    currentPlayer.setBeats(res.beats, res.beatInterval, res.tempo, res.downbeat, res.audioStart);
     metroBpmEl.textContent = `${Math.round(res.tempo)} BPM`;
     metroBpmEl.classList.add('detected');
     if (wantEnabled) {
@@ -370,6 +377,15 @@ metroVolEl?.addEventListener('input', () => {
   saveMetro({ volume: v });
 });
 
+countInToggleEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  const info = currentPlayer.getCountInInfo();
+  const next = !info.enabled;
+  currentPlayer.setCountInEnabled(next);
+  countInToggleEl.classList.toggle('on', next);
+  saveCountIn({ enabled: next, beats: 4 });
+});
+
 async function mountPlayer(item) {
   const myMountId = ++_mountId;
   destroyPlayer();
@@ -395,6 +411,23 @@ async function mountPlayer(item) {
       stemUrls[name] = toYtsepUrl(p);
     }
     currentPlayer = new Player(playerVideo, videoUrl, stems, sampleRate, stemUrls);
+
+    // 카운트인 오버레이 콜백
+    currentPlayer.setCountInCallback((remaining, _total) => {
+      updateVcPlayIcon();   // 카운트인 시작·종료 시 재생 아이콘 반영
+      if (!countInOverlay || !countInNumberEl) return;
+      if (remaining <= 0) {
+        countInOverlay.hidden = true;
+      } else {
+        countInNumberEl.textContent = String(remaining);
+        countInOverlay.hidden = false;
+        // pop 애니메이션 재트리거를 위해 CSS 클래스 리셋
+        countInNumberEl.style.animation = 'none';
+        // eslint-disable-next-line no-unused-expressions
+        countInNumberEl.offsetHeight;
+        countInNumberEl.style.animation = '';
+      }
+    });
 
     // 믹서 트랙
     for (const name of stemOrderFor(item.modelKey || '4stem')) {
@@ -508,7 +541,14 @@ async function restoreSongSettings(item) {
         currentPlayer?.setMetronomeVolume(s.metro.volume / 100);
         if (metroVolEl) metroVolEl.value = s.metro.volume;
       }
-      // enabled 는 beats 세팅 후에 적용해야 함 → prepareMetronome 안에서 처리
+    }
+    // 카운트인 (곡별 상태 · 즉시 반영 가능)
+    if (s.countIn) {
+      if (typeof s.countIn.beats === 'number') currentPlayer?.setCountInBeats(s.countIn.beats);
+      if (s.countIn.enabled) {
+        currentPlayer?.setCountInEnabled(true);
+        countInToggleEl?.classList.add('on');
+      }
     }
     // 트랙 Solo
     if (s.trackSolos) {
@@ -1139,6 +1179,108 @@ cleanupBtn?.addEventListener('click', async () => {
   alert(isEn
     ? `Cleanup complete: ${ok} file(s), ${(freed/1024/1024).toFixed(1)} MB reclaimed`
     : `추가 정리 완료: ${ok}개 파일, ${(freed/1024/1024).toFixed(1)} MB 확보`);
+});
+
+// ── 커스텀 비디오 컨트롤 바 ──────────────────────
+const vcRestart    = $('vc-restart');
+const vcPlay       = $('vc-play');
+const vcTime       = $('vc-time');
+const vcSeek       = $('vc-seek');
+const vcDuration   = $('vc-duration');
+const vcFullscreen = $('vc-fullscreen');
+const vcPlayIco    = vcPlay?.querySelector('.ico-play');
+const vcPauseIco   = vcPlay?.querySelector('.ico-pause');
+
+function fmtVcTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+let _vcSeeking = false;
+
+const videoWrap = $('player-video-wrap');
+let _vcHideTimer = null;
+
+function updateVcPlayIcon() {
+  if (!vcPlay) return;
+  // 카운트인 진행 중이면 재생 의도로 간주 → pause 아이콘 표시
+  const countingIn = !!currentPlayer?.isCountingIn?.();
+  const showingPause = !playerVideo.paused || countingIn;
+  vcPlay.classList.toggle('playing', showingPause);
+  // 정지 상태(카운트인 아님)면 컨트롤 항상 표시
+  videoWrap?.classList.toggle('paused', playerVideo.paused && !countingIn);
+}
+
+// 마우스 움직임 → 컨트롤 잠깐 표시, 2초 후 자동 숨김 (재생 중일 때만 숨김)
+// 재생 중으로 취급할지 (카운트인 진행 중도 포함 → 컨트롤 자동 숨김 대상)
+function vcIsActivePlayback() {
+  return !playerVideo.paused || !!currentPlayer?.isCountingIn?.();
+}
+function showControlsTemporarily() {
+  if (!videoWrap) return;
+  videoWrap.classList.add('controls-active');
+  clearTimeout(_vcHideTimer);
+  _vcHideTimer = setTimeout(() => {
+    if (vcIsActivePlayback()) videoWrap.classList.remove('controls-active');
+  }, 2000);
+}
+function updateVcProgress() {
+  if (_vcSeeking) return;
+  const dur = playerVideo.duration || 0;
+  const cur = playerVideo.currentTime || 0;
+  vcTime.textContent = fmtVcTime(cur);
+  if (dur > 0) {
+    vcSeek.value = String(Math.round(cur / dur * 1000));
+  }
+}
+
+vcPlay?.addEventListener('click', () => {
+  if (playerVideo.paused) playerVideo.play().catch(() => {});
+  else playerVideo.pause();
+});
+vcRestart?.addEventListener('click', () => {
+  playerVideo.currentTime = 0;
+});
+vcSeek?.addEventListener('input', () => {
+  _vcSeeking = true;
+  const dur = playerVideo.duration || 0;
+  const t = (Number(vcSeek.value) / 1000) * dur;
+  vcTime.textContent = fmtVcTime(t);
+});
+vcSeek?.addEventListener('change', () => {
+  const dur = playerVideo.duration || 0;
+  playerVideo.currentTime = (Number(vcSeek.value) / 1000) * dur;
+  _vcSeeking = false;
+});
+vcFullscreen?.addEventListener('click', () => {
+  const wrap = playerVideo.closest('.player-video-wrap');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (wrap || playerVideo).requestFullscreen?.();
+});
+
+playerVideo.addEventListener('play',           updateVcPlayIcon);
+playerVideo.addEventListener('pause',          updateVcPlayIcon);
+playerVideo.addEventListener('timeupdate',     updateVcProgress);
+
+// 컨트롤 표시/숨김 — 마우스 움직임·hover
+videoWrap?.addEventListener('mousemove', showControlsTemporarily);
+videoWrap?.addEventListener('mouseleave', () => {
+  clearTimeout(_vcHideTimer);
+  if (vcIsActivePlayback()) videoWrap.classList.remove('controls-active');
+});
+// 영상 클릭 시 재생/정지 (컨트롤 바 버튼 클릭은 제외)
+playerVideo.addEventListener('click', () => {
+  if (playerVideo.paused) playerVideo.play().catch(() => {});
+  else playerVideo.pause();
+});
+playerVideo.addEventListener('loadedmetadata', () => {
+  vcDuration.textContent = fmtVcTime(playerVideo.duration);
+  updateVcProgress();
+  updateVcPlayIcon();
+});
+playerVideo.addEventListener('durationchange', () => {
+  vcDuration.textContent = fmtVcTime(playerVideo.duration);
 });
 
 export const Library = {

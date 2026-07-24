@@ -267,8 +267,25 @@
           </div>
         </div>
 
-        <div class="player-video-wrap">
-          <video id="player-video" controls muted preload="metadata" playsinline crossorigin="anonymous"></video>
+        <div class="player-video-wrap" id="player-video-wrap">
+          <video id="player-video" muted preload="metadata" playsinline crossorigin="anonymous"></video>
+          <div id="countin-overlay" class="countin-overlay" hidden><span id="countin-number">4</span></div>
+
+          <div id="video-controls" class="video-controls">
+            <button id="vc-play" class="vc-btn vc-play" data-i18n-title="vc.play" title="재생/일시정지">
+              <svg class="ico-play"  viewBox="0 0 20 20" fill="currentColor"><path d="M5 3.5v13l11-6.5-11-6.5Z"/></svg>
+              <svg class="ico-pause" viewBox="0 0 20 20" fill="currentColor"><path d="M5 3.5h4v13H5zM11 3.5h4v13h-4z"/></svg>
+            </button>
+            <button id="vc-restart" class="vc-btn" data-i18n-title="vc.restart" title="처음으로">
+              <svg viewBox="0 0 20 20" fill="none"><path d="M6 4v12M15 4l-8 6 8 6V4Z" fill="currentColor"/></svg>
+            </button>
+            <span id="vc-time" class="vc-time">0:00</span>
+            <input id="vc-seek" class="vc-seek" type="range" min="0" max="1000" value="0" step="1" />
+            <span id="vc-duration" class="vc-time">0:00</span>
+            <button id="vc-fullscreen" class="vc-btn" data-i18n-title="vc.fullscreen" title="전체화면">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
+            </button>
+          </div>
         </div>
 
         <div id="player-loading" class="player-loading muted" data-i18n="player.stems.load" hidden>스템 로드 중…</div>
@@ -312,6 +329,7 @@
             <label class="mixer-label" data-i18n="mixer.metro">메트로놈</label>
             <div class="metro-controls">
               <button id="metro-toggle" class="btn" data-i18n="mixer.metro.toggle" data-i18n-title="mixer.metro.toggle.title" title="곡 sync 메트로놈 켜기/끄기">클릭</button>
+              <button id="countin-toggle" class="btn" data-i18n="mixer.countin.toggle" data-i18n-title="mixer.countin.toggle.title" title="재생 전 카운트인 (4박)">카운트인</button>
               <span id="metro-bpm" class="metro-bpm">—</span>
               <input id="metro-vol" class="metro-vol" type="range" min="0" max="100" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨" />
               <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="mixer.metro.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>

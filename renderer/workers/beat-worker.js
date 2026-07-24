@@ -84,6 +84,29 @@ function fitUniformGrid(beats) {
   return { ...fit, fitStdMs };
 }
 
+// 전체 믹스에서 실제 소리가 시작되는 시점(초) 감지.
+// 보컬·기타 등이 드럼보다 먼저 나오는 곡에서 downbeat(드럼 기준)보다 이른 시작점을 찾기 위함.
+function firstOnsetSec(mono, sampleRate) {
+  const win = 512;
+  // global peak (샘플링해서)
+  let peak = 0;
+  const step = Math.max(1, Math.floor(mono.length / 200000));
+  for (let i = 0; i < mono.length; i += step) {
+    const a = Math.abs(mono[i]);
+    if (a > peak) peak = a;
+  }
+  if (peak <= 0) return 0;
+  const thresh = Math.max(0.01, peak * 0.05);
+  // window RMS 가 threshold 를 처음 넘는 지점
+  for (let start = 0; start + win <= mono.length; start += win) {
+    let ss = 0;
+    for (let i = start; i < start + win; i++) ss += mono[i] * mono[i];
+    const rms = Math.sqrt(ss / win);
+    if (rms > thresh) return start / sampleRate;
+  }
+  return 0;
+}
+
 self.addEventListener('message', (e) => {
   const { id, type } = e.data;
   if (type !== 'analyze') return;
@@ -94,18 +117,26 @@ self.addEventListener('message', (e) => {
     const mono = new Float32Array(L.length);
     for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
 
+    // 전체 믹스 mono (있으면) — audioStart 감지 + BPM 폴백용
+    let mixMono = null;
+    if (e.data.mixL && e.data.mixR) {
+      const mL = new Float32Array(e.data.mixL);
+      const mR = new Float32Array(e.data.mixR);
+      mixMono = new Float32Array(mL.length);
+      for (let i = 0; i < mL.length; i++) mixMono[i] = (mL[i] + mR[i]) * 0.5;
+    }
+
+    // 곡의 실제 소리 시작점 — 믹스 기준 (없으면 드럼 기준)
+    const audioStart = firstOnsetSec(mixMono || mono, sampleRate);
+
     // 1차: drums 로 시도
     let mt;
     try {
       mt = analyze(mono, sampleRate);
     } catch (e1) {
       // 2차: 전체 mix 로 폴백 (drums 가 부족한 조용한 곡 등)
-      if (e.data.mixL && e.data.mixR) {
-        const mL = new Float32Array(e.data.mixL);
-        const mR = new Float32Array(e.data.mixR);
-        const mm = new Float32Array(mL.length);
-        for (let i = 0; i < mL.length; i++) mm[i] = (mL[i] + mR[i]) * 0.5;
-        mt = analyze(mm, sampleRate);
+      if (mixMono) {
+        mt = analyze(mixMono, sampleRate);
       } else {
         throw e1;
       }
@@ -118,6 +149,7 @@ self.addEventListener('message', (e) => {
       beats: mt.beats,
       beatInterval: gridFit ? gridFit.interval : mt.beatInterval,
       downbeat: gridFit ? gridFit.downbeat : (mt.beats[0] || 0),
+      audioStart,
       fitStdMs: gridFit ? gridFit.fitStdMs : null,
     });
   } catch (err) {

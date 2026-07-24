@@ -238,7 +238,24 @@ export class Player {
       }, 100);
     };
 
-    this._onPlayL   = () => { cancelStop(); scheduleSync('play'); };
+    this._onPlayL   = async () => {
+      // 카운트인은 곡 처음(0:00 근처)에서 재생할 때만.
+      // 카운트인이 켜져있고 지금 카운트 중이 아니고 이번에 스킵 신호도 없으면:
+      // 재생을 즉시 잠깐 정지 → 카운트인 클릭 재생 → 자동으로 다시 play (skip 플래그로 재귀 방지)
+      const atStart = this.videoEl.currentTime < 0.5;
+      if (this._countInEnabled && atStart && !this._countingIn && !this._skipNextCountIn) {
+        this._countingIn = true;
+        try { this.videoEl.pause(); } catch {}
+        try { await this._performCountIn(); } catch (e) { console.warn('[count-in]', e); }
+        this._countingIn = false;
+        this._skipNextCountIn = true;
+        try { await this.videoEl.play(); } catch {}
+        return;
+      }
+      this._skipNextCountIn = false;
+      cancelStop();
+      scheduleSync('play');
+    };
     this._onSeekedL = () => {
       // 메트로놈: seek 시 이전에 스케줄된 미래 클릭들을 강제 취소하고 새 위치 기준으로 재시작.
       // (Web Audio 는 스케줄 후 취소 불가 → gain 노드 disconnect 로 무음 처리)
@@ -574,9 +591,97 @@ export class Player {
     };
   }
 
+  /* ── 카운트인 (재생 전 N박 클릭) ─────────────────
+     "탁 · 탁 · 탁 · 탁" 후 실제 재생. 곡 sync BPM 사용, 없으면 default 100. */
+  setCountInEnabled(v)  { this._countInEnabled = !!v; }
+  setCountInBeats(n)    { this._countInBeats = Math.max(1, Math.min(8, +n || 4)); }
+  setCountInCallback(fn){ this._countInCallback = fn; }
+  getCountInInfo() {
+    return { enabled: !!this._countInEnabled, beats: this._countInBeats || 4 };
+  }
+  isCountingIn() { return !!this._countingIn; }
+
+  async _performCountIn() {
+    const beats = this._countInBeats || 4;
+    const bpm   = this._metroTempo || 100;
+    const interval = 60 / bpm;
+    const downbeat = (typeof this._metroDownbeat === 'number' && isFinite(this._metroDownbeat))
+                    ? this._metroDownbeat : 0;
+    const v = this.videoEl;
+
+    if (this.audioCtx.state === 'suspended') { try { await this.audioCtx.resume(); } catch {} }
+
+    // 곡의 재생 시작 위치를 박 그리드에 맞춰 스냅.
+    // 보컬·기타가 드럼 downbeat 보다 먼저 나오는 곡: audioStart(실제 소리 시작) 이전의
+    // 박부터 시작해 인트로가 잘리지 않게 함.
+    if (interval > 0) {
+      const cur = v.currentTime;
+      let target = null;
+      if (cur < 1.0) {
+        // 처음부터 재생.
+        // 소리 시작점(audioStart)과 박 그리드(downbeat + n*interval)를 맞춰,
+        // audioStart 직전(또는 같은) 박을 시작 지점으로 삼음 → 카운트인 후 인트로부터 자연 재생.
+        const anchor = (this._audioStart != null) ? this._audioStart : downbeat;
+        if (anchor > 0.02) {
+          // anchor 이하로 내려가는 가장 가까운 박 인덱스 (grid: downbeat + n*interval)
+          let n = Math.floor((anchor - downbeat) / interval + 1e-6);
+          let t = downbeat + n * interval;
+          // 만약 그 박이 anchor 보다 interval/2 이상 앞서면 한 박 당겨 인트로를 더 살림
+          // (실제 소리보다 반박 이상 일찍 시작하는 건 부자연스러우니 방지)
+          if (anchor - t > interval * 0.5) { n += 1; t = downbeat + n * interval; }
+          target = Math.max(0, t);
+        } else {
+          target = 0;
+        }
+      } else if (downbeat >= 0) {
+        // 곡 중간에서 재생 → 현재 위치에서 근접한 박으로 스냅
+        const beatIdx = Math.max(0, Math.round((cur - downbeat) / interval));
+        target = downbeat + beatIdx * interval;
+      }
+      if (target != null && Math.abs(cur - target) > 0.03) {
+        // seek 완료 (seeked 이벤트) 를 명시적으로 기다림 → 이후 재생 위치가 확실히 target 이 됨
+        await new Promise((resolve) => {
+          const onSeeked = () => { v.removeEventListener('seeked', onSeeked); resolve(); };
+          const timeout  = setTimeout(() => { v.removeEventListener('seeked', onSeeked); resolve(); }, 1500);
+          v.addEventListener('seeked', () => { clearTimeout(timeout); onSeeked(); });
+          try { v.currentTime = target; } catch { clearTimeout(timeout); resolve(); }
+        });
+      }
+    }
+
+    const startCtx = this.audioCtx.currentTime + 0.06;
+    for (let i = 0; i < beats; i++) {
+      this._playCountInClick(startCtx + i * interval, i === 0);
+    }
+    for (let i = 0; i < beats; i++) {
+      setTimeout(() => this._countInCallback?.(beats - i, beats), Math.max(0, i * interval * 1000));
+    }
+    // 첫 클릭 오프셋 (0.06s) 반영 + 클릭 감쇠 꼬리(~80ms) 안 겹치도록 소량 여유.
+    // 마지막 클릭 후 한 박 뒤가 곡의 beat 1. 살짝 늦게(30-50ms) 착지시켜 겹침 방지.
+    const START_OFFSET_MS = 60;
+    const SAFETY_MS = 40;
+    const totalMs = beats * interval * 1000 + START_OFFSET_MS + SAFETY_MS;
+    await new Promise(r => setTimeout(r, Math.max(0, totalMs)));
+    this._countInCallback?.(0, beats);
+  }
+
+  _playCountInClick(when, isDown) {
+    const ctx = this.audioCtx;
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.frequency.setValueAtTime(isDown ? 1500 : 900, when);
+    env.gain.setValueAtTime(0, when);
+    env.gain.linearRampToValueAtTime(0.9, when + 0.003);
+    env.gain.exponentialRampToValueAtTime(0.001, when + 0.08);
+    osc.connect(env);
+    env.connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + 0.1);
+  }
+
   /* ── 메트로놈 (곡 sync 자동 재생) ────────────────────
      detectBeats() 로 얻은 beats 배열을 곡 재생 시간에 맞춰 클릭 스케줄. */
-  setBeats(beats, beatInterval, tempo, downbeat) {
+  setBeats(beats, beatInterval, tempo, downbeat, audioStart) {
     // 워커의 linear regression 결과가 있으면 그대로 사용 (drift 최소화)
     // 없으면 beats[0] 사용
     this._metroDownbeat = (typeof downbeat === 'number' && isFinite(downbeat)) ? downbeat
@@ -585,6 +690,8 @@ export class Player {
                          : (tempo ? 60 / tempo : 0.5);
     this._metroTempo = tempo || (60 / this._metroInterval);
     this._metroBeats = Array.isArray(beats) ? beats.slice() : [];
+    // 곡의 실제 소리 시작점 (보컬/기타가 드럼보다 먼저 나오는 경우 downbeat 보다 이름)
+    this._audioStart = (typeof audioStart === 'number' && isFinite(audioStart)) ? audioStart : null;
   }
   setMetronomeEnabled(v) {
     this._metroEnabled = !!v;

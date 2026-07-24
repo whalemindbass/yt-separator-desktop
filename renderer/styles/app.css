@@ -1097,9 +1097,10 @@ body { display: flex; flex-direction: column; }
   padding: 0 12px;
   display: inline-flex; align-items: center;
 }
-/* Loop toggle · metro toggle 이 켜졌을 때 accent 색 */
+/* Loop · metro · count-in 토글이 켜졌을 때 accent 색 */
 .mixer-master-inline #loop-toggle.on,
-.mixer-master-inline #metro-toggle.on {
+.mixer-master-inline #metro-toggle.on,
+.mixer-master-inline #countin-toggle.on {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
@@ -1457,8 +1458,117 @@ body { display: flex; flex-direction: column; }
   border-radius: 0;
   background: #000;
 }
+/* 카운트인 오버레이 — 재생 전 큰 숫자 표시 */
+.countin-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+  background: rgba(0,0,0,.35);
+  backdrop-filter: blur(2px);
+}
+.countin-overlay[hidden] { display: none; }
+.countin-overlay #countin-number {
+  font: 800 96px/1 var(--sans);
+  color: #fff;
+  text-shadow: 0 0 24px rgba(0,0,0,.7);
+  animation: countInPop .4s ease-out;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes countInPop {
+  0%   { transform: scale(.6); opacity: 0; }
+  35%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .countin-overlay #countin-number { animation: none; }
+}
 /* 로드/에러 표시는 헤더처럼 flex-shrink: 0로 하단 배치 */
 #player-loading, #player-err { flex-shrink: 0; margin: 0 24px 12px; }
+
+/* ── 커스텀 비디오 컨트롤 바 (영상 위 오버레이) ─────────── */
+.video-controls {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 6;
+  display: flex; align-items: center; gap: 10px;
+  padding: 20px 16px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,.75) 0%, rgba(0,0,0,.4) 55%, rgba(0,0,0,0) 100%);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: none;
+}
+/* 커서 올렸거나(controls-active) 정지 상태(paused)면 표시 */
+.player-video-wrap.controls-active .video-controls,
+.player-video-wrap.paused .video-controls {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+/* 정지 상태에서 커서 안 움직여도 유지, 재생 중엔 hover 시에만 → JS 가 controls-active 토글 */
+.vc-btn {
+  flex-shrink: 0;
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background .12s, transform .06s;
+}
+.vc-btn:hover { background: rgba(255,255,255,.24); }
+.vc-btn:active { transform: scale(.92); }
+.vc-btn svg { width: 16px; height: 16px; }
+.vc-btn.vc-play {
+  width: 38px; height: 38px;
+  background: var(--accent); color: var(--accent-fg);
+}
+.vc-btn.vc-play:hover { background: var(--accent-hover); }
+.vc-btn.vc-play svg { width: 18px; height: 18px; }
+/* 재생/정지 아이콘 전환 — 클래스 기반 (SVG hidden 속성보다 안정적) */
+.vc-btn.vc-play .ico-pause { display: none; }
+.vc-btn.vc-play .ico-play  { display: block; }
+.vc-btn.vc-play.playing .ico-play  { display: none; }
+.vc-btn.vc-play.playing .ico-pause { display: block; }
+.vc-time {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11.5px; color: rgba(255,255,255,.9);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px; text-align: center;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.vc-seek {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; min-width: 0; height: 5px;
+  background: rgba(255,255,255,.28);
+  border-radius: 3px;
+  outline: none; cursor: pointer;
+}
+.vc-seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent), 0 1px 3px rgba(0,0,0,.4);
+  transition: transform .1s;
+}
+.vc-seek::-webkit-slider-thumb:hover { transform: scale(1.15); }
+/* 전체화면: 영상이 화면 꽉 채우도록 */
+.player-video-wrap:fullscreen {
+  background: #000;
+  width: 100vw; height: 100vh;
+}
+.player-video-wrap:fullscreen video {
+  width: 100%; height: 100%;
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
 
 /* 좁은 폭에서는 lib-center 내부의 padding·간격 축소 */
 @media (max-width: 1280px) {

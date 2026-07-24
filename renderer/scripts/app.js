@@ -88,6 +88,16 @@ function switchView(name) {
 }
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 
+// ── 초기 뷰: 라이브러리에 항목이 있으면 라이브러리로, 없으면 새 분리 ──
+(async () => {
+  try {
+    const items = await api.library.list();
+    if (Array.isArray(items) && items.length > 0) {
+      switchView('library');
+    }
+  } catch (e) { /* 실패 시 기본(새 분리) 유지 */ }
+})();
+
 // ── 설정 뷰 ──────────────────────────────────────
 function fmtBytes2(n) {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, v = n || 0;
