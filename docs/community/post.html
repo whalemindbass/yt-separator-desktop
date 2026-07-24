@@ -158,6 +158,42 @@
 
     footer{padding:36px 0;text-align:center;border-top:1px solid var(--border);color:var(--tx-4);font-size:11.5px;font-family:var(--mono);letter-spacing:.04em}
     footer a{color:var(--tx-2);margin:0 10px}
+
+    @media (max-width:780px){
+      .container{padding:0 16px}
+      main{padding:20px 0 60px}
+      .post-head{gap:10px}
+      .post-head h1{font-size:17px;line-height:1.35}
+      .post-actions{gap:6px}
+      .post-actions .btn{padding:8px 12px;font-size:12px}
+      .post-meta{gap:6px 8px;font-size:12px}
+      .desc{padding:14px;font-size:13px}
+      .comment{padding:10px 12px;gap:10px}
+      .comment .c-avatar{width:28px;height:28px}
+      .comment.reply{margin-left:20px}
+      .comment .c-text{font-size:12.5px}
+      .comment-form{padding:12px}
+      .comment-form textarea{min-height:60px;font-size:12.5px}
+    }
+    @media (max-width:460px){
+      .header-row{gap:8px}
+      .brand .name{font-size:13.5px}
+      .brand .sub{display:none}
+      .post-head{flex-direction:column;align-items:stretch}
+      .post-head h1{font-size:16px}
+      .post-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}
+      .modal-back{padding:20px 12px}
+      .modal{border-radius:10px}
+      .modal h2{padding:12px 14px;font-size:14px}
+      .modal-body{padding:12px 14px;gap:10px}
+      .modal-actions{padding:12px 14px}
+      .field input,.field textarea,.field select{font-size:13.5px;padding:10px 12px}
+      .btn{padding:10px 14px}
+      .comment{padding:10px}
+      .comment.reply{margin-left:12px}
+      .comment .c-actions{gap:14px}
+      .comment .c-actions button{font-size:12px;padding:4px 0}
+    }
   </style>
 </head>
 <body>

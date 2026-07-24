@@ -268,11 +268,38 @@
     }
     footer a { color: var(--tx-2); margin: 0 10px; }
 
-    @media (max-width: 620px) {
+    @media (max-width: 780px) {
+      .container { padding: 0 16px; }
+      main { padding: 24px 0 60px; }
+      .page-head { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .page-head h1 { font-size: 22px; }
+      .page-head .btn { align-self: stretch; justify-content: center; padding: 12px 14px; }
+      .toolbar { gap: 6px; }
+      .toolbar > input#filter-song { width: 100%; min-width: 0; margin-top: 4px; order: 10; }
       .card { grid-template-columns: 128px 1fr; }
       .thumb { aspect-ratio: 16 / 9; }
-      .card-body { padding: 12px; }
-      .card-title { font-size: 13.5px; -webkit-line-clamp: 2; }
+      .card-body { padding: 11px 12px; gap: 4px; }
+      .card-title { font-size: 13px; -webkit-line-clamp: 2; }
+      .card-song { font-size: 11.5px; }
+      .card-meta { font-size: 11px; gap: 8px; }
+      .card-meta .author img { width: 16px; height: 16px; }
+    }
+    @media (max-width: 460px) {
+      .header-row { gap: 8px; }
+      .brand-title { font-size: 13.5px; }
+      .brand-sub { display: none; }
+      .header-actions .user-menu .name { display: none; }
+      .card { grid-template-columns: 104px 1fr; }
+      .card-title { font-size: 12.5px; }
+      .card-meta { flex-wrap: wrap; row-gap: 2px; }
+      .card-meta .sep:nth-of-type(2) { display: none; }
+      .modal-back { padding: 20px 12px; align-items: flex-start; }
+      .modal { border-radius: 10px; }
+      .modal h2 { padding: 14px 16px; font-size: 14.5px; }
+      .modal-body { padding: 14px 16px; gap: 12px; }
+      .modal-actions { padding: 12px 16px; }
+      .field input, .field textarea, .field select { font-size: 13.5px; padding: 10px 12px; }
+      .btn { padding: 10px 14px; }
     }
   </style>
 </head>

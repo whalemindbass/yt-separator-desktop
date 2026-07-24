@@ -487,11 +487,42 @@
     footer .cw { margin-top: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
     /* ── Responsive tweaks ───────────────────── */
-    @media (max-width: 640px) {
+    @media (max-width: 780px) {
+      .container { padding: 0 18px; }
       .hero { padding: 60px 0 48px; }
+      .hero h1 { line-height: 1.2; }
       .download-card { padding: 22px; }
       .stem-bars { height: 60px; max-width: 340px; gap: 4px; }
       section.features, section.faq, .demo-strip { padding: 52px 0; }
+      .demo-player { padding: 12px 14px; gap: 10px; }
+      .demo-play { width: 40px; height: 40px; }
+      .demo-track-title { font-size: 12px; }
+      .demo-track-attr { display: none; }
+      .demo-time { font-size: 10.5px; }
+      .stem-chip { padding: 9px 14px; font-size: 12.5px; }
+      .feat { padding: 18px; }
+      .faq-q { padding: 16px 8px; font-size: 13.5px; }
+      .faq-a { font-size: 13px; }
+    }
+    @media (max-width: 460px) {
+      header { padding: 12px 0; }
+      .brand-title { font-size: 14px; }
+      .brand-sub { font-size: 10px; }
+      .lang-switch button { padding: 4px 10px; font-size: 11px; }
+      .hero { padding: 44px 0 32px; }
+      .hero-eyebrow { font-size: 10px; padding: 3px 10px; margin-bottom: 16px; }
+      .hero p.lede { margin-bottom: 28px; }
+      .stem-bars { height: 48px; max-width: 280px; margin-bottom: 32px; }
+      .download-card { padding: 18px 16px; border-radius: 12px; }
+      .download-btn { padding: 13px 16px; font-size: 14.5px; }
+      .warn { padding: 10px 12px; font-size: 12px; }
+      .demo-player { flex-wrap: wrap; }
+      .demo-time { flex-basis: 100%; text-align: right; margin-top: 2px; }
+      section.features h2, section.faq h2, .demo-strip h2 { font-size: 20px; }
+      .feat { padding: 16px; }
+      .feat-title { font-size: 13.5px; }
+      .feat p { font-size: 12.5px; }
+      footer .links a { display: inline-block; margin: 4px 8px; }
     }
   </style>
 </head>
