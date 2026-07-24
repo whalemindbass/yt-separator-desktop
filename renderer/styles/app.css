@@ -1106,11 +1106,19 @@ body { display: flex; flex-direction: column; }
   border-color: var(--accent);
 }
 
-/* Metronome */
-.metro-controls { display: flex; align-items: center; gap: 8px; }
+/* Metronome
+   기본(우측 컬럼 · 좁음): 버튼 줄 위, 볼륨·BETA 아래 (2줄).
+   하단 그리드 모드(넓음): 한 줄. */
+.metro-controls {
+  display: flex; align-items: flex-start;
+  flex-direction: column; gap: 6px;
+}
+.metro-row-btns { display: flex; align-items: center; gap: 8px; }
+.metro-row-vol  { display: flex; align-items: center; gap: 8px; }
+/* 메트로놈 토글 버튼: 글자 줄바꿈 방지 */
+.metro-controls .btn { white-space: nowrap; }
 .exp-badge {
   display: inline-block;
-  margin-left: 6px;
   padding: 1px 5px;
   font-size: 8.5px; font-weight: 700;
   letter-spacing: .06em;
@@ -1166,6 +1174,8 @@ body { display: flex; flex-direction: column; }
   .mixer-master.mixer-master-inline:nth-child(2n)  { border-right: 0; }
   /* 마지막 행: border-bottom 없음 (6개면 5,6번째) */
   .mixer-master.mixer-master-inline:nth-last-child(-n+2) { border-bottom: 0; }
+  /* 하단 그리드 모드 — 공간 넉넉하니 메트로놈 한 줄로 */
+  .metro-controls { flex-direction: row; align-items: center; }
 }
 
 /* mixer 컨테이너 자체 폭이 좁으면 (구간반복 셀이 넘칠 만큼): 1-column 그리드로 fallback.
@@ -1546,7 +1556,15 @@ body { display: flex; flex-direction: column; }
 .vc-seek {
   -webkit-appearance: none; appearance: none;
   flex: 1; min-width: 0; height: 5px;
-  background: rgba(255,255,255,.28);
+  /* 트림 범위 밖은 어둡게, 안쪽은 accent 옅게 (--trim-a/--trim-b: 0~100%) */
+  background:
+    linear-gradient(to right,
+      rgba(255,255,255,.15) 0%,
+      rgba(255,255,255,.15) var(--trim-a, 0%),
+      color-mix(in srgb, var(--accent) 45%, rgba(255,255,255,.28)) var(--trim-a, 0%),
+      color-mix(in srgb, var(--accent) 45%, rgba(255,255,255,.28)) var(--trim-b, 100%),
+      rgba(255,255,255,.15) var(--trim-b, 100%),
+      rgba(255,255,255,.15) 100%);
   border-radius: 3px;
   outline: none; cursor: pointer;
 }
@@ -1559,6 +1577,19 @@ body { display: flex; flex-direction: column; }
   transition: transform .1s;
 }
 .vc-seek::-webkit-slider-thumb:hover { transform: scale(1.15); }
+/* 트림 버튼 그룹 */
+.vc-trim { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.vc-trim-btn {
+  width: 26px; height: 26px;
+  font-size: 14px; font-weight: 700;
+  line-height: 1;
+}
+.vc-trim-btn.set {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.vc-trim-btn.set:hover { background: var(--accent-hover); }
+
 /* 전체화면: 영상이 화면 꽉 채우도록 */
 .player-video-wrap:fullscreen {
   background: #000;
@@ -1709,14 +1740,17 @@ body { display: flex; flex-direction: column; }
   font-weight: 500;
 }
 
+/* 모든 트랙이 컬럼을 공유하도록 부모에서 그리드 정의 → subgrid 로 상속.
+   name 컬럼은 가장 긴 트랙 이름 기준으로 정렬됨. */
 .mixer-tracks {
-  display: flex; flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: max-content 30px 30px minmax(50px, 1fr) 52px;   /* name | S | M | slider | val */
+  gap: 2px 10px;
 }
 .mixer-track {
   display: grid;
-  grid-template-columns: 88px 30px 30px 1fr 52px;   /* name | S | M | slider | val */
-  gap: 10px;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
   padding: 7px 0;
   border-bottom: 1px solid var(--border);
@@ -1728,7 +1762,7 @@ body { display: flex; flex-direction: column; }
   color: var(--tx-1);
   min-width: 0;
 }
-.mixer-track-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mixer-track-name span { white-space: nowrap; }
 .mixer-track-dot {
   width: 8px; height: 8px;
   border-radius: 50%;

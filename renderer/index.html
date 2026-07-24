@@ -282,6 +282,11 @@
             <span id="vc-time" class="vc-time">0:00</span>
             <input id="vc-seek" class="vc-seek" type="range" min="0" max="1000" value="0" step="1" />
             <span id="vc-duration" class="vc-time">0:00</span>
+            <div class="vc-trim">
+              <button id="vc-trim-start" class="vc-btn vc-trim-btn" data-i18n-title="vc.trim.start" title="현재 위치를 시작점으로">⇤</button>
+              <button id="vc-trim-end" class="vc-btn vc-trim-btn" data-i18n-title="vc.trim.end" title="현재 위치를 끝점으로">⇥</button>
+              <button id="vc-trim-reset" class="vc-btn vc-trim-btn" data-i18n-title="vc.trim.reset" title="구간 초기화" hidden>↺</button>
+            </div>
             <button id="vc-fullscreen" class="vc-btn" data-i18n-title="vc.fullscreen" title="전체화면">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
             </button>
@@ -328,11 +333,15 @@
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.metro">메트로놈</label>
             <div class="metro-controls">
-              <button id="metro-toggle" class="btn" data-i18n="mixer.metro.toggle" data-i18n-title="mixer.metro.toggle.title" title="곡 sync 메트로놈 켜기/끄기">클릭</button>
-              <button id="countin-toggle" class="btn" data-i18n="mixer.countin.toggle" data-i18n-title="mixer.countin.toggle.title" title="재생 전 카운트인 (4박)">카운트인</button>
-              <span id="metro-bpm" class="metro-bpm">—</span>
-              <input id="metro-vol" class="metro-vol" type="range" min="0" max="100" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨" />
-              <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="mixer.metro.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>
+              <div class="metro-row-btns">
+                <button id="metro-toggle" class="btn" data-i18n="mixer.metro.toggle" data-i18n-title="mixer.metro.toggle.title" title="곡 sync 메트로놈 켜기/끄기">클릭</button>
+                <button id="countin-toggle" class="btn" data-i18n="mixer.countin.toggle" data-i18n-title="mixer.countin.toggle.title" title="재생 전 카운트인 (4박)">카운트인</button>
+                <span id="metro-bpm" class="metro-bpm">—</span>
+              </div>
+              <div class="metro-row-vol">
+                <input id="metro-vol" class="metro-vol" type="range" min="0" max="100" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨" />
+                <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="mixer.metro.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>
+              </div>
             </div>
           </div>
 

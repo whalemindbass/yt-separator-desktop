@@ -239,10 +239,13 @@ export class Player {
     };
 
     this._onPlayL   = async () => {
-      // 카운트인은 곡 처음(0:00 근처)에서 재생할 때만.
-      // 카운트인이 켜져있고 지금 카운트 중이 아니고 이번에 스킵 신호도 없으면:
-      // 재생을 즉시 잠깐 정지 → 카운트인 클릭 재생 → 자동으로 다시 play (skip 플래그로 재귀 방지)
-      const atStart = this.videoEl.currentTime < 0.5;
+      // 트림 시작점 이전에서 재생하면 시작점으로 이동
+      const ts = this._trimStart || 0;
+      if (ts > 0 && v.currentTime < ts - 0.05 && !this._countingIn) {
+        try { v.currentTime = ts; } catch {}
+      }
+      // 카운트인은 트림 시작점(= 새 0:00) 근처에서 재생할 때만.
+      const atStart = Math.abs(v.currentTime - ts) < 0.5;
       if (this._countInEnabled && atStart && !this._countingIn && !this._skipNextCountIn) {
         this._countingIn = true;
         try { this.videoEl.pause(); } catch {}
@@ -268,7 +271,19 @@ export class Player {
     this._loopA = null;
     this._loopB = null;
     this._loopEnabled = false;
+    // 트림 (재생 범위 제한 — 비파괴적)
+    this._trimStart = 0;
+    this._trimEnd = null;   // null = 끝까지
     this._onTimeUpdateL = () => {
+      // 트림 끝 도달 → 정지 (루프 활성 시엔 루프 로직이 우선)
+      if (this._trimEnd != null && !(this._loopEnabled && this._loopA != null && this._loopB != null)) {
+        if (v.currentTime >= this._trimEnd - 0.03) {
+          v.pause();
+          try { v.currentTime = this._trimEnd; } catch {}
+          return;
+        }
+      }
+      // A-B 반복
       if (!this._loopEnabled) return;
       if (this._loopA == null || this._loopB == null) return;
       if (this._loopB <= this._loopA) return;
@@ -351,6 +366,14 @@ export class Player {
   setLoopEnabled(v)   { this._loopEnabled = !!v; }
   getLoopState()      { return { a: this._loopA, b: this._loopB, enabled: this._loopEnabled }; }
   resetLoop()         { this._loopA = null; this._loopB = null; this._loopEnabled = false; }
+
+  /** 트림 (재생 범위 제한). start/end 는 초. end=null 이면 끝까지. */
+  setTrimStart(t) { this._trimStart = (t == null) ? 0 : Math.max(0, +t); }
+  setTrimEnd(t)   { this._trimEnd = (t == null) ? null : Math.max(0, +t); }
+  getTrimState()  { return { start: this._trimStart || 0, end: this._trimEnd }; }
+  resetTrim()     { this._trimStart = 0; this._trimEnd = null; }
+  /** 트림 시작점 (없으면 0) — "처음으로" 등에서 사용 */
+  getTrimStart()  { return this._trimStart || 0; }
 
   _startAll(offset) {
     const rate = this.videoEl.playbackRate || 1;
@@ -614,10 +637,14 @@ export class Player {
     // 곡의 재생 시작 위치를 박 그리드에 맞춰 스냅.
     // 보컬·기타가 드럼 downbeat 보다 먼저 나오는 곡: audioStart(실제 소리 시작) 이전의
     // 박부터 시작해 인트로가 잘리지 않게 함.
+    const ts = this._trimStart || 0;
     if (interval > 0) {
       const cur = v.currentTime;
       let target = null;
-      if (cur < 1.0) {
+      if (ts > 0) {
+        // 트림 시작점이 설정됐으면 그 지점이 곧 새 0:00 → 자동 스냅 대신 그대로 사용
+        target = ts;
+      } else if (cur < 1.0) {
         // 처음부터 재생.
         // 소리 시작점(audioStart)과 박 그리드(downbeat + n*interval)를 맞춰,
         // audioStart 직전(또는 같은) 박을 시작 지점으로 삼음 → 카운트인 후 인트로부터 자연 재생.

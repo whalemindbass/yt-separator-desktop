@@ -71,6 +71,7 @@ const saveTrackMute = (stem, mu)  => _mutateSettings(s => { (s.trackMutes = s.tr
 const saveTrackSolo = (stem, so)  => _mutateSettings(s => { (s.trackSolos = s.trackSolos || {})[stem] = !!so; });
 const saveMetro     = (patch)     => _mutateSettings(s => { s.metro = { ...(s.metro || {}), ...patch }; });
 const saveCountIn   = (patch)     => _mutateSettings(s => { s.countIn = { ...(s.countIn || {}), ...patch }; });
+const saveTrim      = (patch)     => _mutateSettings(s => { s.trim = { ...(s.trim || {}), ...patch }; });
 const saveBeatCache = (tempo, beats, beatInterval, downbeat, fitStdMs, audioStart) => _mutateSettings(s => {
   s.beatCache = { tempo, beats, beatInterval, downbeat, fitStdMs, audioStart, at: Date.now() };
 });
@@ -287,6 +288,9 @@ function destroyPlayer() {
   if (metroBpmEl) { metroBpmEl.textContent = '—'; metroBpmEl.classList.remove('detected'); }
   if (countInToggleEl) countInToggleEl.classList.remove('on');
   if (countInOverlay)  countInOverlay.hidden = true;
+  // 트림 리셋 (새 곡 로드 시 복원 전 기본값)
+  _trimStart = 0; _trimEnd = null;
+  updateTrimUI();
 }
 
 // ── 메트로놈 (곡 sync 자동) ───────────────────────
@@ -450,14 +454,17 @@ async function mountPlayer(item) {
       mixerTracks.appendChild(row);
     }
     mixerTracks.querySelectorAll('.mixer-slider').forEach(sl => {
-      sl.addEventListener('input', () => {
+      const applyVol = (val) => {
         const stem = sl.dataset.stem;
-        const v = Number(sl.value) / 100;
-        currentPlayer.setStemVolume(stem, v);
+        sl.value = val;
+        currentPlayer.setStemVolume(stem, Number(val) / 100);
         const valEl = mixerTracks.querySelector(`[data-val="${stem}"]`);
-        if (valEl) valEl.textContent = sl.value + '%';
-        saveTrackVol(stem, Number(sl.value));
-      });
+        if (valEl) valEl.textContent = val + '%';
+        saveTrackVol(stem, Number(val));
+      };
+      sl.addEventListener('input', () => applyVol(Number(sl.value)));
+      // 더블클릭 → 기본값(100%) 리셋
+      sl.addEventListener('dblclick', () => applyVol(100));
     });
     mixerTracks.querySelectorAll('.mixer-mute').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -550,6 +557,14 @@ async function restoreSongSettings(item) {
         countInToggleEl?.classList.add('on');
       }
     }
+    // 트림 (재생 범위)
+    if (s.trim) {
+      _trimStart = (typeof s.trim.start === 'number') ? s.trim.start : 0;
+      _trimEnd   = (typeof s.trim.end === 'number') ? s.trim.end : null;
+      currentPlayer?.setTrimStart(_trimStart);
+      currentPlayer?.setTrimEnd(_trimEnd);
+      updateTrimUI();
+    }
     // 트랙 Solo
     if (s.trackSolos) {
       for (const [stem, soloed] of Object.entries(s.trackSolos)) {
@@ -596,12 +611,14 @@ async function restoreSongSettings(item) {
   }
 }
 
-masterVol.addEventListener('input', () => {
-  const v = Number(masterVol.value) / 100;
-  masterVal.textContent = masterVol.value + '%';
-  currentPlayer?.setMasterVolume(v);
-  saveMaster(Number(masterVol.value));
-});
+function applyMasterVol(val) {
+  masterVol.value = val;
+  masterVal.textContent = val + '%';
+  currentPlayer?.setMasterVolume(Number(val) / 100);
+  saveMaster(Number(val));
+}
+masterVol.addEventListener('input', () => applyMasterVol(Number(masterVol.value)));
+masterVol.addEventListener('dblclick', () => applyMasterVol(100));
 
 // ── 재분리 (같은/다른 모델) + 모델 토글 ─────────────
 const reseparateBtn      = $('player-reseparate');
@@ -1190,6 +1207,13 @@ const vcDuration   = $('vc-duration');
 const vcFullscreen = $('vc-fullscreen');
 const vcPlayIco    = vcPlay?.querySelector('.ico-play');
 const vcPauseIco   = vcPlay?.querySelector('.ico-pause');
+const vcTrimStart  = $('vc-trim-start');
+const vcTrimEnd    = $('vc-trim-end');
+const vcTrimReset  = $('vc-trim-reset');
+
+// 트림 상태 (라이브러리 레벨에서 UI 반영용 — Player 가 실제 재생 제어)
+let _trimStart = 0;
+let _trimEnd = null;   // null = 끝까지
 
 function fmtVcTime(sec) {
   if (!isFinite(sec) || sec < 0) sec = 0;
@@ -1225,14 +1249,35 @@ function showControlsTemporarily() {
     if (vcIsActivePlayback()) videoWrap.classList.remove('controls-active');
   }, 2000);
 }
+function effectiveDur() {
+  const dur = playerVideo.duration || 0;
+  const end = _trimEnd != null ? _trimEnd : dur;
+  return Math.max(0, end - (_trimStart || 0));
+}
 function updateVcProgress() {
   if (_vcSeeking) return;
   const dur = playerVideo.duration || 0;
   const cur = playerVideo.currentTime || 0;
-  vcTime.textContent = fmtVcTime(cur);
-  if (dur > 0) {
-    vcSeek.value = String(Math.round(cur / dur * 1000));
-  }
+  // 트림 시작점 기준 상대시간 표시
+  vcTime.textContent = fmtVcTime(Math.max(0, cur - (_trimStart || 0)));
+  if (dur > 0) vcSeek.value = String(Math.round(cur / dur * 1000));
+}
+function updateVcDuration() {
+  vcDuration.textContent = fmtVcTime(effectiveDur());
+}
+// 시크바 트림 범위 음영 + 버튼 상태 + 초기화 버튼 표시
+function updateTrimUI() {
+  const dur = playerVideo.duration || 0;
+  const aPct = dur > 0 ? (_trimStart / dur * 100) : 0;
+  const bPct = dur > 0 ? ((_trimEnd != null ? _trimEnd : dur) / dur * 100) : 100;
+  vcSeek?.style.setProperty('--trim-a', aPct + '%');
+  vcSeek?.style.setProperty('--trim-b', bPct + '%');
+  const hasS = (_trimStart || 0) > 0.05;
+  const hasE = _trimEnd != null;
+  vcTrimStart?.classList.toggle('set', hasS);
+  vcTrimEnd?.classList.toggle('set', hasE);
+  if (vcTrimReset) vcTrimReset.hidden = !(hasS || hasE);
+  updateVcDuration();
 }
 
 vcPlay?.addEventListener('click', () => {
@@ -1240,18 +1285,42 @@ vcPlay?.addEventListener('click', () => {
   else playerVideo.pause();
 });
 vcRestart?.addEventListener('click', () => {
-  playerVideo.currentTime = 0;
+  playerVideo.currentTime = _trimStart || 0;   // 트림 시작점 = 새 0:00
 });
 vcSeek?.addEventListener('input', () => {
   _vcSeeking = true;
   const dur = playerVideo.duration || 0;
   const t = (Number(vcSeek.value) / 1000) * dur;
-  vcTime.textContent = fmtVcTime(t);
+  vcTime.textContent = fmtVcTime(Math.max(0, t - (_trimStart || 0)));
 });
 vcSeek?.addEventListener('change', () => {
   const dur = playerVideo.duration || 0;
   playerVideo.currentTime = (Number(vcSeek.value) / 1000) * dur;
   _vcSeeking = false;
+});
+
+// ── 트림 버튼 ──
+vcTrimStart?.addEventListener('click', () => {
+  const t = playerVideo.currentTime || 0;
+  if (_trimEnd != null && t >= _trimEnd - 0.1) return;   // 끝점보다 뒤면 무시
+  _trimStart = t;
+  currentPlayer?.setTrimStart(t);
+  saveTrim({ start: t });
+  updateTrimUI(); updateVcProgress();
+});
+vcTrimEnd?.addEventListener('click', () => {
+  const t = playerVideo.currentTime || 0;
+  if (t <= (_trimStart || 0) + 0.1) return;   // 시작점보다 앞이면 무시
+  _trimEnd = t;
+  currentPlayer?.setTrimEnd(t);
+  saveTrim({ end: t });
+  updateTrimUI();
+});
+vcTrimReset?.addEventListener('click', () => {
+  _trimStart = 0; _trimEnd = null;
+  currentPlayer?.resetTrim();
+  saveTrim({ start: 0, end: null });
+  updateTrimUI(); updateVcProgress();
 });
 vcFullscreen?.addEventListener('click', () => {
   const wrap = playerVideo.closest('.player-video-wrap');
@@ -1275,12 +1344,12 @@ playerVideo.addEventListener('click', () => {
   else playerVideo.pause();
 });
 playerVideo.addEventListener('loadedmetadata', () => {
-  vcDuration.textContent = fmtVcTime(playerVideo.duration);
   updateVcProgress();
   updateVcPlayIcon();
+  updateTrimUI();   // duration 확정 후 트림 음영·상대길이 반영
 });
 playerVideo.addEventListener('durationchange', () => {
-  vcDuration.textContent = fmtVcTime(playerVideo.duration);
+  updateTrimUI();
 });
 
 export const Library = {
