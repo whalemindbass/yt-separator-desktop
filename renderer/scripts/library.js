@@ -29,6 +29,8 @@ const masterVal     = $('master-val');
 const metroToggleEl = $('metro-toggle');
 const metroBpmEl    = $('metro-bpm');
 const metroVolEl    = $('metro-vol');
+const metroHalfEl   = $('metro-half');
+const metroDoubleEl = $('metro-double');
 const countInToggleEl = $('countin-toggle');
 const countInOverlay  = $('countin-overlay');
 const countInNumberEl = $('countin-number');
@@ -286,6 +288,8 @@ function destroyPlayer() {
   // 메트로놈 · 카운트인 UI 리셋
   if (metroToggleEl) metroToggleEl.classList.remove('on');
   if (metroBpmEl) { metroBpmEl.textContent = '—'; metroBpmEl.classList.remove('detected'); }
+  if (metroHalfEl)   metroHalfEl.hidden = true;
+  if (metroDoubleEl) metroDoubleEl.hidden = true;
   if (countInToggleEl) countInToggleEl.classList.remove('on');
   if (countInOverlay)  countInOverlay.hidden = true;
   // 트림 리셋 (새 곡 로드 시 복원 전 기본값)
@@ -294,11 +298,24 @@ function destroyPlayer() {
 }
 
 // ── 메트로놈 (곡 sync 자동) ───────────────────────
+// BPM 표시 갱신 + octave 버튼 노출
+function updateBpmDisplay() {
+  if (!metroBpmEl) return;
+  const info = currentPlayer?.getMetronomeInfo?.();
+  const tempo = info?.tempo || 0;
+  const has = tempo > 0;
+  metroBpmEl.textContent = has ? `${Math.round(tempo)} BPM` : '—';
+  metroBpmEl.classList.toggle('detected', has);
+  if (metroHalfEl)   metroHalfEl.hidden   = !has;
+  if (metroDoubleEl) metroDoubleEl.hidden = !has;
+}
+
 async function prepareMetronome(item, stems, sampleRate) {
   if (!currentPlayer || !metroBpmEl) return;
   const settings = loadSongSettings(item) || {};
   const cached = settings.beatCache;
   const wantEnabled = !!(settings.metro && settings.metro.enabled);
+  const manualBpm = (settings.metro && typeof settings.metro.manualBpm === 'number') ? settings.metro.manualBpm : null;
   // 볼륨: 저장값이 없으면 슬라이더 현재값 (default 60) 을 Player 로 sync
   if (!(settings.metro && typeof settings.metro.volume === 'number') && metroVolEl) {
     currentPlayer.setMetronomeVolume(Number(metroVolEl.value) / 100);
@@ -310,8 +327,8 @@ async function prepareMetronome(item, stems, sampleRate) {
                      && 'audioStart' in cached;
   if (cacheValid) {
     currentPlayer.setBeats(cached.beats, cached.beatInterval, cached.tempo, cached.downbeat, cached.audioStart);
-    metroBpmEl.textContent = `${Math.round(cached.tempo)} BPM`;
-    metroBpmEl.classList.add('detected');
+    if (manualBpm) currentPlayer.setManualTempo(manualBpm);   // 사용자 보정 우선
+    updateBpmDisplay();
     if (wantEnabled) {
       currentPlayer.setMetronomeEnabled(true);
       metroToggleEl?.classList.add('on');
@@ -321,8 +338,9 @@ async function prepareMetronome(item, stems, sampleRate) {
   // 없으면 drums 스템에서 백그라운드 감지
   const drums = stems?.drums;
   if (!drums || !drums[0] || !drums[1]) {
-    metroBpmEl.textContent = '—';
-    metroBpmEl.classList.remove('detected');
+    // 감지 불가여도 수동 BPM 있으면 반영
+    if (manualBpm) { currentPlayer.setManualTempo(manualBpm); updateBpmDisplay(); }
+    else { metroBpmEl.textContent = '—'; metroBpmEl.classList.remove('detected'); }
     return;
   }
   // fallback: 모든 스템 합쳐 재시도용 mix 생성
@@ -353,17 +371,60 @@ async function prepareMetronome(item, stems, sampleRate) {
     }
     saveBeatCache(res.tempo, res.beats, res.beatInterval, res.downbeat, res.fitStdMs, res.audioStart);
     currentPlayer.setBeats(res.beats, res.beatInterval, res.tempo, res.downbeat, res.audioStart);
-    metroBpmEl.textContent = `${Math.round(res.tempo)} BPM`;
-    metroBpmEl.classList.add('detected');
+    if (manualBpm) currentPlayer.setManualTempo(manualBpm);
+    updateBpmDisplay();
     if (wantEnabled) {
       currentPlayer.setMetronomeEnabled(true);
       metroToggleEl?.classList.add('on');
     }
   } catch (e) {
     console.warn('[beat-detect]', e);
-    metroBpmEl.textContent = '감지 실패';
+    // 감지 실패해도 수동 입력 가능하도록 클릭 가능한 상태 유지
+    if (manualBpm) { currentPlayer.setManualTempo(manualBpm); updateBpmDisplay(); }
+    else metroBpmEl.textContent = '감지 실패';
   }
 }
+
+// ── BPM 직접 편집 · octave 교정 ──────────────────
+function commitManualBpm(bpm) {
+  if (!currentPlayer) return;
+  const applied = currentPlayer.setManualTempo(bpm);
+  saveMetro({ manualBpm: applied });
+  updateBpmDisplay();
+}
+metroBpmEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  const info = currentPlayer.getMetronomeInfo();
+  const cur = Math.round(info.tempo || 120);
+  // input 으로 교체
+  const input = document.createElement('input');
+  input.type = 'number'; input.min = '40'; input.max = '300';
+  input.value = String(cur);
+  input.className = 'metro-bpm-input';
+  metroBpmEl.replaceWith(input);
+  input.focus(); input.select();
+  const finish = (save) => {
+    input.replaceWith(metroBpmEl);
+    if (save) {
+      const v = parseInt(input.value, 10);
+      if (v >= 40 && v <= 300) commitManualBpm(v);
+    }
+    updateBpmDisplay();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+});
+metroHalfEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  commitManualBpm(currentPlayer.getMetronomeInfo().tempo / 2);
+});
+metroDoubleEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  commitManualBpm(currentPlayer.getMetronomeInfo().tempo * 2);
+});
 
 metroToggleEl?.addEventListener('click', () => {
   if (!currentPlayer) return;

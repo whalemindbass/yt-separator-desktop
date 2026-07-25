@@ -720,6 +720,24 @@ export class Player {
     // 곡의 실제 소리 시작점 (보컬/기타가 드럼보다 먼저 나오는 경우 downbeat 보다 이름)
     this._audioStart = (typeof audioStart === 'number' && isFinite(audioStart)) ? audioStart : null;
   }
+
+  /** 수동 BPM 설정 — downbeat(위상)는 유지하고 간격만 재계산.
+   *  감지 실패/미실행 곡에서도 사용 가능 (0:00 을 downbeat 로). */
+  setManualTempo(bpm) {
+    bpm = Math.max(40, Math.min(300, Math.round(+bpm) || 100));
+    this._metroTempo = bpm;
+    this._metroInterval = 60 / bpm;
+    if (typeof this._metroDownbeat !== 'number' || !isFinite(this._metroDownbeat)) this._metroDownbeat = 0;
+    if (!this._metroBeats || !this._metroBeats.length) this._metroBeats = [this._metroDownbeat];
+    // 재생 중 메트로놈 켜져있으면 즉시 재스케줄
+    if (this._metroEnabled && this._playing) this._startMetroScheduler();
+    return bpm;
+  }
+  /** BPM 을 정수배(×2)/절반(÷2)으로 — octave 오차 빠른 교정. downbeat 위상 유지. */
+  scaleTempo(factor) {
+    const cur = this._metroTempo || 100;
+    return this.setManualTempo(cur * factor);
+  }
   setMetronomeEnabled(v) {
     this._metroEnabled = !!v;
     if (this._metroEnabled && this._playing) this._startMetroScheduler();
@@ -738,13 +756,14 @@ export class Player {
     return {
       enabled: !!this._metroEnabled,
       tempo: this._metroTempo || 0,
-      hasBeats: (this._metroBeats && this._metroBeats.length > 0),
+      // interval 이 유효하면 재생 가능 (수동 BPM 포함)
+      hasBeats: !!(this._metroInterval && this._metroInterval > 0),
       volume: this._metroVolume ?? 0.5,
     };
   }
   _startMetroScheduler() {
     this._stopMetroScheduler();
-    if (!this._metroBeats?.length || !this._metroInterval) return;
+    if (!this._metroInterval || this._metroInterval <= 0) return;
     if (this._metroGain) { try { this._metroGain.disconnect(); } catch {} }
     this._metroGain = this.audioCtx.createGain();
     this._metroGain.gain.value = this._metroVolume ?? 0.5;
