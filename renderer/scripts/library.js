@@ -832,7 +832,7 @@ const speedUp     = $('speed-up');
 const speedReset  = $('speed-reset');
 
 function applySpeed(pct) {
-  pct = Math.max(50, Math.min(200, Math.round(pct / 5) * 5));   // 5% 스냅
+  pct = Math.max(10, Math.min(200, Math.round(pct / 5) * 5));   // 5% 스냅, 10%~200%
   speedSlider.value = pct;
   speedVal.textContent = pct + '%';
   if (playerVideo) {
