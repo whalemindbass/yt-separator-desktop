@@ -184,21 +184,26 @@ function renderList() {
   const sorted = filtered.sort(sortFn);
   const useGroupHeaders = _sortMode === 'group';
 
+  const isEn = getLocale() === 'en';
   let lastHeader = null;
-  const addHeader = (label) => {
+  const addHeader = (label, groupName) => {
     if (lastHeader === label) return;
     lastHeader = label;
     const h = document.createElement('li');
-    h.className = 'lib-group-head';
+    h.className = 'lib-group-head' + (groupName ? ' renamable' : '');
     h.textContent = label;
+    if (groupName) {
+      h.title = isEn ? 'Click to rename group' : '클릭하여 그룹 이름 변경';
+      h.addEventListener('click', (e) => { e.stopPropagation(); startGroupRename(h, groupName); });
+    }
     listEl.appendChild(h);
   };
 
-  const isEn = getLocale() === 'en';
   for (const it of sorted) {
     if (useGroupHeaders) {
+      const isRealGroup = !it.favorite && !!it.group;
       const header = it.favorite ? (isEn ? '★  Favorites' : '★  즐겨찾기') : (it.group ? it.group : (isEn ? 'Other' : '기타'));
-      addHeader(header);
+      addHeader(header, isRealGroup ? it.group : null);
     }
 
     const li = document.createElement('li');
@@ -273,6 +278,39 @@ function startInlineRename(li, item) {
   input.addEventListener('click', (e) => e.stopPropagation());
 }
 
+// 그룹 헤더 클릭 → 인라인으로 그룹 이름 변경 (해당 그룹의 모든 항목에 반영)
+function startGroupRename(headEl, groupName) {
+  const input = document.createElement('input');
+  input.className = 'lib-group-rename';
+  input.value = groupName;
+  input.spellcheck = false;
+  headEl.textContent = '';
+  headEl.appendChild(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    const newName = input.value.trim();
+    if (save && newName && newName !== groupName) {
+      // 같은 그룹의 모든 항목(4/6-stem sibling 포함) 이름 변경. 기존 그룹명과 겹치면 자연스럽게 병합됨.
+      const affected = items.filter(x => x.group === groupName);
+      for (const it of affected) {
+        const res = await api.library.setGroup(it.id, newName);
+        if (res.ok) syncSiblings(it.videoPath, { group: newName });
+      }
+      updateGroupPickerLabel();
+    }
+    renderList();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
+}
+
 async function selectItem(id) {
   const it = items.find(x => x.id === id);
   if (!it) return;
@@ -294,6 +332,9 @@ function destroyPlayer() {
   if (countInOverlay)  countInOverlay.hidden = true;
   // 트림 리셋 (새 곡 로드 시 복원 전 기본값)
   _trimStart = 0; _trimEnd = null;
+  // 파형 초기화
+  _wavePeaks = null;
+  if (vcWaveform) { const c = vcWaveform.getContext('2d'); c && c.clearRect(0, 0, vcWaveform.width, vcWaveform.height); }
   updateTrimUI();
 }
 
@@ -476,6 +517,10 @@ async function mountPlayer(item) {
       stemUrls[name] = toYtsepUrl(p);
     }
     currentPlayer = new Player(playerVideo, videoUrl, stems, sampleRate, stemUrls);
+
+    // 파형 peaks 계산 (스템 합산 진폭)
+    computeWavePeaks(stems);
+    drawWaveform();
 
     // 카운트인 오버레이 콜백
     currentPlayer.setCountInCallback((remaining, _total) => {
@@ -1271,6 +1316,101 @@ const vcPauseIco   = vcPlay?.querySelector('.ico-pause');
 const vcTrimStart  = $('vc-trim-start');
 const vcTrimEnd    = $('vc-trim-end');
 const vcTrimReset  = $('vc-trim-reset');
+const vcWaveform   = $('vc-waveform');
+
+// ── 파형 ────────────────────────────────────────
+let _wavePeaks = null;   // Float32Array (0~1), 곡 전체 진폭 다운샘플
+const WAVE_BUCKETS = 900;
+// 파형 표시 여부 (기본 꺼짐 → 일자 막대). 설정에서 토글.
+let _waveformOn = localStorage.getItem('waveformDisplay') === '1';
+window.addEventListener('waveform-pref-changed', () => {
+  _waveformOn = localStorage.getItem('waveformDisplay') === '1';
+  drawWaveform();
+});
+
+/** stems({name:[L,R]}) 합산 → mono 진폭을 WAVE_BUCKETS 개로 다운샘플 */
+function computeWavePeaks(stems) {
+  const arrs = Object.values(stems || {}).filter(a => a && a[0] && a[1]);
+  if (!arrs.length) { _wavePeaks = null; return; }
+  const len = arrs[0][0].length;
+  const bucketSize = Math.max(1, Math.floor(len / WAVE_BUCKETS));
+  const peaks = new Float32Array(WAVE_BUCKETS);
+  let globalMax = 1e-6;
+  for (let b = 0; b < WAVE_BUCKETS; b++) {
+    const start = b * bucketSize;
+    const end = Math.min(len, start + bucketSize);
+    let mx = 0;
+    // 스템 합산 후 절대값 최대 (샘플 간격 두고 스캔 — 성능)
+    const step = Math.max(1, Math.floor((end - start) / 400));
+    for (let i = start; i < end; i += step) {
+      let s = 0;
+      for (const [L, R] of arrs) s += (L[i] + R[i]) * 0.5;
+      const a = Math.abs(s);
+      if (a > mx) mx = a;
+    }
+    peaks[b] = mx;
+    if (mx > globalMax) globalMax = mx;
+  }
+  // 정규화
+  for (let b = 0; b < WAVE_BUCKETS; b++) peaks[b] = Math.min(1, peaks[b] / globalMax);
+  _wavePeaks = peaks;
+}
+
+function drawWaveform() {
+  if (!vcWaveform) return;
+  const wrap = vcWaveform.parentElement;
+  const W = Math.max(1, Math.round(wrap.clientWidth));
+  const H = Math.max(1, Math.round(wrap.clientHeight));
+  const dpr = window.devicePixelRatio || 1;
+  if (vcWaveform.width !== W * dpr || vcWaveform.height !== H * dpr) {
+    vcWaveform.width = W * dpr; vcWaveform.height = H * dpr;
+  }
+  const ctx = vcWaveform.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const dur = playerVideo.duration || 0;
+  const cur = playerVideo.currentTime || 0;
+  const progX = dur > 0 ? (cur / dur) * W : 0;
+  const trimAX = dur > 0 ? ((_trimStart || 0) / dur) * W : 0;
+  const trimBX = dur > 0 ? ((_trimEnd != null ? _trimEnd : dur) / dur) * W : W;
+
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const accent = cssVar('--accent') || '#35d1a6';
+  const mid = H / 2;
+
+  if (!_waveformOn || !_wavePeaks) {
+    // 일자(플랫) 막대 — 파형 꺼짐이거나 아직 파형 미계산
+    const trackH = 4;
+    const y = Math.round(mid - trackH / 2);
+    ctx.fillStyle = 'rgba(255,255,255,.16)';               // 전체 트랙
+    ctx.fillRect(0, y, W, trackH);
+    ctx.fillStyle = 'rgba(255,255,255,.30)';               // 트림 구간
+    if (trimBX > trimAX) ctx.fillRect(trimAX, y, trimBX - trimAX, trackH);
+    ctx.fillStyle = accent;                                 // 재생된 부분
+    if (progX > 0) ctx.fillRect(0, y, Math.min(progX, W), trackH);
+  } else {
+    const n = _wavePeaks.length;
+    const barW = W / n;
+    for (let i = 0; i < n; i++) {
+      const x = i * barW;
+      const h = Math.max(1, _wavePeaks[i] * (H * 0.9));
+      const inTrim = x >= trimAX - 0.5 && x <= trimBX + 0.5;
+      const played = x <= progX;
+      if (!inTrim)      ctx.fillStyle = 'rgba(255,255,255,.10)';   // 트림 밖: 매우 흐리게
+      else if (played)  ctx.fillStyle = accent;                     // 재생됨: accent
+      else              ctx.fillStyle = 'rgba(255,255,255,.42)';    // 미재생: 밝은 회색
+      ctx.fillRect(x, mid - h / 2, Math.max(1, barW - 0.5), h);
+    }
+  }
+  // A-B 루프 마커
+  const st = currentPlayer?.getLoopState?.();
+  if (st && dur > 0) {
+    ctx.fillStyle = accent;
+    if (st.a != null) ctx.fillRect((st.a / dur) * W - 1, 0, 2, H);
+    if (st.b != null) ctx.fillRect((st.b / dur) * W - 1, 0, 2, H);
+  }
+}
 
 // 트림 상태 (라이브러리 레벨에서 UI 반영용 — Player 가 실제 재생 제어)
 let _trimStart = 0;
@@ -1322,6 +1462,7 @@ function updateVcProgress() {
   // 트림 시작점 기준 상대시간 표시
   vcTime.textContent = fmtVcTime(Math.max(0, cur - (_trimStart || 0)));
   if (dur > 0) vcSeek.value = String(Math.round(cur / dur * 1000));
+  drawWaveform();
 }
 function updateVcDuration() {
   vcDuration.textContent = fmtVcTime(effectiveDur());
@@ -1339,6 +1480,7 @@ function updateTrimUI() {
   vcTrimEnd?.classList.toggle('set', hasE);
   if (vcTrimReset) vcTrimReset.hidden = !(hasS || hasE);
   updateVcDuration();
+  drawWaveform();
 }
 
 vcPlay?.addEventListener('click', () => {
@@ -1408,6 +1550,12 @@ playerVideo.addEventListener('loadedmetadata', () => {
   updateVcProgress();
   updateVcPlayIcon();
   updateTrimUI();   // duration 확정 후 트림 음영·상대길이 반영
+});
+// 창 크기 변경 시 파형 다시 그리기 (디바운스)
+let _waveResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_waveResizeTimer);
+  _waveResizeTimer = setTimeout(drawWaveform, 100);
 });
 playerVideo.addEventListener('durationchange', () => {
   updateTrimUI();

@@ -6,6 +6,7 @@
 
 import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider, cancelSeparation } from './separator.js';
 import { Library } from './library.js';
+import { initCommunity } from './community.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
 
 // 최초 로드 즉시 i18n 적용
@@ -85,6 +86,7 @@ function switchView(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.view === name));
   views.forEach(v => v.hidden = v.dataset.view !== name);
   if (name === 'library') Library.refresh().catch(console.error);
+  if (name === 'community') initCommunity().catch(console.error);
 }
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 
@@ -110,6 +112,7 @@ const sModelPills    = document.querySelectorAll('#s-model-pills .pill');
 const sProviderPills = document.querySelectorAll('#s-provider-pills .pill');
 const sQualityPills  = document.querySelectorAll('#s-quality-pills .pill');
 const sClipboardCB   = $('s-clipboard-detect');
+const sWaveformCB    = $('s-waveform');
 const sDownloadsDir  = $('s-downloads-dir');
 const sDownloadsOpen = $('s-downloads-open');
 const sDownloadsChg  = $('s-downloads-change');
@@ -139,6 +142,7 @@ async function refreshSettingsView() {
   sQualityPills.forEach(b => b.classList.toggle('on', b.dataset.quality === quality));
 
   sClipboardCB.checked = localStorage.getItem('clipboardAutoDetect') !== '0';
+  if (sWaveformCB) sWaveformCB.checked = localStorage.getItem('waveformDisplay') === '1';
 
   // Main-side settings
   try {
@@ -269,6 +273,10 @@ sQualityPills.forEach(btn => btn.addEventListener('click', () => {
 }));
 sClipboardCB?.addEventListener('change', () => {
   localStorage.setItem('clipboardAutoDetect', sClipboardCB.checked ? '1' : '0');
+});
+sWaveformCB?.addEventListener('change', () => {
+  localStorage.setItem('waveformDisplay', sWaveformCB.checked ? '1' : '0');
+  window.dispatchEvent(new Event('waveform-pref-changed'));
 });
 sAutoUpdateCB?.addEventListener('change', async () => {
   await api.settings.set({ autoUpdateEnabled: sAutoUpdateCB.checked });

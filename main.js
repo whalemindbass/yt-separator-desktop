@@ -1,7 +1,7 @@
 'use strict';
 // YT Separator Desktop — Electron main process
 
-const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { pathToFileURL } = require('url');
 const { Readable } = require('stream');
@@ -93,6 +93,7 @@ function createMainWindow() {
       nodeIntegration: false,
       sandbox: false,
       webSecurity: true,
+      webviewTag: true,            // 커뮤니티 임베드용
     },
   });
   mainWindow.on('maximize',   () => mainWindow.webContents.send('window:state', { maximized: true }));
@@ -113,7 +114,47 @@ function createMainWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+// 데스크톱 Chrome UA — 커뮤니티 webview 에서 Google OAuth 임베드 차단 회피
+const DESKTOP_CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
+
+app.on('web-contents-created', (_e, contents) => {
+  if (contents.getType() === 'webview') {
+    // webview 요청에 데스크톱 UA 적용 (Google 로그인 허용)
+    try { contents.setUserAgent(DESKTOP_CHROME_UA); } catch {}
+    // window.open / target=_blank → 기본 브라우저로
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/i.test(url)) { shell.openExternal(url); }
+      return { action: 'deny' };
+    });
+    // ytseparator.com · google · youtube 외 네비게이션은 외부로
+    contents.on('will-navigate', (ev, url) => {
+      const ok = /^https:\/\/(ytseparator\.com|accounts\.google\.com|[^/]*\.google\.com|[^/]*\.googleusercontent\.com|www\.youtube\.com|youtube\.com|youtu\.be|[^/]*\.gstatic\.com)/i.test(url);
+      if (!ok) { ev.preventDefault(); shell.openExternal(url); }
+    });
+  }
+});
+app.on('will-attach-webview', (_e, webPreferences, params) => {
+  webPreferences.nodeIntegration = false;
+  webPreferences.contextIsolation = true;
+  // preload 제거 (커뮤니티 페이지엔 앱 API 노출 안 함)
+  delete webPreferences.preload;
+});
+
 app.whenReady().then(() => {
+  // 커뮤니티 YouTube iframe 임베드: file:// 오리진이라 Referer 가 없어 오류(153) → 유효한 Referer 주입
+  try {
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      { urls: ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'] },
+      (details, cb) => {
+        const h = details.requestHeaders;
+        // 커뮤니티 iframe 임베드 문서 로드에만 유효한 제3자 Referer 주입
+        // (file:// 오리진은 무효라 오류 153/152 발생. 플레이어 내부 요청은 건드리지 않음)
+        if (details.resourceType === 'subFrame') h['Referer'] = 'https://ytseparator.com/';
+        cb({ requestHeaders: h });
+      }
+    );
+  } catch (e) { console.warn('[yt-referer]', e); }
+
   // ytsep://f/<encoded absolute path> → 파일 스트리밍 응답
   //   호스트('f')는 무시, pathname('/C:/...')만 사용
   // HTTP Range 지원 — <video> seek 필수. 브라우저가 Range 요청 보내면 206으로 응답.
