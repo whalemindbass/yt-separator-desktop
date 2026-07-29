@@ -268,9 +268,11 @@
           </div>
         </div>
 
+        <div class="player-stage" id="player-stage">
         <div class="player-video-wrap" id="player-video-wrap">
           <video id="player-video" muted preload="metadata" playsinline crossorigin="anonymous"></video>
           <div id="countin-overlay" class="countin-overlay" hidden><span id="countin-number">4</span></div>
+          <div id="player-loading-overlay" class="player-loading-overlay" hidden><div class="pl-spinner"></div></div>
 
           <div id="video-controls" class="video-controls">
             <button id="vc-play" class="vc-btn vc-play" data-i18n-title="vc.play" title="재생/일시정지">
@@ -291,13 +293,30 @@
               <button id="vc-trim-end" class="vc-btn vc-trim-btn" data-i18n-title="vc.trim.end" title="현재 위치를 끝점으로">⇥</button>
               <button id="vc-trim-reset" class="vc-btn vc-trim-btn" data-i18n-title="vc.trim.reset" title="구간 초기화" hidden>↺</button>
             </div>
+            <button id="vc-checkpoints" class="vc-btn" data-i18n-title="vc.checkpoints" title="체크포인트">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 3h8v14l-4-3-4 3V3Z"/></svg>
+            </button>
             <button id="vc-fullscreen" class="vc-btn" data-i18n-title="vc.fullscreen" title="전체화면">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
             </button>
           </div>
         </div>
 
-        <div id="player-loading" class="player-loading muted" data-i18n="player.stems.load" hidden>스템 로드 중…</div>
+        <aside id="checkpoint-panel" class="checkpoint-panel" hidden>
+          <div class="cp-head">
+            <span data-i18n="cp.title">체크포인트</span>
+            <button id="cp-close" class="cp-close" title="닫기" aria-label="close">✕</button>
+          </div>
+          <ul id="cp-list" class="cp-list"></ul>
+          <div class="cp-empty" id="cp-empty" data-i18n="cp.empty">현재 위치를 이름과 함께 추가하세요.</div>
+          <div class="cp-add">
+            <input id="cp-add-time" class="cp-add-time" type="text" spellcheck="false" title="시간 (예: 1:23)" value="0:00" />
+            <input id="cp-add-name" class="cp-add-name" type="text" maxlength="40" spellcheck="false" data-i18n-placeholder="cp.name.ph" placeholder="이름 (예: 후렴)" />
+            <button id="cp-add-btn" class="cp-add-btn" title="추가">＋</button>
+          </div>
+        </aside>
+        </div>
+
         <div id="player-err" class="err" hidden></div>
       </div>
     </section>

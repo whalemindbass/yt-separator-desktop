@@ -21,7 +21,7 @@ const playerVideo   = $('player-video');
 const playerProv    = $('player-provider');
 const playerName    = $('player-name');
 const playerDel     = $('player-delete');
-const playerLoading = $('player-loading');
+const playerLoading = $('player-loading-overlay');   // 스템 로드 중 영상 위 오버레이 (클릭 차단)
 const playerErr     = $('player-err');
 const mixerTracks   = $('mixer-tracks');
 const masterVol     = $('master-vol');
@@ -74,6 +74,7 @@ const saveTrackSolo = (stem, so)  => _mutateSettings(s => { (s.trackSolos = s.tr
 const saveMetro     = (patch)     => _mutateSettings(s => { s.metro = { ...(s.metro || {}), ...patch }; });
 const saveCountIn   = (patch)     => _mutateSettings(s => { s.countIn = { ...(s.countIn || {}), ...patch }; });
 const saveTrim      = (patch)     => _mutateSettings(s => { s.trim = { ...(s.trim || {}), ...patch }; });
+const saveCheckpoints = (list)    => _mutateSettings(s => { s.checkpoints = list; });
 const saveBeatCache = (tempo, beats, beatInterval, downbeat, fitStdMs, audioStart) => _mutateSettings(s => {
   s.beatCache = { tempo, beats, beatInterval, downbeat, fitStdMs, audioStart, at: Date.now() };
 });
@@ -602,6 +603,7 @@ async function mountPlayer(item) {
     resetKeyUI();
     updateGroupPickerLabel();
     updateReseparateAndToggle(item);
+    _checkpoints = []; renderCheckpoints();
 
     // 저장된 곡별 설정 복원
     await restoreSongSettings(item);
@@ -670,6 +672,14 @@ async function restoreSongSettings(item) {
       currentPlayer?.setTrimStart(_trimStart);
       currentPlayer?.setTrimEnd(_trimEnd);
       updateTrimUI();
+    }
+    // 체크포인트
+    if (Array.isArray(s.checkpoints)) {
+      _checkpoints = s.checkpoints
+        .filter(cp => cp && typeof cp.t === 'number')
+        .map(cp => ({ t: cp.t, name: String(cp.name || fmtVcTime(cp.t)) }))
+        .sort((a, b) => a.t - b.t);
+      renderCheckpoints();
     }
     // 트랙 Solo
     if (s.trackSolos) {
@@ -1318,6 +1328,98 @@ const vcTrimEnd    = $('vc-trim-end');
 const vcTrimReset  = $('vc-trim-reset');
 const vcWaveform   = $('vc-waveform');
 
+// ── 체크포인트 (곡별 저장, 영상 우측 패널) ──────────
+const cpBtn      = $('vc-checkpoints');
+const cpPanel    = $('checkpoint-panel');
+const cpClose    = $('cp-close');
+const cpListEl   = $('cp-list');
+const cpEmptyEl  = $('cp-empty');
+const cpAddTime  = $('cp-add-time');
+const cpAddName  = $('cp-add-name');
+const cpAddBtn   = $('cp-add-btn');
+let _checkpoints = [];   // [{ t:number, name:string }] — t 오름차순 유지
+
+function renderCheckpoints() {
+  if (!cpListEl) return;
+  cpListEl.innerHTML = '';
+  if (cpEmptyEl) cpEmptyEl.hidden = _checkpoints.length > 0;
+  const isEn = getLocale() === 'en';
+  _checkpoints.forEach((cp, i) => {
+    const li = document.createElement('li');
+    li.className = 'cp-item';
+    li.innerHTML = `<span class="cp-time"></span><span class="cp-name"></span>`
+      + `<button class="cp-del" title="${isEn ? 'Delete' : '삭제'}">✕</button>`;
+    li.querySelector('.cp-time').textContent = fmtVcTime(cp.t);
+    li.querySelector('.cp-name').textContent = cp.name;
+    li.addEventListener('click', (e) => {
+      if (e.target.closest('.cp-del')) return;
+      playerVideo.currentTime = cp.t;
+      updateVcProgress();
+      showControlsTemporarily();
+    });
+    li.querySelector('.cp-del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      _checkpoints.splice(i, 1);
+      saveCheckpoints(_checkpoints);
+      renderCheckpoints();
+      drawWaveform();
+    });
+    cpListEl.appendChild(li);
+  });
+}
+
+// "m:ss" / "h:mm:ss" / 초 문자열 → 초. 형식 오류면 null.
+function parseTimeInput(str) {
+  str = String(str ?? '').trim();
+  if (!str) return null;
+  if (/^\d+(\.\d+)?$/.test(str)) return parseFloat(str);
+  const parts = str.split(':').map(p => p.trim());
+  if (parts.some(p => p === '' || isNaN(Number(p)))) return null;
+  return parts.reduce((sec, p) => sec * 60 + Number(p), 0);
+}
+
+function addCheckpoint() {
+  const dur = playerVideo.duration || 0;
+  let t = parseTimeInput(cpAddTime?.value);
+  if (t == null || isNaN(t)) t = playerVideo.currentTime || 0;
+  t = Math.max(0, dur > 0 ? Math.min(dur, t) : t);   // 영상 범위 [0, 길이] 로 클램프
+  const name = (cpAddName?.value || '').trim() || fmtVcTime(t);
+  _checkpoints.push({ t, name });
+  _checkpoints.sort((a, b) => a.t - b.t);
+  saveCheckpoints(_checkpoints);
+  if (cpAddName) cpAddName.value = '';
+  if (cpAddTime) cpAddTime.value = fmtVcTime(playerVideo.currentTime || 0);
+  renderCheckpoints();
+  drawWaveform();
+}
+
+function toggleCheckpointPanel(force) {
+  if (!cpPanel) return;
+  const show = force != null ? force : cpPanel.hidden;
+  cpPanel.hidden = !show;
+  cpBtn?.classList.toggle('on', show);
+  if (show) {
+    if (cpAddTime) cpAddTime.value = fmtVcTime(playerVideo.currentTime || 0);
+    renderCheckpoints(); cpAddName?.focus();
+  }
+  // 패널 열림/닫힘으로 영상·시크바 폭이 바뀌므로 파형 다시 그림
+  requestAnimationFrame(drawWaveform);
+}
+
+cpBtn?.addEventListener('click', () => toggleCheckpointPanel());
+cpClose?.addEventListener('click', () => toggleCheckpointPanel(false));
+cpAddBtn?.addEventListener('click', addCheckpoint);
+cpAddName?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCheckpoint(); } });
+cpAddTime?.addEventListener('focus', () => cpAddTime.select());
+cpAddTime?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCheckpoint(); } });
+cpAddTime?.addEventListener('blur', () => {
+  // 입력값을 영상 범위로 클램프해 정규화 표시. 비우면 현재 위치로 복귀.
+  const dur = playerVideo.duration || 0;
+  let t = parseTimeInput(cpAddTime.value);
+  if (t == null || isNaN(t)) t = playerVideo.currentTime || 0;
+  cpAddTime.value = fmtVcTime(Math.max(0, dur > 0 ? Math.min(dur, t) : t));
+});
+
 // ── 파형 ────────────────────────────────────────
 let _wavePeaks = null;   // Float32Array (0~1), 곡 전체 진폭 다운샘플
 const WAVE_BUCKETS = 900;
@@ -1403,6 +1505,17 @@ function drawWaveform() {
       ctx.fillRect(x, mid - h / 2, Math.max(1, barW - 0.5), h);
     }
   }
+  // 체크포인트 눈금 (상단에 삼각 표식)
+  if (dur > 0 && _checkpoints.length) {
+    ctx.fillStyle = cssVar('--tx-2') || 'rgba(255,255,255,.7)';
+    for (const cp of _checkpoints) {
+      const x = (cp.t / dur) * W;
+      ctx.beginPath();
+      ctx.moveTo(x - 3, 0); ctx.lineTo(x + 3, 0); ctx.lineTo(x, 4);
+      ctx.closePath(); ctx.fill();
+      ctx.fillRect(x - 0.5, 0, 1, H);
+    }
+  }
   // A-B 루프 마커
   const st = currentPlayer?.getLoopState?.();
   if (st && dur > 0) {
@@ -1462,6 +1575,9 @@ function updateVcProgress() {
   // 트림 시작점 기준 상대시간 표시
   vcTime.textContent = fmtVcTime(Math.max(0, cur - (_trimStart || 0)));
   if (dur > 0) vcSeek.value = String(Math.round(cur / dur * 1000));
+  // 편집 중이 아닐 때만 현재 위치로 자동 갱신
+  if (cpAddTime && cpPanel && !cpPanel.hidden && document.activeElement !== cpAddTime)
+    cpAddTime.value = fmtVcTime(cur);
   drawWaveform();
 }
 function updateVcDuration() {
@@ -1483,10 +1599,21 @@ function updateTrimUI() {
   drawWaveform();
 }
 
-vcPlay?.addEventListener('click', () => {
+function togglePlayback() {
   if (playerVideo.paused) playerVideo.play().catch(() => {});
   else playerVideo.pause();
-});
+}
+// 현재 재생 위치를 delta(초)만큼 이동 — 트림 구간 [start, end] 안으로 클램프
+function seekBy(delta) {
+  const dur = playerVideo.duration || 0;
+  if (!dur) return;
+  const lo = _trimStart || 0;
+  const hi = _trimEnd != null ? _trimEnd : dur;
+  playerVideo.currentTime = Math.max(lo, Math.min(hi, (playerVideo.currentTime || 0) + delta));
+  updateVcProgress();
+  showControlsTemporarily();
+}
+vcPlay?.addEventListener('click', togglePlayback);
 vcRestart?.addEventListener('click', () => {
   playerVideo.currentTime = _trimStart || 0;   // 트림 시작점 = 새 0:00
 });
@@ -1542,9 +1669,22 @@ videoWrap?.addEventListener('mouseleave', () => {
   if (vcIsActivePlayback()) videoWrap.classList.remove('controls-active');
 });
 // 영상 클릭 시 재생/정지 (컨트롤 바 버튼 클릭은 제외)
-playerVideo.addEventListener('click', () => {
-  if (playerVideo.paused) playerVideo.play().catch(() => {});
-  else playerVideo.pause();
+playerVideo.addEventListener('click', togglePlayback);
+
+// 키보드 단축키 — 라이브러리 뷰가 보이고 트랙이 로드됐을 때만.
+// 입력창(그룹/이름/BPM 편집, 슬라이더 등) 포커스 시엔 네이티브 동작 우선.
+document.addEventListener('keydown', (e) => {
+  if (!currentPlayer) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const libView = document.querySelector('main[data-view="library"]');
+  if (!libView || libView.hidden) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  switch (e.key) {
+    case ' ': case 'Spacebar':   e.preventDefault(); togglePlayback(); break;
+    case 'ArrowLeft':            e.preventDefault(); seekBy(-5); break;
+    case 'ArrowRight':           e.preventDefault(); seekBy(5); break;
+  }
 });
 playerVideo.addEventListener('loadedmetadata', () => {
   updateVcProgress();
