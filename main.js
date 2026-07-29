@@ -66,7 +66,7 @@ function writeSettings(obj) {
   catch { return false; }
 }
 
-/** userData/downloads (기본) — 사용자가 설정에서 변경했으면 커스텀 경로 */
+/** 영상 다운로드 폴더 — userData/downloads (기본), 설정에서 변경 가능 */
 function downloadsDir() {
   const s = readSettings();
   let dir = s.downloadsDir;
@@ -75,6 +75,21 @@ function downloadsDir() {
   }
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
+}
+/** 스템 저장 폴더 — 기본은 영상폴더/stems (하위호환), 설정에서 별도 지정 가능 */
+function stemsDir() {
+  const s = readSettings();
+  let dir = s.stemsDir;
+  if (!dir || typeof dir !== 'string') {
+    dir = path.join(downloadsDir(), 'stems');
+  }
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+/** child 가 parent 안(하위)에 있는지 */
+function isInsideDir(parent, child) {
+  const rel = path.relative(parent, child);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 function createMainWindow() {
@@ -309,7 +324,7 @@ ipcMain.handle('settings:set', (_ev, obj) => {
 });
 ipcMain.handle('settings:pickDownloadsDir', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '다운로드 폴더 선택',
+    title: '영상 다운로드 폴더 선택',
     properties: ['openDirectory', 'createDirectory'],
     defaultPath: downloadsDir(),
   });
@@ -320,6 +335,19 @@ ipcMain.handle('settings:pickDownloadsDir', async () => {
   return { ok: true, dir };
 });
 ipcMain.handle('settings:downloadsDir', () => downloadsDir());
+ipcMain.handle('settings:pickStemsDir', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: '스템 저장 폴더 선택',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: stemsDir(),
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  const dir = res.filePaths[0];
+  const merged = { ...readSettings(), stemsDir: dir };
+  writeSettings(merged);
+  return { ok: true, dir };
+});
+ipcMain.handle('settings:stemsDir', () => stemsDir());
 ipcMain.handle('settings:calcDiskUsage', () => {
   const dlDir  = downloadsDir();
   const modDir = path.join(app.getPath('userData'), 'models');
@@ -337,6 +365,8 @@ ipcMain.handle('settings:calcDiskUsage', () => {
     return sum;
   };
   downloads = walk(dlDir);
+  const stDir = stemsDir();
+  if (!isInsideDir(dlDir, stDir) && path.normalize(stDir) !== path.normalize(dlDir)) downloads += walk(stDir);
   models = walk(modDir);
   total = downloads + models;
   return { downloads, models, total, downloadsDir: dlDir, modelsDir: modDir };
@@ -783,7 +813,7 @@ ipcMain.handle('stem:extractAudio', async (_ev, videoPath) => {
 ipcMain.handle('stem:saveStems', async (_ev, stems, baseName, sampleRate) => {
   try {
     if (!stems || typeof stems !== 'object') return { ok: false, error: 'invalid stems' };
-    const outDir = path.join(downloadsDir(), 'stems');
+    const outDir = stemsDir();
     fs.mkdirSync(outDir, { recursive: true });
     const sr = sampleRate || 44100;
     const stemPaths = {};
@@ -960,11 +990,8 @@ ipcMain.handle('library:setGroup', (_ev, id, group) => {
  */
 function safeDeleteInDownloads(p) {
   const dlDir   = downloadsDir();
-  const stemDir = path.join(dlDir, 'stems');
-  const isInside = (parent, child) => {
-    const rel = path.relative(parent, child);
-    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-  };
+  const stemDir = stemsDir();
+  const isInside = isInsideDir;
   const abs = path.normalize(String(p || ''));
   if (!abs) return null;
   if (!isInside(dlDir, abs) && !isInside(stemDir, abs)) return null;
@@ -1028,7 +1055,7 @@ ipcMain.handle('library:cleanup', () => {
 ipcMain.handle('library:previewOrphans', () => {
   const rawItems = readLibrary();
   const dlDir = downloadsDir();
-  const stemDir = path.join(dlDir, 'stems');
+  const stemDir = stemsDir();
   const normKey = (p) => {
     if (!p) return '';
     const abs = path.normalize(String(p));

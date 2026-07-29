@@ -1485,12 +1485,15 @@ function drawWaveform() {
     // 일자(플랫) 막대 — 파형 꺼짐이거나 아직 파형 미계산
     const trackH = 4;
     const y = Math.round(mid - trackH / 2);
-    ctx.fillStyle = 'rgba(255,255,255,.16)';               // 전체 트랙
+    ctx.fillStyle = 'rgba(255,255,255,.12)';               // 트림 밖(제외): 항상 흐리게
     ctx.fillRect(0, y, W, trackH);
-    ctx.fillStyle = 'rgba(255,255,255,.30)';               // 트림 구간
-    if (trimBX > trimAX) ctx.fillRect(trimAX, y, trimBX - trimAX, trackH);
-    ctx.fillStyle = accent;                                 // 재생된 부분
-    if (progX > 0) ctx.fillRect(0, y, Math.min(progX, W), trackH);
+    if (trimBX > trimAX) {
+      ctx.fillStyle = 'rgba(255,255,255,.42)';             // 트림 안 · 미재생: 회색
+      ctx.fillRect(trimAX, y, trimBX - trimAX, trackH);
+      // 트림 안 · 재생됨: accent (progX 를 트림 범위로 클램프 → 제외 구간을 덮지 않음)
+      const playedEnd = Math.max(trimAX, Math.min(progX, trimBX));
+      if (playedEnd > trimAX) { ctx.fillStyle = accent; ctx.fillRect(trimAX, y, playedEnd - trimAX, trackH); }
+    }
   } else {
     const n = _wavePeaks.length;
     const barW = W / n;

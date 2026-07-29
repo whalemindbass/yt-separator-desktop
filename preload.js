@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     set:              (obj)       => ipcRenderer.invoke('settings:set', obj),
     downloadsDir:     ()          => ipcRenderer.invoke('settings:downloadsDir'),
     pickDownloadsDir: ()          => ipcRenderer.invoke('settings:pickDownloadsDir'),
+    stemsDir:         ()          => ipcRenderer.invoke('settings:stemsDir'),
+    pickStemsDir:     ()          => ipcRenderer.invoke('settings:pickStemsDir'),
     calcDiskUsage:    ()          => ipcRenderer.invoke('settings:calcDiskUsage'),
     deleteModel:      (key)       => ipcRenderer.invoke('settings:deleteModel', key),
     appInfo:          ()          => ipcRenderer.invoke('settings:appInfo'),

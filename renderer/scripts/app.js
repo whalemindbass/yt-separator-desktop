@@ -116,6 +116,9 @@ const sWaveformCB    = $('s-waveform');
 const sDownloadsDir  = $('s-downloads-dir');
 const sDownloadsOpen = $('s-downloads-open');
 const sDownloadsChg  = $('s-downloads-change');
+const sStemsDir      = $('s-stems-dir');
+const sStemsOpen     = $('s-stems-open');
+const sStemsChg      = $('s-stems-change');
 const sDiskUsage     = $('s-disk-usage');
 const sDiskRefresh   = $('s-disk-refresh');
 const sCleanup       = $('s-cleanup');
@@ -150,11 +153,15 @@ async function refreshSettingsView() {
     sAutoUpdateCB.checked = s.autoUpdateEnabled !== false;
   } catch {}
 
-  // Downloads dir
+  // Downloads dir (영상) / Stems dir (스템)
   try {
     const dir = await api.settings.downloadsDir();
     sDownloadsDir.textContent = dir;
   } catch (e) { sDownloadsDir.textContent = t('common.error') + ': ' + e.message; }
+  try {
+    const sdir = await api.settings.stemsDir();
+    if (sStemsDir) sStemsDir.textContent = sdir;
+  } catch (e) { if (sStemsDir) sStemsDir.textContent = t('common.error') + ': ' + e.message; }
 
   // Disk usage
   refreshDiskUsage();
@@ -289,6 +296,17 @@ sDownloadsChg?.addEventListener('click', async () => {
   const res = await api.settings.pickDownloadsDir();
   if (res.ok) {
     sDownloadsDir.textContent = res.dir;
+    refreshDiskUsage();
+  }
+});
+sStemsOpen?.addEventListener('click', async () => {
+  const dir = await api.settings.stemsDir();
+  await api.openPath(dir);
+});
+sStemsChg?.addEventListener('click', async () => {
+  const res = await api.settings.pickStemsDir();
+  if (res.ok) {
+    if (sStemsDir) sStemsDir.textContent = res.dir;
     refreshDiskUsage();
   }
 });
