@@ -2122,10 +2122,16 @@ body { display: flex; flex-direction: column; }
 .daw-fx-x { background: none; border: 0; color: var(--tx-4); cursor: pointer; font-size: 13px; }
 .daw-fx-b { flex: 1; padding: 11px; overflow: auto; }
 .daw-fx-actions { display: flex; gap: 6px; margin-bottom: 10px; }
-.daw-fx-actions .mini { flex: 1; height: 26px; font-size: 11px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-2); border-radius: 6px; cursor: pointer; }
+.daw-fx-actions .mini { flex: 1; height: 26px; font-size: 11px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-2); border-radius: 6px; cursor: pointer; transition: color .12s, border-color .12s, background .12s; }
+.daw-fx-actions .mini:hover { color: var(--tx-1); background: var(--input); border-color: var(--accent); }
+.daw-fx-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.daw-fx-h b { color: var(--accent); }
 .daw-fx-slots { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
-.daw-fx-slot { display: flex; align-items: center; gap: 9px; padding: 9px 10px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; }
-.daw-fx-slot.bypassed { opacity: .5; }
+.daw-fx-slot { display: flex; align-items: center; gap: 9px; padding: 9px 10px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s, background .12s; }
+.daw-fx-slot:hover { border-color: var(--border-mid); background: var(--input); }
+.daw-fx-slot.bypassed { opacity: .55; }
+.daw-fx-slot .pw:hover { border-color: var(--accent); }
+.daw-fx-slot .ed:hover { color: var(--tx-1); border-color: var(--accent); }
 .daw-fx-slot .pw { flex: none; width: 34px; height: 20px; border-radius: 999px; border: 1px solid var(--border-mid); background: var(--input); position: relative; cursor: pointer; }
 .daw-fx-slot .pw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--tx-3); transition: left .14s, background .14s; }
 .daw-fx-slot .pw.on { background: color-mix(in srgb, var(--accent) 30%, var(--input)); border-color: var(--accent); }
@@ -2171,7 +2177,11 @@ body { display: flex; flex-direction: column; }
 .daw-head .ctrls { display: flex; align-items: center; gap: 5px; }
 .daw-ms { width: 19px; height: 17px; border-radius: 4px; border: 1px solid var(--border-mid); font: 700 9px/1 var(--sans); color: var(--tx-3); display: grid; place-items: center; background: transparent; cursor: pointer; }
 .daw-ms.on { color: var(--c, var(--accent)); border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); }
-.daw-vol { flex: 1; min-width: 40px; height: 16px; accent-color: var(--c, var(--accent)); cursor: pointer; }
+.daw-vol { -webkit-appearance: none; appearance: none; flex: 1; min-width: 40px; height: 14px; background: transparent; cursor: pointer; }
+.daw-vol::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: rgba(255,255,255,.15); transition: background .12s; }
+.daw-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: var(--c, var(--accent)); transition: box-shadow .12s; }
+.daw-vol:hover::-webkit-slider-runnable-track { background: color-mix(in srgb, var(--c, var(--accent)) 35%, rgba(255,255,255,.15)); }
+.daw-vol:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .daw-vol:disabled { opacity: .4; }
 .daw-area { position: relative; overflow: hidden; }
 .daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 38%, transparent); }

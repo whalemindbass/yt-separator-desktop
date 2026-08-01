@@ -383,6 +383,17 @@ function wire() {
 
   $('st-play').addEventListener('click', play);
   $('st-stop').addEventListener('click', stopAll);
+
+  // 스페이스바 = 재생/정지 (스튜디오 뷰 활성 + 입력창 아닐 때)
+  document.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space') return;
+    const main = document.querySelector('main[data-view="studio"]');
+    if (!main || main.hidden || !_started) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    e.preventDefault();
+    if (_playing) stopAll(); else play();
+  });
   $('st-master').addEventListener('input', (e) => api.engine.master(Number(e.target.value) / 100));
   $('st-seek0').addEventListener('click', () => { api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {

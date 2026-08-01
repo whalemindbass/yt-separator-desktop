@@ -199,7 +199,7 @@ public:
     {
         if (fx == nullptr) { std::cerr << "[engine] no FX loaded\n"; return; }
         if (! fx->hasEditor()) { std::cerr << "[engine] plugin has no editor\n"; return; }
-        if (editorWindow != nullptr) { editorWindow->toFront (true); return; }
+        if (editorWindow != nullptr) { editorWindow->setVisible (true); editorWindow->toFront (true); return; }
         editorWindow.reset (new PluginWindow (fx->createEditorIfNeeded(), fx->getName()));
         std::cerr << "[engine] editor opened\n";
     }
