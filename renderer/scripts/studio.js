@@ -229,7 +229,7 @@ function onPos(samples) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -413,7 +413,12 @@ function renderFxSlots() {
       <div class="info"><div class="n">${s.name}</div></div>
       <button class="ed" title="편집" ${s.hasEditor ? '' : 'disabled'}>✎</button>
       <button class="del" title="삭제">✕</button>`;
-    row.querySelector('.pw').addEventListener('click', () => api.engine.fxBypass(s.id, !s.bypass));
+    row.querySelector('.pw').addEventListener('click', () => {
+      const ns = !s.bypass; s.bypass = ns;                     // 낙관적 갱신 (엔진 fxChain 로 재확정)
+      row.classList.toggle('bypassed', ns);
+      row.querySelector('.pw').classList.toggle('on', !ns);
+      api.engine.fxBypass(s.id, ns);
+    });
     row.querySelector('.ed').addEventListener('click', () => api.engine.fxEditor(s.id));
     row.querySelector('.del').addEventListener('click', () => api.engine.fxRemove(s.id));
     row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(s.id)); row.classList.add('dragging'); });

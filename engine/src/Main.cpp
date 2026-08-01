@@ -226,7 +226,7 @@ public:
     }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
-    void setBypass (int id, bool on) { if (auto* s = findSlot (id)) s->bypass = on; }
+    void setBypass (int id, bool on) { if (auto* s = findSlot (id)) { s->bypass = on; emitChain(); } }
 
     void removeFx (int id)
     {

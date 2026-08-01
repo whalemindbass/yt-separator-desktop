@@ -2127,7 +2127,8 @@ body { display: flex; flex-direction: column; }
 .daw-fx-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
 .daw-fx-h b { color: var(--accent); }
 .daw-fx-slots { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
-.daw-fx-slot { display: flex; align-items: center; gap: 7px; padding: 5px 8px; background: var(--elev); border: 1px solid var(--border); border-radius: 6px; transition: border-color .12s; }
+.daw-fx-slot { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--elev); border: 1px solid var(--border); border-radius: 6px; transition: border-color .12s; }
+.daw-fx-slot .info .n { line-height: 24px; }
 .daw-fx-slot:hover { border-color: var(--border-mid); }
 .daw-fx-slot.bypassed { opacity: .5; }
 .daw-fx-slot.dragging { opacity: .4; }
