@@ -126,7 +126,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     showEditor:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'showEditor' }),
     track:       (index, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'track', index, ...(opts || {}) }),
     fxBypass:    (on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'fxBypass', on }),
-    recordArm:   (file)   => ipcRenderer.invoke('engine:cmd', { cmd: 'recordArm', file }),
+    recordArm:   ()       => ipcRenderer.invoke('engine:recordArm'),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);

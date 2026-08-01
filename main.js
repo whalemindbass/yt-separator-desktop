@@ -461,6 +461,12 @@ ipcMain.handle('engine:start', (_e, stems) => {
   return { ok: eng.start(Array.isArray(stems) ? stems : []), exe: eng.exePath };
 });
 ipcMain.handle('engine:cmd',  (_e, cmd) => ({ ok: getEngine().send(cmd) }));
+ipcMain.handle('engine:recordArm', () => {
+  const dir = path.join(downloadsDir(), 'takes');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const file = path.join(dir, `take-${Date.now()}.wav`);
+  return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
+});
 ipcMain.handle('engine:quit', () => { audioEngine?.quit(); return { ok: true }; });
 app.on('will-quit', () => { audioEngine?.quit(); });
 

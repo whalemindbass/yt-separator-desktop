@@ -173,10 +173,12 @@ async function loadSong(item) {
   flashTake(`불러옴: ${it.name}`);
 
   // 파형 (렌더러에서 디코드)
+  flashTake(`불러옴: ${it.name} · 파형 분석 중…`);
   try {
     const { stems } = await loadStemFilesToBuffers(it.stemPaths);
     renderWaves(stems);
-  } catch (e) { console.warn('waveform decode failed', e); }
+    flashTake(`불러옴: ${it.name}`);
+  } catch (e) { flashTake(`파형 디코드 실패: ${e && e.message || e}`); }
 }
 
 function flashTake(msg) { const el = $('st-take'); el.hidden = false; el.textContent = msg; }
