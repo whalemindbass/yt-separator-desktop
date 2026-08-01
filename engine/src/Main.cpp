@@ -320,6 +320,7 @@ public:
     }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
+    void setInputMonitor (bool on) { monitorInputOn = on; }
     void setBypass (int id, bool on) { if (auto* s = findSlot (id)) { s->bypass = on; emitChain(); } }
 
     void removeFx (int id)
@@ -495,8 +496,9 @@ public:
             // 라이브 입력 + 레벨/튜너 분석(원본 입력)
             if (numIn > 0)
             {
-                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                    fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
+                if (monitorInputOn.load())   // 내 소리 모니터 on 일 때만 입력을 버스에 넣음
+                    for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                        fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
                 float pk = 0;
                 for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[0][i]); if (a > pk) pk = a; }
                 if (pk > inPeak.load()) inPeak.store (pk);
@@ -636,6 +638,7 @@ private:
     std::atomic<int64> playhead { 0 };
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
+    std::atomic<bool>  monitorInputOn { true };
     AudioDeviceManager* devmgr = nullptr;
 
     // 녹음 테이크 재생
@@ -702,6 +705,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
+    else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);

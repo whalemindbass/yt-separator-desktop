@@ -63,6 +63,7 @@ class AudioEngine extends EventEmitter {
   track(index, opts) { return this.send({ cmd: 'track', index, ...(opts || {}) }); }
   master(gain)       { return this.send({ cmd: 'master', gain }); }
   monitor(gain)      { return this.send({ cmd: 'monitor', gain }); }
+  inputMonitor(on)   { return this.send({ cmd: 'inputMonitor', on }); }
   metro(on, bpm)     { return this.send({ cmd: 'metro', on, bpm }); }
   listDevices()      { return this.send({ cmd: 'listDevices' }); }
   setDevice(opts)    { return this.send({ cmd: 'setDevice', ...(opts || {}) }); }

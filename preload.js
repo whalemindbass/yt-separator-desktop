@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     track:       (index, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'track', index, ...(opts || {}) }),
     master:      (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'master', gain }),
     monitor:     (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'monitor', gain }),
+    inputMonitor:(on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'inputMonitor', on }),
     metro:       (on, bpm)=> ipcRenderer.invoke('engine:cmd', { cmd: 'metro', on, bpm }),
     listDevices: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'listDevices' }),
     setDevice:   (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'setDevice', ...(opts || {}) }),

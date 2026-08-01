@@ -254,7 +254,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -606,6 +606,14 @@ function wire() {
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
+
+  // 내 소리 모니터 on/off
+  let _monOn = true;
+  $('st-monitor').addEventListener('click', () => {
+    _monOn = !_monOn;
+    $('st-monitor').classList.toggle('on', _monOn);
+    api.engine.inputMonitor(_monOn);
+  });
 
   // 도구 드로어 (레벨·튜너) — 간헐 토글
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });
