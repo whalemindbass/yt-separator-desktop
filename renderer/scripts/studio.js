@@ -17,18 +17,37 @@ let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _tracks = [];          // [{key,label,color,engineIndex}]
-let _fxLoaded = null, _fxBypass = false, _fxHasEditor = false, _fxIndex = null;
-let _activePresetId = null, _pendingState = null, _savePresetName = null;
-function loadFxIndex(idx) { _fxIndex = idx; api.engine.loadFx(idx); if (_songKey) saveFxPref(_songKey, idx); }
+let _chain = [];              // [{id,index,name,hasEditor,bypass}] — 엔진 FX 체인 미러
+let _activePresetId = null;
+let _presetGather = null;     // 저장: {name,id?,states:{slotId:data},need:[ids],meta:[{index,bypass}],order:[ids]}
+let _pendingPreset = null;    // 로드: {slots:[{index,bypass,data}]}
 
-// ── FX 프리셋(톤) 저장소 — 전역, 플러그인별 상태 스냅샷 ──
+// ── FX 프리셋(톤) — 체인 전체 스냅샷 ──
 function getPresets() { try { return JSON.parse(localStorage.getItem('yss:fx-presets') || '[]'); } catch { return []; } }
 function setPresets(a) { try { localStorage.setItem('yss:fx-presets', JSON.stringify(a)); } catch {} }
+function upsertPreset(p) { const a = getPresets(); const i = a.findIndex(x => x.id === p.id); if (i >= 0) a[i] = p; else a.push(p); setPresets(a); }
+
+function startGather(opts) {   // 현재 체인 상태를 모아 프리셋 생성/갱신
+  if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+  _presetGather = { ...opts, states: {}, need: _chain.map(s => s.id), meta: _chain.map(s => ({ index: s.index, bypass: s.bypass })), order: _chain.map(s => s.id) };
+  for (const s of _chain) api.engine.fxSaveState(s.id);
+}
 function loadPreset(p) {
   _activePresetId = p.id;
-  if (_fxLoaded && _fxIndex === p.index) api.engine.fxSetState(p.data);   // 같은 플러그인 → 상태만 (재생성 X, 안전)
-  else { _pendingState = p.data; loadFxIndex(p.index); }                  // 다른 플러그인 → 로드 후 상태 적용
+  for (const s of _chain) api.engine.fxRemove(s.id);   // 기존 체인 제거
+  _pendingPreset = { slots: p.slots.slice() };
+  for (const sl of p.slots) api.engine.fxAdd(sl.index); // 순서대로 추가
+  setTimeout(applyPendingPreset, 350);                 // 추가 완료 후 상태·bypass 적용
   flashTake('톤 불러옴: ' + p.name);
+}
+function applyPendingPreset() {
+  if (!_pendingPreset) return;
+  const pp = _pendingPreset; _pendingPreset = null;
+  _chain.forEach((s, i) => {
+    const sl = pp.slots[i]; if (!sl) return;
+    if (sl.data) api.engine.fxSetState(s.id, sl.data);
+    if (sl.bypass) api.engine.fxBypass(s.id, true);
+  });
 }
 function openNameModal(title, def, onOk) {
   const host = $('daw-modal');
@@ -321,11 +340,7 @@ function openVstPicker() {
   const html = _plugins.map(p =>
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${p.name}</div>
       <div class="m">${p.manufacturer}</div></div></div>`).join('');
-  openModal('VST3 추가', html, (idx) => {
-    const i = Number(idx);
-    if (_fxLoaded && _fxIndex === i) return;   // 같은 플러그인 재로드 방지
-    loadFxIndex(i);
-  });
+  openModal('VST3 추가', html, (idx) => api.engine.fxAdd(Number(idx)));   // 여러 개 추가 가능
 }
 
 // ── 이벤트 ─────────────────────────────────────────
@@ -344,26 +359,23 @@ function onEngineEvent(m) {
       break;
     case 'plugins':
       _plugins = m.list || [];
-      // 이미 FX 로드돼 있으면 재로드 안 함 (UAD 등 재생성 시 크래시 유발 경로 차단)
-      if (!_fxLoaded) { const saved = _songKey && loadFxPref(_songKey); if (saved != null && _plugins[saved]) loadFxIndex(saved); }
+      $('st-fx-add').disabled = false;
       break;
-    case 'fx':
-      _fxLoaded = m.name; _fxHasEditor = !!m.hasEditor; _fxBypass = false;
+    case 'fxChain':
+      _chain = m.list || [];
       renderFxSlots();
-      if (_pendingState) { const d = _pendingState; _pendingState = null; setTimeout(() => api.engine.fxSetState(d), 150); }
-      else { const st = _songKey && loadFxState(_songKey); if (st) setTimeout(() => api.engine.fxSetState(st), 150); }
       break;
     case 'fxState':
-      if (_savePresetName) {                                   // 새 톤으로 저장
-        const p = { id: 'p' + Date.now(), name: _savePresetName, index: _fxIndex, data: m.data };
-        const a = getPresets(); a.push(p); setPresets(a);
-        _activePresetId = p.id; _savePresetName = null;
-        flashTake('톤 저장됨: ' + p.name);
-      } else if (_activePresetId) {                            // 활성 톤 자동 갱신
-        const a = getPresets(); const i = a.findIndex(x => x.id === _activePresetId);
-        if (i >= 0) { a[i].data = m.data; setPresets(a); }
+      if (_presetGather) {
+        _presetGather.states[m.id] = m.data;
+        if (_presetGather.need.every(id => _presetGather.states[id] != null)) {
+          const g = _presetGather; _presetGather = null;
+          const slots = g.order.map((id, i) => ({ index: g.meta[i].index, bypass: g.meta[i].bypass, data: g.states[id] }));
+          const preset = { id: g.id || ('p' + Date.now()), name: g.name, slots };
+          upsertPreset(preset); _activePresetId = preset.id;
+          if (!g.id) flashTake('톤 저장됨: ' + preset.name);
+        }
       }
-      if (_songKey && m.data) saveFxState(_songKey, m.data);
       break;
     case 'pos': onPos(m.samples); break;
     case 'take':
@@ -377,10 +389,9 @@ function onEngineEvent(m) {
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').hidden = false; $('st-engine-start').disabled = false;
       $('st-engine-stop').hidden = true;
-      _fxLoaded = null; _fxIndex = null; _activePresetId = null;
+      _chain = []; _activePresetId = null; renderFxSlots();
       setEnabled(false);
       break;
-    case 'fxRemoved': _fxLoaded = null; _fxIndex = null; _activePresetId = null; renderFxSlots(); break;
     case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
     case 'log': {
       const s = String(m.msg || '');
@@ -391,28 +402,35 @@ function onEngineEvent(m) {
 }
 
 function renderFxSlots() {
-  const box = $('st-fx-slots'); box.innerHTML = '';
-  if (!_fxLoaded) return;
-  const slot = document.createElement('div');
-  slot.className = 'daw-fx-slot' + (_fxBypass ? ' bypassed' : '');
-  slot.innerHTML = `<span class="pw ${_fxBypass ? '' : 'on'}" title="On/Off"></span>
-    <div class="info"><div class="n">${_fxLoaded}</div><div class="sub">입력 체인</div></div>
-    <button class="ed" ${_fxHasEditor ? '' : 'disabled'}>에디터</button>
-    <button class="del" title="삭제">✕</button>`;
-  slot.querySelector('.pw').addEventListener('click', () => {
-    _fxBypass = !_fxBypass; api.engine.fxBypass(_fxBypass); renderFxSlots();
+  const box = $('st-fx-slots'); if (!box) return;
+  box.innerHTML = '';
+  _chain.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = 'daw-fx-slot' + (s.bypass ? ' bypassed' : '');
+    row.draggable = true; row.dataset.id = s.id;
+    row.innerHTML = `<span class="drag" title="드래그로 순서 변경">⠿</span>
+      <span class="pw ${s.bypass ? '' : 'on'}" title="On/Off"></span>
+      <div class="info"><div class="n">${s.name}</div></div>
+      <button class="ed" title="편집" ${s.hasEditor ? '' : 'disabled'}>✎</button>
+      <button class="del" title="삭제">✕</button>`;
+    row.querySelector('.pw').addEventListener('click', () => api.engine.fxBypass(s.id, !s.bypass));
+    row.querySelector('.ed').addEventListener('click', () => api.engine.fxEditor(s.id));
+    row.querySelector('.del').addEventListener('click', () => api.engine.fxRemove(s.id));
+    row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(s.id)); row.classList.add('dragging'); });
+    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    row.addEventListener('dragover', (e) => e.preventDefault());
+    row.addEventListener('drop', (e) => { e.preventDefault(); reorderChain(Number(e.dataTransfer.getData('text/plain')), s.id); });
+    box.appendChild(row);
   });
-  slot.querySelector('.ed').addEventListener('click', () => api.engine.showEditor());
-  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; _fxIndex = null; _activePresetId = null; renderFxSlots(); });
-  box.appendChild(slot);
 }
-
-function fxKey(k) { return 'yss:studio-fx:' + String(k).replace(/\\/g, '/').toLowerCase(); }
-function saveFxPref(k, i) { try { localStorage.setItem(fxKey(k), String(i)); } catch {} }
-function loadFxPref(k) { try { const v = localStorage.getItem(fxKey(k)); return v == null ? null : parseInt(v, 10); } catch { return null; } }
-function stateKey(k) { return 'yss:studio-fxstate:' + String(k).replace(/\\/g, '/').toLowerCase(); }
-function saveFxState(k, data) { try { localStorage.setItem(stateKey(k), data); } catch {} }
-function loadFxState(k) { try { return localStorage.getItem(stateKey(k)); } catch { return null; } }
+function reorderChain(fromId, toId) {
+  if (fromId === toId) return;
+  const ids = _chain.map(s => s.id);
+  const fi = ids.indexOf(fromId), ti = ids.indexOf(toId);
+  if (fi < 0 || ti < 0) return;
+  ids.splice(ti, 0, ids.splice(fi, 1)[0]);
+  api.engine.fxReorder(ids);
+}
 
 // ── 배선 ───────────────────────────────────────────
 function wire() {
@@ -500,18 +518,23 @@ function wire() {
 
   $('st-fx-toggle').addEventListener('click', () => { const d = $('daw-fx'); d.hidden = !d.hidden; });
   $('st-fx-close').addEventListener('click', () => { $('daw-fx').hidden = true; });
-  $('st-fx-add').addEventListener('click', openVstPicker);
+  $('st-fx-add').addEventListener('click', () => {
+    if (!_plugins.length) { api.engine.scanPlugins(); setTimeout(openVstPicker, 700); }
+    else openVstPicker();
+  });
   $('st-fx-save').addEventListener('click', () => {
-    if (!_fxLoaded) { flashTake('먼저 VST를 추가하세요.'); return; }
-    openNameModal('톤 저장', _fxLoaded, (name) => { _savePresetName = name; api.engine.fxSaveState(); });
+    if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+    openNameModal('톤 저장', '', (name) => startGather({ name }));
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
-  // 활성 톤 있으면 4초마다 상태 스냅샷 → 그 톤에 자동 갱신
-  setInterval(() => { if (_fxLoaded && _activePresetId) api.engine.fxSaveState(); }, 4000);
+  // 활성 톤 있으면 4초마다 체인 스냅샷 → 그 톤 자동 갱신
+  setInterval(() => {
+    if (!_activePresetId || !_chain.length || _presetGather) return;
+    const p = getPresets().find(x => x.id === _activePresetId);
+    if (p) startGather({ id: p.id, name: p.name });
+  }, 5000);
 
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
-  // add 버튼은 스캔 후 활성화
-  api.engine.onEvent((m) => { if (m.ev === 'plugins') $('st-fx-add').disabled = false; });
 }
 
 export async function initStudio() { wire(); }

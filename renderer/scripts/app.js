@@ -115,6 +115,13 @@ const sProviderPills = document.querySelectorAll('#s-provider-pills .pill');
 const sQualityPills  = document.querySelectorAll('#s-quality-pills .pill');
 const sClipboardCB   = $('s-clipboard-detect');
 const sWaveformCB    = $('s-waveform');
+const sVstScan       = $('s-vst-scan');
+const sVstStatus     = $('s-vst-status');
+sVstScan?.addEventListener('click', async () => {
+  if (sVstStatus) sVstStatus.textContent = '오디오 엔진 시작 · 스캔 중…';
+  try { await api.engine.start([]); api.engine.scanPlugins(); } catch {}
+});
+api.engine?.onEvent?.((m) => { if (m.ev === 'plugins' && sVstStatus) sVstStatus.textContent = `감지된 VST3: ${(m.list || []).length}개`; });
 const sDownloadsDir  = $('s-downloads-dir');
 const sDownloadsOpen = $('s-downloads-open');
 const sDownloadsChg  = $('s-downloads-change');

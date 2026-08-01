@@ -11,6 +11,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <atomic>
+#include <algorithm>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -49,6 +50,16 @@ public:
         setVisible (true);
     }
     void closeButtonPressed() override { setVisible (false); }
+};
+
+// FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
+struct FxSlot
+{
+    std::unique_ptr<AudioPluginInstance> plugin;
+    std::unique_ptr<DocumentWindow> editor;
+    std::atomic<bool> bypass { false };
+    int id = 0;
+    int descIndex = -1;
 };
 
 class Engine : public AudioIODeviceCallback
@@ -118,11 +129,18 @@ public:
         for (int i = 0; i < paths.getNumPaths(); ++i)
             paths[i].findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
 
+        StringArray seen;   // 중복 제거 (같은 플러그인 여러 번 반환되는 것 방지)
         for (auto& f : files)
         {
             OwnedArray<PluginDescription> found;
             vst3.findAllTypesForFile (found, f.getFullPathName());
-            for (auto* d : found) scanned.add (*d);
+            for (auto* d : found)
+            {
+                const auto key = d->createIdentifierString();
+                if (seen.contains (key)) continue;
+                seen.add (key);
+                scanned.add (*d);
+            }
         }
         Array<var> list;
         for (int i = 0; i < scanned.size(); ++i)
@@ -138,7 +156,29 @@ public:
         emit (var (r));
     }
 
-    void loadPlugin (int index)
+    FxSlot* findSlot (int id)
+    {
+        for (auto& s : chain) if (s->id == id) return s.get();
+        return nullptr;
+    }
+    void emitChain()
+    {
+        Array<var> list;
+        for (auto& s : chain)
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("id", s->id);
+            o->setProperty ("index", s->descIndex);
+            o->setProperty ("name", s->plugin->getName());
+            o->setProperty ("hasEditor", s->plugin->hasEditor());
+            o->setProperty ("bypass", s->bypass.load());
+            list.add (var (o));
+        }
+        auto* r = ev ("fxChain");
+        r->setProperty ("list", var (list));
+        emit (var (r));
+    }
+    void addFx (int index)
     {
         if (index < 0 || index >= scanned.size()) { std::cerr << "[engine] bad index\n"; return; }
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
@@ -147,17 +187,15 @@ public:
         if (inst == nullptr) { std::cerr << "[engine] load failed: " << err << "\n"; return; }
         inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
         inst->prepareToPlay (deviceSampleRate, blockSize);
-        editorWindow.reset();            // 옛 에디터 닫기 (message 스레드)
+        auto slot = std::make_unique<FxSlot>();
+        slot->id = nextSlotId++;
+        slot->descIndex = index;
+        slot->plugin = std::move (inst);
         {
-            const ScopedLock sl (fxLock); // 오디오 스레드가 옛 인스턴스 사용 끝낼 때까지 대기 후 교체
-            activeFx.store (nullptr);
-            fx = std::move (inst);
-            activeFx.store (fx.get());
+            const ScopedLock sl (fxLock);
+            chain.push_back (std::move (slot));
         }
-        auto* o = ev ("fx");
-        o->setProperty ("name", scanned[index].name);
-        o->setProperty ("hasEditor", fx->hasEditor());
-        emit (var (o));
+        emitChain();
     }
 
     // ---- 스템 로드 ----
@@ -186,51 +224,71 @@ public:
         if (! mute.isVoid()) s.mute = (bool) mute;
         if (! solo.isVoid()) s.solo = (bool) solo;
     }
-    void setFxBypass (bool on) { fxBypass = on; }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
-    void removeFx()
+    void setBypass (int id, bool on) { if (auto* s = findSlot (id)) s->bypass = on; }
+
+    void removeFx (int id)
     {
-        editorWindow.reset();
+        if (auto* s = findSlot (id)) s->editor.reset();   // message 스레드
         {
             const ScopedLock sl (fxLock);
-            activeFx.store (nullptr);
-            fx.reset();
+            chain.erase (std::remove_if (chain.begin(), chain.end(),
+                             [id] (auto& x) { return x->id == id; }), chain.end());
         }
-        emit (var (ev ("fxRemoved")));
+        emitChain();
     }
-    // VST 세부 설정(노브값 등) 직렬화 — base64 로 주고받음
-    void fxSaveState()
+    void reorderFx (const Array<int>& order)
     {
-        if (fx == nullptr) return;
+        {
+            const ScopedLock sl (fxLock);
+            std::vector<std::unique_ptr<FxSlot>> next;
+            for (int id : order)
+            {
+                auto it = std::find_if (chain.begin(), chain.end(), [id] (auto& x) { return x && x->id == id; });
+                if (it != chain.end()) { next.push_back (std::move (*it)); }
+            }
+            for (auto& x : chain) if (x) next.push_back (std::move (x));   // 누락분 보존
+            chain = std::move (next);
+        }
+        emitChain();
+    }
+    // VST 세부 설정(노브값) 직렬화 — 슬롯 단위 base64
+    void fxSaveState (int id)
+    {
+        auto* s = findSlot (id);
+        if (s == nullptr) return;
         MemoryBlock mb;
-        fx->getStateInformation (mb);
+        s->plugin->getStateInformation (mb);
         auto* o = ev ("fxState");
+        o->setProperty ("id", id);
         o->setProperty ("data", Base64::toBase64 (mb.getData(), mb.getSize()));
         emit (var (o));
     }
-    void fxSetState (const String& b64)
+    void fxSetState (int id, const String& b64)
     {
-        if (fx == nullptr || b64.isEmpty()) return;
+        auto* s = findSlot (id);
+        if (s == nullptr || b64.isEmpty()) return;
         MemoryOutputStream mo;
         if (Base64::convertFromBase64 (mo, b64))
         {
-            const ScopedLock sl (fxLock);   // setState 중 오디오 스레드 process 배제
-            fx->setStateInformation (mo.getData(), (int) mo.getDataSize());
+            const ScopedLock sl (fxLock);
+            s->plugin->setStateInformation (mo.getData(), (int) mo.getDataSize());
         }
     }
-
-    // 메시지 스레드에서 호출할 것
-    void showEditor()
+    void showEditor (int id)
     {
-        if (fx == nullptr) { std::cerr << "[engine] no FX loaded\n"; return; }
-        if (! fx->hasEditor()) { std::cerr << "[engine] plugin has no editor\n"; return; }
-        if (editorWindow != nullptr) { editorWindow->setVisible (true); editorWindow->toFront (true); return; }
-        editorWindow.reset (new PluginWindow (fx->createEditorIfNeeded(), fx->getName()));
-        std::cerr << "[engine] editor opened\n";
+        auto* s = findSlot (id);
+        if (s == nullptr || ! s->plugin->hasEditor()) return;
+        if (s->editor != nullptr) { s->editor->setVisible (true); s->editor->toFront (true); return; }
+        s->editor.reset (new PluginWindow (s->plugin->createEditorIfNeeded(), s->plugin->getName()));
     }
-
-    void closeEditorWindow() { editorWindow.reset(); }
+    void clearChain()
+    {
+        for (auto& s : chain) if (s) s->editor.reset();
+        const ScopedLock sl (fxLock);
+        chain.clear();
+    }
 
     // ---- 오디오 콜백 ----
     void audioDeviceAboutToStart (AudioIODevice* device) override
@@ -309,15 +367,15 @@ public:
             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
                 fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
 
-            if (! fxBypass.load())
             {
-                const ScopedTryLock stl (fxLock);
+                const ScopedTryLock stl (fxLock);   // 못 얻으면 그 블록은 FX 스킵 (크래시 대신 잠깐 dry)
                 if (stl.isLocked())
-                    if (auto* p = activeFx.load())
-                    {
-                        MidiBuffer mm;
-                        p->processBlock (fxBuf, mm);
-                    }
+                    for (auto& s : chain)
+                        if (s && s->plugin && ! s->bypass.load())
+                        {
+                            MidiBuffer mm;
+                            s->plugin->processBlock (fxBuf, mm);
+                        }
             }
             const float mg = monitorGain.load();
             for (int c = 0; c < numOut; ++c)
@@ -372,12 +430,12 @@ private:
     int numInputChans = 0, numOutputChans = 0, blockSize = 512;
     int64 inLatSamp = 0, outLatSamp = 0;
 
-    // VST3 FX (입력 체인)
+    // VST3 FX 체인 (입력, 여러 개 직렬)
     AudioPluginFormatManager pluginFmt;
     Array<PluginDescription> scanned;
-    std::unique_ptr<AudioPluginInstance> fx;
-    std::atomic<AudioPluginInstance*> activeFx { nullptr };
-    CriticalSection fxLock;   // 오디오 스레드의 processBlock 과 로드/삭제/setState 를 상호배제
+    std::vector<std::unique_ptr<FxSlot>> chain;
+    int nextSlotId = 1;
+    CriticalSection fxLock;   // 오디오 스레드의 processBlock 과 체인 변경/setState 를 상호배제
     AudioBuffer<float> fxBuf;
 
     std::atomic<bool>  playing { false };
@@ -388,12 +446,9 @@ private:
     TimeSliceThread writerThread;
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
     std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
-    std::atomic<bool>  fxBypass { false };
     std::atomic<bool>  recordArmed { false };
     std::atomic<int64> recordedStart { -1 };
     File outFile;
-
-    std::unique_ptr<DocumentWindow> editorWindow;   // message 스레드에서만 접근
 };
 
 // 재생 위치를 주기적으로 emit (message 스레드)
@@ -424,15 +479,16 @@ static void dispatch (Engine& engine, const var& c)
                                             : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
     else if (cmd == "recordStop")  engine.stopRecord();
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
-    else if (cmd == "fxBypass")    engine.setFxBypass ((bool) c["on"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "scanPlugins") engine.scanPlugins();
-    else if (cmd == "loadFx")      engine.loadPlugin ((int) c["index"]);
-    else if (cmd == "removeFx")    engine.removeFx();
-    else if (cmd == "fxSaveState") engine.fxSaveState();
-    else if (cmd == "fxSetState")  engine.fxSetState (c["data"].toString());
-    else if (cmd == "showEditor")  engine.showEditor();
+    else if (cmd == "fxAdd")       engine.addFx ((int) c["index"]);
+    else if (cmd == "fxRemove")    engine.removeFx ((int) c["slot"]);
+    else if (cmd == "fxReorder")   { Array<int> o; if (auto* a = c["order"].getArray()) for (auto& v : *a) o.add ((int) v); engine.reorderFx (o); }
+    else if (cmd == "fxBypass")    engine.setBypass ((int) c["slot"], (bool) c["on"]);
+    else if (cmd == "fxEditor")    engine.showEditor ((int) c["slot"]);
+    else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["slot"]);
+    else if (cmd == "fxSetState")  engine.fxSetState ((int) c["slot"], c["data"].toString());
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
 }
 
@@ -474,7 +530,7 @@ int main (int argc, char* argv[])
 
     posTimer.stopTimer();
     if (reader.joinable()) reader.join();
-    engine.closeEditorWindow();
+    engine.clearChain();
     dm.removeAudioCallback (&engine);
     return 0;
 }
