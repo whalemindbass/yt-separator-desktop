@@ -23,6 +23,8 @@ target_sources(yss-engine PRIVATE src/Main.cpp)
 target_compile_definitions(yss-engine PRIVATE
   JUCE_USE_CURL=0
   JUCE_WEB_BROWSER=0
+  JUCE_PLUGINHOST_VST3=1
+  JUCE_PLUGINHOST_AU=0
   JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
 if(YSS_ENABLE_ASIO)
@@ -31,9 +33,11 @@ if(YSS_ENABLE_ASIO)
   target_include_directories(yss-engine PRIVATE "${YSS_ASIO_SDK_DIR}")
 endif()
 
+# audio_utils 는 headless audio_processors 를 끌어옴 → full 을 직접 링크해 회피
 target_link_libraries(yss-engine PRIVATE
-  juce::juce_audio_utils
+  juce::juce_audio_processors
   juce::juce_audio_devices
   juce::juce_audio_formats
+  juce::juce_gui_extra
   juce::juce_recommended_config_flags
   juce::juce_recommended_warning_flags)

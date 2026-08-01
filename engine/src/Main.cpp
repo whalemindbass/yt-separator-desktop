@@ -4,7 +4,9 @@
 //   실행: yss-engine.exe stem1.wav [stem2.wav ...]
 //   녹음 결과: take.wav (+ timelineStart 로그)
 
-#include <juce_audio_utils/juce_audio_utils.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <atomic>
 #include <iostream>
 #include <vector>
@@ -74,12 +76,50 @@ public:
 
     void stopRecord() { finishRecording(); }
 
+    // ---- VST3 호스팅 ----
+    void scanPlugins()
+    {
+        if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
+        scanned.clear();
+        VST3PluginFormat vst3;
+        const auto paths = vst3.getDefaultLocationsToSearch();
+        Array<File> files;
+        for (int i = 0; i < paths.getNumPaths(); ++i)
+            paths[i].findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
+
+        for (auto& f : files)
+        {
+            OwnedArray<PluginDescription> found;
+            vst3.findAllTypesForFile (found, f.getFullPathName());
+            for (auto* d : found) scanned.add (*d);
+        }
+        std::cout << "[engine] " << scanned.size() << " VST3 plugins:\n";
+        for (int i = 0; i < scanned.size(); ++i)
+            std::cout << "  [" << i << "] " << scanned[i].name << " (" << scanned[i].manufacturerName << ")\n";
+    }
+
+    void loadPlugin (int index)
+    {
+        if (index < 0 || index >= scanned.size()) { std::cerr << "[engine] bad index\n"; return; }
+        if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
+        String err;
+        auto inst = pluginFmt.createPluginInstance (scanned[index], deviceSampleRate, blockSize, err);
+        if (inst == nullptr) { std::cerr << "[engine] load failed: " << err << "\n"; return; }
+        inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
+        inst->prepareToPlay (deviceSampleRate, blockSize);
+        activeFx.store (nullptr);        // 콜백에서 옛 인스턴스 사용 중단
+        fx = std::move (inst);
+        activeFx.store (fx.get());
+        std::cout << "[engine] loaded FX: " << scanned[index].name << "\n";
+    }
+
     // ---- 오디오 콜백 ----
     void audioDeviceAboutToStart (AudioIODevice* device) override
     {
         currentDevice = device;
         deviceSampleRate = device->getCurrentSampleRate();
         const int block = device->getCurrentBufferSizeSamples();
+        blockSize = block;
         numInputChans  = device->getActiveInputChannels().countNumberOfSetBits();
         numOutputChans = device->getActiveOutputChannels().countNumberOfSetBits();
         inLatSamp  = device->getInputLatencyInSamples();
@@ -131,9 +171,22 @@ public:
             playhead.fetch_add (numSamples);
         }
 
-        // 입력 모니터 (헤드폰 전제)
-        for (int c = 0; c < numOut && numIn > 0; ++c)
-            FloatVectorOperations::addWithMultiply (outputs[c], inputs[jmin (c, numIn - 1)], monitorGain, numSamples);
+        // 입력 모니터 — VST3 FX 체인 통과 (헤드폰 전제)
+        if (numIn > 0)
+        {
+            fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
+            for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
+
+            if (auto* p = activeFx.load())
+            {
+                MidiBuffer mm;
+                p->processBlock (fxBuf, mm);
+            }
+            for (int c = 0; c < numOut; ++c)
+                FloatVectorOperations::addWithMultiply (
+                    outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), monitorGain, numSamples);
+        }
 
         // 녹음
         if (recordArmed.load())
@@ -171,8 +224,15 @@ private:
 
     AudioIODevice* currentDevice = nullptr;
     double deviceSampleRate = 44100.0, stemSampleRate = 44100.0;
-    int numInputChans = 0, numOutputChans = 0;
+    int numInputChans = 0, numOutputChans = 0, blockSize = 512;
     int64 inLatSamp = 0, outLatSamp = 0;
+
+    // VST3 FX (입력 체인)
+    AudioPluginFormatManager pluginFmt;
+    Array<PluginDescription> scanned;
+    std::unique_ptr<AudioPluginInstance> fx;
+    std::atomic<AudioPluginInstance*> activeFx { nullptr };
+    AudioBuffer<float> fxBuf;
 
     std::atomic<bool>  playing { false };
     std::atomic<int64> playhead { 0 };
@@ -207,7 +267,7 @@ int main (int argc, char* argv[])
         engine.addStem (String::fromUTF8 (argv[i]));
 
     dm.addAudioCallback (&engine);
-    std::cout << "[engine] ready. cmds: p=play s=stop r=rec x=stoprec z=seek0 q=quit\n";
+    std::cout << "[engine] ready. cmds: p=play s=stop r=rec x=stoprec z=seek0 v=scanVST l<n>=loadFX q=quit\n";
 
     for (std::string line; std::getline (std::cin, line); )
     {
@@ -219,6 +279,8 @@ int main (int argc, char* argv[])
             case 'r': engine.armRecord (File::getCurrentWorkingDirectory().getChildFile ("take.wav")); break;
             case 'x': engine.stopRecord(); break;
             case 'z': engine.seek0(); break;
+            case 'v': engine.scanPlugins(); break;
+            case 'l': engine.loadPlugin (line.size() > 2 ? std::atoi (line.c_str() + 2) : -1); break;
             case 'q': dm.removeAudioCallback (&engine); return 0;
             default:  break;
         }
