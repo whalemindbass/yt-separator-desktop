@@ -80,10 +80,15 @@ class AudioEngine extends EventEmitter {
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
   takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
   takeClear()        { return this.send({ cmd: 'takeClear' }); }
-  takeLoad(file, start) { return this.send({ cmd: 'takeLoad', file, start }); }
+  takeLoad(file, start, trackId) { return this.send({ cmd: 'takeLoad', file, start, trackId }); }
   takeMove(id, start){ return this.send({ cmd: 'takeMove', id, start }); }
   stemOffset(samples){ return this.send({ cmd: 'stemOffset', samples }); }
-  mine(opts)         { return this.send({ cmd: 'mine', ...(opts || {}) }); }
+  // 녹음 트랙 (여러 개)
+  recTrackAdd()      { return this.send({ cmd: 'recTrackAdd' }); }
+  recTrackRemove(id) { return this.send({ cmd: 'recTrackRemove', id }); }
+  recArm(id)         { return this.send({ cmd: 'recArm', id }); }
+  recTrack(id, opts) { return this.send({ cmd: 'recTrack', id, ...(opts || {}) }); }
+  recTracks()        { return this.send({ cmd: 'recTracks' }); }
 
   quit() {
     if (!this.proc) return;

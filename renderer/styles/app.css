@@ -2250,3 +2250,15 @@ body { display: flex; flex-direction: column; }
 
 .daw-clip, .daw-take-clip { cursor: grab; }
 .daw-clip:active, .daw-take-clip:active { cursor: grabbing; }
+
+/* 내 녹음 트랙(여러 개) */
+.daw-lane-rec .daw-ms { width: 16px; height: 16px; }
+.daw-lane-rec .daw-vol { min-width: 26px; }
+.daw-rec-arm { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.daw-rec-arm.armed { color: #fff; background: var(--danger); border-color: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent); }
+.daw-rec-del { color: var(--tx-4); border-color: transparent; }
+.daw-rec-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.daw-addrec-row { display: grid; grid-template-columns: 140px 1fr; }
+.daw-addrec-row::before { content: ""; grid-column: 1; }
+.daw-addrec { grid-column: 1; margin: 6px 9px; padding: 6px 8px; border: 1px dashed var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 10.5px/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.daw-addrec:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }

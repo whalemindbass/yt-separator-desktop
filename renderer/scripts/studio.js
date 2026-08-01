@@ -79,6 +79,8 @@ let _songKey = null;
 
 const HEAD_W = 140;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
+let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
+const armedRecId = () => (_recTracks.find(r => r.armed) || _recTracks[0] || {}).id;
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
@@ -128,47 +130,80 @@ function buildWaveSvg(ch, color, N = 1400) {
 function renderTracks() {
   const lanes = $('daw-lanes');
   lanes.innerHTML = '';
-  _tracks.forEach((t) => {
+  _tracks.forEach((t) => {   // 스템 트랙만 (내 녹음 트랙은 renderRecLanes 에서)
     const lane = document.createElement('div');
     lane.className = 'daw-lane';
     lane.style.setProperty('--c', t.color);
     lane.dataset.key = t.key;
     lane.innerHTML = `
       <div class="daw-head">
-        <div class="nm"><i></i>${t.label}${t.key === 'mine' ? ' <span style="color:var(--danger);font-size:9px">●REC</span>' : ''}</div>
+        <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
           <button class="daw-ms" data-m="mute" title="뮤트">M</button>
           <button class="daw-ms" data-m="solo" title="솔로">S</button>
           <input class="daw-vol" type="range" min="0" max="150" value="100" title="볼륨">
         </div>
       </div>
-      <div class="daw-area">${t.key === 'mine' ? '' : '<div class="daw-clip"></div>'}</div>`;
-    // 버튼/슬라이더 배선
+      <div class="daw-area"><div class="daw-clip"></div></div>`;
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
-    if (t.key === 'mine') {
-      // 내 녹음 버스 — 볼륨(monitor 게인) + mute/solo
-      vol.addEventListener('input', () => api.engine.monitor(Number(vol.value) / 100));
-      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.mine({ mute: on }); });
-      sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.mine({ solo: sBtn.classList.contains('on') }); updateSoloDim(); });
-    } else {
-      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
-      sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
-      vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
-      // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
-      const clip = lane.querySelector('.daw-clip');
-      if (clip) {
-        clip.addEventListener('click', (e) => e.stopPropagation());
-        clip.addEventListener('pointerdown', (e) => {
-          const base = _stemOffset;
-          dragClip(e, (dSec) => { _stemOffset = base + dSec; repositionStems(); },
-            () => api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))));
-        });
-      }
-    }
+    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
+    sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
+    vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
+    // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
+    const clip = lane.querySelector('.daw-clip');
+    clip.addEventListener('click', (e) => e.stopPropagation());
+    clip.addEventListener('pointerdown', (e) => {
+      const base = _stemOffset;
+      dragClip(e, (dSec) => { _stemOffset = base + dSec; repositionStems(); },
+        () => api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))));
+    });
     lanes.appendChild(lane);
   });
+  renderRecLanes();
+}
+
+// 내 녹음 트랙 레인(여러 개) — 스템 레인은 건드리지 않음(파형 보존)
+function renderRecLanes() {
+  const lanes = $('daw-lanes');
+  lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row').forEach(el => el.remove());
+  _recTracks.forEach((rt, i) => {
+    const lane = document.createElement('div');
+    lane.className = 'daw-lane daw-lane-rec';
+    lane.style.setProperty('--c', 'var(--accent)');
+    lane.dataset.key = 'rec-' + rt.id;
+    lane.dataset.recid = rt.id;
+    lane.innerHTML = `
+      <div class="daw-head">
+        <div class="nm"><i></i>내 녹음 ${i + 1}</div>
+        <div class="ctrls">
+          <button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상">R</button>
+          <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트">M</button>
+          <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로">S</button>
+          <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
+          <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
+        </div>
+      </div>
+      <div class="daw-area"></div>`;
+    const rBtn = lane.querySelector('[data-m="arm"]');
+    const mBtn = lane.querySelector('[data-m="mute"]');
+    const sBtn = lane.querySelector('[data-m="solo"]');
+    const vol = lane.querySelector('.daw-vol');
+    const del = lane.querySelector('[data-m="del"]');
+    rBtn.addEventListener('click', () => api.engine.recArm(rt.id));   // 엔진이 recTracks 재발행 → 갱신
+    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
+    sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
+    vol.addEventListener('input', () => { rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain }); });
+    del.addEventListener('click', () => { if (_recTracks.length > 1) api.engine.recTrackRemove(rt.id); else flashTake('최소 1개 트랙 필요'); });
+    lanes.appendChild(lane);
+  });
+  // + 녹음 트랙 추가
+  const add = document.createElement('div');
+  add.className = 'daw-addrec-row';
+  add.innerHTML = `<button class="daw-addrec" title="녹음 트랙 추가">+ 녹음 트랙</button>`;
+  add.querySelector('button').addEventListener('click', () => api.engine.recTrackAdd());
+  lanes.appendChild(add);
   layout();
 }
 
@@ -227,7 +262,8 @@ function updatePlayhead(sec) {
 // ── 동기 ──────────────────────────────────────────
 let _recStartSec = null;
 function updateRecLive(t) {
-  const area = document.querySelector('.daw-lane[data-key="mine"] .daw-area');
+  const lane = document.querySelector(`.daw-lane-rec[data-recid="${armedRecId()}"]`) || document.querySelector('.daw-lane-rec');
+  const area = lane && lane.querySelector('.daw-area');
   if (!area) return;
   if (_recStartSec == null) _recStartSec = t;
   let el = area.querySelector('.daw-rec-live');
@@ -295,7 +331,6 @@ async function loadSong(item) {
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
-  _tracks.push({ key: 'mine', label: '내 녹음', color: STEM_COLOR.mine, engineIndex: -1 });
   renderTracks();
 
   const v = $('daw-video');
@@ -323,12 +358,13 @@ function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
 }
 
 let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
-async function renderTake(file, startSamples, engineId) {
+async function renderTake(file, startSamples, engineId, trackId) {
   try {
     const { stems } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
     _takes.push({
       id: engineId != null ? engineId : Date.now(), file,
+      trackId: trackId != null ? trackId : armedRecId(),
       start: (startSamples || 0) / (_sr || 44100),
       dur: ch[0].length / (_sr || 44100),
       svg: buildWaveSvg(ch, resolveColor('var(--danger)')),
@@ -337,10 +373,15 @@ async function renderTake(file, startSamples, engineId) {
   } catch (e) { flashTake('녹음 파형 실패: ' + (e && e.message || e)); }
 }
 function renderTakes() {
-  const area = document.querySelector('.daw-lane[data-key="mine"] .daw-area');
-  if (!area) return;
-  area.innerHTML = '';
+  const areas = {};
+  document.querySelectorAll('.daw-lane-rec').forEach(l => {
+    const a = l.querySelector('.daw-area'); a.innerHTML = ''; areas[l.dataset.recid] = a;
+  });
+  if (!Object.keys(areas).length) return;
+  const fallback = armedRecId();
   for (const tk of _takes) {
+    const tid = (tk.trackId != null && areas[tk.trackId]) ? tk.trackId : fallback;
+    const area = areas[tid]; if (!area) continue;
     const el = document.createElement('div');
     el.className = 'daw-take-clip';
     el.style.left = (tk.start * _pxPerSec) + 'px';
@@ -412,7 +453,7 @@ function getTakeSets() { if (!_songKey) return []; try { return JSON.parse(local
 function setTakeSets(a) { if (!_songKey) return; try { localStorage.setItem(takesetKey(_songKey), JSON.stringify(a)); } catch {} }
 function saveTakeSet(name) {
   if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
-  const takes = _takes.map(t => ({ file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur }));
+  const takes = _takes.map(t => ({ file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, takes }); setTakeSets(a);
   flashTake('녹음 저장됨: ' + name);
 }
@@ -420,8 +461,9 @@ async function loadTakeSet(ts) {
   api.engine.takeClear();
   _takes = []; renderTakes();
   for (const t of ts.takes) {
-    api.engine.takeLoad(t.file, t.start);
-    await renderTake(t.file, t.start, t.start);   // start(samples) 로 클립·엔진 id 일치
+    const tid = (t.trackId != null && _recTracks.some(r => r.id === t.trackId)) ? t.trackId : armedRecId();
+    api.engine.takeLoad(t.file, t.start, tid);
+    await renderTake(t.file, t.start, t.start, tid);   // start(samples) 로 클립·엔진 id 일치
   }
   flashTake('녹음 불러옴: ' + ts.name);
 }
@@ -512,10 +554,14 @@ function onEngineEvent(m) {
     case 'pos': onPos(m.samples); break;
     case 'level': updateVU(m.peak); break;
     case 'pitch': updateTuner(m.freq); break;
+    case 'recTracks':
+      _recTracks = m.list || [];
+      renderRecLanes(); updateSoloDim();
+      break;
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
-      renderTake(m.file, m.timelineStart || 0, m.id);
+      renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
       break;
     case 'exit':
       _started = false; _playing = false;

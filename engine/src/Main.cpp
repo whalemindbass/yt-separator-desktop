@@ -64,6 +64,16 @@ struct TakePlay
     int64 id = 0;      // 안정 식별자 (이동해도 유지)
     int64 start = 0;   // 타임라인 위치 (이동 가능)
     int64 len = 0;
+    int   trackId = 0; // 소속 녹음 트랙
+};
+
+// 녹음 트랙 (내 녹음 여러 개 — 각각 뮤트/솔로/게인, R 로 녹음 대상 선택)
+struct RecTrack
+{
+    int id = 0;
+    std::atomic<float> gain { 1.0f };
+    std::atomic<bool>  mute { false };
+    std::atomic<bool>  solo { false };
 };
 
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
@@ -79,7 +89,14 @@ struct FxSlot
 class Engine : public AudioIODeviceCallback
 {
 public:
-    Engine() : writerThread ("rec") { fmt.registerBasicFormats(); }
+    Engine() : writerThread ("rec")
+    {
+        fmt.registerBasicFormats();
+        auto t = std::make_unique<RecTrack>();   // 기본 녹음 트랙 1개 (녹음 대상)
+        t->id = nextRecId++;
+        armedTrack = t->id;
+        recTracks.push_back (std::move (t));
+    }
     ~Engine() override { finishRecording(); }
 
     bool addStem (const String& path)
@@ -138,7 +155,7 @@ public:
                              [id] (auto& t) { return t->id == id; }), takesPlay.end());
     }
     void clearTakes() { const ScopedLock sl (takesLock); takesPlay.clear(); }
-    void loadTake (const String& file, int64 start)   // 저장된 테이크 파일을 재생 소스로 등록
+    void loadTake (const String& file, int64 start, int trackId)   // 저장된 테이크 파일을 재생 소스로 등록
     {
         File f (file);
         if (auto* reader = fmt.createReaderFor (f))
@@ -149,6 +166,7 @@ public:
             tp->id = start;
             tp->start = start;
             tp->len = reader->lengthInSamples;
+            tp->trackId = trackId > 0 ? trackId : armedTrack.load();
             const ScopedLock sl (takesLock);
             takesPlay.push_back (std::move (tp));
         }
@@ -335,15 +353,68 @@ public:
         if (! gain.isVoid()) s.gain = (float) (double) gain;
         if (! mute.isVoid()) s.mute = (bool) mute;
         if (! solo.isVoid()) s.solo = (bool) solo;
+        recomputeSolos();
     }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
     void setStemOffset (int64 samples) { stemOffset = samples; }
-    void setMine (const var& mute, const var& solo)
+
+    // ---- 녹음 트랙 (여러 개) ----
+    RecTrack* findRec (int id) { for (auto& t : recTracks) if (t->id == id) return t.get(); return nullptr; }
+    void recomputeSolos()   // 오디오 스레드가 락 없이 읽는 솔로 캐시 갱신 (message 스레드)
     {
-        if (! mute.isVoid()) mineMute = (bool) mute;
-        if (! solo.isVoid()) mineSolo = (bool) solo;
+        bool ss = false; for (auto& s : stems)     if (s->solo.load()) { ss = true; break; }
+        bool rs = false; for (auto& t : recTracks) if (t->solo.load()) { rs = true; break; }
+        anyStemSolo = ss; anyRecSolo = rs;
+    }
+    void emitRecTracks()
+    {
+        Array<var> list;
+        for (auto& t : recTracks)
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("id", t->id);
+            o->setProperty ("gain", t->gain.load());
+            o->setProperty ("mute", t->mute.load());
+            o->setProperty ("solo", t->solo.load());
+            o->setProperty ("armed", t->id == armedTrack.load());
+            list.add (var (o));
+        }
+        auto* r = ev ("recTracks");
+        r->setProperty ("list", var (list));
+        emit (var (r));
+    }
+    void addRecTrack()
+    {
+        auto t = std::make_unique<RecTrack>();
+        t->id = nextRecId++;
+        { const ScopedLock sl (takesLock); recTracks.push_back (std::move (t)); }
+        emitRecTracks();
+    }
+    void removeRecTrack (int id)
+    {
+        if (recTracks.size() <= 1) return;   // 최소 1개 유지
+        {
+            const ScopedLock sl (takesLock);
+            takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
+                                 [id] (auto& t) { return t->trackId == id; }), takesPlay.end());
+            recTracks.erase (std::remove_if (recTracks.begin(), recTracks.end(),
+                                 [id] (auto& t) { return t->id == id; }), recTracks.end());
+        }
+        if (armedTrack.load() == id && ! recTracks.empty()) armedTrack = recTracks.front()->id;
+        recomputeSolos();
+        emitRecTracks();
+    }
+    void armRec (int id) { if (findRec (id)) { armedTrack = id; emitRecTracks(); } }
+    void setRecTrack (int id, const var& gain, const var& mute, const var& solo)
+    {
+        auto* t = findRec (id);
+        if (t == nullptr) return;
+        if (! gain.isVoid()) t->gain = (float) (double) gain;
+        if (! mute.isVoid()) t->mute = (bool) mute;
+        if (! solo.isVoid()) t->solo = (bool) solo;
+        recomputeSolos();
     }
     void moveTake (int64 id, int64 newStart)
     {
@@ -494,11 +565,9 @@ public:
         const int64 phStart = playhead.load();
 
         // 스템 믹스 (재생 중) — solo 있으면 solo 만, 아니면 mute 제외
+        const bool anySolo = anyStemSolo.load() || anyRecSolo.load();
         if (playing.load())
         {
-            bool anySolo = mineSolo.load();
-            for (auto& s : stems) if (s->solo.load()) { anySolo = true; break; }
-
             const int64 stemPos = jmax<int64> (0, phStart - stemOffset.load());
             for (auto& s : stems)
             {
@@ -519,17 +588,14 @@ public:
             playhead.fetch_add (numSamples);
         }
 
-        // 내 녹음 버스 = 라이브 입력 + 녹음 테이크 → FX 체인(후처리) → 출력
+        // 내 녹음 버스 = (녹음 트랙별) 라이브 입력 + 녹음 테이크 → FX 체인(후처리) → 출력
         {
             fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
             fxBuf.clear();
 
-            // 라이브 입력 + 레벨/튜너 분석(원본 입력)
+            // 레벨/튜너 분석 (원본 입력 — 모니터/트랙 무관하게 항상)
             if (numIn > 0)
             {
-                if (monitorInputOn.load())   // 내 소리 모니터 on 일 때만 입력을 버스에 넣음
-                    for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                        fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
                 float pk = 0;
                 for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[0][i]); if (a > pk) pk = a; }
                 if (pk > inPeak.load()) inPeak.store (pk);
@@ -541,22 +607,38 @@ public:
                 }
             }
 
-            // 녹음 테이크 → 버스에 합산 (재생 중, 타임라인 start 기준)
-            if (playing.load())
+            // 녹음 트랙별 합산 (테이크 + armed 트랙의 라이브 입력), 게인/뮤트/솔로 반영
             {
-                const ScopedTryLock stl (takesLock);
+                const ScopedTryLock stl (takesLock);   // recTracks/takesPlay 보호
                 if (stl.isLocked())
-                    for (auto& t : takesPlay)
+                {
+                    const int armed = armedTrack.load();
+                    const bool monOn = monitorInputOn.load();
+                    for (auto& rt : recTracks)
                     {
-                        const int64 pos = phStart - t->start;
-                        if (pos < 0 || pos >= t->len) continue;
-                        t->src->setNextReadPosition (pos);
-                        scratch.setSize (2, numSamples, false, false, true); scratch.clear();
-                        AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                        t->src->getNextAudioBlock (info);
-                        for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                            fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
+                        const bool audible = anySolo ? rt->solo.load() : ! rt->mute.load();
+                        if (! audible) continue;
+                        const float g = rt->gain.load();
+
+                        if (playing.load())
+                            for (auto& t : takesPlay)
+                            {
+                                if (t->trackId != rt->id) continue;
+                                const int64 pos = phStart - t->start;
+                                if (pos < 0 || pos >= t->len) continue;
+                                t->src->setNextReadPosition (pos);
+                                scratch.setSize (2, numSamples, false, false, true); scratch.clear();
+                                AudioSourceChannelInfo info (&scratch, 0, numSamples);
+                                t->src->getNextAudioBlock (info);
+                                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                                    fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples, g);
+                            }
+
+                        if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
+                            for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                                fxBuf.addFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples, g);
                     }
+                }
             }
 
             // FX 체인 (입력·테이크 모두에 후처리 적용)
@@ -571,10 +653,7 @@ public:
                         }
             }
 
-            bool anySolo = mineSolo.load();
-            for (auto& s : stems) if (s->solo.load()) { anySolo = true; break; }
-            const bool mineAudible = anySolo ? mineSolo.load() : ! mineMute.load();
-            const float mg = mineAudible ? monitorGain.load() : 0.0f;
+            const float mg = monitorGain.load();
             for (int c = 0; c < numOut; ++c)
                 FloatVectorOperations::addWithMultiply (
                     outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), mg, numSamples);
@@ -638,12 +717,14 @@ private:
                 tp->id = timelineStart;
                 tp->start = timelineStart;
                 tp->len = reader->lengthInSamples;
+                tp->trackId = armedTrack.load();
                 const ScopedLock sl (takesLock);
                 takesPlay.push_back (std::move (tp));
             }
 
             auto* o = ev ("take");
             o->setProperty ("id", (int64) timelineStart);   // 렌더러 클립 식별용
+            o->setProperty ("trackId", armedTrack.load());
             o->setProperty ("file", outFile.getFullPathName());
             o->setProperty ("startPlayhead", start);
             o->setProperty ("roundtripComp", comp);
@@ -675,9 +756,14 @@ private:
     std::atomic<float> masterGain { 1.0f };
     std::atomic<bool>  monitorInputOn { true };
     std::atomic<int64> stemOffset { 0 };
-    std::atomic<bool>  mineMute { false };
-    std::atomic<bool>  mineSolo { false };
     AudioDeviceManager* devmgr = nullptr;
+
+    // 녹음 트랙 (여러 개) + 녹음 대상(armed) + 솔로 캐시(오디오 스레드 락-프리 판독)
+    std::vector<std::unique_ptr<RecTrack>> recTracks;
+    std::atomic<int>  armedTrack { 0 };
+    int nextRecId = 1;
+    std::atomic<bool> anyStemSolo { false };
+    std::atomic<bool> anyRecSolo  { false };
 
     // 녹음 테이크 재생
     std::vector<std::unique_ptr<TakePlay>> takesPlay;
@@ -741,10 +827,14 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recordStop")  engine.stopRecord();
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
-    else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"]);
+    else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"]);
     else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
-    else if (cmd == "mine")        engine.setMine (c["mute"], c["solo"]);
+    else if (cmd == "recTrackAdd") engine.addRecTrack();
+    else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
+    else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
+    else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"]);
+    else if (cmd == "recTracks")   engine.emitRecTracks();
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
@@ -784,6 +874,7 @@ int main (int argc, char* argv[])
     PosTimer posTimer (engine);
     posTimer.startTimer (50);       // 20Hz 위치 스트림
     emit (var (ev ("ready")));
+    engine.emitRecTracks();         // 초기 녹음 트랙 목록
 
     // stdin(JSON) → message 스레드로 마셜링 (플러그인/에디터는 message 스레드 필수)
     std::thread reader ([&]
