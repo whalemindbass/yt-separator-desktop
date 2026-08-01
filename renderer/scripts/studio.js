@@ -17,7 +17,8 @@ let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _tracks = [];          // [{key,label,color,engineIndex}]
-let _fxLoaded = null, _fxBypass = false, _fxHasEditor = false;
+let _fxLoaded = null, _fxBypass = false, _fxHasEditor = false, _fxIndex = null;
+function loadFxIndex(idx) { _fxIndex = idx; api.engine.loadFx(idx); if (_songKey) saveFxPref(_songKey, idx); }
 let _plugins = [];         // 스캔된 VST 목록
 let _songKey = null;
 
@@ -279,7 +280,11 @@ function openVstPicker() {
   const html = _plugins.map(p =>
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${p.name}</div>
       <div class="m">${p.manufacturer}</div></div></div>`).join('');
-  openModal('VST3 추가', html, (idx) => { api.engine.loadFx(Number(idx)); if (_songKey) saveFxPref(_songKey, Number(idx)); });
+  openModal('VST3 추가', html, (idx) => {
+    const i = Number(idx);
+    if (_fxLoaded && _fxIndex === i) return;   // 같은 플러그인 재로드 방지
+    loadFxIndex(i);
+  });
 }
 
 // ── 이벤트 ─────────────────────────────────────────
@@ -297,7 +302,8 @@ function onEngineEvent(m) {
       break;
     case 'plugins':
       _plugins = m.list || [];
-      { const saved = _songKey && loadFxPref(_songKey); if (saved != null && _plugins[saved]) api.engine.loadFx(saved); }
+      // 이미 FX 로드돼 있으면 재로드 안 함 (UAD 등 재생성 시 크래시 유발 경로 차단)
+      if (!_fxLoaded) { const saved = _songKey && loadFxPref(_songKey); if (saved != null && _plugins[saved]) loadFxIndex(saved); }
       break;
     case 'fx':
       _fxLoaded = m.name; _fxHasEditor = !!m.hasEditor; _fxBypass = false;
@@ -305,7 +311,7 @@ function onEngineEvent(m) {
       { const st = _songKey && loadFxState(_songKey); if (st) setTimeout(() => api.engine.fxSetState(st), 100); }  // 세부 설정 복원
       break;
     case 'fxState':
-      if (_songKey && m.data) { saveFxState(_songKey, m.data); flashTake('FX 설정 저장됨 (이 곡)'); }
+      if (_songKey && m.data) saveFxState(_songKey, m.data);   // 자동저장 (조용히)
       break;
     case 'pos': onPos(m.samples); break;
     case 'take':
@@ -319,7 +325,7 @@ function onEngineEvent(m) {
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').disabled = false; setEnabled(false);
       break;
-    case 'fxRemoved': _fxLoaded = null; renderFxSlots(); break;
+    case 'fxRemoved': _fxLoaded = null; _fxIndex = null; renderFxSlots(); break;
     case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
     case 'log': {
       const s = String(m.msg || '');
@@ -342,7 +348,7 @@ function renderFxSlots() {
     _fxBypass = !_fxBypass; api.engine.fxBypass(_fxBypass); renderFxSlots();
   });
   slot.querySelector('.ed').addEventListener('click', () => api.engine.showEditor());
-  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; renderFxSlots(); });
+  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; _fxIndex = null; renderFxSlots(); });
   box.appendChild(slot);
 }
 
@@ -440,8 +446,8 @@ function wire() {
   $('st-fx-toggle').addEventListener('click', () => { const d = $('daw-fx'); d.hidden = !d.hidden; });
   $('st-fx-close').addEventListener('click', () => { $('daw-fx').hidden = true; });
   $('st-fx-add').addEventListener('click', openVstPicker);
-  $('st-fx-save').addEventListener('click', () => { api.engine.fxSaveState(); });
-  $('st-fx-load').addEventListener('click', () => api.engine.scanPlugins());
+  // VST 세부 설정 자동저장 — 로드된 FX 있으면 주기적으로 상태 스냅샷 요청 (조용히)
+  setInterval(() => { if (_fxLoaded) api.engine.fxSaveState(); }, 4000);
   // add 버튼은 스캔 후 활성화
   api.engine.onEvent((m) => { if (m.ev === 'plugins') $('st-fx-add').disabled = false; });
 }
