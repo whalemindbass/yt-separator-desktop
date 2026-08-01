@@ -28,9 +28,17 @@ class AudioEngine extends EventEmitter {
 
   start(stemPaths = []) {
     if (this.proc) return true;
-    if (!this.exePath) { this.emit('error', { msg: 'engine exe not found' }); return false; }
-    this.proc = spawn(this.exePath, stemPaths, { stdio: ['pipe', 'pipe', 'pipe'] });
-
+    if (!this.exePath) { this.emit('event', { ev: 'error', msg: 'engine exe not found' }); return false; }
+    try {
+      this.proc = spawn(this.exePath, stemPaths, { stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (e) {
+      this.proc = null;
+      this.emit('event', { ev: 'error', msg: 'spawn failed: ' + e.message });
+      return false;
+    }
+    // 'error'/stdin EPIPE 등 미처리 시 프로세스 크래시 → 반드시 핸들
+    this.proc.on('error', (e) => { this.proc = null; this.emit('event', { ev: 'error', msg: String(e && e.message || e) }); });
+    this.proc.stdin.on('error', () => {});
     readline.createInterface({ input: this.proc.stdout }).on('line', (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch { return; }   // 비-JSON 줄 무시
@@ -43,8 +51,8 @@ class AudioEngine extends EventEmitter {
 
   send(cmd) {
     if (!this.proc) return false;
-    this.proc.stdin.write(JSON.stringify(cmd) + '\n');
-    return true;
+    try { this.proc.stdin.write(JSON.stringify(cmd) + '\n'); return true; }
+    catch { return false; }
   }
 
   loadStems(paths)   { return this.send({ cmd: 'loadStems', paths }); }

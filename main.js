@@ -7,6 +7,10 @@ const { pathToFileURL } = require('url');
 const { Readable } = require('stream');
 const path = require('path');
 const fs = require('fs');
+
+// 예상 못한 예외로 프로세스가 조용히 죽는 것 방지 — 로그만 남기고 유지
+process.on('uncaughtException', (e) => { try { console.error('[uncaught]', e && e.stack || e); } catch {} });
+process.on('unhandledRejection', (e) => { try { console.error('[unhandledRejection]', e); } catch {} });
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
