@@ -61,7 +61,8 @@ public:
 struct TakePlay
 {
     std::unique_ptr<AudioFormatReaderSource> src;
-    int64 start = 0;
+    int64 id = 0;      // 안정 식별자 (이동해도 유지)
+    int64 start = 0;   // 타임라인 위치 (이동 가능)
     int64 len = 0;
 };
 
@@ -134,7 +135,7 @@ public:
     {
         const ScopedLock sl (takesLock);
         takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
-                             [id] (auto& t) { return t->start == id; }), takesPlay.end());
+                             [id] (auto& t) { return t->id == id; }), takesPlay.end());
     }
     void clearTakes() { const ScopedLock sl (takesLock); takesPlay.clear(); }
     void loadTake (const String& file, int64 start)   // 저장된 테이크 파일을 재생 소스로 등록
@@ -145,6 +146,7 @@ public:
             auto tp = std::make_unique<TakePlay>();
             tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
             tp->src->prepareToPlay (blockSize, deviceSampleRate);
+            tp->id = start;
             tp->start = start;
             tp->len = reader->lengthInSamples;
             const ScopedLock sl (takesLock);
@@ -238,6 +240,7 @@ public:
         playing = false;
         stems.clear();                       // 정지 상태에서만 (콜백이 stems 미접근)
         { const ScopedLock sl (takesLock); takesPlay.clear(); }   // 새 곡 → 이전 테이크 제거
+        stemOffset = 0;
         for (auto& p : paths) addStem (p);
         if (currentDevice != nullptr)
             for (auto& s : stems) s->src->prepareToPlay (blockSize, deviceSampleRate);
@@ -336,6 +339,17 @@ public:
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
+    void setStemOffset (int64 samples) { stemOffset = samples; }
+    void setMine (const var& mute, const var& solo)
+    {
+        if (! mute.isVoid()) mineMute = (bool) mute;
+        if (! solo.isVoid()) mineSolo = (bool) solo;
+    }
+    void moveTake (int64 id, int64 newStart)
+    {
+        const ScopedLock sl (takesLock);
+        for (auto& t : takesPlay) if (t->id == id) { t->start = newStart; break; }
+    }
     void setBypass (int id, bool on) { if (auto* s = findSlot (id)) { s->bypass = on; emitChain(); } }
 
     void removeFx (int id)
@@ -482,15 +496,17 @@ public:
         // 스템 믹스 (재생 중) — solo 있으면 solo 만, 아니면 mute 제외
         if (playing.load())
         {
-            bool anySolo = false;
+            bool anySolo = mineSolo.load();
             for (auto& s : stems) if (s->solo.load()) { anySolo = true; break; }
 
+            const int64 stemPos = jmax<int64> (0, phStart - stemOffset.load());
             for (auto& s : stems)
             {
                 scratch.setSize (2, numSamples, false, false, true);
                 scratch.clear();
+                s->src->setNextReadPosition (stemPos);   // 오프셋 반영
                 AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                s->src->getNextAudioBlock (info);   // 위치 유지 위해 항상 읽음
+                s->src->getNextAudioBlock (info);
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
                 if (! audible) continue;
@@ -555,7 +571,10 @@ public:
                         }
             }
 
-            const float mg = monitorGain.load();
+            bool anySolo = mineSolo.load();
+            for (auto& s : stems) if (s->solo.load()) { anySolo = true; break; }
+            const bool mineAudible = anySolo ? mineSolo.load() : ! mineMute.load();
+            const float mg = mineAudible ? monitorGain.load() : 0.0f;
             for (int c = 0; c < numOut; ++c)
                 FloatVectorOperations::addWithMultiply (
                     outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), mg, numSamples);
@@ -616,6 +635,7 @@ private:
                 auto tp = std::make_unique<TakePlay>();
                 tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
                 tp->src->prepareToPlay (blockSize, deviceSampleRate);
+                tp->id = timelineStart;
                 tp->start = timelineStart;
                 tp->len = reader->lengthInSamples;
                 const ScopedLock sl (takesLock);
@@ -654,6 +674,9 @@ private:
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
     std::atomic<bool>  monitorInputOn { true };
+    std::atomic<int64> stemOffset { 0 };
+    std::atomic<bool>  mineMute { false };
+    std::atomic<bool>  mineSolo { false };
     AudioDeviceManager* devmgr = nullptr;
 
     // 녹음 테이크 재생
@@ -719,6 +742,9 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
     else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"]);
+    else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"]);
+    else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
+    else if (cmd == "mine")        engine.setMine (c["mute"], c["solo"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);

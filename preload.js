@@ -142,6 +142,9 @@ contextBridge.exposeInMainWorld('yssApi', {
     takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
     takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),
     takeLoad:    (file, start) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeLoad', file, start }),
+    takeMove:    (id, start) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeMove', id, start }),
+    stemOffset:  (samples) => ipcRenderer.invoke('engine:cmd', { cmd: 'stemOffset', samples }),
+    mine:        (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'mine', ...(opts || {}) }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

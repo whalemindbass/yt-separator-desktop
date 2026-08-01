@@ -2247,3 +2247,6 @@ body { display: flex; flex-direction: column; }
 .dev-field select:focus { border-color: var(--accent); }
 
 .daw .btn#st-monitor.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+.daw-clip, .daw-take-clip { cursor: grab; }
+.daw-clip:active, .daw-take-clip:active { cursor: grabbing; }

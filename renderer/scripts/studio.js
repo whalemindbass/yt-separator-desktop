@@ -78,6 +78,21 @@ let _plugins = [];         // 스캔된 VST 목록
 let _songKey = null;
 
 const HEAD_W = 140;
+let _stemOffset = 0;   // 스템 전체 오프셋(초)
+// 클립 가로 드래그 유틸 — onDelta(초), onEnd
+function dragClip(e, onDelta, onEnd) {
+  e.preventDefault(); e.stopPropagation();
+  const startX = e.clientX; let moved = false;
+  const move = (ev) => { moved = true; onDelta((ev.clientX - startX) / _pxPerSec); };
+  const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); onEnd(moved); };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+function repositionStems() {
+  document.querySelectorAll('.daw-lane:not([data-key="mine"]) .daw-clip').forEach(c => {
+    c.style.left = (_stemOffset * _pxPerSec) + 'px'; c.style.right = 'auto';
+  });
+}
 const fmtTC = (sec) => {
   sec = Math.max(0, sec || 0);
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60), ms = Math.floor((sec - Math.floor(sec)) * 1000);
@@ -133,14 +148,24 @@ function renderTracks() {
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
     if (t.key === 'mine') {
-      // 내 녹음(입력 모니터) — monitor 게인 제어
-      sBtn.disabled = true;
-      vol.addEventListener('input', () => api.engine.monitor(mBtn.classList.contains('on') ? 0 : Number(vol.value) / 100));
-      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.monitor(on ? 0 : Number(vol.value) / 100); });
+      // 내 녹음 버스 — 볼륨(monitor 게인) + mute/solo
+      vol.addEventListener('input', () => api.engine.monitor(Number(vol.value) / 100));
+      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.mine({ mute: on }); });
+      sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.mine({ solo: sBtn.classList.contains('on') }); updateSoloDim(); });
     } else {
       mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
       sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
       vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
+      // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
+      const clip = lane.querySelector('.daw-clip');
+      if (clip) {
+        clip.addEventListener('click', (e) => e.stopPropagation());
+        clip.addEventListener('pointerdown', (e) => {
+          const base = _stemOffset;
+          dragClip(e, (dSec) => { _stemOffset = base + dSec; repositionStems(); },
+            () => api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))));
+        });
+      }
     }
     lanes.appendChild(lane);
   });
@@ -184,6 +209,7 @@ function layout() {
     ruler.appendChild(tk);
   }
   renderTakes();
+  repositionStems();
   updatePlayhead(_lastSec);
 }
 
@@ -265,7 +291,7 @@ async function loadSong(item) {
   const paths = Object.values(it.stemPaths || {}).filter(Boolean);
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _songKey = String(it.videoPath || it.id);
-  _takes = [];
+  _takes = []; _stemOffset = 0;
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -322,6 +348,12 @@ function renderTakes() {
     el.innerHTML = tk.svg;
     el.title = tk.file;
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
+    el.addEventListener('click', (e) => e.stopPropagation());
+    el.addEventListener('pointerdown', (e) => {
+      const base = tk.start;
+      dragClip(e, (dSec) => { tk.start = Math.max(0, base + dSec); el.style.left = (tk.start * _pxPerSec) + 'px'; },
+        () => api.engine.takeMove(tk.id, Math.round(tk.start * (_sr || 44100))));
+    });
     area.appendChild(el);
   }
 }
