@@ -254,7 +254,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -574,16 +574,9 @@ function wire() {
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
 
-  // 메트로놈
-  let _metroOn = false;
-  const bpmInput = $('st-metro-bpm');
-  $('st-metro-toggle').addEventListener('click', () => {
-    _metroOn = !_metroOn;
-    $('st-metro-toggle').classList.toggle('on', _metroOn);
-    $('st-metro-toggle').textContent = _metroOn ? '정지' : '시작';
-    api.engine.metro(_metroOn, Number(bpmInput.value) || 120);
-  });
-  bpmInput.addEventListener('change', () => { if (_metroOn) api.engine.metro(true, Number(bpmInput.value) || 120); });
+  // 도구 드로어 (레벨·튜너) — 간헐 토글
+  $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });
+  $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; });
 }
 
 export async function initStudio() { wire(); }
