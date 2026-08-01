@@ -48,7 +48,9 @@ public:
         setContentNonOwned (editor, true);   // 에디터는 플러그인(processor)이 소유
         setResizable (editor->isResizable(), false);
         centreWithSize (getWidth(), getHeight());
+        setAlwaysOnTop (true);               // 앱 위에 떠 있도록 (플러그인 에디터 표준)
         setVisible (true);
+        toFront (true);
     }
     void closeButtonPressed() override { setVisible (false); }
 };
@@ -309,6 +311,7 @@ public:
         if (s == nullptr || ! s->plugin->hasEditor()) return;
         if (s->editor != nullptr) { s->editor->setVisible (true); s->editor->toFront (true); return; }
         s->editor.reset (new PluginWindow (s->plugin->createEditorIfNeeded(), s->plugin->getName()));
+        s->editor->toFront (true);
     }
     void clearChain()
     {
