@@ -2262,3 +2262,24 @@ body { display: flex; flex-direction: column; }
 .daw-addrec-row::before { content: ""; grid-column: 1; }
 .daw-addrec { grid-column: 1; margin: 6px 9px; padding: 6px 8px; border: 1px dashed var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 10.5px/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .daw-addrec:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* 선택된 트랙 강조 (컨트롤부) */
+.daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+.daw-lane.selected .daw-head::before { width: 4px; box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent); }
+.daw-lane.selected .ctrls { border-radius: 5px; }
+.daw-lane.selected .daw-head .nm { color: var(--accent); }
+
+/* 이펙트 패널 — 선택 트랙 없으면 안내만 */
+.daw-fx-empty { display: none; padding: 26px 16px; text-align: center; color: var(--tx-4); font-size: 11.5px; line-height: 1.7; }
+.daw-left.empty .daw-fx-actions, .daw-left.empty #st-fx-slots, .daw-left.empty #st-fx-add { display: none; }
+.daw-left.empty .daw-fx-empty { display: block; }
+
+/* 드래그 이동량 배지 (+0:07) */
+.daw-drag-badge { position: absolute; top: 4px; left: 4px; z-index: 8; background: var(--accent); color: #fff; font: 700 10px/1 var(--mono); padding: 3px 6px; border-radius: 4px; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+/* 도구 탭 (하나씩) */
+.daw-tool-tabs { display: flex; gap: 6px; padding: 8px 10px 0; }
+.daw-tool-tab { flex: 1; padding: 7px; border: 1px solid var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 11px/1 var(--sans); cursor: pointer; }
+.daw-tool-tab:hover { color: var(--tx-1); }
+.daw-tool-tab.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.daw-tool-empty { padding: 26px 14px; text-align: center; color: var(--tx-4); font-size: 11.5px; }

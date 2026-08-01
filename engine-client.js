@@ -67,15 +67,17 @@ class AudioEngine extends EventEmitter {
   metro(on, bpm)     { return this.send({ cmd: 'metro', on, bpm }); }
   listDevices()      { return this.send({ cmd: 'listDevices' }); }
   setDevice(opts)    { return this.send({ cmd: 'setDevice', ...(opts || {}) }); }
-  // FX 체인 (슬롯 id 기반)
-  fxAdd(index)          { return this.send({ cmd: 'fxAdd', index }); }
-  fxRemove(slot)        { return this.send({ cmd: 'fxRemove', slot }); }
-  fxReorder(order)      { return this.send({ cmd: 'fxReorder', order }); }
-  fxSetChain(plugins)   { return this.send({ cmd: 'fxSetChain', plugins }); }
-  fxBypass(slot, on)    { return this.send({ cmd: 'fxBypass', slot, on }); }
-  fxEditor(slot)        { return this.send({ cmd: 'fxEditor', slot }); }
-  fxSaveState(slot)     { return this.send({ cmd: 'fxSaveState', slot }); }
-  fxSetState(slot, data){ return this.send({ cmd: 'fxSetState', slot, data }); }
+  // FX 체인 (트랙별 · 슬롯 id 기반)
+  fxAdd(track, index)         { return this.send({ cmd: 'fxAdd', track, index }); }
+  fxRemove(track, slot)       { return this.send({ cmd: 'fxRemove', track, slot }); }
+  fxReorder(track, order)     { return this.send({ cmd: 'fxReorder', track, order }); }
+  fxSetChain(track, plugins)  { return this.send({ cmd: 'fxSetChain', track, plugins }); }
+  fxBypass(track, slot, on)   { return this.send({ cmd: 'fxBypass', track, slot, on }); }
+  fxBypassAll(track, on)      { return this.send({ cmd: 'fxBypassAll', track, on }); }
+  fxEditor(track, slot)       { return this.send({ cmd: 'fxEditor', track, slot }); }
+  fxSaveState(track, slot)    { return this.send({ cmd: 'fxSaveState', track, slot }); }
+  fxSetState(track, slot, data){ return this.send({ cmd: 'fxSetState', track, slot, data }); }
+  fxChainReq(track)           { return this.send({ cmd: 'fxChainReq', track }); }
   recordArm(file)    { return this.send({ cmd: 'recordArm', file }); }
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
   takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }

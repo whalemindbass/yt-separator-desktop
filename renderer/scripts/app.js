@@ -121,7 +121,7 @@ sVstScan?.addEventListener('click', async () => {
   if (sVstStatus) sVstStatus.textContent = '오디오 엔진 시작 · 스캔 중…';
   try { await api.engine.start([]); api.engine.scanPlugins(); } catch {}
 });
-api.engine?.onEvent?.((m) => { if (m.ev === 'plugins' && sVstStatus) sVstStatus.textContent = `감지된 VST3: ${(m.list || []).length}개`; });
+api.engine?.onEvent?.((m) => { if (m.ev === 'plugins' && sVstStatus) sVstStatus.textContent = `감지된 VST: ${(m.list || []).length}개`; });
 const sDownloadsDir  = $('s-downloads-dir');
 const sDownloadsOpen = $('s-downloads-open');
 const sDownloadsChg  = $('s-downloads-change');

@@ -17,7 +17,9 @@ let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _tracks = [];          // [{key,label,color,engineIndex}]
-let _chain = [];              // [{id,index,name,hasEditor,bypass}] — 엔진 FX 체인 미러
+let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
+let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
+let _selTrack = null;         // 선택(편집 대상) 녹음 트랙 id — 이펙트 패널 대상
 let _activePresetId = null;
 let _presetGather = null;     // 저장: {name,id?,states:{slotId:data},need:[ids],meta:[{index,bypass}],order:[ids]}
 let _pendingPreset = null;    // 로드: {slots:[{index,bypass,data}]}
@@ -27,16 +29,18 @@ function getPresets() { try { return JSON.parse(localStorage.getItem('yss:fx-pre
 function setPresets(a) { try { localStorage.setItem('yss:fx-presets', JSON.stringify(a)); } catch {} }
 function upsertPreset(p) { const a = getPresets(); const i = a.findIndex(x => x.id === p.id); if (i >= 0) a[i] = p; else a.push(p); setPresets(a); }
 
-function startGather(opts) {   // 현재 체인 상태를 모아 프리셋 생성/갱신
+function startGather(opts) {   // 현재 트랙 체인 상태를 모아 프리셋 생성/갱신
+  if (_selTrack == null) { flashTake('트랙을 선택하세요.'); return; }
   if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
   _presetGather = { ...opts, states: {}, need: _chain.map(s => s.id), meta: _chain.map(s => ({ index: s.index, bypass: s.bypass })), order: _chain.map(s => s.id) };
-  for (const s of _chain) api.engine.fxSaveState(s.id);
+  for (const s of _chain) api.engine.fxSaveState(_selTrack, s.id);
 }
 function loadPreset(p) {
+  if (_selTrack == null) { flashTake('트랙을 선택하세요.'); return; }
   _activePresetId = p.id;
   showFxOverlay('톤 불러오는 중…');
-  // 엔진이 체인을 한 번에 재구성 (원자적) → fxChain 이벤트 오면 overlay 해제
-  api.engine.fxSetChain(p.slots.map(s => ({ index: s.index, data: s.data, bypass: s.bypass })));
+  // 엔진이 선택 트랙 체인을 한 번에 재구성 (원자적) → fxChain 이벤트 오면 overlay 해제
+  api.engine.fxSetChain(_selTrack, p.slots.map(s => ({ index: s.index, data: s.data, bypass: s.bypass })));
 }
 function showFxOverlay(msg) {
   const el = $('daw-fx-overlay'); if (!el) return;
@@ -91,9 +95,25 @@ function dragClip(e, onDelta, onEnd) {
   document.addEventListener('pointerup', up);
 }
 function repositionStems() {
-  document.querySelectorAll('.daw-lane:not([data-key="mine"]) .daw-clip').forEach(c => {
+  document.querySelectorAll('.daw-lane:not(.daw-lane-rec) .daw-clip').forEach(c => {
     c.style.left = (_stemOffset * _pxPerSec) + 'px'; c.style.right = 'auto';
   });
+}
+// 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
+function scrubStart(e, area) {
+  if (!_dur) return;
+  const seekTo = (clientX) => {
+    const r = area.getBoundingClientRect();
+    const t = Math.max(0, Math.min(_dur, (clientX - r.left) / _pxPerSec));
+    api.engine.seek(Math.round(t * (_sr || 44100)));
+    const v = $('daw-video'); if (v && isFinite(v.duration)) v.currentTime = t;
+    updatePlayhead(t);
+  };
+  seekTo(e.clientX);
+  const mv = (ev) => seekTo(ev.clientX);
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); };
+  document.addEventListener('pointermove', mv);
+  document.addEventListener('pointerup', up);
 }
 const fmtTC = (sec) => {
   sec = Math.max(0, sec || 0);
@@ -156,8 +176,10 @@ function renderTracks() {
     clip.addEventListener('click', (e) => e.stopPropagation());
     clip.addEventListener('pointerdown', (e) => {
       const base = _stemOffset;
-      dragClip(e, (dSec) => { _stemOffset = base + dSec; repositionStems(); },
-        () => api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))));
+      dragClip(e, (dSec) => {
+        _stemOffset = Math.max(0, base + dSec); repositionStems();   // 0:00 뒤로 못 감
+        showDragBadge(lane, _stemOffset - base);
+      }, () => { hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); });
     });
     lanes.appendChild(lane);
   });
@@ -191,11 +213,13 @@ function renderRecLanes() {
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
     const del = lane.querySelector('[data-m="del"]');
-    rBtn.addEventListener('click', () => api.engine.recArm(rt.id));   // 엔진이 recTracks 재발행 → 갱신
-    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
-    sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
+    // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
+    lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
+    rBtn.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recArm(rt.id); });   // 엔진이 recTracks 재발행 → 갱신
+    mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
+    sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
     vol.addEventListener('input', () => { rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain }); });
-    del.addEventListener('click', () => { if (_recTracks.length > 1) api.engine.recTrackRemove(rt.id); else flashTake('최소 1개 트랙 필요'); });
+    del.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recTrackRemove(rt.id); });
     lanes.appendChild(lane);
   });
   // + 녹음 트랙 추가
@@ -204,8 +228,49 @@ function renderRecLanes() {
   add.innerHTML = `<button class="daw-addrec" title="녹음 트랙 추가">+ 녹음 트랙</button>`;
   add.querySelector('button').addEventListener('click', () => api.engine.recTrackAdd());
   lanes.appendChild(add);
+  syncSelection();
   layout();
 }
+
+// ── 트랙 선택 (편집 대상) — 이펙트 패널 대상 ──
+function selectTrack(id) {
+  if (id != null && !_recTracks.some(r => r.id === id)) id = null;
+  _selTrack = id;
+  if (id != null) { _chain = _chainByTrack[id] || []; api.engine.fxChainReq(id); }
+  else _chain = [];
+  syncSelection();
+  renderFxSlots();
+  updateFxPanel();
+}
+function syncSelection() {   // 재렌더 후 선택 하이라이트 재적용
+  if (_selTrack != null && !_recTracks.some(r => r.id === _selTrack)) _selTrack = null;
+  document.querySelectorAll('.daw-lane').forEach(l =>
+    l.classList.toggle('selected', l.dataset.recid != null && Number(l.dataset.recid) === _selTrack));
+}
+function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
+  const left = document.querySelector('.daw-left');
+  if (!left) return;
+  const has = _selTrack != null;
+  left.classList.toggle('empty', !has);
+  const h = $('daw-left-h');
+  if (h) {
+    const idx = _recTracks.findIndex(r => r.id === _selTrack);
+    h.textContent = has ? `내 녹음 ${idx + 1} 이펙트` : '입력 이펙트';
+  }
+}
+
+// ── 드래그 이동량 배지 (+0:07) ──
+function fmtDelta(sec) {
+  const s = Math.round(sec), a = Math.abs(s);
+  return `${s >= 0 ? '+' : '-'}${Math.floor(a / 60)}:${String(a % 60).padStart(2, '0')}`;
+}
+function showDragBadge(laneEl, deltaSec) {
+  const area = laneEl.querySelector('.daw-area'); if (!area) return;
+  let b = area.querySelector('.daw-drag-badge');
+  if (!b) { b = document.createElement('div'); b.className = 'daw-drag-badge'; area.appendChild(b); }
+  b.textContent = fmtDelta(deltaSec);
+}
+function hideDragBadge() { document.querySelectorAll('.daw-drag-badge').forEach(b => b.remove()); }
 
 function updateSoloDim() {
   const anySolo = [...document.querySelectorAll('.daw-ms[data-m="solo"].on')].length > 0;
@@ -316,7 +381,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -391,9 +456,13 @@ function renderTakes() {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
+      selectTrack(tk.trackId);
       const base = tk.start;
-      dragClip(e, (dSec) => { tk.start = Math.max(0, base + dSec); el.style.left = (tk.start * _pxPerSec) + 'px'; },
-        () => api.engine.takeMove(tk.id, Math.round(tk.start * (_sr || 44100))));
+      const lane = el.closest('.daw-lane-rec');
+      dragClip(e, (dSec) => {
+        tk.start = Math.max(0, base + dSec); el.style.left = (tk.start * _pxPerSec) + 'px';   // 0:00 뒤로 못 감
+        if (lane) showDragBadge(lane, tk.start - base);
+      }, () => { hideDragBadge(); api.engine.takeMove(tk.id, Math.round(tk.start * (_sr || 44100))); });
     });
     area.appendChild(el);
   }
@@ -440,11 +509,12 @@ function openSongPicker() {
 }
 
 function openVstPicker() {
-  if (!_plugins.length) { openModal('VST3 추가', `<div class="daw-modal-empty">감지된 VST3 없음. 상단 FX·스캔 필요.</div>`, () => {}); return; }
+  if (_selTrack == null) { flashTake('먼저 녹음 트랙을 선택하세요.'); return; }
+  if (!_plugins.length) { openModal('VST 추가', `<div class="daw-modal-empty">감지된 VST 없음. 설정·스캔 필요.</div>`, () => {}); return; }
   const html = _plugins.map(p =>
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${p.name}</div>
       <div class="m">${p.manufacturer}</div></div></div>`).join('');
-  openModal('VST3 추가', html, (idx) => api.engine.fxAdd(Number(idx)));   // 여러 개 추가 가능
+  openModal('VST 추가', html, (idx) => api.engine.fxAdd(_selTrack, Number(idx)));   // 선택 트랙에 추가
 }
 
 // ── 녹음(테이크 세트) 저장/불러오기 — 곡별, 이름 지정 ──
@@ -531,8 +601,8 @@ function onEngineEvent(m) {
       $('st-fx-add').disabled = false;
       break;
     case 'fxChain':
-      _chain = m.list || [];
-      renderFxSlots();
+      _chainByTrack[m.trackId] = m.list || [];
+      if (m.trackId === _selTrack) { _chain = m.list || []; renderFxSlots(); }
       hideFxOverlay();
       break;
     case 'fxState':
@@ -557,6 +627,10 @@ function onEngineEvent(m) {
     case 'recTracks':
       _recTracks = m.list || [];
       renderRecLanes(); updateSoloDim();
+      if (_selTrack == null || !_recTracks.some(r => r.id === _selTrack)) {
+        const a = armedRecId();                       // 선택 없으면 녹음 대상 자동 선택
+        selectTrack(a != null ? a : null);
+      } else updateFxPanel();
       break;
     case 'take':
       clearRecLive();
@@ -569,7 +643,8 @@ function onEngineEvent(m) {
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').hidden = false; $('st-engine-start').disabled = false;
       $('st-engine-stop').hidden = true;
-      _chain = []; _activePresetId = null; renderFxSlots();
+      _chain = []; _chainByTrack = {}; _selTrack = null; _recTracks = [];
+      _activePresetId = null; renderFxSlots(); renderRecLanes(); updateFxPanel();
       setEnabled(false);
       break;
     case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
@@ -597,10 +672,10 @@ function renderFxSlots() {
       const ns = !s.bypass; s.bypass = ns;                     // 낙관적 갱신 (엔진 fxChain 로 재확정)
       row.classList.toggle('bypassed', ns);
       row.querySelector('.pw').classList.toggle('on', !ns);
-      api.engine.fxBypass(s.id, ns);
+      api.engine.fxBypass(_selTrack, s.id, ns);
     });
-    row.querySelector('.ed').addEventListener('click', () => api.engine.fxEditor(s.id));
-    row.querySelector('.del').addEventListener('click', () => api.engine.fxRemove(s.id));
+    row.querySelector('.ed').addEventListener('click', () => api.engine.fxEditor(_selTrack, s.id));
+    row.querySelector('.del').addEventListener('click', () => api.engine.fxRemove(_selTrack, s.id));
     row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(s.id)); row.classList.add('dragging'); });
     row.addEventListener('dragend', () => row.classList.remove('dragging'));
     row.addEventListener('dragover', (e) => e.preventDefault());
@@ -614,7 +689,7 @@ function reorderChain(fromId, toId) {
   const fi = ids.indexOf(fromId), ti = ids.indexOf(toId);
   if (fi < 0 || ti < 0) return;
   ids.splice(ti, 0, ids.splice(fi, 1)[0]);
-  api.engine.fxReorder(ids);
+  api.engine.fxReorder(_selTrack, ids);
 }
 
 // ── 배선 ───────────────────────────────────────────
@@ -716,6 +791,20 @@ function wire() {
     openNameModal('새 톤으로 저장', '', (name) => startGather({ name }));
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
+  // 이펙트 일괄 끄기/켜기 (선택 트랙)
+  $('st-fx-bypassall').addEventListener('click', () => {
+    if (_selTrack == null || !_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+    const allOff = _chain.every(s => s.bypass);   // 전부 꺼져있으면 → 켜기, 아니면 → 끄기
+    api.engine.fxBypassAll(_selTrack, !allOff);
+  });
+  // 트랙 빈 곳 스크럽 + 선택 (재렌더돼도 #daw-lanes 는 유지되므로 위임)
+  $('daw-lanes').addEventListener('pointerdown', (e) => {
+    const area = e.target.closest('.daw-area');
+    if (!area || e.target.closest('.daw-clip, .daw-take-clip, .daw-drag-badge')) return;
+    const lane = area.closest('.daw-lane-rec');
+    if (lane) selectTrack(Number(lane.dataset.recid));
+    scrubStart(e, area);
+  });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
   $('st-take-save').addEventListener('click', () => {
@@ -733,9 +822,17 @@ function wire() {
     api.engine.inputMonitor(_monOn);
   });
 
-  // 도구 드로어 (레벨·튜너) — 간헐 토글
+  // 도구 드로어 — 열면 도구 선택 탭. 하나씩 사용.
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });
   $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; });
+  const selectTool = (name) => {
+    document.querySelectorAll('.daw-tool-tab').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
+    document.querySelectorAll('.daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
+    const empty = $('tool-empty'); if (empty) empty.hidden = !!name;
+  };
+  document.querySelectorAll('.daw-tool-tab').forEach(b =>
+    b.addEventListener('click', () => selectTool(b.classList.contains('on') ? null : b.dataset.tool)));   // 다시 누르면 닫기
+  selectTool(null);   // 처음엔 아무 도구도 안 열림
 }
 
 export async function initStudio() { wire(); }

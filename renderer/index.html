@@ -419,16 +419,18 @@
       </div>
 
       <div class="daw-midrow">
-      <aside class="daw-left">
-        <div class="daw-left-h" data-i18n="studio.inputfx">입력 이펙트</div>
+      <aside class="daw-left empty">
+        <div id="daw-left-h" class="daw-left-h">입력 이펙트</div>
         <div id="daw-fx-overlay" class="daw-fx-overlay" hidden><div class="pl-spinner"></div><div class="msg"></div></div>
         <div class="daw-fx-actions">
           <button id="st-fx-save" class="mini" disabled data-i18n="studio.fx.save">저장</button>
           <button id="st-fx-saveas" class="mini" disabled data-i18n="studio.fx.saveas">새 톤</button>
           <button id="st-fx-load" class="mini" disabled data-i18n="studio.fx.load">불러오기</button>
+          <button id="st-fx-bypassall" class="mini" disabled title="이펙트 일괄 끄기/켜기">일괄</button>
         </div>
         <div id="st-fx-slots" class="daw-fx-slots"></div>
-        <button id="st-fx-add" class="daw-fx-add" disabled data-i18n="studio.fx.add">＋ VST3 추가</button>
+        <button id="st-fx-add" class="daw-fx-add" disabled>＋ VST 추가</button>
+        <div class="daw-fx-empty">녹음 트랙을 선택하면<br>해당 트랙의 입력 이펙트가 표시됩니다</div>
       </aside>
       <div class="daw-content">
 
@@ -443,18 +445,21 @@
         </div>
         <aside id="daw-tools" class="daw-fx" hidden>
           <div class="daw-fx-h"><span class="t" data-i18n="studio.tools">도구</span><button id="st-tools-close" class="daw-fx-x">✕</button></div>
+          <div class="daw-tool-tabs">
+            <button class="daw-tool-tab" data-tool="vu">입력 레벨</button>
+            <button class="daw-tool-tab" data-tool="tuner">튜너</button>
+          </div>
           <div class="daw-fx-b">
-            <div class="daw-tool">
-              <div class="daw-tool-h">입력 레벨</div>
+            <div class="daw-tool" id="tool-vu" data-tool="vu" hidden>
               <div class="vu"><div id="st-vu-fill" class="vu-fill"></div></div>
               <div id="st-vu-db" class="vu-db">—</div>
             </div>
-            <div class="daw-tool">
-              <div class="daw-tool-h">튜너</div>
+            <div class="daw-tool" id="tool-tuner" data-tool="tuner" hidden>
               <div id="st-tuner-note" class="tuner-note">—</div>
               <div class="tuner-meter"><span class="tuner-center"></span><div id="st-tuner-needle" class="tuner-needle"></div></div>
               <div id="st-tuner-cents" class="tuner-cents"></div>
             </div>
+            <div class="daw-tool-empty" id="tool-empty">위에서 도구를 선택하세요</div>
           </div>
         </aside>
       </div>
@@ -568,8 +573,8 @@
       </div>
       <div class="settings-item">
         <div class="settings-label-col">
-          <div class="settings-item-title" data-i18n="set.vst.title">VST3 플러그인</div>
-          <div class="settings-item-desc" id="s-vst-status" data-i18n="set.vst.desc">스튜디오 입력 이펙트로 쓸 VST3를 스캔합니다</div>
+          <div class="settings-item-title" data-i18n="set.vst.title">VST 플러그인</div>
+          <div class="settings-item-desc" id="s-vst-status" data-i18n="set.vst.desc">스튜디오 입력 이펙트로 쓸 VST를 스캔합니다</div>
         </div>
         <div class="settings-actions"><button id="s-vst-scan" class="btn" data-i18n="set.vst.scan">스캔</button></div>
       </div>
