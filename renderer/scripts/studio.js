@@ -352,6 +352,7 @@ function onEngineEvent(m) {
       $('st-engine-dot').classList.add('on');
       $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
       setEnabled(true);
+      api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
       break;
     case 'device':
       _sr = m.sr || 44100;
