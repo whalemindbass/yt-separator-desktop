@@ -147,10 +147,13 @@ public:
         if (inst == nullptr) { std::cerr << "[engine] load failed: " << err << "\n"; return; }
         inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
         inst->prepareToPlay (deviceSampleRate, blockSize);
-        editorWindow.reset();            // 옛 에디터 닫기
-        activeFx.store (nullptr);        // 콜백에서 옛 인스턴스 사용 중단
-        fx = std::move (inst);
-        activeFx.store (fx.get());
+        editorWindow.reset();            // 옛 에디터 닫기 (message 스레드)
+        {
+            const ScopedLock sl (fxLock); // 오디오 스레드가 옛 인스턴스 사용 끝낼 때까지 대기 후 교체
+            activeFx.store (nullptr);
+            fx = std::move (inst);
+            activeFx.store (fx.get());
+        }
         auto* o = ev ("fx");
         o->setProperty ("name", scanned[index].name);
         o->setProperty ("hasEditor", fx->hasEditor());
@@ -189,8 +192,11 @@ public:
     void removeFx()
     {
         editorWindow.reset();
-        activeFx.store (nullptr);
-        fx.reset();
+        {
+            const ScopedLock sl (fxLock);
+            activeFx.store (nullptr);
+            fx.reset();
+        }
         emit (var (ev ("fxRemoved")));
     }
     // VST 세부 설정(노브값 등) 직렬화 — base64 로 주고받음
@@ -208,7 +214,10 @@ public:
         if (fx == nullptr || b64.isEmpty()) return;
         MemoryOutputStream mo;
         if (Base64::convertFromBase64 (mo, b64))
+        {
+            const ScopedLock sl (fxLock);   // setState 중 오디오 스레드 process 배제
             fx->setStateInformation (mo.getData(), (int) mo.getDataSize());
+        }
     }
 
     // 메시지 스레드에서 호출할 것
@@ -300,10 +309,15 @@ public:
             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
                 fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
 
-            if (auto* p = activeFx.load(); p != nullptr && ! fxBypass.load())
+            if (! fxBypass.load())
             {
-                MidiBuffer mm;
-                p->processBlock (fxBuf, mm);
+                const ScopedTryLock stl (fxLock);
+                if (stl.isLocked())
+                    if (auto* p = activeFx.load())
+                    {
+                        MidiBuffer mm;
+                        p->processBlock (fxBuf, mm);
+                    }
             }
             const float mg = monitorGain.load();
             for (int c = 0; c < numOut; ++c)
@@ -363,6 +377,7 @@ private:
     Array<PluginDescription> scanned;
     std::unique_ptr<AudioPluginInstance> fx;
     std::atomic<AudioPluginInstance*> activeFx { nullptr };
+    CriticalSection fxLock;   // 오디오 스레드의 processBlock 과 로드/삭제/setState 를 상호배제
     AudioBuffer<float> fxBuf;
 
     std::atomic<bool>  playing { false };
