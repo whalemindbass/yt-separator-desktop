@@ -289,6 +289,34 @@ public:
         const ScopedLock sl (fxLock);
         chain.clear();
     }
+    // 프리셋 로드 — 체인 전체를 한 번에 재구성(원자적). churn 없이 안전.
+    void setChain (const var& list)
+    {
+        for (auto& s : chain) if (s) s->editor.reset();
+        { const ScopedLock sl (fxLock); chain.clear(); }
+        if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
+        if (auto* a = list.getArray())
+            for (auto& v : *a)
+            {
+                const int index = (int) v["index"];
+                if (index < 0 || index >= scanned.size()) continue;
+                String err;
+                auto inst = pluginFmt.createPluginInstance (scanned[index], deviceSampleRate, blockSize, err);
+                if (inst == nullptr) continue;
+                inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
+                inst->prepareToPlay (deviceSampleRate, blockSize);
+                const String data = v["data"].toString();
+                if (data.isNotEmpty()) { MemoryOutputStream mo; if (Base64::convertFromBase64 (mo, data)) inst->setStateInformation (mo.getData(), (int) mo.getDataSize()); }
+                auto slot = std::make_unique<FxSlot>();
+                slot->id = nextSlotId++;
+                slot->descIndex = index;
+                slot->bypass = (bool) v["bypass"];
+                slot->plugin = std::move (inst);
+                const ScopedLock sl (fxLock);
+                chain.push_back (std::move (slot));
+            }
+        emitChain();
+    }
 
     // ---- 오디오 콜백 ----
     void audioDeviceAboutToStart (AudioIODevice* device) override
@@ -485,6 +513,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxAdd")       engine.addFx ((int) c["index"]);
     else if (cmd == "fxRemove")    engine.removeFx ((int) c["slot"]);
     else if (cmd == "fxReorder")   { Array<int> o; if (auto* a = c["order"].getArray()) for (auto& v : *a) o.add ((int) v); engine.reorderFx (o); }
+    else if (cmd == "fxSetChain")  engine.setChain (c["plugins"]);
     else if (cmd == "fxBypass")    engine.setBypass ((int) c["slot"], (bool) c["on"]);
     else if (cmd == "fxEditor")    engine.showEditor ((int) c["slot"]);
     else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["slot"]);

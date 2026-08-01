@@ -34,21 +34,16 @@ function startGather(opts) {   // 현재 체인 상태를 모아 프리셋 생�
 }
 function loadPreset(p) {
   _activePresetId = p.id;
-  for (const s of _chain) api.engine.fxRemove(s.id);   // 기존 체인 제거
-  _pendingPreset = { slots: p.slots.slice() };
-  for (const sl of p.slots) api.engine.fxAdd(sl.index); // 순서대로 추가
-  setTimeout(applyPendingPreset, 350);                 // 추가 완료 후 상태·bypass 적용
-  flashTake('톤 불러옴: ' + p.name);
+  showFxOverlay('톤 불러오는 중…');
+  // 엔진이 체인을 한 번에 재구성 (원자적) → fxChain 이벤트 오면 overlay 해제
+  api.engine.fxSetChain(p.slots.map(s => ({ index: s.index, data: s.data, bypass: s.bypass })));
 }
-function applyPendingPreset() {
-  if (!_pendingPreset) return;
-  const pp = _pendingPreset; _pendingPreset = null;
-  _chain.forEach((s, i) => {
-    const sl = pp.slots[i]; if (!sl) return;
-    if (sl.data) api.engine.fxSetState(s.id, sl.data);
-    if (sl.bypass) api.engine.fxBypass(s.id, true);
-  });
+function showFxOverlay(msg) {
+  const el = $('daw-fx-overlay'); if (!el) return;
+  el.querySelector('.msg').textContent = msg || '';
+  el.hidden = false;
 }
+function hideFxOverlay() { const el = $('daw-fx-overlay'); if (el) el.hidden = true; }
 function openNameModal(title, def, onOk) {
   const host = $('daw-modal');
   host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${title}</span><button class="x">✕</button></div>
@@ -365,6 +360,7 @@ function onEngineEvent(m) {
     case 'fxChain':
       _chain = m.list || [];
       renderFxSlots();
+      hideFxOverlay();
       break;
     case 'fxState':
       if (_presetGather) {
@@ -463,8 +459,8 @@ function wire() {
   const updatePlayIcon = () => { $('daw-vplay').hidden = _playing; };
   window._dawUpdatePlayIcon = updatePlayIcon;
 
-  // 영상 클릭 = 재생/정지 (트랙·엔진과 동기)
-  video.addEventListener('click', () => { if (_playing) stopAll(); else play(); });
+  // 영상 클릭 = 재생/정지 (곡 로드 후에만)
+  video.addEventListener('click', () => { if (!_dur) return; if (_playing) stopAll(); else play(); });
   // 진행바 클릭 = 이동
   $('daw-vbar').addEventListener('click', (e) => {
     if (!_dur || _recArmed) return;

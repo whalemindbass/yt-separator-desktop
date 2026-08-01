@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     fxAdd:       (index)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxAdd', index }),
     fxRemove:    (slot)       => ipcRenderer.invoke('engine:cmd', { cmd: 'fxRemove', slot }),
     fxReorder:   (order)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxReorder', order }),
+    fxSetChain:  (plugins)    => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSetChain', plugins }),
     fxBypass:    (slot, on)   => ipcRenderer.invoke('engine:cmd', { cmd: 'fxBypass', slot, on }),
     fxEditor:    (slot)       => ipcRenderer.invoke('engine:cmd', { cmd: 'fxEditor', slot }),
     fxSaveState: (slot)       => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSaveState', slot }),

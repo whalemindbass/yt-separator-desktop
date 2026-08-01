@@ -67,6 +67,7 @@ class AudioEngine extends EventEmitter {
   fxAdd(index)          { return this.send({ cmd: 'fxAdd', index }); }
   fxRemove(slot)        { return this.send({ cmd: 'fxRemove', slot }); }
   fxReorder(order)      { return this.send({ cmd: 'fxReorder', order }); }
+  fxSetChain(plugins)   { return this.send({ cmd: 'fxSetChain', plugins }); }
   fxBypass(slot, on)    { return this.send({ cmd: 'fxBypass', slot, on }); }
   fxEditor(slot)        { return this.send({ cmd: 'fxEditor', slot }); }
   fxSaveState(slot)     { return this.send({ cmd: 'fxSaveState', slot }); }
