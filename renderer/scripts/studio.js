@@ -76,10 +76,16 @@ function renderTracks() {
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
-    if (t.engineIndex < 0) { mBtn.disabled = sBtn.disabled = vol.disabled = true; }
-    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
-    sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
-    vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
+    if (t.key === 'mine') {
+      // 내 녹음(입력 모니터) — monitor 게인 제어
+      sBtn.disabled = true;
+      vol.addEventListener('input', () => api.engine.monitor(mBtn.classList.contains('on') ? 0 : Number(vol.value) / 100));
+      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.monitor(on ? 0 : Number(vol.value) / 100); });
+    } else {
+      mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
+      sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
+      vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
+    }
     lanes.appendChild(lane);
   });
   layout();
@@ -137,9 +143,22 @@ function updatePlayhead(sec) {
 }
 
 // ── 동기 ──────────────────────────────────────────
+let _recStartSec = null;
+function updateRecLive(t) {
+  const area = document.querySelector('.daw-lane[data-key="mine"] .daw-area');
+  if (!area) return;
+  if (_recStartSec == null) _recStartSec = t;
+  let el = area.querySelector('.daw-rec-live');
+  if (!el) { el = document.createElement('div'); el.className = 'daw-rec-live'; area.appendChild(el); }
+  el.style.left = (_recStartSec * _pxPerSec) + 'px';
+  el.style.width = Math.max(2, (t - _recStartSec) * _pxPerSec) + 'px';
+}
+function clearRecLive() { _recStartSec = null; document.querySelector('.daw-rec-live')?.remove(); }
+
 function onPos(samples) {
   const t = (samples || 0) / (_sr || 44100);
   updatePlayhead(t);
+  if (_recArmed && _playing) updateRecLive(t);
   const v = $('daw-video');
   if (v && _playing && isFinite(v.duration) && Math.abs(v.currentTime - t) > 0.15) v.currentTime = t;
   const sc = $('daw-tscroll'), x = HEAD_W + t * _pxPerSec;
@@ -148,7 +167,7 @@ function onPos(samples) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -224,7 +243,7 @@ function showTakeMenu(x, y, id) {
     _takes = _takes.filter(t => t.id !== id); renderTakes(); menu.remove();
   });
   document.body.appendChild(menu);
-  const close = () => { menu.remove(); document.removeEventListener('mousedown', close); };
+  const close = (e) => { if (menu.contains(e.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
@@ -285,6 +304,7 @@ function onEngineEvent(m) {
       break;
     case 'pos': onPos(m.samples); break;
     case 'take':
+      clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
       renderTake(m.file, m.timelineStart || 0);
       break;
@@ -294,6 +314,7 @@ function onEngineEvent(m) {
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').disabled = false; setEnabled(false);
       break;
+    case 'fxRemoved': _fxLoaded = null; renderFxSlots(); break;
     case 'error': $('st-engine-status').textContent = '엔진 오류'; break;
     case 'log': {
       const s = String(m.msg || '');
@@ -310,11 +331,13 @@ function renderFxSlots() {
   slot.className = 'daw-fx-slot' + (_fxBypass ? ' bypassed' : '');
   slot.innerHTML = `<span class="pw ${_fxBypass ? '' : 'on'}" title="On/Off"></span>
     <div class="info"><div class="n">${_fxLoaded}</div><div class="sub">입력 체인</div></div>
-    <button class="ed" ${_fxHasEditor ? '' : 'disabled'}>에디터</button>`;
+    <button class="ed" ${_fxHasEditor ? '' : 'disabled'}>에디터</button>
+    <button class="del" title="삭제">✕</button>`;
   slot.querySelector('.pw').addEventListener('click', () => {
     _fxBypass = !_fxBypass; api.engine.fxBypass(_fxBypass); renderFxSlots();
   });
   slot.querySelector('.ed').addEventListener('click', () => api.engine.showEditor());
+  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; renderFxSlots(); });
   box.appendChild(slot);
 }
 
@@ -343,11 +366,13 @@ function wire() {
     _playing = false; api.engine.stop(); video.pause();
     // 녹음 중이었으면 정지 시 바로 마감 → take 트랙 반영
     if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); api.engine.recordStop(); }
+    clearRecLive();
   });
+  $('st-master').addEventListener('input', (e) => api.engine.master(Number(e.target.value) / 100));
   $('st-seek0').addEventListener('click', () => { api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     _recArmed = !_recArmed; $('st-rec').classList.toggle('armed', _recArmed);
-    if (_recArmed) api.engine.recordArm(); else api.engine.recordStop();
+    if (_recArmed) api.engine.recordArm(); else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });

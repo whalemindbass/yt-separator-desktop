@@ -2169,6 +2169,11 @@ body { display: flex; flex-direction: column; }
 .daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 38%, transparent); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .daw-ph { position: absolute; top: 0; width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.8); z-index: 3; pointer-events: none; }
+.daw-master { display: flex; align-items: center; gap: 7px; font: 700 10px/1 var(--mono); letter-spacing: .06em; color: var(--tx-3); }
+.daw-master input[type=range] { width: 90px; accent-color: var(--accent); cursor: pointer; }
+.daw-fx-slot .del { flex: none; align-self: center; width: 24px; height: 24px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-4); border-radius: 5px; cursor: pointer; }
+.daw-fx-slot .del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); box-shadow: 0 0 10px color-mix(in srgb, var(--danger) 50%, transparent); pointer-events: none; }
 .daw-take-clip { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); border: 1px solid color-mix(in srgb, var(--danger) 48%, transparent); cursor: pointer; }
 .daw-take-clip svg { width: 100%; height: 100%; display: block; }
 .daw-ctx { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 7px; box-shadow: var(--shadow-pop); padding: 4px; }

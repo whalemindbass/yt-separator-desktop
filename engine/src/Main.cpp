@@ -184,6 +184,15 @@ public:
         if (! solo.isVoid()) s.solo = (bool) solo;
     }
     void setFxBypass (bool on) { fxBypass = on; }
+    void setMaster (float g)   { masterGain = g; }
+    void setMonitor (float g)  { monitorGain = g; }
+    void removeFx()
+    {
+        editorWindow.reset();
+        activeFx.store (nullptr);
+        fx.reset();
+        emit (var (ev ("fxRemoved")));
+    }
 
     // 메시지 스레드에서 호출할 것
     void showEditor()
@@ -279,10 +288,17 @@ public:
                 MidiBuffer mm;
                 p->processBlock (fxBuf, mm);
             }
+            const float mg = monitorGain.load();
             for (int c = 0; c < numOut; ++c)
                 FloatVectorOperations::addWithMultiply (
-                    outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), monitorGain, numSamples);
+                    outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), mg, numSamples);
         }
+
+        // 마스터 볼륨 (전체 출력)
+        const float master = masterGain.load();
+        if (master != 1.0f)
+            for (int c = 0; c < numOut; ++c)
+                FloatVectorOperations::multiply (outputs[c], master, numSamples);
 
         // 녹음
         if (recordArmed.load())
@@ -334,7 +350,8 @@ private:
 
     std::atomic<bool>  playing { false };
     std::atomic<int64> playhead { 0 };
-    float monitorGain = 1.0f;
+    std::atomic<float> monitorGain { 1.0f };
+    std::atomic<float> masterGain { 1.0f };
 
     TimeSliceThread writerThread;
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
@@ -376,8 +393,11 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recordStop")  engine.stopRecord();
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "fxBypass")    engine.setFxBypass ((bool) c["on"]);
+    else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
+    else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "scanPlugins") engine.scanPlugins();
     else if (cmd == "loadFx")      engine.loadPlugin ((int) c["index"]);
+    else if (cmd == "removeFx")    engine.removeFx();
     else if (cmd == "showEditor")  engine.showEditor();
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
 }
