@@ -138,6 +138,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     fxSetState:  (slot, data) => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSetState', slot, data }),
     recordArm:   ()       => ipcRenderer.invoke('engine:recordArm'),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
+    takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

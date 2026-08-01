@@ -77,6 +77,7 @@ class AudioEngine extends EventEmitter {
   fxSetState(slot, data){ return this.send({ cmd: 'fxSetState', slot, data }); }
   recordArm(file)    { return this.send({ cmd: 'recordArm', file }); }
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
+  takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
 
   quit() {
     if (!this.proc) return;

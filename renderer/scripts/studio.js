@@ -297,12 +297,12 @@ function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
 }
 
 let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
-async function renderTake(file, startSamples) {
+async function renderTake(file, startSamples, engineId) {
   try {
     const { stems } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
     _takes.push({
-      id: Date.now(), file,
+      id: engineId != null ? engineId : Date.now(), file,
       start: (startSamples || 0) / (_sr || 44100),
       dur: ch[0].length / (_sr || 44100),
       svg: buildWaveSvg(ch, resolveColor('var(--danger)')),
@@ -332,6 +332,7 @@ function showTakeMenu(x, y, id) {
   menu.style.left = x + 'px'; menu.style.top = y + 'px';
   menu.innerHTML = `<button class="del">삭제</button>`;
   menu.querySelector('.del').addEventListener('click', () => {
+    api.engine.takeRemove(id);   // 엔진 재생 소스도 제거
     _takes = _takes.filter(t => t.id !== id); renderTakes(); menu.remove();
   });
   document.body.appendChild(menu);
@@ -448,7 +449,7 @@ function onEngineEvent(m) {
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
-      renderTake(m.file, m.timelineStart || 0);
+      renderTake(m.file, m.timelineStart || 0, m.id);
       break;
     case 'exit':
       _started = false; _playing = false;

@@ -57,6 +57,14 @@ public:
     void closeButtonPressed() override { setVisible (false); }
 };
 
+// 녹음된 테이크 재생 (타임라인 start 위치부터)
+struct TakePlay
+{
+    std::unique_ptr<AudioFormatReaderSource> src;
+    int64 start = 0;
+    int64 len = 0;
+};
+
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
 struct FxSlot
 {
@@ -122,6 +130,12 @@ public:
     }
 
     void stopRecord() { finishRecording(); }
+    void removeTake (int64 id)
+    {
+        const ScopedLock sl (takesLock);
+        takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
+                             [id] (auto& t) { return t->start == id; }), takesPlay.end());
+    }
 
     // ---- VST3 호스팅 ----
     void scanPlugins()
@@ -208,6 +222,7 @@ public:
     {
         playing = false;
         stems.clear();                       // 정지 상태에서만 (콜백이 stems 미접근)
+        { const ScopedLock sl (takesLock); takesPlay.clear(); }   // 새 곡 → 이전 테이크 제거
         for (auto& p : paths) addStem (p);
         if (currentDevice != nullptr)
             for (auto& s : stems) s->src->prepareToPlay (blockSize, deviceSampleRate);
@@ -467,6 +482,24 @@ public:
                         outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
                         g, numSamples);
             }
+
+            // 녹음 테이크 재생 (타임라인 start 기준)
+            {
+                const int64 ph = playhead.load();
+                const ScopedTryLock stl (takesLock);
+                if (stl.isLocked())
+                    for (auto& t : takesPlay)
+                    {
+                        const int64 pos = ph - t->start;
+                        if (pos < 0 || pos >= t->len) continue;
+                        t->src->setNextReadPosition (pos);
+                        scratch.setSize (2, numSamples, false, false, true); scratch.clear();
+                        AudioSourceChannelInfo info (&scratch, 0, numSamples);
+                        t->src->getNextAudioBlock (info);
+                        for (int c = 0; c < numOut; ++c)
+                            FloatVectorOperations::add (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)), numSamples);
+                    }
+            }
             playhead.fetch_add (numSamples);
         }
 
@@ -554,7 +587,21 @@ private:
         {
             const int64 comp = inLatSamp + outLatSamp;                 // 왕복 지연 = PDC
             const int64 timelineStart = jmax<int64> (0, start - comp); // 테이크를 앞당겨 정렬
+
+            // 저장된 테이크를 재생 소스로 등록 → 이후 재생 시 그 위치에서 들림
+            if (auto* reader = fmt.createReaderFor (outFile))
+            {
+                auto tp = std::make_unique<TakePlay>();
+                tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
+                tp->src->prepareToPlay (blockSize, deviceSampleRate);
+                tp->start = timelineStart;
+                tp->len = reader->lengthInSamples;
+                const ScopedLock sl (takesLock);
+                takesPlay.push_back (std::move (tp));
+            }
+
             auto* o = ev ("take");
+            o->setProperty ("id", (int64) timelineStart);   // 렌더러 클립 식별용
             o->setProperty ("file", outFile.getFullPathName());
             o->setProperty ("startPlayhead", start);
             o->setProperty ("roundtripComp", comp);
@@ -585,6 +632,10 @@ private:
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
     AudioDeviceManager* devmgr = nullptr;
+
+    // 녹음 테이크 재생
+    std::vector<std::unique_ptr<TakePlay>> takesPlay;
+    CriticalSection takesLock;
 
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
@@ -642,6 +693,7 @@ static void dispatch (Engine& engine, const var& c)
                                             ? c["file"].toString()
                                             : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
     else if (cmd == "recordStop")  engine.stopRecord();
+    else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
