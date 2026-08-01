@@ -18,7 +18,48 @@ let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _fxLoaded = null, _fxBypass = false, _fxHasEditor = false, _fxIndex = null;
+let _activePresetId = null, _pendingState = null, _savePresetName = null;
 function loadFxIndex(idx) { _fxIndex = idx; api.engine.loadFx(idx); if (_songKey) saveFxPref(_songKey, idx); }
+
+// ── FX 프리셋(톤) 저장소 — 전역, 플러그인별 상태 스냅샷 ──
+function getPresets() { try { return JSON.parse(localStorage.getItem('yss:fx-presets') || '[]'); } catch { return []; } }
+function setPresets(a) { try { localStorage.setItem('yss:fx-presets', JSON.stringify(a)); } catch {} }
+function loadPreset(p) {
+  _activePresetId = p.id;
+  if (_fxLoaded && _fxIndex === p.index) api.engine.fxSetState(p.data);   // 같은 플러그인 → 상태만 (재생성 X, 안전)
+  else { _pendingState = p.data; loadFxIndex(p.index); }                  // 다른 플러그인 → 로드 후 상태 적용
+  flashTake('톤 불러옴: ' + p.name);
+}
+function openNameModal(title, def, onOk) {
+  const host = $('daw-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${title}</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" style="padding:16px">
+      <input id="daw-name-in" class="daw-fx-select" style="margin:0" placeholder="톤 이름" />
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="mini" id="daw-name-ok">저장</button></div>
+    </div></div>`;
+  host.hidden = false;
+  const inp = $('daw-name-in'); inp.value = def || ''; inp.focus(); inp.select();
+  const done = () => { const v = inp.value.trim(); host.hidden = true; if (v) onOk(v); };
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  $('daw-name-ok').addEventListener('click', done);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(); });
+}
+function openPresetPicker() {
+  const ps = getPresets();
+  const host = $('daw-modal');
+  if (!ps.length) { openModal('톤 불러오기', '<div class="daw-modal-empty">저장된 톤이 없습니다.</div>', () => {}); return; }
+  const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
+    <div class="mt"><div class="n">${p.name}</div><div class="m">${(_plugins[p.index] && _plugins[p.index].name) || ('VST ' + p.index)}</div></div>
+    <button class="daw-preset-del" data-id="${p.id}" title="삭제">✕</button></div>`).join('');
+  openModal('톤 불러오기', html, (idx) => loadPreset(ps[Number(idx)]));
+  host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const id = b.dataset.id;
+    setPresets(getPresets().filter(p => p.id !== id));
+    if (_activePresetId === id) _activePresetId = null;
+    openPresetPicker();
+  }));
+}
 let _plugins = [];         // 스캔된 VST 목록
 let _songKey = null;
 
@@ -294,7 +335,8 @@ function onEngineEvent(m) {
       _started = true;
       $('st-engine-status').textContent = '오디오 준비됨';
       $('st-engine-dot').classList.add('on');
-      $('st-engine-start').disabled = true; setEnabled(true);
+      $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
+      setEnabled(true);
       break;
     case 'device':
       _sr = m.sr || 44100;
@@ -308,10 +350,20 @@ function onEngineEvent(m) {
     case 'fx':
       _fxLoaded = m.name; _fxHasEditor = !!m.hasEditor; _fxBypass = false;
       renderFxSlots();
-      { const st = _songKey && loadFxState(_songKey); if (st) setTimeout(() => api.engine.fxSetState(st), 100); }  // 세부 설정 복원
+      if (_pendingState) { const d = _pendingState; _pendingState = null; setTimeout(() => api.engine.fxSetState(d), 150); }
+      else { const st = _songKey && loadFxState(_songKey); if (st) setTimeout(() => api.engine.fxSetState(st), 150); }
       break;
     case 'fxState':
-      if (_songKey && m.data) saveFxState(_songKey, m.data);   // 자동저장 (조용히)
+      if (_savePresetName) {                                   // 새 톤으로 저장
+        const p = { id: 'p' + Date.now(), name: _savePresetName, index: _fxIndex, data: m.data };
+        const a = getPresets(); a.push(p); setPresets(a);
+        _activePresetId = p.id; _savePresetName = null;
+        flashTake('톤 저장됨: ' + p.name);
+      } else if (_activePresetId) {                            // 활성 톤 자동 갱신
+        const a = getPresets(); const i = a.findIndex(x => x.id === _activePresetId);
+        if (i >= 0) { a[i].data = m.data; setPresets(a); }
+      }
+      if (_songKey && m.data) saveFxState(_songKey, m.data);
       break;
     case 'pos': onPos(m.samples); break;
     case 'take':
@@ -323,9 +375,12 @@ function onEngineEvent(m) {
       _started = false; _playing = false;
       $('st-engine-status').textContent = '오디오 꺼짐';
       $('st-engine-dot').classList.remove('on');
-      $('st-engine-start').disabled = false; setEnabled(false);
+      $('st-engine-start').hidden = false; $('st-engine-start').disabled = false;
+      $('st-engine-stop').hidden = true;
+      _fxLoaded = null; _fxIndex = null; _activePresetId = null;
+      setEnabled(false);
       break;
-    case 'fxRemoved': _fxLoaded = null; _fxIndex = null; renderFxSlots(); break;
+    case 'fxRemoved': _fxLoaded = null; _fxIndex = null; _activePresetId = null; renderFxSlots(); break;
     case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
     case 'log': {
       const s = String(m.msg || '');
@@ -348,7 +403,7 @@ function renderFxSlots() {
     _fxBypass = !_fxBypass; api.engine.fxBypass(_fxBypass); renderFxSlots();
   });
   slot.querySelector('.ed').addEventListener('click', () => api.engine.showEditor());
-  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; _fxIndex = null; renderFxSlots(); });
+  slot.querySelector('.del').addEventListener('click', () => { api.engine.removeFx(); _fxLoaded = null; _fxIndex = null; _activePresetId = null; renderFxSlots(); });
   box.appendChild(slot);
 }
 
@@ -446,8 +501,15 @@ function wire() {
   $('st-fx-toggle').addEventListener('click', () => { const d = $('daw-fx'); d.hidden = !d.hidden; });
   $('st-fx-close').addEventListener('click', () => { $('daw-fx').hidden = true; });
   $('st-fx-add').addEventListener('click', openVstPicker);
-  // VST 세부 설정 자동저장 — 로드된 FX 있으면 주기적으로 상태 스냅샷 요청 (조용히)
-  setInterval(() => { if (_fxLoaded) api.engine.fxSaveState(); }, 4000);
+  $('st-fx-save').addEventListener('click', () => {
+    if (!_fxLoaded) { flashTake('먼저 VST를 추가하세요.'); return; }
+    openNameModal('톤 저장', _fxLoaded, (name) => { _savePresetName = name; api.engine.fxSaveState(); });
+  });
+  $('st-fx-load').addEventListener('click', openPresetPicker);
+  // 활성 톤 있으면 4초마다 상태 스냅샷 → 그 톤에 자동 갱신
+  setInterval(() => { if (_fxLoaded && _activePresetId) api.engine.fxSaveState(); }, 4000);
+
+  $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   // add 버튼은 스캔 후 활성화
   api.engine.onEvent((m) => { if (m.ev === 'plugins') $('st-fx-add').disabled = false; });
 }
