@@ -1708,6 +1708,7 @@ export const Library = {
   refresh,
   selectItem,
   getSelected: () => currentItem(),
+  getItems: () => items.slice(),
 };
 
 // 뷰 첫 진입 시 자동 로드

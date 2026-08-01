@@ -30,7 +30,9 @@ struct Stem
 {
     std::unique_ptr<AudioFormatReaderSource> src;
     String name;
-    float gain = 1.0f;
+    std::atomic<float> gain { 1.0f };
+    std::atomic<bool>  mute { false };
+    std::atomic<bool>  solo { false };
 };
 
 // 플러그인 에디터를 담는 네이티브 창
@@ -172,6 +174,17 @@ public:
     bool  isPlaying()   const { return playing.load(); }
     int64 getPlayhead() const { return playhead.load(); }
 
+    // 트랙 제어 (index = 스템 순서)
+    void setTrack (int index, const var& gain, const var& mute, const var& solo)
+    {
+        if (index < 0 || index >= (int) stems.size()) return;
+        auto& s = *stems[(size_t) index];
+        if (! gain.isVoid()) s.gain = (float) (double) gain;
+        if (! mute.isVoid()) s.mute = (bool) mute;
+        if (! solo.isVoid()) s.solo = (bool) solo;
+    }
+    void setFxBypass (bool on) { fxBypass = on; }
+
     // 메시지 스레드에서 호출할 것
     void showEditor()
     {
@@ -230,19 +243,26 @@ public:
         for (int c = 0; c < numOut; ++c)
             FloatVectorOperations::clear (outputs[c], numSamples);
 
-        // 스템 믹스 (재생 중)
+        // 스템 믹스 (재생 중) — solo 있으면 solo 만, 아니면 mute 제외
         if (playing.load())
         {
+            bool anySolo = false;
+            for (auto& s : stems) if (s->solo.load()) { anySolo = true; break; }
+
             for (auto& s : stems)
             {
                 scratch.setSize (2, numSamples, false, false, true);
                 scratch.clear();
                 AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                s->src->getNextAudioBlock (info);
+                s->src->getNextAudioBlock (info);   // 위치 유지 위해 항상 읽음
+
+                const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
+                if (! audible) continue;
+                const float g = s->gain.load();
                 for (int c = 0; c < numOut; ++c)
                     FloatVectorOperations::addWithMultiply (
                         outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
-                        s->gain, numSamples);
+                        g, numSamples);
             }
             playhead.fetch_add (numSamples);
         }
@@ -254,7 +274,7 @@ public:
             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
                 fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
 
-            if (auto* p = activeFx.load())
+            if (auto* p = activeFx.load(); p != nullptr && ! fxBypass.load())
             {
                 MidiBuffer mm;
                 p->processBlock (fxBuf, mm);
@@ -319,6 +339,7 @@ private:
     TimeSliceThread writerThread;
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
     std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
+    std::atomic<bool>  fxBypass { false };
     std::atomic<bool>  recordArmed { false };
     std::atomic<int64> recordedStart { -1 };
     File outFile;
@@ -353,6 +374,8 @@ static void dispatch (Engine& engine, const var& c)
                                             ? c["file"].toString()
                                             : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
     else if (cmd == "recordStop")  engine.stopRecord();
+    else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
+    else if (cmd == "fxBypass")    engine.setFxBypass ((bool) c["on"]);
     else if (cmd == "scanPlugins") engine.scanPlugins();
     else if (cmd == "loadFx")      engine.loadPlugin ((int) c["index"]);
     else if (cmd == "showEditor")  engine.showEditor();

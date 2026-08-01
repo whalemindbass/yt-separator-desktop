@@ -2102,8 +2102,8 @@ body { display: flex; flex-direction: column; }
 .daw-zoom { display: flex; align-items: center; gap: 6px; color: var(--tx-3); font-size: 11.5px; }
 .daw-zoom .btn.icon { height: 26px; width: 26px; }
 
-.daw-hero { display: flex; background: #05070a; border-bottom: 1px solid var(--border); min-height: 0; }
-.daw-video { flex: 1; min-width: 0; height: 50vh; max-height: 560px; position: relative; display: grid; place-items: center; background: radial-gradient(130% 100% at 50% 0, #171c24, #05070a); overflow: hidden; }
+.daw-hero { display: flex; background: #05070a; border-bottom: 1px solid var(--border); flex: 1; min-height: 0; }
+.daw-video { flex: 1; min-width: 0; min-height: 0; position: relative; display: grid; place-items: center; background: radial-gradient(130% 100% at 50% 0, #171c24, #05070a); overflow: hidden; }
 .daw-video video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .daw-video-empty { position: absolute; color: var(--tx-3); font-size: 13px; }
 .daw-badge { position: absolute; top: 12px; left: 12px; font: 700 10.5px/1 var(--mono); color: var(--tx-2); background: rgba(0,0,0,.55); padding: 5px 10px; border-radius: 999px; }
@@ -2117,14 +2117,39 @@ body { display: flex; flex-direction: column; }
 .daw-fx-actions .mini { flex: 1; height: 26px; font-size: 11px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-2); border-radius: 6px; cursor: pointer; }
 .daw-fx-slots { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
 .daw-fx-slot { display: flex; align-items: center; gap: 9px; padding: 9px 10px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; }
-.daw-fx-slot .info { flex: 1; min-width: 0; }
+.daw-fx-slot.bypassed { opacity: .5; }
+.daw-fx-slot .pw { flex: none; width: 34px; height: 20px; border-radius: 999px; border: 1px solid var(--border-mid); background: var(--input); position: relative; cursor: pointer; }
+.daw-fx-slot .pw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--tx-3); transition: left .14s, background .14s; }
+.daw-fx-slot .pw.on { background: color-mix(in srgb, var(--accent) 30%, var(--input)); border-color: var(--accent); }
+.daw-fx-slot .pw.on::after { left: 16px; background: var(--accent); }
+.daw-fx-slot .info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .daw-fx-slot .info .n { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.daw-fx-slot .ed { height: 22px; padding: 0 8px; font-size: 10.5px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-2); border-radius: 5px; cursor: pointer; }
+.daw-fx-slot .info .sub { font-size: 10px; color: var(--tx-4); }
+.daw-fx-slot .ed { flex: none; align-self: center; height: 24px; padding: 0 10px; font-size: 10.5px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-2); border-radius: 5px; cursor: pointer; }
+
+/* 트랙 파형 (SVG, 줌에 따라 가로 stretch) */
+.daw-clip svg { width: 100%; height: 100%; display: block; }
+.daw-vol input[type=range] { width: 100%; }
+
+/* DAW 모달 (곡/VST 선택) */
+.daw-modal { position: absolute; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.daw-modal[hidden] { display: none; }
+.daw-modal-box { background: var(--surface); border: 1px solid var(--border-mid); border-radius: 12px; width: 460px; max-width: 92%; max-height: 78%; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-pop); }
+.daw-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700; }
+.daw-modal-h .x { background: none; border: 0; color: var(--tx-4); cursor: pointer; font-size: 14px; }
+.daw-modal-list { overflow-y: auto; padding: 8px; }
+.daw-modal-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.daw-modal-item:hover { background: var(--elev); }
+.daw-modal-item .thumb { width: 52px; height: 30px; border-radius: 4px; background: var(--elev); object-fit: cover; flex: none; }
+.daw-modal-item .mt { flex: 1; min-width: 0; }
+.daw-modal-item .mt .n { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daw-modal-item .mt .m { font-size: 11px; color: var(--tx-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daw-modal-empty { padding: 28px; text-align: center; color: var(--tx-3); font-size: 13px; }
 .daw-fx-select { width: 100%; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--tx-1); font: 500 12px/1.3 var(--sans); outline: none; margin-bottom: 7px; }
 .daw-fx-add { width: 100%; padding: 9px; border: 1px dashed var(--border-mid); background: transparent; color: var(--tx-3); border-radius: 8px; font-size: 12px; cursor: pointer; }
 .daw-fx-add:disabled { opacity: .4; cursor: default; }
 
-.daw-tracks { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.daw-tracks { flex: none; height: 300px; min-height: 0; display: flex; flex-direction: column; }
 .daw-ruler-wrap { height: 24px; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; padding-left: 140px; position: relative; }
 .daw-ruler { height: 24px; position: relative; will-change: transform; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border); font: 600 9.5px/24px var(--mono); color: var(--tx-4); padding-left: 5px; }
@@ -2138,7 +2163,8 @@ body { display: flex; flex-direction: column; }
 .daw-head .ctrls { display: flex; align-items: center; gap: 5px; }
 .daw-ms { width: 19px; height: 17px; border-radius: 4px; border: 1px solid var(--border-mid); font: 700 9px/1 var(--sans); color: var(--tx-3); display: grid; place-items: center; background: transparent; cursor: pointer; }
 .daw-ms.on { color: var(--c, var(--accent)); border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); }
-.daw-vol { flex: 1; height: 4px; }
+.daw-vol { flex: 1; min-width: 40px; height: 16px; accent-color: var(--c, var(--accent)); cursor: pointer; }
+.daw-vol:disabled { opacity: .4; }
 .daw-area { position: relative; overflow: hidden; }
 .daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 38%, transparent); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }

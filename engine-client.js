@@ -62,6 +62,8 @@ class AudioEngine extends EventEmitter {
   scanPlugins()      { return this.send({ cmd: 'scanPlugins' }); }
   loadFx(index)      { return this.send({ cmd: 'loadFx', index }); }
   showEditor()       { return this.send({ cmd: 'showEditor' }); }
+  track(index, opts) { return this.send({ cmd: 'track', index, ...(opts || {}) }); }
+  fxBypass(on)       { return this.send({ cmd: 'fxBypass', on }); }
   recordArm(file)    { return this.send({ cmd: 'recordArm', file }); }
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
 
