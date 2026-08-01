@@ -461,6 +461,8 @@ public:
         for (int c = 0; c < numOut; ++c)
             FloatVectorOperations::clear (outputs[c], numSamples);
 
+        const int64 phStart = playhead.load();
+
         // 스템 믹스 (재생 중) — solo 있으면 solo 만, 아니면 mute 제외
         if (playing.load())
         {
@@ -482,36 +484,19 @@ public:
                         outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
                         g, numSamples);
             }
-
-            // 녹음 테이크 재생 (타임라인 start 기준)
-            {
-                const int64 ph = playhead.load();
-                const ScopedTryLock stl (takesLock);
-                if (stl.isLocked())
-                    for (auto& t : takesPlay)
-                    {
-                        const int64 pos = ph - t->start;
-                        if (pos < 0 || pos >= t->len) continue;
-                        t->src->setNextReadPosition (pos);
-                        scratch.setSize (2, numSamples, false, false, true); scratch.clear();
-                        AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                        t->src->getNextAudioBlock (info);
-                        for (int c = 0; c < numOut; ++c)
-                            FloatVectorOperations::add (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)), numSamples);
-                    }
-            }
             playhead.fetch_add (numSamples);
         }
 
-        // 입력 모니터 — VST3 FX 체인 통과 (헤드폰 전제)
-        if (numIn > 0)
+        // 내 녹음 버스 = 라이브 입력 + 녹음 테이크 → FX 체인(후처리) → 출력
         {
             fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
-            for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
+            fxBuf.clear();
 
-            // 입력 레벨(peak) + 튜너용 링버퍼 (원본 입력)
+            // 라이브 입력 + 레벨/튜너 분석(원본 입력)
+            if (numIn > 0)
             {
+                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                    fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
                 float pk = 0;
                 for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[0][i]); if (a > pk) pk = a; }
                 if (pk > inPeak.load()) inPeak.store (pk);
@@ -523,8 +508,27 @@ public:
                 }
             }
 
+            // 녹음 테이크 → 버스에 합산 (재생 중, 타임라인 start 기준)
+            if (playing.load())
             {
-                const ScopedTryLock stl (fxLock);   // 못 얻으면 그 블록은 FX 스킵 (크래시 대신 잠깐 dry)
+                const ScopedTryLock stl (takesLock);
+                if (stl.isLocked())
+                    for (auto& t : takesPlay)
+                    {
+                        const int64 pos = phStart - t->start;
+                        if (pos < 0 || pos >= t->len) continue;
+                        t->src->setNextReadPosition (pos);
+                        scratch.setSize (2, numSamples, false, false, true); scratch.clear();
+                        AudioSourceChannelInfo info (&scratch, 0, numSamples);
+                        t->src->getNextAudioBlock (info);
+                        for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                            fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
+                    }
+            }
+
+            // FX 체인 (입력·테이크 모두에 후처리 적용)
+            {
+                const ScopedTryLock stl (fxLock);
                 if (stl.isLocked())
                     for (auto& s : chain)
                         if (s && s->plugin && ! s->bypass.load())
@@ -533,6 +537,7 @@ public:
                             s->plugin->processBlock (fxBuf, mm);
                         }
             }
+
             const float mg = monitorGain.load();
             for (int c = 0; c < numOut; ++c)
                 FloatVectorOperations::addWithMultiply (
