@@ -97,6 +97,15 @@ int main (int argc, char* argv[])
                   << "  inputs : " << type->getDeviceNames (true).joinIntoString (", ") << "\n";
     }
 
+    // ASIO 있으면 전환 (저지연). 실패해도 계속.
+    for (auto* type : dm.getAvailableDeviceTypes())
+        if (type->getTypeName() == "ASIO")
+        {
+            std::cout << "[engine] switching to ASIO type\n";
+            dm.setCurrentAudioDeviceType ("ASIO", true);
+            break;
+        }
+
     Engine engine;
     if (argc > 1 && engine.loadFile (String::fromUTF8 (argv[1])))
         engine.play();
