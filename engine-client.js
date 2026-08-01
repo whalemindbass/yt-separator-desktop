@@ -64,6 +64,8 @@ class AudioEngine extends EventEmitter {
   master(gain)       { return this.send({ cmd: 'master', gain }); }
   monitor(gain)      { return this.send({ cmd: 'monitor', gain }); }
   metro(on, bpm)     { return this.send({ cmd: 'metro', on, bpm }); }
+  listDevices()      { return this.send({ cmd: 'listDevices' }); }
+  setDevice(opts)    { return this.send({ cmd: 'setDevice', ...(opts || {}) }); }
   // FX 체인 (슬롯 id 기반)
   fxAdd(index)          { return this.send({ cmd: 'fxAdd', index }); }
   fxRemove(slot)        { return this.send({ cmd: 'fxRemove', slot }); }

@@ -254,7 +254,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -373,6 +373,35 @@ function openVstPicker() {
   openModal('VST3 추가', html, (idx) => api.engine.fxAdd(Number(idx)));   // 여러 개 추가 가능
 }
 
+// ── 오디오 설정 모달 ──
+let _devOpen = false;
+function openDevModal(d) {
+  const host = $('daw-modal');
+  const opts = (arr, cur) => (arr || []).map(v => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
+  const curType = (d.types || []).find(t => t.name === d.currentType) || (d.types || [])[0] || { outputs: [], inputs: [] };
+  const rates = (d.rates && d.rates.length ? d.rates : [44100, 48000, 96000]).map(r => Math.round(r));
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>오디오 설정</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" style="padding:16px;display:flex;flex-direction:column;gap:12px">
+      <label class="dev-field"><span>드라이버</span><select id="dv-type">${opts((d.types || []).map(t => t.name), d.currentType)}</select></label>
+      <label class="dev-field"><span>출력 기기</span><select id="dv-out">${opts(curType.outputs, d.output)}</select></label>
+      <label class="dev-field"><span>입력 기기</span><select id="dv-in">${opts(curType.inputs, d.input)}</select></label>
+      <label class="dev-field"><span>샘플레이트</span><select id="dv-sr">${opts(rates, Math.round(d.sampleRate))}</select></label>
+      <label class="dev-field"><span>버퍼 크기</span><select id="dv-buf">${opts(d.buffers && d.buffers.length ? d.buffers : [128, 256, 512], d.bufferSize)}</select></label>
+      <div style="display:flex;justify-content:flex-end"><button class="mini" id="dv-apply">적용</button></div>
+    </div></div>`;
+  host.hidden = false;
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  // 드라이버 변경 → 즉시 전환 후 목록 갱신
+  $('dv-type').addEventListener('change', (e) => { api.engine.setDevice({ type: e.target.value }); });
+  $('dv-apply').addEventListener('click', () => {
+    api.engine.setDevice({
+      type: $('dv-type').value, output: $('dv-out').value, input: $('dv-in').value,
+      sampleRate: Number($('dv-sr').value), bufferSize: Number($('dv-buf').value),
+    });
+    host.hidden = true;
+  });
+}
+
 // ── 이벤트 ─────────────────────────────────────────
 function onEngineEvent(m) {
   switch (m.ev) {
@@ -408,6 +437,10 @@ function onEngineEvent(m) {
           if (!g.id) flashTake('톤 저장됨: ' + preset.name);
         }
       }
+      break;
+    case 'devices':
+      if (_devOpen) { openDevModal(m); _devOpen = false; }
+      else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
       break;
     case 'pos': onPos(m.samples); break;
     case 'level': updateVU(m.peak); break;
@@ -571,6 +604,7 @@ function wire() {
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
+  $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
 
   // 도구 드로어 (레벨·튜너) — 간헐 토글
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });

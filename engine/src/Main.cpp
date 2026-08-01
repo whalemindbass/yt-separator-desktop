@@ -27,6 +27,8 @@ static DynamicObject* ev (const char* name)
     o->setProperty ("ev", name);
     return o;
 }
+static var strArr (const StringArray& a) { Array<var> v; for (auto& s : a) v.add (s); return var (v); }
+template <typename T> static var numArr (const Array<T>& a) { Array<var> v; for (auto x : a) v.add ((double) x); return var (v); }
 
 struct Stem
 {
@@ -218,6 +220,54 @@ public:
     bool  isPlaying()   const { return playing.load(); }
     int64 getPlayhead() const { return playhead.load(); }
 
+    // ---- 오디오 디바이스 설정 ----
+    void setDeviceManager (AudioDeviceManager* d) { devmgr = d; }
+    void listDevices()
+    {
+        if (devmgr == nullptr) return;
+        auto* r = ev ("devices");
+        Array<var> typeList;
+        for (auto* t : devmgr->getAvailableDeviceTypes())
+        {
+            t->scanForDevices();
+            auto* o = new DynamicObject();
+            o->setProperty ("name", t->getTypeName());
+            o->setProperty ("outputs", strArr (t->getDeviceNames (false)));
+            o->setProperty ("inputs", strArr (t->getDeviceNames (true)));
+            typeList.add (var (o));
+        }
+        r->setProperty ("types", var (typeList));
+        r->setProperty ("currentType", devmgr->getCurrentAudioDeviceType());
+        AudioDeviceManager::AudioDeviceSetup s; devmgr->getAudioDeviceSetup (s);
+        r->setProperty ("output", s.outputDeviceName);
+        r->setProperty ("input", s.inputDeviceName);
+        r->setProperty ("sampleRate", s.sampleRate);
+        r->setProperty ("bufferSize", s.bufferSize);
+        if (auto* dev = devmgr->getCurrentAudioDevice())
+        {
+            r->setProperty ("rates", numArr (dev->getAvailableSampleRates()));
+            r->setProperty ("buffers", numArr (dev->getAvailableBufferSizes()));
+        }
+        emit (var (r));
+    }
+    void setDevice (const var& c)
+    {
+        if (devmgr == nullptr) return;
+        const String type = c["type"].toString();
+        if (type.isNotEmpty() && type != devmgr->getCurrentAudioDeviceType())
+            devmgr->setCurrentAudioDeviceType (type, true);
+        AudioDeviceManager::AudioDeviceSetup s; devmgr->getAudioDeviceSetup (s);
+        if (! c["output"].isVoid())     s.outputDeviceName = c["output"].toString();
+        if (! c["input"].isVoid())      s.inputDeviceName  = c["input"].toString();
+        if (! c["sampleRate"].isVoid()) s.sampleRate = (double) c["sampleRate"];
+        if (! c["bufferSize"].isVoid()) s.bufferSize = (int) c["bufferSize"];
+        s.useDefaultInputChannels = true;
+        s.useDefaultOutputChannels = true;
+        const String err = devmgr->setAudioDeviceSetup (s, true);
+        if (err.isNotEmpty()) std::cerr << "[engine] setDevice: " << err << "\n";
+        listDevices();
+    }
+
     // ---- 부가: 레벨 미터 · 튜너 · 메트로놈 ----
     void setMetro (bool on, double bpm) { metroOn = on; if (bpm > 20.0) metroBpm = bpm; }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
@@ -361,8 +411,10 @@ public:
         outLatSamp = device->getOutputLatencyInSamples();
 
         for (auto& s : stems) s->src->prepareToPlay (block, deviceSampleRate);
+        { const ScopedLock sl (fxLock); for (auto& s : chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         scratch.setSize (2, block);
-        writerThread.startThread();
+        pitchRing.assign (2048, 0.0f); pitchW = 0;
+        if (! writerThread.isThreadRunning()) writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
             std::cerr << "[engine] WARN stem SR " << stemSampleRate
@@ -532,6 +584,7 @@ private:
     std::atomic<int64> playhead { 0 };
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
+    AudioDeviceManager* devmgr = nullptr;
 
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
@@ -593,6 +646,8 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"]);
+    else if (cmd == "listDevices") engine.listDevices();
+    else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") engine.scanPlugins();
     else if (cmd == "fxAdd")       engine.addFx ((int) c["index"]);
     else if (cmd == "fxRemove")    engine.removeFx ((int) c["slot"]);
@@ -617,6 +672,7 @@ int main (int argc, char* argv[])
         if (type->getTypeName() == "ASIO") { dm.setCurrentAudioDeviceType ("ASIO", true); break; }
 
     Engine engine;
+    engine.setDeviceManager (&dm);
     for (int i = 1; i < argc; ++i)
         engine.addStem (String::fromUTF8 (argv[i]));
 
