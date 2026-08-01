@@ -555,8 +555,6 @@ function wire() {
   });
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
-  $('st-fx-toggle').addEventListener('click', () => { const d = $('daw-fx'); d.hidden = !d.hidden; });
-  $('st-fx-close').addEventListener('click', () => { $('daw-fx').hidden = true; });
   $('st-fx-add').addEventListener('click', () => {
     if (!_plugins.length) { api.engine.scanPlugins(); setTimeout(openVstPicker, 700); }
     else openVstPicker();
