@@ -193,6 +193,23 @@ public:
         fx.reset();
         emit (var (ev ("fxRemoved")));
     }
+    // VST 세부 설정(노브값 등) 직렬화 — base64 로 주고받음
+    void fxSaveState()
+    {
+        if (fx == nullptr) return;
+        MemoryBlock mb;
+        fx->getStateInformation (mb);
+        auto* o = ev ("fxState");
+        o->setProperty ("data", Base64::toBase64 (mb.getData(), mb.getSize()));
+        emit (var (o));
+    }
+    void fxSetState (const String& b64)
+    {
+        if (fx == nullptr || b64.isEmpty()) return;
+        MemoryOutputStream mo;
+        if (Base64::convertFromBase64 (mo, b64))
+            fx->setStateInformation (mo.getData(), (int) mo.getDataSize());
+    }
 
     // 메시지 스레드에서 호출할 것
     void showEditor()
@@ -398,6 +415,8 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "scanPlugins") engine.scanPlugins();
     else if (cmd == "loadFx")      engine.loadPlugin ((int) c["index"]);
     else if (cmd == "removeFx")    engine.removeFx();
+    else if (cmd == "fxSaveState") engine.fxSaveState();
+    else if (cmd == "fxSetState")  engine.fxSetState (c["data"].toString());
     else if (cmd == "showEditor")  engine.showEditor();
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
 }

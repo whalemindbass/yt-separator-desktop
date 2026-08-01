@@ -287,7 +287,7 @@ function onEngineEvent(m) {
   switch (m.ev) {
     case 'ready':
       _started = true;
-      $('st-engine-status').textContent = '엔진 실행 중';
+      $('st-engine-status').textContent = '오디오 준비됨';
       $('st-engine-dot').classList.add('on');
       $('st-engine-start').disabled = true; setEnabled(true);
       break;
@@ -302,6 +302,10 @@ function onEngineEvent(m) {
     case 'fx':
       _fxLoaded = m.name; _fxHasEditor = !!m.hasEditor; _fxBypass = false;
       renderFxSlots();
+      { const st = _songKey && loadFxState(_songKey); if (st) setTimeout(() => api.engine.fxSetState(st), 100); }  // 세부 설정 복원
+      break;
+    case 'fxState':
+      if (_songKey && m.data) { saveFxState(_songKey, m.data); flashTake('FX 설정 저장됨 (이 곡)'); }
       break;
     case 'pos': onPos(m.samples); break;
     case 'take':
@@ -311,12 +315,12 @@ function onEngineEvent(m) {
       break;
     case 'exit':
       _started = false; _playing = false;
-      $('st-engine-status').textContent = '엔진 종료됨';
+      $('st-engine-status').textContent = '오디오 꺼짐';
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').disabled = false; setEnabled(false);
       break;
     case 'fxRemoved': _fxLoaded = null; renderFxSlots(); break;
-    case 'error': $('st-engine-status').textContent = '엔진 오류'; break;
+    case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
     case 'log': {
       const s = String(m.msg || '');
       if (/fail|cannot|error|armed|writer|no device/i.test(s)) flashTake('엔진: ' + s.trim());
@@ -345,6 +349,9 @@ function renderFxSlots() {
 function fxKey(k) { return 'yss:studio-fx:' + String(k).replace(/\\/g, '/').toLowerCase(); }
 function saveFxPref(k, i) { try { localStorage.setItem(fxKey(k), String(i)); } catch {} }
 function loadFxPref(k) { try { const v = localStorage.getItem(fxKey(k)); return v == null ? null : parseInt(v, 10); } catch { return null; } }
+function stateKey(k) { return 'yss:studio-fxstate:' + String(k).replace(/\\/g, '/').toLowerCase(); }
+function saveFxState(k, data) { try { localStorage.setItem(stateKey(k), data); } catch {} }
+function loadFxState(k) { try { return localStorage.getItem(stateKey(k)); } catch { return null; } }
 
 // ── 배선 ───────────────────────────────────────────
 function wire() {
@@ -352,9 +359,9 @@ function wire() {
   api.engine.onEvent(onEngineEvent);
 
   $('st-engine-start').addEventListener('click', async () => {
-    $('st-engine-start').disabled = true; $('st-engine-status').textContent = '시작 중…';
+    $('st-engine-start').disabled = true; $('st-engine-status').textContent = '연결 중…';
     const r = await api.engine.start([]);
-    if (!r.ok) { $('st-engine-status').textContent = '엔진 실행 파일 없음'; $('st-engine-start').disabled = false; }
+    if (!r.ok) { $('st-engine-status').textContent = '오디오 엔진 없음'; $('st-engine-start').disabled = false; }
   });
 
   $('st-load-song').addEventListener('click', openSongPicker);
@@ -375,7 +382,7 @@ function wire() {
   video.addEventListener('click', () => { if (_playing) stopAll(); else play(); });
   // 진행바 클릭 = 이동
   $('daw-vbar').addEventListener('click', (e) => {
-    if (!_dur) return;
+    if (!_dur || _recArmed) return;
     const r = $('daw-vbar').getBoundingClientRect();
     const t = Math.max(0, Math.min(_dur, ((e.clientX - r.left) / r.width) * _dur));
     api.engine.seek(Math.round(t * _sr)); video.currentTime = t; updatePlayhead(t);
@@ -395,7 +402,7 @@ function wire() {
     if (_playing) stopAll(); else play();
   });
   $('st-master').addEventListener('input', (e) => api.engine.master(Number(e.target.value) / 100));
-  $('st-seek0').addEventListener('click', () => { api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
+  $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     _recArmed = !_recArmed; $('st-rec').classList.toggle('armed', _recArmed);
     if (_recArmed) api.engine.recordArm(); else { api.engine.recordStop(); clearRecLive(); }
@@ -421,7 +428,7 @@ function wire() {
 
   // 타임라인 클릭 → 이동
   $('daw-tscroll').addEventListener('click', (e) => {
-    if (!_dur || e.target.closest('.daw-head')) return;
+    if (!_dur || _recArmed || e.target.closest('.daw-head')) return;
     const rect = $('daw-lanes').getBoundingClientRect();
     const x = e.clientX - rect.left - HEAD_W;
     if (x < 0) return;
@@ -433,7 +440,7 @@ function wire() {
   $('st-fx-toggle').addEventListener('click', () => { const d = $('daw-fx'); d.hidden = !d.hidden; });
   $('st-fx-close').addEventListener('click', () => { $('daw-fx').hidden = true; });
   $('st-fx-add').addEventListener('click', openVstPicker);
-  $('st-fx-save').addEventListener('click', () => { flashTake('FX 저장됨 (이 곡)'); });
+  $('st-fx-save').addEventListener('click', () => { api.engine.fxSaveState(); });
   $('st-fx-load').addEventListener('click', () => api.engine.scanPlugins());
   // add 버튼은 스캔 후 활성화
   api.engine.onEvent((m) => { if (m.ev === 'plugins') $('st-fx-add').disabled = false; });

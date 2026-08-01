@@ -129,6 +129,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     master:      (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'master', gain }),
     monitor:     (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'monitor', gain }),
     removeFx:    ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'removeFx' }),
+    fxSaveState: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSaveState' }),
+    fxSetState:  (data)   => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSetState', data }),
     recordArm:   ()       => ipcRenderer.invoke('engine:recordArm'),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     onEvent:     (fn)     => {
