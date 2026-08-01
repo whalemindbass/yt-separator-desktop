@@ -79,6 +79,8 @@ class AudioEngine extends EventEmitter {
   recordArm(file)    { return this.send({ cmd: 'recordArm', file }); }
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
   takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
+  takeClear()        { return this.send({ cmd: 'takeClear' }); }
+  takeLoad(file, start) { return this.send({ cmd: 'takeLoad', file, start }); }
 
   quit() {
     if (!this.proc) return;

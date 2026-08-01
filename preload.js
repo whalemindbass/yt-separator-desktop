@@ -140,6 +140,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     recordArm:   ()       => ipcRenderer.invoke('engine:recordArm'),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
+    takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),
+    takeLoad:    (file, start) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeLoad', file, start }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

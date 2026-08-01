@@ -254,7 +254,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -372,6 +372,40 @@ function openVstPicker() {
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${p.name}</div>
       <div class="m">${p.manufacturer}</div></div></div>`).join('');
   openModal('VST3 추가', html, (idx) => api.engine.fxAdd(Number(idx)));   // 여러 개 추가 가능
+}
+
+// ── 녹음(테이크 세트) 저장/불러오기 — 곡별, 이름 지정 ──
+function takesetKey(k) { return 'yss:takesets:' + String(k).replace(/\\/g, '/').toLowerCase(); }
+function getTakeSets() { if (!_songKey) return []; try { return JSON.parse(localStorage.getItem(takesetKey(_songKey)) || '[]'); } catch { return []; } }
+function setTakeSets(a) { if (!_songKey) return; try { localStorage.setItem(takesetKey(_songKey), JSON.stringify(a)); } catch {} }
+function saveTakeSet(name) {
+  if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
+  const takes = _takes.map(t => ({ file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur }));
+  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, takes }); setTakeSets(a);
+  flashTake('녹음 저장됨: ' + name);
+}
+async function loadTakeSet(ts) {
+  api.engine.takeClear();
+  _takes = []; renderTakes();
+  for (const t of ts.takes) {
+    api.engine.takeLoad(t.file, t.start);
+    await renderTake(t.file, t.start, t.start);   // start(samples) 로 클립·엔진 id 일치
+  }
+  flashTake('녹음 불러옴: ' + ts.name);
+}
+function openTakeSetPicker() {
+  const ps = getTakeSets();
+  if (!ps.length) { openModal('녹음 불러오기', '<div class="daw-modal-empty">이 곡에 저장된 녹음이 없습니다.</div>', () => {}); return; }
+  const host = $('daw-modal');
+  const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
+    <div class="mt"><div class="n">${p.name}</div><div class="m">${p.takes.length} 테이크</div></div>
+    <button class="daw-preset-del" data-id="${p.id}" title="삭제">✕</button></div>`).join('');
+  openModal('녹음 불러오기', html, (idx) => loadTakeSet(ps[Number(idx)]));
+  host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setTakeSets(getTakeSets().filter(p => p.id !== b.dataset.id));
+    openTakeSetPicker();
+  }));
 }
 
 // ── 오디오 설정 모달 ──
@@ -606,6 +640,12 @@ function wire() {
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
+  $('st-take-save').addEventListener('click', () => {
+    if (!_songKey) { flashTake('곡을 먼저 불러오세요.'); return; }
+    if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
+    openNameModal('녹음 저장', '', (name) => saveTakeSet(name));
+  });
+  $('st-take-load').addEventListener('click', openTakeSetPicker);
 
   // 내 소리 모니터 on/off
   let _monOn = true;

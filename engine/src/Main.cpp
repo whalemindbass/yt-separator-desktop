@@ -136,6 +136,21 @@ public:
         takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
                              [id] (auto& t) { return t->start == id; }), takesPlay.end());
     }
+    void clearTakes() { const ScopedLock sl (takesLock); takesPlay.clear(); }
+    void loadTake (const String& file, int64 start)   // 저장된 테이크 파일을 재생 소스로 등록
+    {
+        File f (file);
+        if (auto* reader = fmt.createReaderFor (f))
+        {
+            auto tp = std::make_unique<TakePlay>();
+            tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
+            tp->src->prepareToPlay (blockSize, deviceSampleRate);
+            tp->start = start;
+            tp->len = reader->lengthInSamples;
+            const ScopedLock sl (takesLock);
+            takesPlay.push_back (std::move (tp));
+        }
+    }
 
     // ---- VST3 호스팅 ----
     void scanPlugins()
@@ -702,6 +717,8 @@ static void dispatch (Engine& engine, const var& c)
                                             : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
     else if (cmd == "recordStop")  engine.stopRecord();
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
+    else if (cmd == "takeClear")   engine.clearTakes();
+    else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
