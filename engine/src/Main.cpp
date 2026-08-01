@@ -7,8 +7,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_gui_extra/juce_gui_extra.h>
 #include <atomic>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 using namespace juce;
@@ -18,6 +20,22 @@ struct Stem
     std::unique_ptr<AudioFormatReaderSource> src;
     String name;
     float gain = 1.0f;
+};
+
+// 플러그인 에디터를 담는 네이티브 창
+class PluginWindow : public DocumentWindow
+{
+public:
+    PluginWindow (AudioProcessorEditor* editor, const String& title)
+        : DocumentWindow (title, Colours::black, DocumentWindow::allButtons)
+    {
+        setUsingNativeTitleBar (true);
+        setContentNonOwned (editor, true);   // 에디터는 플러그인(processor)이 소유
+        setResizable (editor->isResizable(), false);
+        centreWithSize (getWidth(), getHeight());
+        setVisible (true);
+    }
+    void closeButtonPressed() override { setVisible (false); }
 };
 
 class Engine : public AudioIODeviceCallback
@@ -107,11 +125,24 @@ public:
         if (inst == nullptr) { std::cerr << "[engine] load failed: " << err << "\n"; return; }
         inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
         inst->prepareToPlay (deviceSampleRate, blockSize);
+        editorWindow.reset();            // 옛 에디터 닫기
         activeFx.store (nullptr);        // 콜백에서 옛 인스턴스 사용 중단
         fx = std::move (inst);
         activeFx.store (fx.get());
         std::cout << "[engine] loaded FX: " << scanned[index].name << "\n";
     }
+
+    // 메시지 스레드에서 호출할 것
+    void showEditor()
+    {
+        if (fx == nullptr) { std::cerr << "[engine] no FX loaded\n"; return; }
+        if (! fx->hasEditor()) { std::cerr << "[engine] plugin has no editor\n"; return; }
+        if (editorWindow != nullptr) { editorWindow->toFront (true); return; }
+        editorWindow.reset (new PluginWindow (fx->createEditorIfNeeded(), fx->getName()));
+        std::cout << "[engine] editor opened\n";
+    }
+
+    void closeEditorWindow() { editorWindow.reset(); }
 
     // ---- 오디오 콜백 ----
     void audioDeviceAboutToStart (AudioIODevice* device) override
@@ -244,6 +275,8 @@ private:
     std::atomic<bool>  recordArmed { false };
     std::atomic<int64> recordedStart { -1 };
     File outFile;
+
+    std::unique_ptr<DocumentWindow> editorWindow;   // message 스레드에서만 접근
 };
 
 int main (int argc, char* argv[])
@@ -267,24 +300,43 @@ int main (int argc, char* argv[])
         engine.addStem (String::fromUTF8 (argv[i]));
 
     dm.addAudioCallback (&engine);
-    std::cout << "[engine] ready. cmds: p=play s=stop r=rec x=stoprec z=seek0 v=scanVST l<n>=loadFX q=quit\n";
+    std::cout << "[engine] ready. cmds: p=play s=stop r=rec x=stoprec z=seek0 "
+                 "v=scanVST l<n>=loadFX e=editor q=quit\n";
 
-    for (std::string line; std::getline (std::cin, line); )
+    // stdin 은 별도 스레드에서 읽고, 실제 작업은 메시지 스레드로 마셜링
+    // (플러그인 로드·에디터 창은 반드시 메시지 스레드에서)
+    auto* mm = MessageManager::getInstance();
+    std::thread reader ([&]
     {
-        if (line.empty()) continue;
-        switch (line[0])
+        for (std::string line; std::getline (std::cin, line); )
         {
-            case 'p': engine.play(); break;
-            case 's': engine.stop(); break;
-            case 'r': engine.armRecord (File::getCurrentWorkingDirectory().getChildFile ("take.wav")); break;
-            case 'x': engine.stopRecord(); break;
-            case 'z': engine.seek0(); break;
-            case 'v': engine.scanPlugins(); break;
-            case 'l': engine.loadPlugin (line.size() > 2 ? std::atoi (line.c_str() + 2) : -1); break;
-            case 'q': dm.removeAudioCallback (&engine); return 0;
-            default:  break;
+            if (line.empty()) continue;
+            const char c = line[0];
+            const int  arg = line.size() > 2 ? std::atoi (line.c_str() + 2) : -1;
+            MessageManager::callAsync ([&engine, c, arg]
+            {
+                switch (c)
+                {
+                    case 'p': engine.play(); break;
+                    case 's': engine.stop(); break;
+                    case 'r': engine.armRecord (File::getCurrentWorkingDirectory().getChildFile ("take.wav")); break;
+                    case 'x': engine.stopRecord(); break;
+                    case 'z': engine.seek0(); break;
+                    case 'v': engine.scanPlugins(); break;
+                    case 'l': engine.loadPlugin (arg); break;
+                    case 'e': engine.showEditor(); break;
+                    case 'q': MessageManager::getInstance()->stopDispatchLoop(); break;
+                    default:  break;
+                }
+            });
+            if (c == 'q') break;
         }
-    }
+    });
+
+    mm->runDispatchLoop();   // 메시지 루프 (에디터 GUI 펌핑)
+
+    if (reader.joinable()) reader.join();
+    engine.closeEditorWindow();
     dm.removeAudioCallback (&engine);
     return 0;
 }

@@ -20,6 +20,9 @@ juce_add_console_app(yss-engine PRODUCT_NAME "yss-engine")
 
 target_sources(yss-engine PRIVATE src/Main.cpp)
 
+# 소스에 한글 주석(UTF-8) 있음 → MSVC 가 cp949 로 오해하지 않게 강제
+target_compile_options(yss-engine PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
 target_compile_definitions(yss-engine PRIVATE
   JUCE_USE_CURL=0
   JUCE_WEB_BROWSER=0
