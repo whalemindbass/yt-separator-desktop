@@ -24,4 +24,10 @@ cmake @cfg
 cmake --build "$Work\build" --config Release
 $exe = "$Work\build\yss-engine_artefacts\Release\yss-engine.exe"
 Write-Host "built: $exe"
+
+# 패키징용으로 repo engine/bin 에 복사 (electron-builder extraResources 대상)
+$bin = Join-Path $src "bin"
+New-Item $bin -ItemType Directory -Force | Out-Null
+Copy-Item $exe $bin -Force
+Write-Host "copied to: $bin\yss-engine.exe"
 if ($PSBoundParameters.ContainsKey('Run')) { & $exe @Run }

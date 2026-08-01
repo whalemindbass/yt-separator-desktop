@@ -39,6 +39,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "engine-client.js",
       "renderer/**/*",
       "!**/*.map",
       "package.json"
@@ -47,6 +48,13 @@
       {
         "from": "vendor",
         "to": "vendor",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "engine/bin",
+        "to": "engine",
         "filter": [
           "**/*"
         ]
