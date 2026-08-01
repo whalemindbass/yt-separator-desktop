@@ -111,4 +111,25 @@ contextBridge.exposeInMainWorld('yssApi', {
     setFavorite:     (id, fav)         => ipcRenderer.invoke('library:setFavorite', id, fav),
     setGroup:        (id, group)       => ipcRenderer.invoke('library:setGroup', id, group),
   },
+
+  // 실시간 오디오 엔진 (JUCE 사이드카)
+  engine: {
+    start:       (stems)  => ipcRenderer.invoke('engine:start', stems),
+    cmd:         (c)      => ipcRenderer.invoke('engine:cmd', c),
+    quit:        ()       => ipcRenderer.invoke('engine:quit'),
+    loadStems:   (paths)  => ipcRenderer.invoke('engine:cmd', { cmd: 'loadStems', paths }),
+    play:        ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'play' }),
+    stop:        ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'stop' }),
+    seek:        (pos)    => ipcRenderer.invoke('engine:cmd', { cmd: 'seek', pos }),
+    scanPlugins: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'scanPlugins' }),
+    loadFx:      (index)  => ipcRenderer.invoke('engine:cmd', { cmd: 'loadFx', index }),
+    showEditor:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'showEditor' }),
+    recordArm:   (file)   => ipcRenderer.invoke('engine:cmd', { cmd: 'recordArm', file }),
+    recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
+    onEvent:     (fn)     => {
+      const h = (_ev, m) => fn(m);
+      ipcRenderer.on('engine:event', h);
+      return () => ipcRenderer.off('engine:event', h);
+    },
+  },
 });

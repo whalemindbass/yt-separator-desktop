@@ -441,6 +441,25 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// ── 실시간 오디오 엔진(JUCE 사이드카) 브리지 ──────────────
+const { AudioEngine } = require('./engine-client');
+let audioEngine = null;
+function getEngine() {
+  if (!audioEngine) {
+    audioEngine = new AudioEngine();
+    audioEngine.on('event', (m) => { try { mainWindow?.webContents.send('engine:event', m); } catch {} });
+    audioEngine.on('exit',  (c) => { try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c }); } catch {} });
+  }
+  return audioEngine;
+}
+ipcMain.handle('engine:start', (_e, stems) => {
+  const eng = getEngine();
+  return { ok: eng.start(Array.isArray(stems) ? stems : []), exe: eng.exePath };
+});
+ipcMain.handle('engine:cmd',  (_e, cmd) => ({ ok: getEngine().send(cmd) }));
+ipcMain.handle('engine:quit', () => { audioEngine?.quit(); return { ok: true }; });
+app.on('will-quit', () => { audioEngine?.quit(); });
+
 // ── IPC: 앱 메타 ──────────────────────────────────────
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:platform', () => process.platform);
