@@ -2162,6 +2162,8 @@ body { display: flex; flex-direction: column; }
 .daw-modal-item .mt .n { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daw-modal-item .mt .m { font-size: 11px; color: var(--tx-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daw-modal-empty { padding: 28px; text-align: center; color: var(--tx-3); font-size: 13px; }
+.daw-modal .mini { height: 30px; padding: 0 16px; font-size: 12.5px; font-weight: 700; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); border-radius: 6px; cursor: pointer; }
+.daw-modal .mini:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .daw-preset-del { flex: none; width: 24px; height: 24px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-4); border-radius: 5px; cursor: pointer; }
 .daw-preset-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .daw-fx-select { width: 100%; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--tx-1); font: 500 12px/1.3 var(--sans); outline: none; margin-bottom: 7px; }

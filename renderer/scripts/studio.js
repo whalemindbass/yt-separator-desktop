@@ -533,13 +533,6 @@ function wire() {
     openNameModal('톤 저장', '', (name) => startGather({ name }));
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
-  // 활성 톤 있으면 4초마다 체인 스냅샷 → 그 톤 자동 갱신
-  setInterval(() => {
-    if (!_activePresetId || !_chain.length || _presetGather) return;
-    const p = getPresets().find(x => x.id === _activePresetId);
-    if (p) startGather({ id: p.id, name: p.name });
-  }, 5000);
-
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
 }
 
