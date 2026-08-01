@@ -16,7 +16,11 @@ FetchContent_MakeAvailable(JUCE)
 option(YSS_ENABLE_ASIO "Enable ASIO backend (needs Steinberg ASIO SDK)" OFF)
 set(YSS_ASIO_SDK_DIR "" CACHE PATH "Path to ASIO SDK dir containing asio.h")
 
-juce_add_console_app(yss-engine PRODUCT_NAME "yss-engine")
+juce_add_console_app(yss-engine
+  PRODUCT_NAME "yss-engine"
+  COMPANY_NAME "Whale Mind"
+  VERSION "0.1.0"
+  DESCRIPTION "YT Separator Audio Engine")
 
 target_sources(yss-engine PRIVATE src/Main.cpp)
 

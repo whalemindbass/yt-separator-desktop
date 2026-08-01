@@ -7,7 +7,8 @@ param(
   [string[]]$Run,
   [string]$Work = "C:\yss"
 )
-$ErrorActionPreference = "Stop"
+# cmake 는 경고를 stderr 로 냄 → Stop 이면 경고에도 중단됨. Continue + exit-code 검사로 판단.
+$ErrorActionPreference = "Continue"
 $src = $PSScriptRoot
 
 # 소스만 복사 (build/_deps 제외). robocopy exit<8 = 성공.
@@ -21,8 +22,11 @@ if ($AsioSdk -and (Test-Path "$AsioSdk\asio.h")) {
 } else { Write-Host "ASIO: off" }
 
 cmake @cfg
+if ($LASTEXITCODE -ne 0) { throw "cmake configure failed ($LASTEXITCODE)" }
 cmake --build "$Work\build" --config Release
+if ($LASTEXITCODE -ne 0) { throw "cmake build failed ($LASTEXITCODE)" }
 $exe = "$Work\build\yss-engine_artefacts\Release\yss-engine.exe"
+if (-not (Test-Path $exe)) { throw "exe not produced" }
 Write-Host "built: $exe"
 
 # 패키징용으로 repo engine/bin 에 복사 (electron-builder extraResources 대상)
