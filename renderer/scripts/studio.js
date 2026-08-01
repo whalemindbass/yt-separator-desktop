@@ -71,7 +71,7 @@ function renderTracks() {
           <input class="daw-vol" type="range" min="0" max="150" value="100" title="볼륨">
         </div>
       </div>
-      <div class="daw-area"><div class="daw-clip"></div></div>`;
+      <div class="daw-area">${t.key === 'mine' ? '' : '<div class="daw-clip"></div>'}</div>`;
     // 버튼/슬라이더 배선
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
@@ -121,7 +121,7 @@ function layout() {
     tk.textContent = fmtTC(s).replace(/\.000$/, '');
     ruler.appendChild(tk);
   }
-  positionTake();
+  renderTakes();
   updatePlayhead(_lastSec);
 }
 
@@ -159,6 +159,7 @@ async function loadSong(item) {
   const paths = Object.values(it.stemPaths || {}).filter(Boolean);
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _songKey = String(it.videoPath || it.id);
+  _takes = [];
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -184,27 +185,47 @@ async function loadSong(item) {
 
 function flashTake(msg) { const el = $('st-take'); el.hidden = false; el.textContent = msg; }
 
-let _take = null;   // { start(sec), dur(sec) }
+let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
 async function renderTake(file, startSamples) {
-  const lane = document.querySelector('.daw-lane[data-key="mine"]');
-  const clip = lane && lane.querySelector('.daw-clip');
-  if (!clip) return;
   try {
     const { stems } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
-    _take = { start: (startSamples || 0) / (_sr || 44100), dur: ch[0].length / (_sr || 44100) };
-    clip.classList.add('rec');
-    clip.innerHTML = buildWaveSvg(ch, resolveColor('var(--danger)'));
-    positionTake();
+    _takes.push({
+      id: Date.now(), file,
+      start: (startSamples || 0) / (_sr || 44100),
+      dur: ch[0].length / (_sr || 44100),
+      svg: buildWaveSvg(ch, resolveColor('var(--danger)')),
+    });
+    renderTakes();
   } catch (e) { flashTake('녹음 파형 실패: ' + (e && e.message || e)); }
 }
-function positionTake() {
-  if (!_take) return;
-  const clip = document.querySelector('.daw-lane[data-key="mine"] .daw-clip');
-  if (!clip) return;
-  clip.style.left = (_take.start * _pxPerSec) + 'px';
-  clip.style.right = 'auto';
-  clip.style.width = Math.max(2, _take.dur * _pxPerSec) + 'px';
+function renderTakes() {
+  const area = document.querySelector('.daw-lane[data-key="mine"] .daw-area');
+  if (!area) return;
+  area.innerHTML = '';
+  for (const tk of _takes) {
+    const el = document.createElement('div');
+    el.className = 'daw-take-clip';
+    el.style.left = (tk.start * _pxPerSec) + 'px';
+    el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
+    el.innerHTML = tk.svg;
+    el.title = tk.file;
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
+    area.appendChild(el);
+  }
+}
+function showTakeMenu(x, y, id) {
+  document.querySelector('.daw-ctx')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'daw-ctx';
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
+  menu.innerHTML = `<button class="del">삭제</button>`;
+  menu.querySelector('.del').addEventListener('click', () => {
+    _takes = _takes.filter(t => t.id !== id); renderTakes(); menu.remove();
+  });
+  document.body.appendChild(menu);
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', close); };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
 // ── 모달 ───────────────────────────────────────────
@@ -315,16 +336,14 @@ function wire() {
   $('st-load-song').addEventListener('click', openSongPicker);
 
   const video = $('daw-video');
-  video.addEventListener('loadedmetadata', () => {
-    _dur = video.duration || 0; layout();
-    // 영상 크기 진단 (잘림 원인 파악용)
-    const wrap = $('daw-video-wrap'), hero = wrap.parentElement;
-    const dawEl = document.querySelector('.daw'), bodyEl = document.querySelector('.daw-body');
-    flashTake(`[diag] body=${bodyEl.offsetHeight} daw=${dawEl.offsetHeight} hero=${hero.offsetHeight} wrap=${wrap.offsetHeight} vid=${video.videoWidth}x${video.videoHeight} shown=${video.offsetWidth}x${video.offsetHeight} win=${window.innerHeight}`);
-  });
+  video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); });
 
   $('st-play').addEventListener('click', () => { _playing = true; api.engine.play(); video.play().catch(() => {}); });
-  $('st-stop').addEventListener('click', () => { _playing = false; api.engine.stop(); video.pause(); });
+  $('st-stop').addEventListener('click', () => {
+    _playing = false; api.engine.stop(); video.pause();
+    // 녹음 중이었으면 정지 시 바로 마감 → take 트랙 반영
+    if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); api.engine.recordStop(); }
+  });
   $('st-seek0').addEventListener('click', () => { api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     _recArmed = !_recArmed; $('st-rec').classList.toggle('armed', _recArmed);
@@ -334,15 +353,16 @@ function wire() {
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });
   $('st-zoom-out').addEventListener('click', () => { _pxPerSec = Math.max(2, _pxPerSec / 1.4); layout(); });
 
-  // 휠 줌 (커서 위치 기준, 세밀)
+  // Ctrl+휠 = 배율(커서 기준). 그냥 휠 = 위아래 스크롤(네이티브)
   $('daw-tscroll').addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;              // 배율은 Ctrl 눌렀을 때만
     if (!_dur) return;
     e.preventDefault();
     const sc = $('daw-tscroll');
     const rect = $('daw-lanes').getBoundingClientRect();
-    const cursorX = e.clientX - rect.left - HEAD_W + sc.scrollLeft;   // content px
+    const cursorX = e.clientX - rect.left - HEAD_W + sc.scrollLeft;
     const tAt = cursorX / _pxPerSec;
-    const factor = Math.exp(-e.deltaY * 0.0015);                     // 유기적
+    const factor = Math.exp(-e.deltaY * 0.0015);
     _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
     layout();
     sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));

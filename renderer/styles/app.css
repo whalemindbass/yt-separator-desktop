@@ -2102,7 +2102,7 @@ body { display: flex; flex-direction: column; }
 .daw-zoom { display: flex; align-items: center; gap: 6px; color: var(--tx-3); font-size: 11.5px; }
 .daw-zoom .btn.icon { height: 26px; width: 26px; }
 
-.daw-hero { display: flex; background: #05070a; border-bottom: 1px solid var(--border); flex: 1; min-height: 0; }
+.daw-hero { display: flex; background: #05070a; border-bottom: 1px solid var(--border); flex: none; height: 46vh; min-height: 200px; }
 .daw-video { flex: 1; min-width: 0; min-height: 0; position: relative; display: grid; place-items: center; background: radial-gradient(130% 100% at 50% 0, #171c24, #05070a); overflow: hidden; }
 .daw-video video { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: #000; }
 .daw-video-empty { position: absolute; color: var(--tx-3); font-size: 13px; }
@@ -2149,14 +2149,14 @@ body { display: flex; flex-direction: column; }
 .daw-fx-add { width: 100%; padding: 9px; border: 1px dashed var(--border-mid); background: transparent; color: var(--tx-3); border-radius: 8px; font-size: 12px; cursor: pointer; }
 .daw-fx-add:disabled { opacity: .4; cursor: default; }
 
-.daw-tracks { flex: none; height: 300px; min-height: 0; display: flex; flex-direction: column; }
+.daw-tracks { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
 .daw-ruler-wrap { height: 24px; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; padding-left: 140px; position: relative; }
 .daw-ruler { height: 24px; position: relative; will-change: transform; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border); font: 600 9.5px/24px var(--mono); color: var(--tx-4); padding-left: 5px; }
 .daw-tscroll { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .daw-lanes { position: relative; }
 .daw-lane { display: grid; grid-template-columns: 140px 1fr; height: 64px; border-bottom: 1px solid var(--border); }
-.daw-head { position: sticky; left: 0; z-index: 2; background: var(--surface); border-right: 1px solid var(--border); padding: 8px 9px; display: flex; flex-direction: column; gap: 5px; }
+.daw-head { position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 8px 9px; display: flex; flex-direction: column; gap: 5px; }
 .daw-head::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c, var(--accent)); }
 .daw-head .nm { font-size: 11.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .daw-head .nm i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--accent)); flex: none; }
@@ -2169,4 +2169,10 @@ body { display: flex; flex-direction: column; }
 .daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 38%, transparent); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .daw-ph { position: absolute; top: 0; width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.8); z-index: 3; pointer-events: none; }
+.daw-take-clip { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); border: 1px solid color-mix(in srgb, var(--danger) 48%, transparent); cursor: pointer; }
+.daw-take-clip svg { width: 100%; height: 100%; display: block; }
+.daw-ctx { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 7px; box-shadow: var(--shadow-pop); padding: 4px; }
+.daw-ctx button { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: 0; color: var(--tx-1); font-size: 12.5px; cursor: pointer; border-radius: 5px; }
+.daw-ctx button:hover { background: var(--elev); }
+.daw-ctx button.del:hover { color: var(--danger); }
 .daw-take { flex: none; padding: 8px 14px; background: var(--surface); border-top: 1px solid var(--border); font: 500 11.5px/1.4 var(--mono); color: var(--tx-2); }
