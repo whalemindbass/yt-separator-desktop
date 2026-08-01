@@ -247,6 +247,11 @@ function onEngineEvent(m) {
       $('st-engine-start').disabled = false; setEnabled(false);
       break;
     case 'error': $('st-engine-status').textContent = '엔진 오류'; break;
+    case 'log': {
+      const s = String(m.msg || '');
+      if (/fail|cannot|error|armed|writer|no device/i.test(s)) flashTake('엔진: ' + s.trim());
+      break;
+    }
   }
 }
 

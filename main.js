@@ -452,6 +452,7 @@ function getEngine() {
   if (!audioEngine) {
     audioEngine = new AudioEngine();
     audioEngine.on('event', (m) => { try { mainWindow?.webContents.send('engine:event', m); } catch {} });
+    audioEngine.on('log',   (s) => { try { mainWindow?.webContents.send('engine:event', { ev: 'log', msg: String(s) }); } catch {} });
     audioEngine.on('exit',  (c) => { try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c }); } catch {} });
   }
   return audioEngine;

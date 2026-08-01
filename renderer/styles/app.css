@@ -2083,7 +2083,7 @@ body { display: flex; flex-direction: column; }
 #st-fx-current { margin-top: 8px; }
 
 /* ── 스튜디오 DAW ───────────────────────────────── */
-.daw-body { overflow: hidden; padding: 0; }
+.daw-body { overflow: hidden; padding: 0; min-height: 0; gap: 0; }
 .daw { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .daw .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-1); border-radius: 7px; font: 600 12.5px/1 var(--sans); cursor: pointer; }
 .daw .btn:hover:not(:disabled) { background: var(--input); }
