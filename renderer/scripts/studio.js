@@ -1,5 +1,6 @@
 // 스튜디오 뷰 — 실시간 오디오 엔진(JUCE 사이드카) 컨트롤
 //   api.engine.* 로 엔진 제어, onEvent 로 상태 수신.
+import { Library } from './library.js';
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
 
@@ -17,7 +18,7 @@ function fmtPos(samples) {
 }
 
 function setTransportEnabled(on) {
-  ['st-play', 'st-stop', 'st-seek0', 'st-rec', 'st-recstop', 'st-scan'].forEach(id => {
+  ['st-play', 'st-stop', 'st-seek0', 'st-rec', 'st-recstop', 'st-scan', 'st-load-song'].forEach(id => {
     const el = $(id); if (el) el.disabled = !on;
   });
 }
@@ -59,6 +60,7 @@ function onEngineEvent(m) {
       $('st-editor').disabled = !m.hasEditor;
       break;
     case 'stems':
+      $('st-song').textContent = m.count > 0 ? `스템 ${m.count}개 로드됨` : '스템 없음';
       break;
     case 'pos':
       $('st-pos').textContent = fmtPos(m.samples);
@@ -109,6 +111,15 @@ function wire() {
     if (!isNaN(idx)) api.engine.loadFx(idx);
   });
   $('st-editor').addEventListener('click', () => api.engine.showEditor());
+
+  $('st-load-song').addEventListener('click', () => {
+    const it = Library.getSelected();
+    if (!it) { $('st-song').textContent = '라이브러리에서 곡을 먼저 선택하세요.'; return; }
+    const paths = Object.values(it.stemPaths || {}).filter(Boolean);
+    if (!paths.length) { $('st-song').textContent = '이 곡에 스템 파일이 없습니다.'; return; }
+    $('st-song').textContent = `불러오는 중: ${it.name}`;
+    api.engine.loadStems(paths);
+  });
 }
 
 export async function initStudio() {

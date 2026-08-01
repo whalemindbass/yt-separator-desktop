@@ -1707,6 +1707,7 @@ playerVideo.addEventListener('durationchange', () => {
 export const Library = {
   refresh,
   selectItem,
+  getSelected: () => currentItem(),
 };
 
 // 뷰 첫 진입 시 자동 로드
