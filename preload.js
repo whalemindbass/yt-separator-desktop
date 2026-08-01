@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     track:       (index, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'track', index, ...(opts || {}) }),
     master:      (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'master', gain }),
     monitor:     (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'monitor', gain }),
+    metro:       (on, bpm)=> ipcRenderer.invoke('engine:cmd', { cmd: 'metro', on, bpm }),
     fxAdd:       (index)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxAdd', index }),
     fxRemove:    (slot)       => ipcRenderer.invoke('engine:cmd', { cmd: 'fxRemove', slot }),
     fxReorder:   (order)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxReorder', order }),

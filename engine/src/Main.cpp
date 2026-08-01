@@ -12,6 +12,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -215,6 +216,32 @@ public:
     bool  isPlaying()   const { return playing.load(); }
     int64 getPlayhead() const { return playhead.load(); }
 
+    // ---- 부가: 레벨 미터 · 튜너 · 메트로놈 ----
+    void setMetro (bool on, double bpm) { metroOn = on; if (bpm > 20.0) metroBpm = bpm; }
+    float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
+    double detectPitch()
+    {
+        const int N = 2048;
+        std::vector<float> buf (N);
+        {
+            const SpinLock::ScopedLockType sl (pitchLock);
+            for (int i = 0; i < N; ++i) buf[i] = pitchRing[(pitchW + i) % N];
+        }
+        double mean = 0; for (float v : buf) mean += v; mean /= N;
+        double rms = 0; for (int i = 0; i < N; ++i) { buf[i] -= (float) mean; rms += buf[i] * (double) buf[i]; }
+        rms = std::sqrt (rms / N);
+        if (rms < 0.004) return 0.0;   // 너무 조용
+        const int minLag = (int) (deviceSampleRate / 1000.0);
+        const int maxLag = std::min (N - 1, (int) (deviceSampleRate / 60.0));
+        double best = 0; int bestLag = -1;
+        for (int lag = minLag; lag <= maxLag; ++lag)
+        {
+            double c = 0; for (int i = 0; i < N - lag; ++i) c += buf[i] * (double) buf[i + lag];
+            if (c > best) { best = c; bestLag = lag; }
+        }
+        return bestLag > 0 ? deviceSampleRate / (double) bestLag : 0.0;
+    }
+
     // 트랙 제어 (index = 스템 순서)
     void setTrack (int index, const var& gain, const var& mute, const var& solo)
     {
@@ -395,6 +422,19 @@ public:
             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
                 fxBuf.copyFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
 
+            // 입력 레벨(peak) + 튜너용 링버퍼 (원본 입력)
+            {
+                float pk = 0;
+                for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[0][i]); if (a > pk) pk = a; }
+                if (pk > inPeak.load()) inPeak.store (pk);
+                const SpinLock::ScopedTryLockType sl (pitchLock);
+                if (sl.isLocked())
+                {
+                    const int R = (int) pitchRing.size();
+                    for (int i = 0; i < numSamples; ++i) { pitchRing[pitchW] = inputs[0][i]; pitchW = (pitchW + 1) % R; }
+                }
+            }
+
             {
                 const ScopedTryLock stl (fxLock);   // 못 얻으면 그 블록은 FX 스킵 (크래시 대신 잠깐 dry)
                 if (stl.isLocked())
@@ -409,6 +449,25 @@ public:
             for (int c = 0; c < numOut; ++c)
                 FloatVectorOperations::addWithMultiply (
                     outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), mg, numSamples);
+        }
+
+        // 메트로놈 클릭
+        if (metroOn.load() && numOut > 0)
+        {
+            const double interval = 60.0 / metroBpm.load() * deviceSampleRate;
+            const int clickLen = (int) (deviceSampleRate * 0.06);
+            for (int i = 0; i < numSamples; ++i)
+            {
+                metroCounter += 1.0;
+                if (metroCounter >= interval) { metroCounter -= interval; clickPos = 0; }
+                if (clickPos >= 0)
+                {
+                    const float env = std::exp (-(float) clickPos / ((float) deviceSampleRate * 0.012f));
+                    const float s = 0.4f * env * std::sin (2.0f * 3.14159265f * 1000.0f * (float) clickPos / (float) deviceSampleRate);
+                    for (int c = 0; c < numOut; ++c) outputs[c][i] += s;
+                    if (++clickPos > clickLen) clickPos = -1;
+                }
+            }
         }
 
         // 마스터 볼륨 (전체 출력)
@@ -471,6 +530,16 @@ private:
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
 
+    // 부가: 레벨/튜너/메트로놈
+    std::atomic<float> inPeak { 0.0f };
+    std::vector<float> pitchRing = std::vector<float> (2048, 0.0f);
+    int pitchW = 0;
+    SpinLock pitchLock;
+    std::atomic<bool> metroOn { false };
+    std::atomic<double> metroBpm { 120.0 };
+    double metroCounter = 0.0;
+    int clickPos = -1;
+
     TimeSliceThread writerThread;
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
     std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
@@ -486,11 +555,22 @@ public:
     explicit PosTimer (Engine& e) : engine (e) {}
     void timerCallback() override
     {
-        if (! engine.isPlaying()) return;
-        auto* o = ev ("pos");
-        o->setProperty ("samples", engine.getPlayhead());
-        emit (var (o));
+        if (engine.isPlaying())
+        {
+            auto* o = ev ("pos");
+            o->setProperty ("samples", engine.getPlayhead());
+            emit (var (o));
+        }
+        // 입력 레벨 (매 틱)
+        { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel()); emit (var (o)); }
+        // 튜너 피치 (3틱마다 — 무거움)
+        if (++tick % 3 == 0)
+        {
+            const double f = engine.detectPitch();
+            auto* o = ev ("pitch"); o->setProperty ("freq", f); emit (var (o));
+        }
     }
+    int tick = 0;
     Engine& engine;
 };
 
@@ -509,6 +589,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
+    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"]);
     else if (cmd == "scanPlugins") engine.scanPlugins();
     else if (cmd == "fxAdd")       engine.addFx ((int) c["index"]);
     else if (cmd == "fxRemove")    engine.removeFx ((int) c["slot"]);

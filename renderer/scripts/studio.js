@@ -223,6 +223,36 @@ function onPos(samples) {
     sc.scrollLeft = Math.max(0, x - sc.clientWidth / 2);
 }
 
+// ── 부가: 레벨 미터 · 튜너 ──
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function updateVU(peak) {
+  const fill = $('st-vu-fill'), dbEl = $('st-vu-db'); if (!fill) return;
+  const p = peak || 0;
+  const db = p > 0.00001 ? 20 * Math.log10(p) : -80;
+  const pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));   // -60..0dB
+  fill.style.width = pct + '%';
+  fill.classList.toggle('clip', p >= 0.99);
+  dbEl.textContent = p > 0.00001 ? `${db.toFixed(0)} dB` : '—';
+}
+let _tunerHold = 0;
+function updateTuner(freq) {
+  const noteEl = $('st-tuner-note'), needle = $('st-tuner-needle'), centsEl = $('st-tuner-cents');
+  if (!noteEl) return;
+  if (!freq || freq < 40) {
+    if (Date.now() - _tunerHold > 700) { noteEl.textContent = '—'; centsEl.textContent = ''; needle.style.left = '50%'; }
+    return;
+  }
+  _tunerHold = Date.now();
+  const n = 69 + 12 * Math.log2(freq / 440);
+  const nearest = Math.round(n);
+  const cents = Math.round((n - nearest) * 100);
+  const name = NOTE_NAMES[((nearest % 12) + 12) % 12] + (Math.floor(nearest / 12) - 1);
+  noteEl.textContent = name;
+  noteEl.classList.toggle('in-tune', Math.abs(cents) <= 5);
+  centsEl.textContent = (cents > 0 ? '+' : '') + cents + ' cent';
+  needle.style.left = Math.max(0, Math.min(100, 50 + cents)) + '%';
+}
+
 function setEnabled(on) {
   ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
@@ -380,6 +410,8 @@ function onEngineEvent(m) {
       }
       break;
     case 'pos': onPos(m.samples); break;
+    case 'level': updateVU(m.peak); break;
+    case 'pitch': updateTuner(m.freq); break;
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
@@ -541,6 +573,17 @@ function wire() {
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
+
+  // 메트로놈
+  let _metroOn = false;
+  const bpmInput = $('st-metro-bpm');
+  $('st-metro-toggle').addEventListener('click', () => {
+    _metroOn = !_metroOn;
+    $('st-metro-toggle').classList.toggle('on', _metroOn);
+    $('st-metro-toggle').textContent = _metroOn ? '정지' : '시작';
+    api.engine.metro(_metroOn, Number(bpmInput.value) || 120);
+  });
+  bpmInput.addEventListener('change', () => { if (_metroOn) api.engine.metro(true, Number(bpmInput.value) || 120); });
 }
 
 export async function initStudio() { wire(); }

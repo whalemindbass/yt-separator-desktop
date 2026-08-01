@@ -418,8 +418,25 @@
 
       <div class="daw-midrow">
       <aside class="daw-left">
-        <div class="daw-left-title">부가 기능</div>
-        <div class="daw-left-soon">튜너 · 메트로놈 등 (준비 중)</div>
+        <div class="daw-tool">
+          <div class="daw-tool-h">입력 레벨</div>
+          <div class="vu"><div id="st-vu-fill" class="vu-fill"></div></div>
+          <div id="st-vu-db" class="vu-db">—</div>
+        </div>
+        <div class="daw-tool">
+          <div class="daw-tool-h">튜너</div>
+          <div id="st-tuner-note" class="tuner-note">—</div>
+          <div class="tuner-meter"><span class="tuner-center"></span><div id="st-tuner-needle" class="tuner-needle"></div></div>
+          <div id="st-tuner-cents" class="tuner-cents"></div>
+        </div>
+        <div class="daw-tool">
+          <div class="daw-tool-h">메트로놈</div>
+          <div class="metro-row">
+            <button id="st-metro-toggle" class="btn">시작</button>
+            <input id="st-metro-bpm" class="metro-bpm" type="number" min="30" max="300" value="120" />
+            <span class="metro-unit">BPM</span>
+          </div>
+        </div>
       </aside>
       <div class="daw-content">
 
