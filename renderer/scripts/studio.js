@@ -259,7 +259,12 @@ async function loadSong(item) {
   } catch (e) { flashTake(`파형 디코드 실패: ${e && e.message || e}`); }
 }
 
-function flashTake(msg) { const el = $('st-take'); el.hidden = false; el.textContent = msg; }
+function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
+  let t = document.getElementById('daw-toast');
+  if (!t) { t = document.createElement('div'); t.id = 'daw-toast'; t.className = 'daw-toast'; (document.querySelector('.daw') || document.body).appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600);
+}
 
 let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
 async function renderTake(file, startSamples) {

@@ -408,26 +408,20 @@
   <!-- View: 스튜디오 (실시간 녹음 엔진) -->
   <main class="body view daw-body" data-view="studio" hidden>
     <div class="daw">
-      <!-- 트랜스포트 -->
+      <!-- 상단: 엔진/곡 -->
       <div class="daw-tbar">
         <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><span id="st-engine-status">엔진 꺼짐</span></span>
         <button id="st-engine-start" class="btn" data-i18n="studio.engine.start">오디오 시작</button>
         <button id="st-engine-stop" class="btn" hidden data-i18n="studio.engine.stop">오디오 종료</button>
         <button id="st-load-song" class="btn pri" disabled data-i18n="studio.loadSong">곡 불러오기</button>
-        <span class="daw-sp"></span>
-        <button id="st-seek0" class="btn icon" disabled title="처음으로">⇤</button>
-        <button id="st-play" class="btn icon" disabled title="재생">▶</button>
-        <button id="st-stop" class="btn icon" disabled title="정지">■</button>
-        <button id="st-rec" class="btn icon rec" disabled title="녹음 준비">●</button>
-        <span id="st-pos" class="daw-tc">0:00.000</span>
-        <span class="daw-sp"></span>
-        <span class="daw-master" title="마스터 볼륨">MASTER <input id="st-master" type="range" min="0" max="150" value="100" disabled></span>
-        <span class="daw-zoom"><span data-i18n="studio.zoom">배율</span>
-          <button id="st-zoom-out" class="btn icon" disabled>−</button>
-          <button id="st-zoom-in" class="btn icon" disabled>＋</button></span>
-        <button id="st-fx-toggle" class="btn" disabled>FX</button>
-        <button id="st-export" class="btn" disabled data-i18n="studio.export">Export ▾</button>
       </div>
+
+      <div class="daw-midrow">
+      <aside class="daw-left">
+        <div class="daw-left-title">부가 기능</div>
+        <div class="daw-left-soon">튜너 · 메트로놈 등 (준비 중)</div>
+      </aside>
+      <div class="daw-content">
 
       <!-- 히어로: 대형 영상 + FX 드로어 -->
       <div class="daw-hero">
@@ -462,7 +456,25 @@
         </div>
       </div>
 
-      <div id="st-take" class="daw-take" hidden></div>
+      </div><!-- /daw-content -->
+      </div><!-- /daw-midrow -->
+
+      <!-- 하단: 트랜스포트 -->
+      <div class="daw-bottombar">
+        <button id="st-seek0" class="btn icon" disabled title="처음으로">⇤</button>
+        <button id="st-play" class="btn icon" disabled title="재생">▶</button>
+        <button id="st-stop" class="btn icon" disabled title="정지">■</button>
+        <button id="st-rec" class="btn icon rec" disabled title="녹음 준비">●</button>
+        <span id="st-pos" class="daw-tc">0:00.000</span>
+        <span class="daw-sp"></span>
+        <span class="daw-master" title="마스터 볼륨">MASTER <input id="st-master" type="range" min="0" max="150" value="100" disabled></span>
+        <span class="daw-zoom"><span data-i18n="studio.zoom">배율</span>
+          <button id="st-zoom-out" class="btn icon" disabled>−</button>
+          <button id="st-zoom-in" class="btn icon" disabled>＋</button></span>
+        <button id="st-fx-toggle" class="btn" disabled>FX</button>
+        <button id="st-export" class="btn" disabled data-i18n="studio.export">Export ▾</button>
+      </div>
+
       <div id="daw-modal" class="daw-modal" hidden></div>
     </div>
   </main>
