@@ -121,6 +121,7 @@ function layout() {
     tk.textContent = fmtTC(s).replace(/\.000$/, '');
     ruler.appendChild(tk);
   }
+  positionTake();
   updatePlayhead(_lastSec);
 }
 
@@ -183,6 +184,29 @@ async function loadSong(item) {
 
 function flashTake(msg) { const el = $('st-take'); el.hidden = false; el.textContent = msg; }
 
+let _take = null;   // { start(sec), dur(sec) }
+async function renderTake(file, startSamples) {
+  const lane = document.querySelector('.daw-lane[data-key="mine"]');
+  const clip = lane && lane.querySelector('.daw-clip');
+  if (!clip) return;
+  try {
+    const { stems } = await loadStemFilesToBuffers({ take: file });
+    const ch = stems.take;
+    _take = { start: (startSamples || 0) / (_sr || 44100), dur: ch[0].length / (_sr || 44100) };
+    clip.classList.add('rec');
+    clip.innerHTML = buildWaveSvg(ch, resolveColor('var(--danger)'));
+    positionTake();
+  } catch (e) { flashTake('녹음 파형 실패: ' + (e && e.message || e)); }
+}
+function positionTake() {
+  if (!_take) return;
+  const clip = document.querySelector('.daw-lane[data-key="mine"] .daw-clip');
+  if (!clip) return;
+  clip.style.left = (_take.start * _pxPerSec) + 'px';
+  clip.style.right = 'auto';
+  clip.style.width = Math.max(2, _take.dur * _pxPerSec) + 'px';
+}
+
 // ── 모달 ───────────────────────────────────────────
 function openModal(title, itemsHtml, onClick) {
   const host = $('daw-modal');
@@ -239,7 +263,10 @@ function onEngineEvent(m) {
       renderFxSlots();
       break;
     case 'pos': onPos(m.samples); break;
-    case 'take': flashTake(`녹음 저장: ${m.file}  ·  정렬 ${fmtTC(m.timelineStart / (_sr || 44100))}  (PDC ${m.roundtripComp} samp)`); break;
+    case 'take':
+      flashTake(`녹음 저장: ${m.file}`);
+      renderTake(m.file, m.timelineStart || 0);
+      break;
     case 'exit':
       _started = false; _playing = false;
       $('st-engine-status').textContent = '엔진 종료됨';
@@ -288,7 +315,13 @@ function wire() {
   $('st-load-song').addEventListener('click', openSongPicker);
 
   const video = $('daw-video');
-  video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); });
+  video.addEventListener('loadedmetadata', () => {
+    _dur = video.duration || 0; layout();
+    // 영상 크기 진단 (잘림 원인 파악용)
+    const wrap = $('daw-video-wrap'), hero = wrap.parentElement;
+    const dawEl = document.querySelector('.daw'), bodyEl = document.querySelector('.daw-body');
+    flashTake(`[diag] body=${bodyEl.offsetHeight} daw=${dawEl.offsetHeight} hero=${hero.offsetHeight} wrap=${wrap.offsetHeight} vid=${video.videoWidth}x${video.videoHeight} shown=${video.offsetWidth}x${video.offsetHeight} win=${window.innerHeight}`);
+  });
 
   $('st-play').addEventListener('click', () => { _playing = true; api.engine.play(); video.play().catch(() => {}); });
   $('st-stop').addEventListener('click', () => { _playing = false; api.engine.stop(); video.pause(); });
