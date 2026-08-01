@@ -229,7 +229,7 @@ function onPos(samples) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-fx-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -530,7 +530,13 @@ function wire() {
   });
   $('st-fx-save').addEventListener('click', () => {
     if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
-    openNameModal('톤 저장', '', (name) => startGather({ name }));
+    const p = _activePresetId && getPresets().find(x => x.id === _activePresetId);
+    if (p) { startGather({ id: p.id, name: p.name }); flashTake('톤 덮어씀: ' + p.name); }   // 활성 톤 덮어쓰기
+    else openNameModal('톤 저장', '', (name) => startGather({ name }));                       // 활성 없으면 새로
+  });
+  $('st-fx-saveas').addEventListener('click', () => {
+    if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+    openNameModal('새 톤으로 저장', '', (name) => startGather({ name }));
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
