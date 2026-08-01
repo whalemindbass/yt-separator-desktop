@@ -7,6 +7,7 @@
 import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider, cancelSeparation } from './separator.js';
 import { Library } from './library.js';
 import { initCommunity } from './community.js';
+import { initStudio } from './studio.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
 
 // 최초 로드 즉시 i18n 적용
@@ -87,6 +88,7 @@ function switchView(name) {
   views.forEach(v => v.hidden = v.dataset.view !== name);
   if (name === 'library') Library.refresh().catch(console.error);
   if (name === 'community') initCommunity().catch(console.error);
+  if (name === 'studio') initStudio().catch(console.error);
 }
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 

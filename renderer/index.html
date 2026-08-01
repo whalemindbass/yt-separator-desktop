@@ -23,6 +23,7 @@
       <button class="tab on" data-view="separate" data-i18n="title.tab.separate">새 분리</button>
       <button class="tab" data-view="library" data-i18n="title.tab.library">라이브러리</button>
       <button class="tab" data-view="community" data-i18n="title.tab.community" hidden>커뮤니티</button>
+      <button class="tab" data-view="studio" data-i18n="title.tab.studio">스튜디오</button>
       <button class="tab" data-view="settings" data-i18n="title.tab.settings">설정</button>
     </nav>
     <div class="titlebar-meta">
@@ -402,6 +403,56 @@
   <!-- View: 커뮤니티 (네이티브) -->
   <main class="body view community-body" data-view="community" hidden>
     <div id="community-root" class="community-root"></div>
+  </main>
+
+  <!-- View: 스튜디오 (실시간 녹음 엔진) -->
+  <main class="body view studio-body" data-view="studio" hidden>
+    <div class="studio">
+      <div class="studio-head">
+        <div>
+          <div class="studio-title" data-i18n="studio.title">스튜디오</div>
+          <div class="studio-sub" data-i18n="studio.sub">스템 위에 저지연으로 연주·녹음 (ASIO)</div>
+        </div>
+        <div class="studio-engine">
+          <span id="st-engine-dot" class="st-dot"></span>
+          <span id="st-engine-status" class="settings-hint" data-i18n="studio.engine.off">엔진 꺼짐</span>
+          <button id="st-engine-start" class="btn" data-i18n="studio.engine.start">엔진 시작</button>
+        </div>
+      </div>
+
+      <section class="studio-card">
+        <h3 data-i18n="studio.device">오디오 장치</h3>
+        <div id="st-device" class="st-device muted" data-i18n="studio.device.none">엔진 시작 후 표시</div>
+      </section>
+
+      <section class="studio-card">
+        <div class="studio-card-head">
+          <h3 data-i18n="studio.transport">트랜스포트</h3>
+          <span id="st-pos" class="st-pos">0:00.000</span>
+        </div>
+        <div class="st-transport">
+          <button id="st-play" class="btn" disabled>▶ <span data-i18n="studio.play">재생</span></button>
+          <button id="st-stop" class="btn" disabled>■ <span data-i18n="studio.stop">정지</span></button>
+          <button id="st-seek0" class="btn" disabled>⇤ <span data-i18n="studio.seek0">처음</span></button>
+          <span class="st-sep"></span>
+          <button id="st-rec" class="btn danger" disabled>● <span data-i18n="studio.rec">녹음 준비</span></button>
+          <button id="st-recstop" class="btn" disabled data-i18n="studio.recstop">녹음 정지</button>
+        </div>
+        <div id="st-take" class="st-take" hidden></div>
+      </section>
+
+      <section class="studio-card">
+        <div class="studio-card-head">
+          <h3 data-i18n="studio.fx">입력 이펙트 (VST3)</h3>
+          <div class="studio-card-actions">
+            <button id="st-scan" class="btn" disabled data-i18n="studio.scan">플러그인 스캔</button>
+            <button id="st-editor" class="btn" disabled data-i18n="studio.editor">에디터 열기</button>
+          </div>
+        </div>
+        <select id="st-fx-list" class="cm-select" disabled></select>
+        <div id="st-fx-current" class="settings-hint"></div>
+      </section>
+    </div>
   </main>
 
   <!-- View 3: 설정 -->
