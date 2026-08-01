@@ -1,8 +1,10 @@
-// yss-engine — 실시간 오디오 사이드카 (Milestone 2)
-//   멀티 스템 재생 + 트랜스포트 + 입력 모니터 + 1트랙 녹음 + PDC(지연 보정)
-//   조작(stdin): p=play  s=stop  r=arm&record  x=stop record  z=seek0  q=quit
-//   실행: yss-engine.exe stem1.wav [stem2.wav ...]
-//   녹음 결과: take.wav (+ timelineStart 로그)
+// yss-engine — 실시간 오디오 사이드카 (Electron 연동용 JSON IPC)
+//   stdin  : 한 줄당 JSON 명령 { "cmd": "...", ... }
+//            loadStems{paths[]} play stop seek{pos} recordArm{file?} recordStop
+//            scanPlugins loadFx{index} showEditor quit
+//   stdout : 한 줄당 JSON 이벤트 { "ev": "..." }
+//            ready device plugins fx stems pos take error
+//   stderr : 사람용 진단 로그
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -14,6 +16,15 @@
 #include <vector>
 
 using namespace juce;
+
+// stdout = JSON 이벤트 채널 (한 줄 1객체). stderr = 진단 로그.
+static void emit (const var& v) { std::cout << JSON::toString (v, true) << std::endl; }
+static DynamicObject* ev (const char* name)
+{
+    auto* o = new DynamicObject();
+    o->setProperty ("ev", name);
+    return o;
+}
 
 struct Stem
 {
@@ -58,9 +69,9 @@ public:
     }
 
     // ---- 트랜스포트 ----
-    void play()  { playing = true;  std::cout << "[engine] play @" << playhead.load() << "\n"; }
-    void stop()  { playing = false; std::cout << "[engine] stop @" << playhead.load() << "\n"; }
-    void seek0() { setPos (0); std::cout << "[engine] seek 0\n"; }
+    void play()  { playing = true;  std::cerr << "[engine] play @" << playhead.load() << "\n"; }
+    void stop()  { playing = false; std::cerr << "[engine] stop @" << playhead.load() << "\n"; }
+    void seek0() { setPos (0); std::cerr << "[engine] seek 0\n"; }
 
     void setPos (int64 p)
     {
@@ -89,7 +100,7 @@ public:
         activeWriter.store (threadedWriter.get());
         recordArmed = true;
         recordedStart = -1;
-        std::cout << "[engine] armed (rec on next play block)\n";
+        std::cerr << "[engine] armed (rec on next play block)\n";
     }
 
     void stopRecord() { finishRecording(); }
@@ -111,9 +122,18 @@ public:
             vst3.findAllTypesForFile (found, f.getFullPathName());
             for (auto* d : found) scanned.add (*d);
         }
-        std::cout << "[engine] " << scanned.size() << " VST3 plugins:\n";
+        Array<var> list;
         for (int i = 0; i < scanned.size(); ++i)
-            std::cout << "  [" << i << "] " << scanned[i].name << " (" << scanned[i].manufacturerName << ")\n";
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("index", i);
+            o->setProperty ("name", scanned[i].name);
+            o->setProperty ("manufacturer", scanned[i].manufacturerName);
+            list.add (var (o));
+        }
+        auto* r = ev ("plugins");
+        r->setProperty ("list", var (list));
+        emit (var (r));
     }
 
     void loadPlugin (int index)
@@ -129,8 +149,28 @@ public:
         activeFx.store (nullptr);        // 콜백에서 옛 인스턴스 사용 중단
         fx = std::move (inst);
         activeFx.store (fx.get());
-        std::cout << "[engine] loaded FX: " << scanned[index].name << "\n";
+        auto* o = ev ("fx");
+        o->setProperty ("name", scanned[index].name);
+        o->setProperty ("hasEditor", fx->hasEditor());
+        emit (var (o));
     }
+
+    // ---- 스템 로드 ----
+    void loadStems (const StringArray& paths)
+    {
+        playing = false;
+        stems.clear();                       // 정지 상태에서만 (콜백이 stems 미접근)
+        for (auto& p : paths) addStem (p);
+        if (currentDevice != nullptr)
+            for (auto& s : stems) s->src->prepareToPlay (blockSize, deviceSampleRate);
+        setPos (0);
+        auto* o = ev ("stems");
+        o->setProperty ("count", (int) stems.size());
+        emit (var (o));
+    }
+
+    bool  isPlaying()   const { return playing.load(); }
+    int64 getPlayhead() const { return playhead.load(); }
 
     // 메시지 스레드에서 호출할 것
     void showEditor()
@@ -139,7 +179,7 @@ public:
         if (! fx->hasEditor()) { std::cerr << "[engine] plugin has no editor\n"; return; }
         if (editorWindow != nullptr) { editorWindow->toFront (true); return; }
         editorWindow.reset (new PluginWindow (fx->createEditorIfNeeded(), fx->getName()));
-        std::cout << "[engine] editor opened\n";
+        std::cerr << "[engine] editor opened\n";
     }
 
     void closeEditorWindow() { editorWindow.reset(); }
@@ -161,12 +201,17 @@ public:
         writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
-            std::cout << "[engine] WARN stem SR " << stemSampleRate
+            std::cerr << "[engine] WARN stem SR " << stemSampleRate
                       << " != device SR " << deviceSampleRate << " (no resample yet)\n";
 
-        std::cout << "[engine] device=\"" << device->getName() << "\" sr=" << deviceSampleRate
-                  << " block=" << block << " in=" << numInputChans << " out=" << numOutputChans
-                  << " roundtrip=" << String ((inLatSamp + outLatSamp) / deviceSampleRate * 1000.0, 2) << "ms\n";
+        auto* o = ev ("device");
+        o->setProperty ("name", device->getName());
+        o->setProperty ("sr", deviceSampleRate);
+        o->setProperty ("block", block);
+        o->setProperty ("in", numInputChans);
+        o->setProperty ("out", numOutputChans);
+        o->setProperty ("roundtripMs", (inLatSamp + outLatSamp) / deviceSampleRate * 1000.0);
+        emit (var (o));
     }
 
     void audioDeviceStopped() override
@@ -242,10 +287,12 @@ private:
         {
             const int64 comp = inLatSamp + outLatSamp;                 // 왕복 지연 = PDC
             const int64 timelineStart = jmax<int64> (0, start - comp); // 테이크를 앞당겨 정렬
-            std::cout << "[engine] take=" << outFile.getFullPathName()
-                      << " startPlayhead=" << start
-                      << " roundtripComp=" << comp
-                      << " timelineStart=" << timelineStart << "\n";
+            auto* o = ev ("take");
+            o->setProperty ("file", outFile.getFullPathName());
+            o->setProperty ("startPlayhead", start);
+            o->setProperty ("roundtripComp", comp);
+            o->setProperty ("timelineStart", timelineStart);
+            emit (var (o));
         }
     }
 
@@ -279,62 +326,76 @@ private:
     std::unique_ptr<DocumentWindow> editorWindow;   // message 스레드에서만 접근
 };
 
+// 재생 위치를 주기적으로 emit (message 스레드)
+class PosTimer : public Timer
+{
+public:
+    explicit PosTimer (Engine& e) : engine (e) {}
+    void timerCallback() override
+    {
+        if (! engine.isPlaying()) return;
+        auto* o = ev ("pos");
+        o->setProperty ("samples", engine.getPlayhead());
+        emit (var (o));
+    }
+    Engine& engine;
+};
+
+// 한 줄 JSON 명령 처리 (message 스레드)
+static void dispatch (Engine& engine, const var& c)
+{
+    const String cmd = c["cmd"].toString();
+    if      (cmd == "loadStems")   { StringArray p; for (auto& v : *c["paths"].getArray()) p.add (v.toString()); engine.loadStems (p); }
+    else if (cmd == "play")        engine.play();
+    else if (cmd == "stop")        engine.stop();
+    else if (cmd == "seek")        engine.setPos ((int64) (double) c["pos"]);
+    else if (cmd == "recordArm")   engine.armRecord (File (c["file"].toString().isNotEmpty()
+                                            ? c["file"].toString()
+                                            : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
+    else if (cmd == "recordStop")  engine.stopRecord();
+    else if (cmd == "scanPlugins") engine.scanPlugins();
+    else if (cmd == "loadFx")      engine.loadPlugin ((int) c["index"]);
+    else if (cmd == "showEditor")  engine.showEditor();
+    else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
+}
+
 int main (int argc, char* argv[])
 {
     ScopedJuceInitialiser_GUI juceInit;
 
     AudioDeviceManager dm;
     const String err = dm.initialiseWithDefaultDevices (2, 2);
-    if (err.isNotEmpty()) { std::cerr << "[engine] audio init error: " << err << "\n"; return 1; }
+    if (err.isNotEmpty()) { emit (var (ev ("error"))); std::cerr << "audio init: " << err << "\n"; return 1; }
 
     for (auto* type : dm.getAvailableDeviceTypes())
-        if (type->getTypeName() == "ASIO")
-        {
-            std::cout << "[engine] using ASIO\n";
-            dm.setCurrentAudioDeviceType ("ASIO", true);
-            break;
-        }
+        if (type->getTypeName() == "ASIO") { dm.setCurrentAudioDeviceType ("ASIO", true); break; }
 
     Engine engine;
     for (int i = 1; i < argc; ++i)
         engine.addStem (String::fromUTF8 (argv[i]));
 
     dm.addAudioCallback (&engine);
-    std::cout << "[engine] ready. cmds: p=play s=stop r=rec x=stoprec z=seek0 "
-                 "v=scanVST l<n>=loadFX e=editor q=quit\n";
+    PosTimer posTimer (engine);
+    posTimer.startTimer (50);       // 20Hz 위치 스트림
+    emit (var (ev ("ready")));
 
-    // stdin 은 별도 스레드에서 읽고, 실제 작업은 메시지 스레드로 마셜링
-    // (플러그인 로드·에디터 창은 반드시 메시지 스레드에서)
-    auto* mm = MessageManager::getInstance();
+    // stdin(JSON) → message 스레드로 마셜링 (플러그인/에디터는 message 스레드 필수)
     std::thread reader ([&]
     {
         for (std::string line; std::getline (std::cin, line); )
         {
             if (line.empty()) continue;
-            const char c = line[0];
-            const int  arg = line.size() > 2 ? std::atoi (line.c_str() + 2) : -1;
-            MessageManager::callAsync ([&engine, c, arg]
-            {
-                switch (c)
-                {
-                    case 'p': engine.play(); break;
-                    case 's': engine.stop(); break;
-                    case 'r': engine.armRecord (File::getCurrentWorkingDirectory().getChildFile ("take.wav")); break;
-                    case 'x': engine.stopRecord(); break;
-                    case 'z': engine.seek0(); break;
-                    case 'v': engine.scanPlugins(); break;
-                    case 'l': engine.loadPlugin (arg); break;
-                    case 'e': engine.showEditor(); break;
-                    case 'q': MessageManager::getInstance()->stopDispatchLoop(); break;
-                    default:  break;
-                }
-            });
-            if (c == 'q') break;
+            var c = JSON::parse (String::fromUTF8 (line.c_str()));
+            if (! c.isObject()) continue;
+            const bool isQuit = c["cmd"].toString() == "quit";
+            MessageManager::callAsync ([&engine, c] { dispatch (engine, c); });
+            if (isQuit) break;
         }
     });
 
-    mm->runDispatchLoop();   // 메시지 루프 (에디터 GUI 펌핑)
+    MessageManager::getInstance()->runDispatchLoop();
 
+    posTimer.stopTimer();
     if (reader.joinable()) reader.join();
     engine.closeEditorWindow();
     dm.removeAudioCallback (&engine);
