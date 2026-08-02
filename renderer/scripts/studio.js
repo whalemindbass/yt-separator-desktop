@@ -92,7 +92,8 @@ let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
 let _exporting = false, _exportMp3 = null, _exportTmp = null;   // export 진행 상태
-const armedRecId = () => (_recTracks.find(r => r.armed) || _recTracks[0] || {}).id;
+// 녹음 대상 = 녹음(type 0) 트랙만
+const armedRecId = () => (_recTracks.find(r => r.armed && r.type !== 1) || _recTracks.find(r => r.type !== 1) || {}).id;
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
@@ -210,17 +211,22 @@ function renderTracks() {
 function renderRecLanes() {
   const lanes = $('daw-lanes');
   lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row').forEach(el => el.remove());
-  _recTracks.forEach((rt, i) => {
+  let recN = 0, audN = 0;
+  _recTracks.forEach((rt) => {
+    const isAudio = rt.type === 1;
+    const label = isAudio ? `오디오 ${++audN}` : `내 녹음 ${++recN}`;
     const lane = document.createElement('div');
-    lane.className = 'daw-lane daw-lane-rec';
-    lane.style.setProperty('--c', 'var(--accent)');
+    lane.className = 'daw-lane daw-lane-rec' + (isAudio ? ' daw-lane-audio' : '');
+    lane.style.setProperty('--c', isAudio ? 'var(--stem-bass)' : 'var(--accent)');
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
+    lane.dataset.type = isAudio ? 'audio' : 'rec';
+    const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>`;
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
-        <div class="nm"><i></i>내 녹음 ${i + 1}</div>
+        <div class="nm"><i></i>${label}</div>
         <div class="ctrls">
-          <button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>
+          ${rBtnHtml}
           <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
           <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
           <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
@@ -235,7 +241,7 @@ function renderRecLanes() {
     const del = lane.querySelector('[data-m="del"]');
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
-    rBtn.addEventListener('click', (e) => {   // R = 이 트랙을 녹음 대상으로 선택(arm). 녹음 시작은 ● 또는 R키
+    if (rBtn) rBtn.addEventListener('click', (e) => {   // R = 이 트랙을 녹음 대상으로 선택(arm). 녹음 시작은 ● 또는 R키
       e.stopPropagation();
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
@@ -289,8 +295,8 @@ function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   left.classList.toggle('empty', !has);
   const h = $('daw-left-h');
   if (h) {
-    const idx = _recTracks.findIndex(r => r.id === _selTrack);
-    h.textContent = has ? `내 녹음 ${idx + 1} 이펙트` : '입력 이펙트';
+    const lbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .nm`)?.textContent?.trim();
+    h.textContent = has ? `${lbl || '트랙'} 이펙트` : '입력 이펙트';
   }
   updateTrackFader();
 }
@@ -509,23 +515,23 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-import-video', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
 // ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
 function nextClipId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
-async function ensureImportTrack() {
-  let id = _selTrack != null ? _selTrack : armedRecId();
-  if (id != null) return id;
+async function newAudioTrack() {   // 오디오(임포트) 트랙 생성 후 새 id 반환
   const before = _recTracks.length;
-  api.engine.recTrackAdd();
+  api.engine.recTrackAdd(1);   // type 1 = 오디오(녹음 불가)
   await new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { if (_recTracks.length > before || Date.now() - t0 > 2000) { clearInterval(iv); res(); } }, 25); });
   return _recTracks.length ? _recTracks[_recTracks.length - 1].id : null;
 }
 async function importAudio(paths, startSec, trackId) {
   if (!_started) { flashTake('먼저 상단 “오디오 시작”을 누르세요.'); return; }
-  const tid = trackId != null ? trackId : await ensureImportTrack();
+  // 대상: 드롭한 오디오 레인이면 그 트랙, 아니면 새 오디오 트랙
+  const dropTrack = _recTracks.find(t => t.id === trackId && t.type === 1);
+  const tid = dropTrack ? dropTrack.id : await newAudioTrack();
   if (tid == null) { flashTake('트랙을 만들 수 없습니다.'); return; }
   const startS = Math.round(Math.max(0, startSec || 0) * (_sr || 44100));
   for (const p of paths) {
@@ -533,21 +539,12 @@ async function importAudio(paths, startSec, trackId) {
     api.engine.takeLoad(p, startS, tid, id);
     await renderTake(p, startS, id, tid);
   }
+  layout();   // 임포트 클립이 범위 밖이면 타임라인 연장
   flashTake(`오디오 임포트: ${paths.length}개`);
-}
-function importVideo(path) {
-  const v = $('daw-video'); if (!v) return;
-  const em = $('daw-video-empty'); if (em) em.hidden = true;
-  v.src = toYtsepUrl(path); v.load();
-  flashTake('영상 임포트됨');
 }
 async function pickImportAudio() {
   const r = await api.dialog.pickAudioFiles();
-  if (r && r.ok && r.filePaths?.length) importAudio(r.filePaths, _lastSec, _selTrack != null ? _selTrack : armedRecId());
-}
-async function pickImportVideo() {
-  const r = await api.dialog.pickVideoFile();
-  if (r && r.ok && r.filePath) importVideo(r.filePath);
+  if (r && r.ok && r.filePaths?.length) importAudio(r.filePaths, _lastSec, null);
 }
 
 // 불러온 스템 곡 닫기(되돌리기) — 스템·영상 비움, 내 녹음/임포트 트랙은 유지
@@ -606,12 +603,14 @@ async function renderTake(file, startSamples, engineId, trackId) {
   try {
     const { stems } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
+    const tid = trackId != null ? trackId : armedRecId();
+    const isAudio = (_recTracks.find(r => r.id === tid) || {}).type === 1;   // 오디오 트랙 클립 = 다른 색
     _takes.push({
       id: engineId != null ? engineId : Date.now(), file,
-      trackId: trackId != null ? trackId : armedRecId(),
+      trackId: tid,
       start: (startSamples || 0) / (_sr || 44100),
       dur: ch[0].length / (_sr || 44100),
-      svg: buildWaveSvg(ch, resolveColor('var(--danger)')),
+      svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
     });
     renderTakes();
   } catch (e) { flashTake('녹음 파형 실패: ' + (e && e.message || e)); }
@@ -660,10 +659,10 @@ function renderTakes() {
         if (newId && newId !== tk.trackId) {   // 트랙 변경
           tk.trackId = newId;
           api.engine.takeMove(tk.id, startS, newId);
-          renderTakes();   // 새 레인으로 클립 이동
         } else {
           api.engine.takeMove(tk.id, startS, 0);
         }
+        layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
@@ -744,7 +743,7 @@ function saveTakeSet(name) {
   if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
   // 트랙 레이아웃(개수·게인·뮤트·솔로) + 트랙별 FX 체인까지 통째로 저장
   const tracks = _recTracks.map(r => ({
-    id: r.id, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
   const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
@@ -758,12 +757,12 @@ function saveTakeSet(name) {
   _takeSetGather._t = setTimeout(finishTakeSetGather, 2000);   // 일부 못 받아도 저장(타임아웃)
 }
 function stripFxOrder(tracks) {
-  return tracks.map(t => ({ id: t.id, gain: t.gain, mute: t.mute, solo: t.solo, fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass })) }));
+  return tracks.map(t => ({ id: t.id, type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo, fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass })) }));
 }
 function finishTakeSetGather() {
   const g = _takeSetGather; if (!g) return; _takeSetGather = null; clearTimeout(g._t);
   const tracks = g.tracks.map(t => ({
-    id: t.id, gain: t.gain, mute: t.mute, solo: t.solo,
+    id: t.id, type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo,
     fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass, data: g.states[s.id] })),
   }));
   persistTakeSet(g.name, tracks, g.takes);
@@ -793,7 +792,7 @@ async function loadTakeSet(ts) {
     if (Array.isArray(ts.tracks) && ts.tracks.length) {
       _recTracks = [];   // stale 값으로 즉시 resolve 되지 않도록 비우고 이벤트로만 채움
       const gen = ++_recTracksGenReq;
-      api.engine.recTracksReset(ts.tracks.map(t => ({ gain: t.gain, mute: t.mute, solo: t.solo })), gen);
+      api.engine.recTracksReset(ts.tracks.map(t => ({ type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo })), gen);
       const ok = await waitRecTracks(gen);
       if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
       idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
@@ -996,7 +995,7 @@ function onEngineEvent(m) {
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       renderRecLanes(); updateSoloDim();
       if (_selTrack == null || !_recTracks.some(r => r.id === _selTrack)) {
-        const a = armedRecId();                       // 선택 없으면 녹음 대상 자동 선택
+        const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
         selectTrack(a != null ? a : null);
       } else updateFxPanel();
       break;
@@ -1155,23 +1154,20 @@ function wire() {
 
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
-  // 파일 임포트 — 버튼 + 타임라인 드래그드롭
+  // 오디오 파일 임포트 — 버튼 + 타임라인 드래그드롭
   $('st-import-audio').addEventListener('click', pickImportAudio);
-  $('st-import-video').addEventListener('click', pickImportVideo);
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });
   tscroll.addEventListener('drop', (e) => {
     e.preventDefault(); tscroll.classList.remove('drop-hi');
-    const all = [...(e.dataTransfer?.files || [])].map(f => ({ name: f.name, path: api.pathForFile(f) })).filter(f => f.path);
-    const audio = all.filter(f => /\.(wav|mp3|flac|ogg|aif|aiff|m4a|aac)$/i.test(f.name));
-    const vid = all.find(f => /\.(mp4|mkv|webm|mov|avi|m4v)$/i.test(f.name));
+    const audio = [...(e.dataTransfer?.files || [])].map(f => ({ name: f.name, path: api.pathForFile(f) }))
+      .filter(f => f.path && /\.(wav|mp3|flac|ogg|aif|aiff|m4a|aac)$/i.test(f.name));
+    if (!audio.length) return;
     const rect = $('daw-lanes').getBoundingClientRect();
     const startSec = Math.max(0, (e.clientX - rect.left - HEAD_W) / _pxPerSec);
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.daw-lane-rec');
-    const tid = lane ? Number(lane.dataset.recid) : null;
-    if (audio.length) importAudio(audio.map(f => f.path), startSec, tid);
-    if (vid) importVideo(vid.path);
+    importAudio(audio.map(f => f.path), startSec, lane ? Number(lane.dataset.recid) : null);
   });
 
   $('st-fx-add').addEventListener('click', () => {

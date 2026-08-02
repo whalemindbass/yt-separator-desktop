@@ -80,10 +80,11 @@ struct FxSlot
     int descIndex = -1;
 };
 
-// 녹음 트랙 (내 녹음 여러 개 — 각각 뮤트/솔로/게인 + 독립 FX 체인, R 로 녹음 대상 선택)
+// 트랙 (내 녹음/오디오 임포트 — 각각 뮤트/솔로/게인 + 독립 FX 체인). type: 0=녹음, 1=오디오(녹음불가)
 struct RecTrack
 {
     int id = 0;
+    int type = 0;   // 0=rec(내 악기 녹음), 1=audio(임포트, 녹음 대상 불가)
     std::atomic<float> gain { 1.0f };
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
@@ -136,7 +137,7 @@ public:
     void armRecord (const File& out)
     {
         finishRecording();
-        if (findRec (armedTrack.load()) == nullptr) { std::cerr << "[engine] no armed rec track\n"; return; }
+        { auto* rt = findRec (armedTrack.load()); if (rt == nullptr || rt->type != 0) { std::cerr << "[engine] no armed rec track\n"; return; } }
         outFile = out;
         auto* dev = currentDevice;
         if (dev == nullptr) { std::cerr << "[engine] no device\n"; return; }
@@ -414,6 +415,7 @@ public:
             o->setProperty ("gain", t->gain.load());
             o->setProperty ("mute", t->mute.load());
             o->setProperty ("solo", t->solo.load());
+            o->setProperty ("type", t->type);
             o->setProperty ("armed", t->id == armedTrack.load());
             list.add (var (o));
         }
@@ -423,13 +425,13 @@ public:
         emit (var (r));
     }
     void emitChainFor (int trackId) { if (auto* rt = findRec (trackId)) emitChain (*rt); }
-    void addRecTrack()
+    void addRecTrack (int type = 0)
     {
         auto t = std::make_unique<RecTrack>();
         const int newId = nextRecId++;
-        t->id = newId;
+        t->id = newId; t->type = type;
         { const ScopedLock sl (takesLock); recTracks.push_back (std::move (t)); }
-        if (findRec (armedTrack.load()) == nullptr) armedTrack = newId;   // 첫 트랙이면 자동 녹음 대상
+        if (type == 0 && findRec (armedTrack.load()) == nullptr) armedTrack = newId;   // 녹음 트랙만 자동 arm
         emitRecTracks();
     }
     void removeRecTrack (int id)
@@ -447,7 +449,7 @@ public:
         recomputeSolos();
         emitRecTracks();
     }
-    void armRec (int id) { if (findRec (id)) { armedTrack = id; emitRecTracks(); } }
+    void armRec (int id) { if (auto* rt = findRec (id)) if (rt->type == 0) { armedTrack = id; emitRecTracks(); } }   // 오디오 트랙은 녹음 대상 불가
     // 녹음 트랙 전체 재구성 (녹음 저장 불러오기 — 트랙 수·상태 복원). 새 id 는 emitRecTracks 로 통지.
     void setRecTracks (const var& list, int gen)
     {
@@ -459,13 +461,15 @@ public:
             {
                 auto t = std::make_unique<RecTrack>();
                 t->id = nextRecId++;
+                if (! v["type"].isVoid()) t->type = (int) v["type"];
                 if (! v["gain"].isVoid()) t->gain = (float) (double) v["gain"];
                 if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
                 if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
                 const ScopedLock sl (takesLock);
                 recTracks.push_back (std::move (t));
             }
-        armedTrack = recTracks.empty() ? 0 : recTracks.front()->id;
+        armedTrack = 0;
+        for (auto& t : recTracks) if (t->type == 0) { armedTrack = t->id; break; }   // 첫 녹음 트랙 arm
         recomputeSolos();
         emitRecTracks();
     }
@@ -1068,7 +1072,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"], (int64) (double) c["id"]);
     else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"], (int) c["trackId"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
-    else if (cmd == "recTrackAdd") engine.addRecTrack();
+    else if (cmd == "recTrackAdd") engine.addRecTrack ((int) c["type"]);
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
     else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
     else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"]);

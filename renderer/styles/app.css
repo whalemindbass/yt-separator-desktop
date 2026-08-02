@@ -2408,6 +2408,8 @@ body { display: flex; flex-direction: column; }
 /* 클립 모서리 정돈 */
 .daw-clip { border-radius: 6px; }
 .daw-take-clip { border-radius: 6px; }
+/* 오디오(임포트) 트랙 클립 = 다른 색(녹음 클립과 구분) */
+.daw-lane-audio .daw-take-clip { border-color: color-mix(in srgb, var(--stem-bass) 35%, transparent); background: color-mix(in srgb, var(--stem-bass) 14%, var(--elev)); }
 .daw-lane:hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
 
 /* 믹서 페이더 — 채널 스트립 (플랫) */
