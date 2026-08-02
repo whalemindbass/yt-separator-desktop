@@ -588,7 +588,7 @@ public:
 
     // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터) (message 스레드) ----
     //   format: wav | flac | aiff (MP3 은 렌더러가 WAV 렌더 후 ffmpeg 변환)
-    void exportMix (const String& outPath, const String& format, int bitDepth)
+    void exportMix (const String& outPath, const String& format, int bitDepth, bool mineOnly)
     {
         const double sr = (deviceSampleRate > 0 ? deviceSampleRate : stemSampleRate);
         const int block = 2048;
@@ -598,28 +598,30 @@ public:
         const bool anySolo = anyStemSolo.load() || anyRecSolo.load();
         int64 total = 0;
 
-        // 스템: 프레시 리더(실시간 소스와 공유 안 함)
+        // 스템: 프레시 리더(실시간 소스와 공유 안 함). "내 녹음만" 이면 스킵
         struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible; };
         std::vector<SR> srs;
-        for (auto& s : stems)
-        {
-            auto* rd = fmt.createReaderFor (File (s->path));
-            if (rd == nullptr) continue;
-            auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
-            src->prepareToPlay (block, sr);
-            total = jmax (total, soff + rd->lengthInSamples);
-            srs.push_back ({ std::move (src), s->gain.load(), anySolo ? s->solo.load() : ! s->mute.load() });
-        }
+        if (! mineOnly)
+            for (auto& s : stems)
+            {
+                auto* rd = fmt.createReaderFor (File (s->path));
+                if (rd == nullptr) continue;
+                auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
+                src->prepareToPlay (block, sr);
+                total = jmax (total, soff + rd->lengthInSamples);
+                srs.push_back ({ std::move (src), s->gain.load(), anySolo ? s->solo.load() : ! s->mute.load() });
+            }
 
         // 트랙: 프레시 테이크 리더 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
         struct TR { std::unique_ptr<AudioFormatReaderSource> src; int64 start; int64 len; };
         struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
         std::vector<TRK> trks;
         {
+            const bool trackSolo = mineOnly ? anyRecSolo.load() : anySolo;   // 내 녹음만이면 스템 솔로 무시
             const ScopedLock lk (takesLock);
             for (auto& rt : recTracks)
             {
-                TRK tk; tk.gain = rt->gain.load(); tk.audible = anySolo ? rt->solo.load() : ! rt->mute.load();
+                TRK tk; tk.gain = rt->gain.load(); tk.audible = trackSolo ? rt->solo.load() : ! rt->mute.load();
                 {
                     const ScopedLock fl (rt->fxLock);
                     for (auto& slot : rt->chain)
@@ -1073,7 +1075,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["track"], (int) c["slot"]);
     else if (cmd == "fxSetState")  engine.fxSetState ((int) c["track"], (int) c["slot"], c["data"].toString());
     else if (cmd == "fxChainReq")  engine.emitChainFor ((int) c["track"]);
-    else if (cmd == "export")      engine.exportMix (c["file"].toString(), c["format"].toString(), (int) c["bitDepth"]);
+    else if (cmd == "export")      engine.exportMix (c["file"].toString(), c["format"].toString(), (int) c["bitDepth"], (bool) c["mineOnly"]);
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
     else                           std::cerr << "[engine] unknown cmd: " << cmd << "\n";
 }

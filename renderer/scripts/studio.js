@@ -666,7 +666,11 @@ function openExportModal() {
   const host = $('daw-modal');
   host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>내보내기</span><button class="x">✕</button></div>
     <div class="daw-modal-list" style="padding:16px">
-      <div class="dev-field"><span>포맷</span><select id="exp-fmt">
+      <div class="dev-field"><span>범위</span><select id="exp-scope">
+        <option value="mix">전체 믹스 (스템 + 내 녹음)</option>
+        <option value="mine">내 녹음 트랙만</option>
+      </select></div>
+      <div class="dev-field" style="margin-top:10px"><span>포맷</span><select id="exp-fmt">
         <option value="wav">WAV · 무손실</option>
         <option value="flac">FLAC · 무손실(압축)</option>
         <option value="aiff">AIFF · 무손실</option>
@@ -681,21 +685,22 @@ function openExportModal() {
   const fmt = $('exp-fmt'), q = $('exp-q');
   const fillQ = () => { q.innerHTML = EXPORT_QUAL[fmt.value].map(([v, l]) => `<option value="${v}">${l}</option>`).join(''); };
   fmt.addEventListener('change', fillQ); fillQ();
-  $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value); });
+  $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value, $('exp-scope').value === 'mine'); });
 }
-async function runExport(format, quality) {
+async function runExport(format, quality, mineOnly) {
   if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
-  const res = await api.dialog.saveAs('mix.' + format, [format]);
+  const base = mineOnly ? 'recording' : 'mix';
+  const res = await api.dialog.saveAs(base + '.' + format, [format]);
   if (!res || !res.ok || !res.filePath) return;
   _exporting = true;
   flashTake('내보내는 중… 0%');
   if (format === 'mp3') {   // 임시 WAV 렌더 → ffmpeg MP3 변환
     _exportTmp = res.filePath.replace(/\.mp3$/i, '') + '.__export_tmp.wav';
     _exportMp3 = { dst: res.filePath, bitrate: quality };
-    api.engine.cmd({ cmd: 'export', file: _exportTmp, format: 'wav', bitDepth: 24 });
+    api.engine.cmd({ cmd: 'export', file: _exportTmp, format: 'wav', bitDepth: 24, mineOnly });
   } else {
     _exportMp3 = null; _exportTmp = null;
-    api.engine.cmd({ cmd: 'export', file: res.filePath, format, bitDepth: Number(quality) });
+    api.engine.cmd({ cmd: 'export', file: res.filePath, format, bitDepth: Number(quality), mineOnly });
   }
 }
 
