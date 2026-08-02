@@ -18,7 +18,8 @@ const STEM_LABEL = { vocals: '보컬', drums: '드럼', bass: '베이스', other
 let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
-let _playStart = 0, _dawArmRecPlay = null;   // 재생 시작점 · R(즉시 녹음+재생) 핸들
+let _playStart = 0;   // 재생 시작점
+let _timelinePad = 180;   // 타임라인 여유 길이(초) — 스크롤로 늘어남(무한)
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
@@ -241,7 +242,7 @@ function renderRecLanes() {
       e.stopPropagation();
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
-      _dawArmRecPlay && _dawArmRecPlay();
+      armRecPlay();
     });
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
@@ -354,15 +355,24 @@ function ensurePlayhead() {
   return ph;
 }
 
+// 타임라인 총 길이(초) — 스템 길이에 국한하지 않고 뷰포트 채움 + 여유(무한 느낌)
+function fullSec() {
+  const sc = $('daw-tscroll');
+  const vw = sc ? sc.clientWidth - HEAD_W : 1000;
+  return Math.max(_dur, vw / _pxPerSec) + _timelinePad;
+}
+const timelineW = () => Math.max(1, fullSec() * _pxPerSec);
+
 function layout() {
-  const w = contentW();
+  const w = timelineW();   // 스템 길이가 아니라 타임라인 전체 폭 (오른쪽 회색 여백 제거 + 무한)
   $('daw-lanes').style.width = (HEAD_W + w) + 'px';
   document.querySelectorAll('.daw-lane').forEach(l => { l.style.width = (HEAD_W + w) + 'px'; });
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
   const step = _pxPerSec >= 40 ? 2 : _pxPerSec >= 20 ? 5 : _pxPerSec >= 10 ? 10 : 20;
   $('daw-lanes').style.setProperty('--grid', (step * _pxPerSec) + 'px');   // 타임라인 그리드 간격
-  for (let s = 0; s <= _dur; s += step) {
+  const end = fullSec();
+  for (let s = 0; s <= end; s += step) {
     const tk = document.createElement('span');
     tk.className = 'tk'; tk.style.left = (s * _pxPerSec) + 'px';
     tk.textContent = fmtTC(s).replace(/\.000$/, '');
@@ -380,11 +390,36 @@ let _lastSec = 0;
 function updatePlayhead(sec) {
   _lastSec = sec;
   const ph = $('daw-playhead');
-  ph.hidden = _tracks.length === 0;
+  if (!ph) return;
+  ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
   ph.style.left = (HEAD_W + sec * _pxPerSec) + 'px';
   ph.style.height = ($('daw-lanes').offsetHeight || 0) + 'px';
   $('st-pos').textContent = fmtTC(sec);
   $('daw-ruler').style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
+}
+
+// ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
+function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
+function playStudio() {
+  _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
+  _playing = true; api.engine.play(); const v = $('daw-video'); if (v) v.play().catch(() => {}); updatePlayIcon();
+}
+function stopStudio() {
+  _playing = false; api.engine.stop(); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
+  if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
+  clearRecLive();
+  if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
+    const back = Math.max(0, _playStart || 0);
+    api.engine.seek(Math.round(back * (_sr || 44100)));
+    const v2 = $('daw-video'); if (v2 && isFinite(v2.duration)) v2.currentTime = back;
+    updatePlayhead(back);
+  }
+}
+function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
+  if (!armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하세요.'); return; }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
+  if (!_playing) playStudio();
+  flashTake('● 녹음 시작');
 }
 
 // ── 동기 ──────────────────────────────────────────
@@ -458,7 +493,7 @@ async function loadSong(item) {
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
-  _takes = []; _stemOffset = 0;
+  _takes = []; _stemOffset = 0; _timelinePad = 180;
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -964,29 +999,8 @@ function wire() {
   const video = $('daw-video');
   video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); $('daw-vplay').hidden = false; });
 
-  const play = () => {
-    _playStart = _lastSec;   // 재생 시작점 기억 (정지 시 이 위치로 복귀)
-    _playing = true; api.engine.play(); video.play().catch(() => {}); updatePlayIcon();
-  };
-  const stopAll = () => {
-    _playing = false; api.engine.stop(); video.pause(); updatePlayIcon();
-    if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
-    clearRecLive();
-    // 정지 시 재생을 시작한 위치로 복귀 (옵션 켜졌을 때만)
-    if (_returnOnStop) {
-      const back = Math.max(0, _playStart || 0);
-      api.engine.seek(Math.round(back * (_sr || 44100)));
-      if (video && isFinite(video.duration)) video.currentTime = back;
-      updatePlayhead(back);
-    }
-  };
-  const armRecPlay = () => {   // R: 즉시 녹음 준비 + 재생 시작
-    if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
-    if (!_playing) play();
-  };
-  const updatePlayIcon = () => { $('daw-vplay').hidden = _playing; };
+  const play = playStudio, stopAll = stopStudio;   // 모듈 함수 별칭
   window._dawUpdatePlayIcon = updatePlayIcon;
-  _dawArmRecPlay = armRecPlay;
 
   // 영상 클릭 = 재생/정지 (곡 로드 후에만)
   video.addEventListener('click', () => { if (!_dur) return; if (_playing) stopAll(); else play(); });
@@ -1062,7 +1076,11 @@ function wire() {
     const t = Math.max(0, Math.min(_dur, x / _pxPerSec));
     api.engine.seek(Math.round(t * _sr)); video.currentTime = t; updatePlayhead(t);
   });
-  $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
+  $('daw-tscroll').addEventListener('scroll', () => {
+    updatePlayhead(_lastSec);
+    const sc = $('daw-tscroll');   // 오른쪽 끝 근처면 타임라인 더 늘림(무한)
+    if (sc.scrollLeft + sc.clientWidth > sc.scrollWidth - 300) { _timelinePad += 180; layout(); }
+  });
 
   $('st-fx-add').addEventListener('click', () => {
     if (!_plugins.length) { api.engine.scanPlugins(); setTimeout(openVstPicker, 700); }
