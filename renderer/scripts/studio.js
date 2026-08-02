@@ -144,21 +144,27 @@ function buildWaveSvg(ch, color, N = 1400) {
   const bucket = Math.max(1, Math.floor(len / N));
   let pts = '';
   let mx = 1e-6;
-  const peaks = new Float32Array(N);
+  const peaks = new Float32Array(N), rms = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const start = i * bucket, end = Math.min(len, start + bucket);
-    let p = 0;
+    let p = 0, s2 = 0, cnt = 0;
     const step = Math.max(1, Math.floor((end - start) / 200));
-    for (let j = start; j < end; j += step) { const a = Math.abs((L[j] + R[j]) * 0.5); if (a > p) p = a; }
-    peaks[i] = p; if (p > mx) mx = p;
+    for (let j = start; j < end; j += step) { const a = (L[j] + R[j]) * 0.5; const aa = Math.abs(a); if (aa > p) p = aa; s2 += a * a; cnt++; }
+    peaks[i] = p; rms[i] = cnt ? Math.sqrt(s2 / cnt) : 0; if (p > mx) mx = p;
   }
-  for (let i = 0; i < N; i++) {
-    const h = Math.min(1, peaks[i] / mx) * 22;
-    pts += `${i},${(25 - h).toFixed(1)} `;
-  }
-  let pts2 = '';
-  for (let i = N - 1; i >= 0; i--) { const h = Math.min(1, peaks[i] / mx) * 22; pts2 += `${i},${(25 + h).toFixed(1)} `; }
-  return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none"><polygon points="${pts}${pts2}" fill="${color}" fill-opacity=".55"/></svg>`;
+  const poly = (arr, scale) => {
+    let a = '', b = '';
+    for (let i = 0; i < N; i++) { const h = Math.min(1, arr[i] / mx) * 22 * scale; a += `${i},${(25 - h).toFixed(1)} `; }
+    for (let i = N - 1; i >= 0; i--) { const h = Math.min(1, arr[i] / mx) * 22 * scale; b += `${i},${(25 + h).toFixed(1)} `; }
+    return a + b;
+  };
+  const gid = 'wg' + Math.random().toString(36).slice(2, 8);
+  // peak = 흐린 외곽, rms = 밝은 본체(세로 그라디언트), 가운데 기준선
+  return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0" stop-color="${color}" stop-opacity=".9"/><stop offset=".5" stop-color="${color}" stop-opacity=".5"/><stop offset="1" stop-color="${color}" stop-opacity=".9"/></linearGradient></defs>`
+    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".26"/>`
+    + `<polygon points="${poly(rms, 1)}" fill="url(#${gid})"/>`
+    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".45" stroke-width=".6"/></svg>`;
 }
 
 // ── 렌더 ──────────────────────────────────────────
@@ -338,6 +344,7 @@ function layout() {
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
   const step = _pxPerSec >= 40 ? 2 : _pxPerSec >= 20 ? 5 : _pxPerSec >= 10 ? 10 : 20;
+  $('daw-lanes').style.setProperty('--grid', (step * _pxPerSec) + 'px');   // 타임라인 그리드 간격
   for (let s = 0; s <= _dur; s += step) {
     const tk = document.createElement('span');
     tk.className = 'tk'; tk.style.left = (s * _pxPerSec) + 'px';

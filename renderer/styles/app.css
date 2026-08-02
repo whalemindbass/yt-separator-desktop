@@ -2360,6 +2360,17 @@ body { display: flex; flex-direction: column; }
 .daw-ruler { font-variant-numeric: tabular-nums; }
 .daw-ph { box-shadow: 0 0 6px var(--accent), 0 0 1px var(--accent); }
 
+/* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
+.daw-lane .daw-area { background-image: linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px); background-size: var(--grid, 60px) 100%; }
+.daw-lane .daw-area::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(90deg, rgba(255,255,255,.02) 0 1px, transparent 1px); background-size: calc(var(--grid, 60px) / 5) 100%; }
+/* 트랙 헤더 좌측 컬러 스트립 강화 */
+.daw-head::before { width: 4px; box-shadow: 1px 0 6px -1px color-mix(in srgb, var(--c, var(--accent)) 55%, transparent); }
+.daw-head .nm i { box-shadow: 0 0 6px color-mix(in srgb, var(--c, var(--accent)) 70%, transparent); }
+/* 클립 모서리·경계 정돈 */
+.daw-clip { border-radius: 7px; }
+.daw-take-clip { border-radius: 7px; }
+.daw-lane:hover .daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, #fff), var(--surface)); }
+
 /* 믹서 페이더 — 채널 스트립 질감 */
 .mx-strip { background: linear-gradient(180deg, var(--elev), color-mix(in srgb, var(--elev) 88%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.25); }
 .mx-val { font-variant-numeric: tabular-nums; }
