@@ -158,13 +158,11 @@ function buildWaveSvg(ch, color, N = 1400) {
     for (let i = N - 1; i >= 0; i--) { const h = Math.min(1, arr[i] / mx) * 22 * scale; b += `${i},${(25 + h).toFixed(1)} `; }
     return a + b;
   };
-  const gid = 'wg' + Math.random().toString(36).slice(2, 8);
-  // peak = 흐린 외곽, rms = 밝은 본체(세로 그라디언트), 가운데 기준선
-  return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">`
-    + `<stop offset="0" stop-color="${color}" stop-opacity=".9"/><stop offset=".5" stop-color="${color}" stop-opacity=".5"/><stop offset="1" stop-color="${color}" stop-opacity=".9"/></linearGradient></defs>`
-    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".26"/>`
-    + `<polygon points="${poly(rms, 1)}" fill="url(#${gid})"/>`
-    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".45" stroke-width=".6"/></svg>`;
+  // peak = 흐린 외곽, rms = 본체(플랫), 가운데 기준선 — 진중하게(그라디언트 없음)
+  return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none">`
+    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".22"/>`
+    + `<polygon points="${poly(rms, 1)}" fill="${color}" fill-opacity=".62"/>`
+    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".4" stroke-width=".6"/></svg>`;
 }
 
 // ── 렌더 ──────────────────────────────────────────

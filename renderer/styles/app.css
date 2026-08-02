@@ -30,10 +30,10 @@
   --danger-rgb: 224,90,90;
   --err-tx: #f0918f;
   --ok: #55d989;
-  --stem-vocals: #e15b5b;
-  --stem-drums:  #e6c33a;
-  --stem-bass:   #4b7bff;
-  --stem-other:  #e75ea0;
+  --stem-vocals: #a97070;
+  --stem-drums:  #a89a63;
+  --stem-bass:   #6b87ad;
+  --stem-other:  #9c7391;
   --scrollbar-thumb: rgba(255,255,255,.10);
   --scrollbar-thumb-hover: rgba(255,255,255,.18);
   --r-sm: 6px;
@@ -2129,17 +2129,13 @@ body { display: flex; flex-direction: column; }
 /* 새 분리(첫 화면) — 워크플로우를 하나의 콘솔 패널로 */
 .body[data-view="separate"] > .hero {
   position: relative;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  box-shadow: inset 0 1px 0 var(--hair-hi), var(--shadow-card);
+  box-shadow: var(--shadow-card);
   padding: 30px 34px 34px;
   margin: 34px auto;
   overflow: hidden;
-}
-.body[data-view="separate"] > .hero::before {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, transparent), transparent);
 }
 /* 튜너 미터 — 센트 색존(가운데 초록) + 눈금 */
 .tuner-meter { position: relative; height: 12px; margin: 10px 0 4px; border-radius: 3px;
@@ -2366,40 +2362,39 @@ body { display: flex; flex-direction: column; }
 .daw-master { font-variant-numeric: tabular-nums; }
 .daw-master input[type=range] { accent-color: var(--accent); }
 
-/* 좌측 FX 패널 — 계층감 */
-.daw-left { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface)); }
-.daw-fx-slots { }
-.daw-fx-slot { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); transition: border-color .12s, background .12s; }
+/* 좌측 FX 패널 — 플랫 */
+.daw-left { background: var(--surface); }
+.daw-fx-slot { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; transition: border-color .12s, background .12s; }
 .daw-fx-slot:hover { border-color: var(--border-mid); }
 .daw-fx-slot.bypassed { opacity: .5; }
 
-/* 트랙 레인 — Ableton풍 딥 그레이 + 헤어라인 */
+/* 트랙 레인 — 진중한 딥 그레이 + 헤어라인 (플랫) */
 .daw-lanes { background: color-mix(in srgb, var(--bg) 82%, #000); }
 .daw-lane { border-bottom: 1px solid rgba(255,255,255,.045); }
-.daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface)); }
-.daw-lane.selected .daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, var(--surface)), color-mix(in srgb, var(--accent) 9%, var(--surface))); }
-.daw-clip { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 3px rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.06); }
-.daw-take-clip { box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 1px 3px rgba(0,0,0,.3); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); }
+.daw-head { background: var(--surface); }
+.daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
+.daw-clip { border: 1px solid rgba(255,255,255,.05); }
+.daw-take-clip { border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); }
 .daw-ruler { font-variant-numeric: tabular-nums; }
-.daw-ph { box-shadow: 0 0 6px var(--accent), 0 0 1px var(--accent); }
+.daw-ph { box-shadow: 0 0 4px var(--accent); }
 
 /* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
 .daw-lane .daw-area { background-image: linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px); background-size: var(--grid, 60px) 100%; }
 .daw-lane .daw-area::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(90deg, rgba(255,255,255,.02) 0 1px, transparent 1px); background-size: calc(var(--grid, 60px) / 5) 100%; }
-/* 트랙 헤더 좌측 컬러 스트립 강화 */
-.daw-head::before { width: 4px; box-shadow: 1px 0 6px -1px color-mix(in srgb, var(--c, var(--accent)) 55%, transparent); }
-.daw-head .nm i { box-shadow: 0 0 6px color-mix(in srgb, var(--c, var(--accent)) 70%, transparent); }
-/* 클립 모서리·경계 정돈 */
-.daw-clip { border-radius: 7px; }
-.daw-take-clip { border-radius: 7px; }
-.daw-lane:hover .daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, #fff), var(--surface)); }
+/* 트랙 헤더 좌측 컬러 스트립 — 얇게(2px), glow 없음 */
+.daw-head::before { width: 2px; box-shadow: none; }
+.daw-head .nm i { box-shadow: none; }
+/* 클립 모서리 정돈 */
+.daw-clip { border-radius: 6px; }
+.daw-take-clip { border-radius: 6px; }
+.daw-lane:hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
 
-/* 믹서 페이더 — 채널 스트립 질감 */
-.mx-strip { background: linear-gradient(180deg, var(--elev), color-mix(in srgb, var(--elev) 88%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.25); }
+/* 믹서 페이더 — 채널 스트립 (플랫) */
+.mx-strip { background: var(--elev); box-shadow: none; }
 .mx-val { font-variant-numeric: tabular-nums; }
 .mx-fader { -webkit-appearance: none; appearance: none; background: transparent; }
-.mx-fader::-webkit-slider-runnable-track { width: 6px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border), inset 0 2px 4px rgba(0,0,0,.4); }
-.mx-fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 14px; border-radius: 3px; background: linear-gradient(180deg, var(--elev-2), var(--elev)); border: 1px solid var(--border-mid); box-shadow: 0 1px 3px rgba(0,0,0,.55), inset 0 1px 0 var(--hair-hi); margin-left: -9px; }
+.mx-fader::-webkit-slider-runnable-track { width: 6px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border); }
+.mx-fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 14px; border-radius: 3px; background: var(--elev-2); border: 1px solid var(--border-mid); box-shadow: 0 1px 2px rgba(0,0,0,.5); margin-left: -9px; }
 .mx-fader:hover::-webkit-slider-thumb { border-color: var(--accent-soft-border); }
 .mx-fader:disabled::-webkit-slider-thumb { background: var(--elev); }
 
@@ -2407,15 +2402,13 @@ body { display: flex; flex-direction: column; }
    PRO 리스타일 — 전 화면 공통 컴포넌트 (다크 우선)
    ════════════════════════════════════════════════════════════ */
 
-/* 앱 배경 — 은은한 방사형 비네트로 평면감 제거 */
-body { background:
-    radial-gradient(1200px 680px at 50% -8%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
-    var(--bg) !important; }
+/* 앱 배경 — 플랫 */
+body { background: var(--bg) !important; }
 
-/* 타이틀바 — 얇은 헤어라인 + 살짝 떠 있는 느낌 */
-.titlebar { border-bottom: 1px solid var(--border); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 6px 20px -18px rgba(0,0,0,.8); background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, #fff), var(--surface)); }
+/* 타이틀바 — 얇은 헤어라인 (플랫) */
+.titlebar { border-bottom: 1px solid var(--border); background: var(--surface); }
 .titles h1 { letter-spacing: -.01em; }
-.logo { border-radius: 8px; box-shadow: 0 0 0 1px var(--border), 0 2px 8px -2px rgba(var(--accent-rgb), .4); }
+.logo { border-radius: 8px; box-shadow: 0 0 0 1px var(--border); }
 
 /* 탭 — 활성 시 소프트 필 + 언더라인 글로우 */
 .tab { padding: 0 13px; height: 30px; border-radius: 8px; transition: color .14s var(--ease), background .14s var(--ease); }
@@ -2428,16 +2421,16 @@ body { background:
 .pill { border: 0; border-radius: 6px; padding: 6px 13px; color: var(--tx-2); transition: color .14s, background .14s, box-shadow .14s; }
 .pill:last-child, .pill { border-right: 0; }
 .pill:hover:not(:disabled):not(.on) { color: var(--tx-1); background: color-mix(in srgb, var(--tx-1) 6%, transparent); }
-.pill.on { color: var(--accent); font-weight: 600; background: linear-gradient(180deg, var(--elev-2), var(--elev)); box-shadow: 0 1px 3px rgba(0,0,0,.45), inset 0 1px 0 var(--hair-hi), inset 0 0 0 1px var(--accent-soft-border); }
+.pill.on { color: var(--accent); font-weight: 600; background: var(--elev-2); box-shadow: inset 0 0 0 1px var(--accent-soft-border); }
 .pill { position: relative; }
 
-/* 버튼 — 미세 그라디언트 + hover 리프트 + 포커스 링 */
+/* 버튼 — 플랫 + hover/포커스 */
 .btn, .mini, .daw .btn { transition: background .14s var(--ease), border-color .14s var(--ease), transform .08s var(--ease), box-shadow .14s var(--ease); }
-.btn:not(.pri):not(.icon) { background: linear-gradient(180deg, var(--elev-2), var(--elev)); border: 1px solid var(--border-mid); box-shadow: inset 0 1px 0 var(--hair-hi); }
-.btn:not(.pri):hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-mid)); }
+.btn:not(.pri):not(.icon) { background: var(--elev); border: 1px solid var(--border-mid); }
+.btn:not(.pri):hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-mid)); background: var(--elev-2); }
 .btn:active:not(:disabled) { transform: translateY(.5px); }
-.btn.pri { background: linear-gradient(180deg, var(--accent-hover), var(--accent)); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 4px 14px -6px rgba(var(--accent-rgb), .6); }
-.btn.pri:hover:not(:disabled) { box-shadow: 0 1px 0 var(--hair-hi) inset, 0 6px 18px -6px rgba(var(--accent-rgb), .75); }
+.btn.pri { background: var(--accent); box-shadow: none; }
+.btn.pri:hover:not(:disabled) { background: var(--accent-hover); }
 .btn:focus-visible, .pill:focus-visible, .tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent); }
 
 /* 입력 — 파인 면 + accent 포커스 글로우 */
@@ -2451,12 +2444,12 @@ body { background:
   outline: none;
 }
 
-/* 카드/섹션 — 상단 하이라이트 + 부드러운 그림자 */
+/* 카드/섹션 — 플랫 서피스 + 부드러운 그림자 */
 .settings-section, .probe-card, .done-card, .daw-modal-box, .update-dialog-card {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  box-shadow: inset 0 1px 0 var(--hair-hi), var(--shadow-card);
+  box-shadow: var(--shadow-card);
 }
 .settings-section { padding: 20px 22px; }
 .settings-section h3 { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tx-3); font-family: var(--mono); }
