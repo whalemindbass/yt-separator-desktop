@@ -158,11 +158,11 @@ function buildWaveSvg(ch, color, N = 1400) {
     for (let i = N - 1; i >= 0; i--) { const h = Math.min(1, arr[i] / mx) * 22 * scale; b += `${i},${(25 + h).toFixed(1)} `; }
     return a + b;
   };
-  // peak = 흐린 외곽, rms = 본체(플랫), 가운데 기준선 — 진중하게(그라디언트 없음)
+  // peak = 흐린 외곽, rms = 본체(플랫·선명), 가운데 기준선 (그라디언트 없음)
   return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none">`
-    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".22"/>`
-    + `<polygon points="${poly(rms, 1)}" fill="${color}" fill-opacity=".62"/>`
-    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".4" stroke-width=".6"/></svg>`;
+    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".24"/>`
+    + `<polygon points="${poly(rms, 1)}" fill="${color}" fill-opacity=".7"/>`
+    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".45" stroke-width=".6"/></svg>`;
 }
 
 // ── 렌더 ──────────────────────────────────────────
