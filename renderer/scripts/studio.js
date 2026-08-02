@@ -652,6 +652,10 @@ function onEngineEvent(m) {
     case 'device':
       _sr = m.sr || 44100;
       $('st-engine-status').textContent = `${m.name} · ${Number(m.roundtripMs).toFixed(2)}ms`;
+      if (m.srMismatch) flashTake(`⚠ 샘플레이트 불일치: 스템 ${Math.round(m.stemSr)}Hz ≠ 장치 ${Math.round(m.sr)}Hz — 피치/템포 어긋남. 장치 SR을 맞추세요.`);
+      break;
+    case 'fxError':
+      flashTake(`⚠ 이펙트 ${m.failed}개 로드 실패 (플러그인 누락/버전)`);
       break;
     case 'plugins':
       _plugins = m.list || [];

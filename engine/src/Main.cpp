@@ -37,6 +37,7 @@ struct Stem
     std::atomic<float> gain { 1.0f };
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
+    float curGain = 1.0f;   // 오디오 스레드 전용 — 게인/뮤트/솔로 램프(클릭/지퍼 방지)
 };
 
 // 플러그인 에디터를 담는 네이티브 창
@@ -86,7 +87,17 @@ struct RecTrack
     std::atomic<bool>  solo { false };
     std::vector<std::unique_ptr<FxSlot>> chain;   // 트랙별 독립 이펙트
     CriticalSection fxLock;                        // processBlock 과 체인 변경 상호배제
+    float curGain = 1.0f;                          // 오디오 스레드 전용 — 게인/뮤트/솔로 램프
 };
+
+// 원본 → 목적지에 게인 램프(g0→g1) 걸어 합산 (블록 경계 클릭·지퍼 방지)
+static inline void addRamped (float* dst, const float* src, int n, float g0, float g1)
+{
+    if (g0 == g1) { FloatVectorOperations::addWithMultiply (dst, src, g0, n); return; }
+    const float step = (g1 - g0) / (float) jmax (1, n);
+    float g = g0;
+    for (int i = 0; i < n; ++i) { dst[i] += src[i] * g; g += step; }
+}
 
 class Engine : public AudioIODeviceCallback
 {
@@ -534,17 +545,19 @@ public:
     void setChain (int trackId, const var& list)
     {
         auto* rt = findRec (trackId); if (rt == nullptr) return;
-        for (auto& s : rt->chain) if (s) s->editor.reset();
-        { const ScopedLock sl (rt->fxLock); rt->chain.clear(); }
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
+
+        // 새 체인을 락 밖에서 완성한 뒤 한 번에 스왑(원자적) — 재생 중 빈/부분 체인 노출·드롭 방지
+        std::vector<std::unique_ptr<FxSlot>> next;
+        int failed = 0;
         if (auto* a = list.getArray())
             for (auto& v : *a)
             {
                 const int index = (int) v["index"];
-                if (index < 0 || index >= scanned.size()) continue;
+                if (index < 0 || index >= scanned.size()) { ++failed; continue; }
                 String err;
                 auto inst = pluginFmt.createPluginInstance (scanned[index], deviceSampleRate, blockSize, err);
-                if (inst == nullptr) continue;
+                if (inst == nullptr) { ++failed; std::cerr << "[engine] setChain load failed: " << err << "\n"; continue; }
                 inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
                 inst->prepareToPlay (deviceSampleRate, blockSize);
                 const String data = v["data"].toString();
@@ -554,9 +567,18 @@ public:
                 slot->descIndex = index;
                 slot->bypass = (bool) v["bypass"];
                 slot->plugin = std::move (inst);
-                const ScopedLock sl (rt->fxLock);
-                rt->chain.push_back (std::move (slot));
+                next.push_back (std::move (slot));
             }
+
+        std::vector<std::unique_ptr<FxSlot>> old;   // 이전 체인은 락 밖에서 소멸(에디터/플러그인 소멸이 오디오 스레드 안 막게)
+        {
+            const ScopedLock sl (rt->fxLock);
+            old.swap (rt->chain);
+            rt->chain = std::move (next);
+        }
+        for (auto& s : old) if (s) s->editor.reset();   // message 스레드에서 정리
+        old.clear();
+        if (failed > 0) { auto* e = ev ("fxError"); e->setProperty ("trackId", trackId); e->setProperty ("failed", failed); emit (var (e)); }
         emitChain (*rt);
     }
 
@@ -589,6 +611,8 @@ public:
         o->setProperty ("in", numInputChans);
         o->setProperty ("out", numOutputChans);
         o->setProperty ("roundtripMs", (inLatSamp + outLatSamp) / deviceSampleRate * 1000.0);
+        o->setProperty ("stemSr", stemSampleRate);
+        o->setProperty ("srMismatch", ! approximatelyEqual (stemSampleRate, deviceSampleRate));
         emit (var (o));
     }
 
@@ -624,12 +648,11 @@ public:
                 s->src->getNextAudioBlock (info);
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
-                if (! audible) continue;
-                const float g = s->gain.load();
+                const float target = audible ? s->gain.load() : 0.0f;   // 뮤트/솔로도 램프로 declick
                 for (int c = 0; c < numOut; ++c)
-                    FloatVectorOperations::addWithMultiply (
-                        outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
-                        g, numSamples);
+                    addRamped (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
+                               numSamples, s->curGain, target);
+                s->curGain = target;
             }
             playhead.fetch_add (numSamples);
         }
@@ -659,12 +682,13 @@ public:
                 for (auto& rt : recTracks)
                 {
                     const bool audible = anySolo ? rt->solo.load() : ! rt->mute.load();
-                    if (! audible) continue;
-                    const float g = rt->gain.load();
+                    const float target = (audible ? rt->gain.load() : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
+                    if (rt->curGain == 0.0f && target == 0.0f) continue;             // 무음 지속 → 처리 스킵
 
                     fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
                     fxBuf.clear();
 
+                    // 테이크·입력은 유니티로 버스에 모음 (게인은 FX 뒤에 적용)
                     if (playing.load())
                         for (auto& t : takesPlay)
                         {
@@ -676,12 +700,12 @@ public:
                             AudioSourceChannelInfo info (&scratch, 0, numSamples);
                             t->src->getNextAudioBlock (info);
                             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                                fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples, g);
+                                fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
                         }
 
                     if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
                         for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                            fxBuf.addFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples, g);
+                            fxBuf.addFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
 
                     // 이 트랙의 독립 FX 체인 적용
                     {
@@ -695,9 +719,10 @@ public:
                                 }
                     }
 
-                    for (int c = 0; c < numOut; ++c)
-                        FloatVectorOperations::addWithMultiply (
-                            outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)), mg, numSamples);
+                    for (int c = 0; c < numOut; ++c)   // post-FX 페이더 + 램프
+                        addRamped (outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)),
+                                   numSamples, rt->curGain, target);
+                    rt->curGain = target;
                 }
             }
         }
@@ -721,11 +746,19 @@ public:
             }
         }
 
-        // 마스터 볼륨 (전체 출력)
+        // 마스터 볼륨 (램프) + 안전 클리퍼 (다트랙 합산 클리핑/왜곡 방지)
         const float master = masterGain.load();
-        if (master != 1.0f)
+        if (numOut > 0)
+        {
+            AudioBuffer<float> out (outputs, numOut, numSamples);   // 기존 포인터 래핑(무복사)
+            out.applyGainRamp (0, numSamples, lastMasterGain, master);
             for (int c = 0; c < numOut; ++c)
-                FloatVectorOperations::multiply (outputs[c], master, numSamples);
+            {
+                FloatVectorOperations::max (outputs[c], outputs[c], -1.0f, numSamples);
+                FloatVectorOperations::min (outputs[c], outputs[c],  1.0f, numSamples);
+            }
+        }
+        lastMasterGain = master;
 
         // 녹음
         if (recordArmed.load())
@@ -797,6 +830,7 @@ private:
     std::atomic<int64> playhead { 0 };
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
+    float lastMasterGain = 1.0f;   // 마스터 게인 램프용 (오디오 스레드 전용)
     std::atomic<bool>  monitorInputOn { true };
     std::atomic<int64> stemOffset { 0 };
     AudioDeviceManager* devmgr = nullptr;
