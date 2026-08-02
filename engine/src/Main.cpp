@@ -944,7 +944,7 @@ int main (int argc, char* argv[])
 
     AudioDeviceManager dm;
     const String err = dm.initialiseWithDefaultDevices (2, 2);
-    if (err.isNotEmpty()) { emit (var (ev ("error"))); std::cerr << "audio init: " << err << "\n"; return 1; }
+    if (err.isNotEmpty()) { auto* e = ev ("error"); e->setProperty ("msg", "audio init: " + err); emit (var (e)); std::cerr << "audio init: " << err << "\n"; return 1; }
 
     for (auto* type : dm.getAvailableDeviceTypes())
         if (type->getTypeName() == "ASIO") { dm.setCurrentAudioDeviceType ("ASIO", true); break; }

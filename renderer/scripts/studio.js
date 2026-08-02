@@ -93,9 +93,15 @@ function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
   const startX = e.clientX; let moved = false;
   const move = (ev) => { moved = true; onDelta((ev.clientX - startX) / _pxPerSec); };
-  const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); onEnd(moved); };
+  const up = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);   // 인터럽트 시 리스너 누수 방지
+    onEnd(moved);
+  };
   document.addEventListener('pointermove', move);
   document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
 }
 function repositionStems() {
   document.querySelectorAll('.daw-lane:not(.daw-lane-rec) .daw-clip').forEach(c => {
@@ -114,9 +120,14 @@ function scrubStart(e, area) {
   };
   seekTo(e.clientX);
   const mv = (ev) => seekTo(ev.clientX);
-  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); };
+  const up = () => {
+    document.removeEventListener('pointermove', mv);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
+  };
   document.addEventListener('pointermove', mv);
   document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
 }
 const fmtTC = (sec) => {
   sec = Math.max(0, sec || 0);
@@ -389,11 +400,14 @@ function setEnabled(on) {
 }
 
 // ── 곡 로드 ────────────────────────────────────────
+let _loadingSong = false;
 async function loadSong(item) {
+  if (_loadingSong) return;   // 재진입 차단 (더블클릭 시 전역상태 오염)
   const it = item || Library.getSelected();
   if (!it) return;
   const paths = Object.values(it.stemPaths || {}).filter(Boolean);
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
+  _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _takes = []; _stemOffset = 0;
 
@@ -416,6 +430,7 @@ async function loadSong(item) {
     renderWaves(stems);
     flashTake(`불러옴: ${it.name}`);
   } catch (e) { flashTake(`파형 디코드 실패: ${e && e.message || e}`); }
+  finally { _loadingSong = false; }
 }
 
 function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
@@ -474,7 +489,9 @@ function renderTakes() {
         showDragBadge(srcLane, tk.start - base);
       };
       const up = () => {
-        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
         hideDragBadge();
         document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
         const newId = target ? Number(target.dataset.recid) : tk.trackId;
@@ -489,6 +506,7 @@ function renderTakes() {
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
     });
     area.appendChild(el);
   }
@@ -706,6 +724,7 @@ function onEngineEvent(m) {
       $('st-engine-start').hidden = false; $('st-engine-start').disabled = false;
       $('st-engine-stop').hidden = true;
       _chain = []; _chainByTrack = {}; _selTrack = null; _recTracks = [];
+      _recArmed = false; $('st-rec').classList.remove('armed'); clearRecLive();   // 재시작 후 녹음버튼 잔상 방지
       _activePresetId = null; renderFxSlots(); renderRecLanes(); updateFxPanel();
       setEnabled(false);
       break;

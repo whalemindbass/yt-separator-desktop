@@ -9,13 +9,18 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
 
-/** 엔진 실행 파일 경로 — 패키지: resources/engine, 개발: 환경변수 또는 C:\yss 빌드 산출물 */
+/** 엔진 실행 파일 경로 — 환경변수 → 패키지(resources/engine) → 프로젝트 산출물 순 */
 function resolveEnginePath() {
   if (process.env.YSS_ENGINE && fs.existsSync(process.env.YSS_ENGINE)) return process.env.YSS_ENGINE;
   const packaged = path.join(process.resourcesPath || '', 'engine', 'yss-engine.exe');
   if (fs.existsSync(packaged)) return packaged;
-  const dev = 'C:\\yss\\build\\yss-engine_artefacts\\Release\\yss-engine.exe';
-  if (fs.existsSync(dev)) return dev;
+  // 개발: 리포에 복사된 산출물 우선, 그다음 특정 빌드 경로(레거시)
+  const candidates = [
+    path.join(__dirname, 'engine', 'bin', 'yss-engine.exe'),
+    path.join(__dirname, 'engine', 'build', 'yss-engine_artefacts', 'Release', 'yss-engine.exe'),
+    'C:\\yss\\build\\yss-engine_artefacts\\Release\\yss-engine.exe',
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
   return null;
 }
 
@@ -39,59 +44,23 @@ class AudioEngine extends EventEmitter {
     // 'error'/stdin EPIPE 등 미처리 시 프로세스 크래시 → 반드시 핸들
     this.proc.on('error', (e) => { this.proc = null; this.emit('event', { ev: 'error', msg: String(e && e.message || e) }); });
     this.proc.stdin.on('error', () => {});
-    readline.createInterface({ input: this.proc.stdout }).on('line', (line) => {
+    this.rl = readline.createInterface({ input: this.proc.stdout });
+    this.rl.on('line', (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch { return; }   // 비-JSON 줄 무시
       if (msg && msg.ev) { this.emit('event', msg); this.emit(msg.ev, msg); }
     });
     this.proc.stderr.on('data', (d) => this.emit('log', String(d)));
-    this.proc.on('exit', (code) => { this.proc = null; this.emit('exit', code); });
+    this.proc.on('exit', (code) => { try { this.rl?.close(); } catch {} this.rl = null; this.proc = null; this.emit('exit', code); });
     return true;
   }
 
+  // 모든 엔진 명령은 preload 의 인라인 {cmd:...} 객체 → engine:cmd → 이 send() 단일 경로.
   send(cmd) {
     if (!this.proc) return false;
     try { this.proc.stdin.write(JSON.stringify(cmd) + '\n'); return true; }
     catch { return false; }
   }
-
-  loadStems(paths)   { return this.send({ cmd: 'loadStems', paths }); }
-  play()             { return this.send({ cmd: 'play' }); }
-  stop()             { return this.send({ cmd: 'stop' }); }
-  seek(pos)          { return this.send({ cmd: 'seek', pos }); }
-  scanPlugins()      { return this.send({ cmd: 'scanPlugins' }); }
-  track(index, opts) { return this.send({ cmd: 'track', index, ...(opts || {}) }); }
-  master(gain)       { return this.send({ cmd: 'master', gain }); }
-  monitor(gain)      { return this.send({ cmd: 'monitor', gain }); }
-  inputMonitor(on)   { return this.send({ cmd: 'inputMonitor', on }); }
-  metro(on, bpm)     { return this.send({ cmd: 'metro', on, bpm }); }
-  listDevices()      { return this.send({ cmd: 'listDevices' }); }
-  setDevice(opts)    { return this.send({ cmd: 'setDevice', ...(opts || {}) }); }
-  // FX 체인 (트랙별 · 슬롯 id 기반)
-  fxAdd(track, index)         { return this.send({ cmd: 'fxAdd', track, index }); }
-  fxRemove(track, slot)       { return this.send({ cmd: 'fxRemove', track, slot }); }
-  fxReorder(track, order)     { return this.send({ cmd: 'fxReorder', track, order }); }
-  fxSetChain(track, plugins)  { return this.send({ cmd: 'fxSetChain', track, plugins }); }
-  fxBypass(track, slot, on)   { return this.send({ cmd: 'fxBypass', track, slot, on }); }
-  fxBypassAll(track, on)      { return this.send({ cmd: 'fxBypassAll', track, on }); }
-  fxEditor(track, slot)       { return this.send({ cmd: 'fxEditor', track, slot }); }
-  fxSaveState(track, slot)    { return this.send({ cmd: 'fxSaveState', track, slot }); }
-  fxSetState(track, slot, data){ return this.send({ cmd: 'fxSetState', track, slot, data }); }
-  fxChainReq(track)           { return this.send({ cmd: 'fxChainReq', track }); }
-  recordArm(file)    { return this.send({ cmd: 'recordArm', file }); }
-  recordStop()       { return this.send({ cmd: 'recordStop' }); }
-  takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
-  takeClear()        { return this.send({ cmd: 'takeClear' }); }
-  takeLoad(file, start, trackId, id) { return this.send({ cmd: 'takeLoad', file, start, trackId, id }); }
-  takeMove(id, start, trackId){ return this.send({ cmd: 'takeMove', id, start, trackId }); }
-  stemOffset(samples){ return this.send({ cmd: 'stemOffset', samples }); }
-  // 녹음 트랙 (여러 개)
-  recTrackAdd()      { return this.send({ cmd: 'recTrackAdd' }); }
-  recTrackRemove(id) { return this.send({ cmd: 'recTrackRemove', id }); }
-  recArm(id)         { return this.send({ cmd: 'recArm', id }); }
-  recTrack(id, opts) { return this.send({ cmd: 'recTrack', id, ...(opts || {}) }); }
-  recTracks()        { return this.send({ cmd: 'recTracks' }); }
-  recTracksReset(tracks, gen) { return this.send({ cmd: 'recTracksReset', tracks, gen }); }
 
   quit() {
     if (!this.proc) return;
