@@ -2387,7 +2387,10 @@ body { display: flex; flex-direction: column; }
 
 /* 트랙 레인 — 진중한 딥 그레이 + 헤어라인 (플랫) */
 .daw-lanes { background: var(--timeline); }
-.daw-lane { border-bottom: 1px solid rgba(255,255,255,.045); }
+/* 레인 구분선: 레인 자체엔 없음(재생선 틈새 방지). 헤드는 불투명 선(재생선 덮음), 영역은 타임라인 선 */
+.daw-lane { border-bottom: none; }
+.daw-head { border-bottom: 1px solid color-mix(in srgb, var(--surface) 82%, #000); }
+.daw-lane .daw-area { border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
 .daw-head { background: var(--surface); }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
 .daw-clip { border: 1px solid rgba(255,255,255,.05); }

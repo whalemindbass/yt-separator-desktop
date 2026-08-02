@@ -513,7 +513,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -1148,20 +1148,28 @@ function wire() {
     if (lane) selectTrack(Number(lane.dataset.recid));
     scrubStart(e, area);
   });
-  // 룰러에서 드래그 = 내보내기 범위 선택 (클릭만 하면 해제)
+  // 룰러: 드래그 = 재생선 이동(스크럽) · Shift+드래그 = 내보내기 범위 선택
   $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
     if (!_dur) return;
     e.preventDefault();
     const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
     const toSec = (cx) => { const r = wrap.getBoundingClientRect(); return Math.max(0, Math.min(fullSec(), (cx - r.left - HEAD_W + sc.scrollLeft) / _pxPerSec)); };
-    const a = toSec(e.clientX); let b = a;
-    const mv = (ev) => { b = toSec(ev.clientX); _exportRange = { start: Math.min(a, b), end: Math.max(a, b) }; renderExportRange(); };
-    const up = () => {
-      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
-      if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }   // 드래그 안 하면 해제
-      else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`);
-    };
-    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    if (e.shiftKey) {   // 내보내기 범위
+      const a = toSec(e.clientX); let b = a;
+      const mv = (ev) => { b = toSec(ev.clientX); _exportRange = { start: Math.min(a, b), end: Math.max(a, b) }; renderExportRange(); };
+      const up = () => {
+        document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+        if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }
+        else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)} (Shift+드래그)`);
+      };
+      document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    } else {   // 재생선 이동
+      const seek = (cx) => { const t = toSec(cx); api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t); };
+      seek(e.clientX);
+      const mv = (ev) => seek(ev.clientX);
+      const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
+      document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    }
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
