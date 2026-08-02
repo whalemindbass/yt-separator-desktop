@@ -69,8 +69,7 @@ api.window.onState(({ maximized }) => titlebarEl.classList.toggle('maximized', m
 // ── Theme toggle (dark/light) ───────────────────
 (function initTheme() {
   const saved = localStorage.getItem('theme');
-  const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const initial = saved || (sysDark ? 'dark' : 'light');
+  const initial = saved || 'dark';   // 프로 툴 정체성 — 기본 다크 (저장된 선택은 존중)
   document.documentElement.dataset.theme = initial;
 })();
 $('theme-toggle').addEventListener('click', () => {

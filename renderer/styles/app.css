@@ -7,12 +7,15 @@
 }
 
 :root, :root[data-theme="dark"] {
-  --bg: #0f1114;
-  --surface: #161a20;
-  --elev: #1c2028;
+  --bg: #0a0c0f;
+  --surface: #13161c;
+  --elev: #1a1e25;
+  --elev-2: #232833;      /* 올라온 세그먼트/칩 */
+  --sunken: #0c0e12;      /* 인풋·트랙 등 파인 면 */
+  --hair-hi: rgba(255,255,255,.05);   /* 상단 하이라이트 */
   --input: #242830;
-  --border: rgba(255,255,255,.08);
-  --border-mid: rgba(255,255,255,.14);
+  --border: rgba(255,255,255,.07);
+  --border-mid: rgba(255,255,255,.13);
   --tx-1: #ececef;
   --tx-2: #9aa4b2;
   --tx-3: #6b7280;
@@ -55,6 +58,9 @@
   --bg: #fafbfc;
   --surface: #ffffff;
   --elev: #f4f5f7;
+  --elev-2: #ffffff;
+  --sunken: #eef0f3;
+  --hair-hi: rgba(255,255,255,.7);
   --input: #eef0f3;
   --border: rgba(15,20,30,.08);
   --border-mid: rgba(15,20,30,.16);
@@ -2357,3 +2363,66 @@ body { display: flex; flex-direction: column; }
 /* 믹서 페이더 — 채널 스트립 질감 */
 .mx-strip { background: linear-gradient(180deg, var(--elev), color-mix(in srgb, var(--elev) 88%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.25); }
 .mx-val { font-variant-numeric: tabular-nums; }
+.mx-fader { -webkit-appearance: none; appearance: none; background: transparent; }
+.mx-fader::-webkit-slider-runnable-track { width: 6px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border), inset 0 2px 4px rgba(0,0,0,.4); }
+.mx-fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 14px; border-radius: 3px; background: linear-gradient(180deg, var(--elev-2), var(--elev)); border: 1px solid var(--border-mid); box-shadow: 0 1px 3px rgba(0,0,0,.55), inset 0 1px 0 var(--hair-hi); margin-left: -9px; }
+.mx-fader:hover::-webkit-slider-thumb { border-color: var(--accent-soft-border); }
+.mx-fader:disabled::-webkit-slider-thumb { background: var(--elev); }
+
+/* ════════════════════════════════════════════════════════════
+   PRO 리스타일 — 전 화면 공통 컴포넌트 (다크 우선)
+   ════════════════════════════════════════════════════════════ */
+
+/* 앱 배경 — 은은한 방사형 비네트로 평면감 제거 */
+body { background:
+    radial-gradient(1200px 680px at 50% -8%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
+    var(--bg) !important; }
+
+/* 타이틀바 — 얇은 헤어라인 + 살짝 떠 있는 느낌 */
+.titlebar { border-bottom: 1px solid var(--border); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 6px 20px -18px rgba(0,0,0,.8); background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, #fff), var(--surface)); }
+.titles h1 { letter-spacing: -.01em; }
+.logo { border-radius: 8px; box-shadow: 0 0 0 1px var(--border), 0 2px 8px -2px rgba(var(--accent-rgb), .4); }
+
+/* 탭 — 활성 시 소프트 필 + 언더라인 글로우 */
+.tab { padding: 0 13px; height: 30px; border-radius: 8px; transition: color .14s var(--ease), background .14s var(--ease); }
+.tab:hover:not(.on) { color: var(--tx-1); background: color-mix(in srgb, var(--tx-1) 6%, transparent); }
+.tab.on { color: var(--tx-1); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: none; }
+.tab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -7px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+
+/* 세그먼트(pill-row) — 파인 트랙 위에 올라온 활성 세그먼트 */
+.pill-row { background: var(--sunken); border-color: var(--border); border-radius: 9px; padding: 3px; gap: 2px; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
+.pill { border: 0; border-radius: 6px; padding: 6px 13px; color: var(--tx-2); transition: color .14s, background .14s, box-shadow .14s; }
+.pill:last-child, .pill { border-right: 0; }
+.pill:hover:not(:disabled):not(.on) { color: var(--tx-1); background: color-mix(in srgb, var(--tx-1) 6%, transparent); }
+.pill.on { color: var(--accent); font-weight: 600; background: linear-gradient(180deg, var(--elev-2), var(--elev)); box-shadow: 0 1px 3px rgba(0,0,0,.45), inset 0 1px 0 var(--hair-hi), inset 0 0 0 1px var(--accent-soft-border); }
+.pill { position: relative; }
+
+/* 버튼 — 미세 그라디언트 + hover 리프트 + 포커스 링 */
+.btn, .mini, .daw .btn { transition: background .14s var(--ease), border-color .14s var(--ease), transform .08s var(--ease), box-shadow .14s var(--ease); }
+.btn:not(.pri):not(.icon) { background: linear-gradient(180deg, var(--elev-2), var(--elev)); border: 1px solid var(--border-mid); box-shadow: inset 0 1px 0 var(--hair-hi); }
+.btn:not(.pri):hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-mid)); }
+.btn:active:not(:disabled) { transform: translateY(.5px); }
+.btn.pri { background: linear-gradient(180deg, var(--accent-hover), var(--accent)); box-shadow: 0 1px 0 var(--hair-hi) inset, 0 4px 14px -6px rgba(var(--accent-rgb), .6); }
+.btn.pri:hover:not(:disabled) { box-shadow: 0 1px 0 var(--hair-hi) inset, 0 6px 18px -6px rgba(var(--accent-rgb), .75); }
+.btn:focus-visible, .pill:focus-visible, .tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* 입력 — 파인 면 + accent 포커스 글로우 */
+.url, .lib-search, input.url, input.lib-search {
+  background: var(--sunken); border: 1px solid var(--border); border-radius: 9px; color: var(--tx-1);
+  transition: border-color .14s, box-shadow .14s;
+}
+.url:focus, .lib-search:focus {
+  border-color: var(--accent-soft-border);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
+
+/* 카드/섹션 — 상단 하이라이트 + 부드러운 그림자 */
+.settings-section, .probe-card, .done-card, .daw-modal-box, .update-dialog-card {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--hair-hi), var(--shadow-card);
+}
+.settings-section { padding: 20px 22px; }
+.settings-section h3 { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tx-3); font-family: var(--mono); }
