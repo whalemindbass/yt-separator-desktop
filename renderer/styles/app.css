@@ -2312,4 +2312,48 @@ body { display: flex; flex-direction: column; }
 /* 트랙 타임라인 빈 상태 안내 */
 .daw-tracks-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--tx-4); font-size: 12px; line-height: 1.7; pointer-events: none; padding: 0 20px; }
 /* 줌 배율 표시 */
-.daw-zoom-val { min-width: 44px; text-align: center; font: 600 10px/1 var(--mono); color: var(--tx-3); }
+.daw-zoom-val { min-width: 46px; text-align: center; font: 600 10px/1 var(--mono); color: var(--tx-3); font-variant-numeric: tabular-nums; }
+
+/* ══ 다크 모던 DAW 디자인 정밀화 (Ableton풍) ══════════════ */
+/* 숫자 판독부는 탭ular 정렬 */
+.daw-tc, .daw-zoom-val, .mx-val, .vu-db, .tuner-cents, .tuner-note, #st-engine-status { font-variant-numeric: tabular-nums; }
+
+/* 트랜스포트 아이콘 버튼 — 원형, 또렷한 상태색 */
+.daw .btn svg { width: 15px; height: 15px; display: block; flex: none; }
+.daw-bottombar > .btn.icon { height: 34px; border-radius: 9px; }
+.daw-bottombar > .btn.icon svg { width: 16px; height: 16px; }
+.daw .btn.icon:hover:not(:disabled) { border-color: var(--border-mid); color: var(--tx-1); }
+.daw-zoom .btn.icon svg { width: 13px; height: 13px; }
+.daw .btn.tp-play { color: var(--accent); }
+.daw .btn.tp-play:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent-soft-border); }
+.daw .btn.rec svg { transition: transform .12s var(--ease); }
+.daw .btn.rec.armed { animation: recPulse 1.4s ease-in-out infinite; }
+@keyframes recPulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 0%, transparent); } }
+.tp-div { width: 1px; height: 22px; background: var(--border-mid); margin: 0 3px; flex: none; }
+
+/* 하단 트랜스포트 바 — 살짝 떠 있는 느낌 */
+.daw-bottombar { background: linear-gradient(var(--surface), color-mix(in srgb, var(--surface) 92%, #000)); box-shadow: 0 -1px 0 var(--border), 0 -8px 20px -16px rgba(0,0,0,.6); }
+.daw-tc { letter-spacing: .01em; text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 30%, transparent); }
+.daw-master { font-variant-numeric: tabular-nums; }
+.daw-master input[type=range] { accent-color: var(--accent); }
+
+/* 좌측 FX 패널 — 계층감 */
+.daw-left { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface)); }
+.daw-fx-slots { }
+.daw-fx-slot { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: inset 0 1px 0 rgba(255,255,255,.03); transition: border-color .12s, background .12s; }
+.daw-fx-slot:hover { border-color: var(--border-mid); }
+.daw-fx-slot.bypassed { opacity: .5; }
+
+/* 트랙 레인 — Ableton풍 딥 그레이 + 헤어라인 */
+.daw-lanes { background: color-mix(in srgb, var(--bg) 82%, #000); }
+.daw-lane { border-bottom: 1px solid rgba(255,255,255,.045); }
+.daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface)); }
+.daw-lane.selected .daw-head { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, var(--surface)), color-mix(in srgb, var(--accent) 9%, var(--surface))); }
+.daw-clip { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 3px rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.06); }
+.daw-take-clip { box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 1px 3px rgba(0,0,0,.3); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); }
+.daw-ruler { font-variant-numeric: tabular-nums; }
+.daw-ph { box-shadow: 0 0 6px var(--accent), 0 0 1px var(--accent); }
+
+/* 믹서 페이더 — 채널 스트립 질감 */
+.mx-strip { background: linear-gradient(180deg, var(--elev), color-mix(in srgb, var(--elev) 88%, #000)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.25); }
+.mx-val { font-variant-numeric: tabular-nums; }
