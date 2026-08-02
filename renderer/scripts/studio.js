@@ -116,19 +116,20 @@ function repositionStems() {
   });
 }
 // 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
-// 룰러/트랙 빈 곳 잡고 드래그 = 가로 스크롤(팬). 안 끌고 클릭만 하면 재생선 이동
+// 화면 x → 재생선 이동
+function seekToClientX(cx) {
+  const rect = $('daw-lanes').getBoundingClientRect();
+  const t = Math.max(0, Math.min(fullSec(), (cx - rect.left - HEAD_W) / _pxPerSec));
+  api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
+}
+// 룰러/트랙 잡고 드래그 = 가로 스크롤(팬). 안 끌고 클릭만 하면 재생선 이동
 function grabPan(e) {
   const sc = $('daw-tscroll'); if (!sc) return;
   const startX = e.clientX, startScroll = sc.scrollLeft; let moved = false;
-  const seekAt = (cx) => {
-    const rect = $('daw-lanes').getBoundingClientRect();
-    const t = Math.max(0, Math.min(fullSec(), (cx - rect.left - HEAD_W) / _pxPerSec));
-    api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
-  };
   const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 3) moved = true; sc.scrollLeft = startScroll - dx; updatePlayhead(_lastSec); };
   const up = () => {
     document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
-    if (!moved && !_recArmed) seekAt(startX);   // 클릭(드래그 안 함) = 재생선 이동 (녹음 중엔 이동 금지)
+    if (!moved && !_recArmed) seekToClientX(startX);   // 클릭(드래그 안 함) = 재생선 이동 (녹음 중엔 이동 금지)
   };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
@@ -639,8 +640,10 @@ function renderTakes() {
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX, base = tk.start;
       const srcLane = el.closest('.daw-lane-rec');
-      let target = srcLane;
+      let target = srcLane, dragging = false;
       const move = (ev) => {
+        if (!dragging && Math.abs(ev.clientX - startX) < 4) return;   // 임계값 전엔 클릭으로 취급
+        dragging = true;
         tk.start = Math.max(0, base + (ev.clientX - startX) / _pxPerSec);   // 좌우 = 시간
         el.style.left = (tk.start * _pxPerSec) + 'px';
         // 상하 = 대상 내 트랙 감지 (다른 내 트랙으로 이동)
@@ -655,14 +658,11 @@ function renderTakes() {
         document.removeEventListener('pointercancel', up);
         hideDragBadge();
         document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
+        if (!dragging) { if (!_recArmed) seekToClientX(startX); return; }   // 클릭 = 재생선 이동(클립 위에서도)
         const newId = target ? Number(target.dataset.recid) : tk.trackId;
         const startS = Math.round(tk.start * (_sr || 44100));
-        if (newId && newId !== tk.trackId) {   // 트랙 변경
-          tk.trackId = newId;
-          api.engine.takeMove(tk.id, startS, newId);
-        } else {
-          api.engine.takeMove(tk.id, startS, 0);
-        }
+        if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, startS, newId); }
+        else api.engine.takeMove(tk.id, startS, 0);
         layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
       };
       document.addEventListener('pointermove', move);
@@ -1140,17 +1140,21 @@ function wire() {
 
   // Ctrl+휠 = 배율(커서 기준). 그냥 휠 = 위아래 스크롤(네이티브)
   $('daw-tscroll').addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return;              // 배율은 Ctrl 눌렀을 때만
-    if (!_dur) return;
-    e.preventDefault();
     const sc = $('daw-tscroll');
-    const rect = $('daw-lanes').getBoundingClientRect();
-    const cursorX = e.clientX - rect.left - HEAD_W + sc.scrollLeft;
-    const tAt = cursorX / _pxPerSec;
-    const factor = Math.exp(-e.deltaY * 0.0015);
-    _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
-    layout();
-    sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
+    if (e.ctrlKey) {                       // Ctrl+휠 = 배율(커서 기준)
+      e.preventDefault();
+      const rect = $('daw-lanes').getBoundingClientRect();
+      const cursorX = e.clientX - rect.left - HEAD_W + sc.scrollLeft;
+      const tAt = cursorX / _pxPerSec;
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
+      layout();
+      sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
+    } else {                               // 그냥 휠 = 가로 스크롤
+      e.preventDefault();
+      sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX);
+      updatePlayhead(_lastSec);
+    }
   }, { passive: false });
 
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));

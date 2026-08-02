@@ -2251,7 +2251,7 @@ body { display: flex; flex-direction: column; }
 .daw-lanes { position: relative; }
 .daw-lane { display: grid; grid-template-columns: 140px 1fr; height: 64px; border-bottom: 1px solid var(--border); }
 .daw-head { position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 8px 9px; display: flex; flex-direction: column; gap: 5px; }
-.daw-head::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c, var(--accent)); }
+.daw-head::before { content: none; }
 .daw-head .nm { font-size: 11.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
 .daw-head .nm i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--accent)); flex: none; }
 .daw-head .ctrls { display: flex; align-items: center; gap: 5px; }
