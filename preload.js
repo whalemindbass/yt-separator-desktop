@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('yssApi', {
     copyFile:    (src, dst)      => ipcRenderer.invoke('fs:copyFile', src, dst),
     writeBuffer: (path, data)    => ipcRenderer.invoke('fs:writeBuffer', path, data),
   },
+  audio: {
+    transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
+  },
 
   // 외부
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

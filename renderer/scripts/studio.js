@@ -87,7 +87,7 @@ const HEAD_W = 140;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
-let _exporting = false, _exportPath = null;    // export 진행 상태
+let _exporting = false, _exportMp3 = null, _exportTmp = null;   // export 진행 상태
 const armedRecId = () => (_recTracks.find(r => r.armed) || _recTracks[0] || {}).id;
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
@@ -653,6 +653,52 @@ async function loadTakeSet(ts) {
     flashTake('녹음 불러옴: ' + ts.name);
   } finally { _loadingTakeSet = false; }
 }
+// ── Export: 포맷·품질 선택 ──
+const EXPORT_QUAL = {
+  wav:  [['24', '24-bit'], ['16', '16-bit'], ['32', '32-bit float']],
+  aiff: [['24', '24-bit'], ['16', '16-bit'], ['32', '32-bit float']],
+  flac: [['24', '24-bit'], ['16', '16-bit']],
+  mp3:  [['320', '320 kbps'], ['256', '256 kbps'], ['192', '192 kbps'], ['128', '128 kbps']],
+};
+function openExportModal() {
+  if (!_tracks.length && !_recTracks.length) { flashTake('내보낼 내용이 없습니다.'); return; }
+  if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
+  const host = $('daw-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>내보내기</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" style="padding:16px">
+      <div class="dev-field"><span>포맷</span><select id="exp-fmt">
+        <option value="wav">WAV · 무손실</option>
+        <option value="flac">FLAC · 무손실(압축)</option>
+        <option value="aiff">AIFF · 무손실</option>
+        <option value="mp3">MP3 · 손실(공유용)</option>
+      </select></div>
+      <div class="dev-field" style="margin-top:10px"><span>품질</span><select id="exp-q"></select></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="exp-go">내보내기</button></div>
+    </div></div>`;
+  host.hidden = false;
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
+  const fmt = $('exp-fmt'), q = $('exp-q');
+  const fillQ = () => { q.innerHTML = EXPORT_QUAL[fmt.value].map(([v, l]) => `<option value="${v}">${l}</option>`).join(''); };
+  fmt.addEventListener('change', fillQ); fillQ();
+  $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value); });
+}
+async function runExport(format, quality) {
+  if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
+  const res = await api.dialog.saveAs('mix.' + format, [format]);
+  if (!res || !res.ok || !res.filePath) return;
+  _exporting = true;
+  flashTake('내보내는 중… 0%');
+  if (format === 'mp3') {   // 임시 WAV 렌더 → ffmpeg MP3 변환
+    _exportTmp = res.filePath.replace(/\.mp3$/i, '') + '.__export_tmp.wav';
+    _exportMp3 = { dst: res.filePath, bitrate: quality };
+    api.engine.cmd({ cmd: 'export', file: _exportTmp, format: 'wav', bitDepth: 24 });
+  } else {
+    _exportMp3 = null; _exportTmp = null;
+    api.engine.cmd({ cmd: 'export', file: res.filePath, format, bitDepth: Number(quality) });
+  }
+}
+
 function openTakeSetPicker() {
   const ps = getTakeSets();
   if (!ps.length) { openModal('녹음 불러오기', '<div class="daw-modal-empty">이 곡에 저장된 녹음이 없습니다.</div>', () => {}); return; }
@@ -720,12 +766,22 @@ function onEngineEvent(m) {
       flashTake(`내보내는 중… ${Math.round(m.pct)}%`);
       break;
     case 'exportDone':
-      _exporting = false;
-      flashTake('내보내기 완료: ' + (m.file || ''));
-      if (m.file) api.openPath(m.file);   // 저장된 파일 열기
+      if (_exportMp3) {   // 임시 WAV 렌더 끝 → MP3 변환
+        const job = _exportMp3, tmp = _exportTmp; _exportMp3 = null; _exportTmp = null;
+        flashTake('MP3 변환 중…');
+        api.audio.transcode(tmp, job.dst, { bitrate: job.bitrate }).then((r) => {
+          _exporting = false;
+          if (r && r.ok) { flashTake('내보내기 완료: ' + job.dst); api.openPath(job.dst); }
+          else flashTake('MP3 변환 실패: ' + (r && r.error || ''));
+        });
+      } else {
+        _exporting = false;
+        flashTake('내보내기 완료: ' + (m.file || ''));
+        if (m.file) api.openPath(m.file);
+      }
       break;
     case 'exportError':
-      _exporting = false;
+      _exporting = false; _exportMp3 = null; _exportTmp = null;
       flashTake('내보내기 실패: ' + (m.msg || ''));
       break;
     case 'plugins':
@@ -959,16 +1015,8 @@ function wire() {
   });
   $('st-take-load').addEventListener('click', openTakeSetPicker);
 
-  // Export — 전체 믹스(스템+내 녹음·FX·마스터)를 WAV 로 오프라인 렌더
-  $('st-export').addEventListener('click', async () => {
-    if (!_tracks.length && !_recTracks.length) { flashTake('내보낼 내용이 없습니다.'); return; }
-    if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
-    const res = await api.dialog.saveAs('mix.wav', ['wav']);
-    if (!res || !res.ok || !res.filePath) return;
-    _exporting = true; _exportPath = res.filePath;
-    flashTake('내보내는 중… 0%');
-    api.engine.cmd({ cmd: 'export', file: res.filePath });
-  });
+  // Export — 포맷/품질 선택 후 전체 믹스를 오프라인 렌더
+  $('st-export').addEventListener('click', openExportModal);
 
   // 내 소리 모니터 on/off
   let _monOn = true;

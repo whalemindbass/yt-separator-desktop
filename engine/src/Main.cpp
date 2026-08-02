@@ -586,8 +586,9 @@ public:
         emitChain (*rt);
     }
 
-    // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터)를 WAV 로 (message 스레드) ----
-    void exportMix (const String& outPath)
+    // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터) (message 스레드) ----
+    //   format: wav | flac | aiff (MP3 은 렌더러가 WAV 렌더 후 ffmpeg 변환)
+    void exportMix (const String& outPath, const String& format, int bitDepth)
     {
         const double sr = (deviceSampleRate > 0 ? deviceSampleRate : stemSampleRate);
         const int block = 2048;
@@ -654,9 +655,17 @@ public:
         File out (outPath); out.deleteFile();
         std::unique_ptr<FileOutputStream> os (out.createOutputStream());
         if (os == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "파일 열기 실패"); emit (var (e)); return; }
-        WavAudioFormat wav;
-        std::unique_ptr<AudioFormatWriter> writer (wav.createWriterFor (os.get(), sr, 2, 24, {}, 0));
-        if (writer == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "writer 생성 실패"); emit (var (e)); return; }
+
+        std::unique_ptr<AudioFormat> af;
+        if      (format == "flac") af.reset (new FlacAudioFormat());
+        else if (format == "aiff") af.reset (new AiffAudioFormat());
+        else                       af.reset (new WavAudioFormat());
+        int bits = bitDepth > 0 ? bitDepth : 24;
+        const auto allowed = af->getPossibleBitDepths();          // 포맷이 지원하는 비트뎁스로 보정
+        if (! allowed.contains (bits)) bits = allowed.isEmpty() ? 24 : allowed.getLast();
+        const bool isFloat = (bits == 32 && format != "flac");    // 32-bit = float(WAV/AIFF)
+        std::unique_ptr<AudioFormatWriter> writer (af->createWriterFor (os.get(), sr, 2, bits, {}, 0));
+        if (writer == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "이 포맷/비트뎁스 지원 안 됨"); emit (var (e)); return; }
         os.release();
 
         AudioBuffer<float> mix (2, block), sbuf (2, block), tbuf (2, block), tmp (2, block);
@@ -696,12 +705,13 @@ public:
                 for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, tbuf, c, 0, n, tk.gain * mg);
             }
 
-            mix.applyGain (0, n, master);   // 마스터 + 세이프 클리퍼
-            for (int c = 0; c < 2; ++c)
-            {
-                FloatVectorOperations::max (mix.getWritePointer (c), mix.getReadPointer (c), -1.0f, n);
-                FloatVectorOperations::min (mix.getWritePointer (c), mix.getReadPointer (c),  1.0f, n);
-            }
+            mix.applyGain (0, n, master);   // 마스터 (+ 정수 포맷은 세이프 클리퍼, float 은 헤드룸 보존)
+            if (! isFloat)
+                for (int c = 0; c < 2; ++c)
+                {
+                    FloatVectorOperations::max (mix.getWritePointer (c), mix.getReadPointer (c), -1.0f, n);
+                    FloatVectorOperations::min (mix.getWritePointer (c), mix.getReadPointer (c),  1.0f, n);
+                }
             writer->writeFromAudioSampleBuffer (mix, 0, n);
             pos += n;
             if ((++blk % 40) == 0) { auto* p = ev ("exportProgress"); p->setProperty ("pct", (double) pos / (double) total * 100.0); emit (var (p)); }
@@ -1063,7 +1073,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["track"], (int) c["slot"]);
     else if (cmd == "fxSetState")  engine.fxSetState ((int) c["track"], (int) c["slot"], c["data"].toString());
     else if (cmd == "fxChainReq")  engine.emitChainFor ((int) c["track"]);
-    else if (cmd == "export")      engine.exportMix (c["file"].toString());
+    else if (cmd == "export")      engine.exportMix (c["file"].toString(), c["format"].toString(), (int) c["bitDepth"]);
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
     else                           std::cerr << "[engine] unknown cmd: " << cmd << "\n";
 }

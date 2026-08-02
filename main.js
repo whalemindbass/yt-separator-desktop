@@ -476,6 +476,27 @@ ipcMain.handle('engine:recordArm', () => {
   const file = path.join(dir, `take-${Date.now()}.wav`);
   return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
 });
+// Export MP3: 엔진이 렌더한 임시 WAV → ffmpeg 로 MP3 변환 후 임시 삭제
+ipcMain.handle('audio:transcode', async (_ev, src, dst, opts) => {
+  if (typeof src !== 'string' || !fs.existsSync(src)) return { ok: false, error: '원본 없음' };
+  if (typeof dst !== 'string' || !dst) return { ok: false, error: '대상 경로 없음' };
+  const o = opts || {};
+  const br = String(Math.max(64, Math.min(320, parseInt(o.bitrate, 10) || 320)));
+  const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', src,
+    '-codec:a', 'libmp3lame', '-b:a', br + 'k', '-y', dst];
+  return await new Promise((resolve) => {
+    let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
+    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let stderr = '';
+    proc.stderr.on('data', (d) => stderr += d);
+    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('close', (code) => {
+      try { fs.unlinkSync(src); } catch {}   // 임시 WAV 정리
+      if (code === 0) resolve({ ok: true, dst });
+      else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-200) });
+    });
+  });
+});
 ipcMain.handle('engine:quit', () => { audioEngine?.quit(); return { ok: true }; });
 // 종료 시 엔진 자식 프로세스가 orphan 으로 남지 않도록 exit 까지 기다림 (Windows 는 자동 종료 안 됨)
 let _quitting = false;
