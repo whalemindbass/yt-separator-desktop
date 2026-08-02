@@ -342,6 +342,17 @@ function renderWaves(buffers) {
   });
 }
 
+function ensurePlayhead() {
+  const lanes = $('daw-lanes'); if (!lanes) return null;
+  let ph = document.getElementById('daw-playhead');
+  if (!ph || ph.parentElement !== lanes) {   // renderTracks 가 lanes 비우므로 없으면 재생성
+    if (ph) ph.remove();
+    ph = document.createElement('div'); ph.id = 'daw-playhead'; ph.className = 'daw-ph'; ph.hidden = true;
+    lanes.appendChild(ph);
+  }
+  return ph;
+}
+
 function layout() {
   const w = contentW();
   $('daw-lanes').style.width = (HEAD_W + w) + 'px';
@@ -356,6 +367,7 @@ function layout() {
     tk.textContent = fmtTC(s).replace(/\.000$/, '');
     ruler.appendChild(tk);
   }
+  ensurePlayhead();   // 재생선을 lanes 안에 유지(헤드보다 아래 z → 컨트롤 컬럼에 안 비침)
   renderTakes();
   repositionStems();
   updatePlayhead(_lastSec);

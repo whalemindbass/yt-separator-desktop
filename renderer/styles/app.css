@@ -13,6 +13,8 @@
   --elev-2: #232833;      /* 올라온 세그먼트/칩 */
   --sunken: #0c0e12;      /* 인풋·트랙 등 파인 면 */
   --hair-hi: rgba(255,255,255,.05);   /* 상단 하이라이트 */
+  --timeline: #05070b;    /* 트랙 타임라인 배경 */
+  --video-bg: #05070a;    /* 영상 레터박스 배경 */
   --input: #242830;
   --border: rgba(255,255,255,.07);
   --border-mid: rgba(255,255,255,.13);
@@ -61,6 +63,8 @@
   --elev-2: #ffffff;
   --sunken: #eef0f3;
   --hair-hi: rgba(255,255,255,.7);
+  --timeline: #ffffff;    /* 라이트 테마: 트랙 배경 화이트 */
+  --video-bg: #ffffff;    /* 라이트 테마: 영상 레터박스 화이트 */
   --input: #eef0f3;
   --border: rgba(15,20,30,.08);
   --border-mid: rgba(15,20,30,.16);
@@ -2073,7 +2077,7 @@ body { display: flex; flex-direction: column; }
 .studio-sub { font-size: var(--fs-md); color: var(--tx-3); margin-top: 2px; }
 .studio-engine { display: flex; align-items: center; gap: 10px; }
 .st-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--tx-4); flex: none; }
-.st-dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.st-dot.on { background: var(--ok); }
 .studio-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px; }
 .studio-card h3 { font-size: var(--fs-md); font-weight: 700; color: var(--tx-2); letter-spacing: .02em; margin: 0 0 12px; }
 .studio-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -2103,7 +2107,7 @@ body { display: flex; flex-direction: column; }
 .daw-sp { flex: 1; }
 .daw-eng { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--tx-2); }
 .st-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tx-4); flex: none; }
-.st-dot.on { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+.st-dot.on { background: var(--ok); }
 .daw-tc { font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--accent); padding: 0 6px; min-width: 92px; }
 .daw-zoom { display: flex; align-items: center; gap: 6px; color: var(--tx-3); font-size: 11.5px; }
 .daw-zoom .btn.icon { height: 26px; width: 26px; }
@@ -2120,11 +2124,11 @@ body { display: flex; flex-direction: column; }
 /* 레벨 미터 — 세그먼트 LED 스타일 (파인 트랙 + 눈금) */
 .vu { position: relative; height: 12px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border), inset 0 1px 3px rgba(0,0,0,.4); overflow: hidden; }
 .vu-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--ok) 55%, var(--stem-drums) 78%, var(--danger)); transition: width .05s linear; }
-.vu-fill.clip { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.vu-fill.clip { background: var(--danger); }
 .vu::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 5px, var(--sunken) 5px 7px); }
 .vu-db { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--tx-2); text-align: right; font-variant-numeric: tabular-nums; }
-.tuner-note { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; text-shadow: 0 0 20px transparent; transition: color .12s, text-shadow .12s; }
-.tuner-note.in-tune { color: var(--ok); text-shadow: 0 0 22px color-mix(in srgb, var(--ok) 55%, transparent); }
+.tuner-note { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; transition: color .12s; }
+.tuner-note.in-tune { color: var(--ok); }
 
 /* 새 분리(첫 화면) — 워크플로우를 하나의 콘솔 패널로 */
 .body[data-view="separate"] > .hero {
@@ -2156,9 +2160,9 @@ body { display: flex; flex-direction: column; }
 .daw-bottombar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--surface); border-top: 1px solid var(--border); flex-wrap: wrap; }
 .daw-toast { position: absolute; top: 14px; left: 50%; transform: translate(-50%, -8px); background: var(--elev); border: 1px solid var(--border-mid); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--tx-1); box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 60; max-width: 70%; }
 .daw-toast.show { opacity: 1; transform: translate(-50%, 0); }
-.daw-hero { display: flex; background: #05070a; border-bottom: 1px solid var(--border); flex: none; height: 46vh; min-height: 200px; }
-.daw-video { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; background: radial-gradient(130% 100% at 50% 0, #171c24, #05070a); overflow: hidden; }
-.daw-video video { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: #000; }
+.daw-hero { display: flex; background: var(--video-bg); border-bottom: 1px solid var(--border); flex: none; height: 46vh; min-height: 200px; }
+.daw-video { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; background: var(--video-bg); overflow: hidden; }
+.daw-video video { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; background: var(--video-bg); }
 .daw-video-empty { position: absolute; color: var(--tx-3); font-size: 13px; }
 .daw-video video { cursor: pointer; }
 .daw-vplay { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 66px; height: 66px; border-radius: 50%; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.2); backdrop-filter: blur(3px); pointer-events: none; }
@@ -2167,7 +2171,7 @@ body { display: flex; flex-direction: column; }
 .daw-vbar { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: rgba(255,255,255,.14); cursor: pointer; opacity: 0; transition: opacity .15s, height .12s; }
 .daw-video:hover .daw-vbar { opacity: 1; }
 .daw-vbar:hover { height: 12px; }
-.daw-vbar > i { display: block; height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.daw-vbar > i { display: block; height: 100%; width: 0; background: var(--accent); }
 .daw-badge { position: absolute; top: 12px; left: 12px; font: 700 10.5px/1 var(--mono); color: var(--tx-2); background: rgba(0,0,0,.55); padding: 5px 10px; border-radius: 999px; }
 .daw-fx { width: 290px; flex: none; border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
 .daw-fx[hidden] { display: none; }
@@ -2193,8 +2197,8 @@ body { display: flex; flex-direction: column; }
 .daw-fx-slot .drag { flex: none; color: var(--tx-4); cursor: grab; font-size: 12px; line-height: 1; }
 /* FX on/off = LED 도트 (클릭 토글) */
 .daw-fx-slot .pw { flex: none; width: 10px; height: 10px; margin: 0 4px 0 2px; border-radius: 50%; border: 0; background: var(--tx-4); cursor: pointer; transition: background .14s, box-shadow .14s; }
-.daw-fx-slot .pw.on { background: var(--accent); box-shadow: 0 0 7px color-mix(in srgb, var(--accent) 80%, transparent); }
-.daw-fx-slot .pw:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.daw-fx-slot .pw.on { background: var(--accent); }
+.daw-fx-slot .pw:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 .daw-fx-slot .info { flex: 1; min-width: 0; margin: 0; font-family: var(--sans); }
 .daw-fx-slot .info .n { font-size: 12px; font-weight: 600; color: var(--tx-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daw-fx-slot .ed { flex: none; width: 24px; height: 24px; padding: 0; font-size: 12px; border: 1px solid transparent; background: transparent; color: var(--tx-3); border-radius: 5px; cursor: pointer; }
@@ -2255,12 +2259,12 @@ body { display: flex; flex-direction: column; }
 .daw-area { position: relative; overflow: hidden; }
 .daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
-.daw-ph { position: absolute; top: 0; width: 1px; background: var(--accent); box-shadow: 0 0 4px var(--accent); z-index: 3; pointer-events: none; }
+.daw-ph { position: absolute; top: 0; width: 1.5px; background: var(--accent); z-index: 4; pointer-events: none; }
 .daw-master { display: flex; align-items: center; gap: 7px; font: 700 10px/1 var(--mono); letter-spacing: .06em; color: var(--tx-3); }
 .daw-master input[type=range] { width: 90px; accent-color: var(--accent); cursor: pointer; }
 .daw-fx-slot .del { flex: none; width: 24px; height: 24px; padding: 0; font-size: 12px; border: 1px solid transparent; background: transparent; color: var(--tx-4); border-radius: 5px; cursor: pointer; }
 .daw-fx-slot .del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); box-shadow: 0 0 10px color-mix(in srgb, var(--danger) 50%, transparent); pointer-events: none; }
+.daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); pointer-events: none; }
 .daw-take-clip { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); cursor: pointer; }
 .daw-take-clip svg { width: 100%; height: 100%; display: block; }
 .daw-ctx { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 7px; box-shadow: var(--shadow-pop); padding: 4px; }
@@ -2288,7 +2292,7 @@ body { display: flex; flex-direction: column; }
 .daw-ms[data-m="solo"].on { color: #4a90d9; border-color: color-mix(in srgb, #4a90d9 55%, transparent); background: color-mix(in srgb, #4a90d9 16%, transparent); }
 /* R(arm): 대기=중립, armed 일 때만 빨강 */
 .daw-rec-arm { color: var(--tx-3); border-color: var(--border-mid); }
-.daw-rec-arm.armed { color: #fff; background: var(--danger); border-color: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent); }
+.daw-rec-arm.armed { color: #fff; background: var(--danger); border-color: var(--danger); }
 .daw-rec-del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
 .daw-rec-del { color: var(--tx-4); border-color: transparent; }
 .daw-rec-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
@@ -2299,7 +2303,7 @@ body { display: flex; flex-direction: column; }
 
 /* 선택된 트랙 강조 (컨트롤부) */
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
-.daw-lane.selected .daw-head::before { width: 4px; box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent); }
+.daw-lane.selected .daw-head::before { width: 2px; }
 .daw-lane.selected .ctrls { border-radius: 5px; }
 .daw-lane.selected .daw-head .nm { color: var(--accent); }
 
@@ -2314,7 +2318,7 @@ body { display: flex; flex-direction: column; }
 .daw-fx-power:disabled { opacity: .4; cursor: default; }
 .daw-fx-power .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--tx-4); box-shadow: none; transition: background .12s, box-shadow .12s; }
 .daw-fx-power.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
-.daw-fx-power.active .pdot { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent); }
+.daw-fx-power.active .pdot { background: var(--accent); }
 .daw-left.empty .daw-fx-power { display: none; }
 
 /* 하단 믹서 — 마스터 / 선택 트랙 페이더 */
@@ -2356,13 +2360,12 @@ body { display: flex; flex-direction: column; }
 .daw .btn.tp-play { color: var(--accent); }
 .daw .btn.tp-play:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent-soft-border); }
 .daw .btn.rec svg { transition: transform .12s var(--ease); }
-.daw .btn.rec.armed { animation: recPulse 1.4s ease-in-out infinite; }
-@keyframes recPulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 0%, transparent); } }
+.daw .btn.rec.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
 .tp-div { width: 1px; height: 22px; background: var(--border-mid); margin: 0 3px; flex: none; }
 
 /* 하단 트랜스포트 바 — 살짝 떠 있는 느낌 */
 .daw-bottombar { background: linear-gradient(var(--surface), color-mix(in srgb, var(--surface) 92%, #000)); box-shadow: 0 -1px 0 var(--border), 0 -8px 20px -16px rgba(0,0,0,.6); }
-.daw-tc { letter-spacing: .01em; text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 30%, transparent); }
+.daw-tc { letter-spacing: .01em; }
 .daw-master { font-variant-numeric: tabular-nums; }
 .daw-master input[type=range] { accent-color: var(--accent); }
 
@@ -2377,14 +2380,13 @@ body { display: flex; flex-direction: column; }
 .daw-fx-slot.bypassed { opacity: .5; }
 
 /* 트랙 레인 — 진중한 딥 그레이 + 헤어라인 (플랫) */
-.daw-lanes { background: color-mix(in srgb, var(--bg) 82%, #000); }
+.daw-lanes { background: var(--timeline); }
 .daw-lane { border-bottom: 1px solid rgba(255,255,255,.045); }
 .daw-head { background: var(--surface); }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
 .daw-clip { border: 1px solid rgba(255,255,255,.05); }
 .daw-take-clip { border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); }
 .daw-ruler { font-variant-numeric: tabular-nums; }
-.daw-ph { box-shadow: 0 0 4px var(--accent); }
 
 /* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
 .daw-lane .daw-area { background-image: linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px); background-size: var(--grid, 60px) 100%; }
@@ -2422,7 +2424,7 @@ body { background: var(--bg) !important; }
 .tab { padding: 0 13px; height: 30px; border-radius: 8px; transition: color .14s var(--ease), background .14s var(--ease); }
 .tab:hover:not(.on) { color: var(--tx-1); background: color-mix(in srgb, var(--tx-1) 6%, transparent); }
 .tab.on { color: var(--tx-1); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: none; }
-.tab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -7px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+.tab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -7px; height: 2px; border-radius: 2px; background: var(--accent); }
 
 /* 세그먼트(pill-row) — 파인 트랙 위에 올라온 활성 세그먼트 */
 .pill-row { background: var(--sunken); border-color: var(--border); border-radius: 9px; padding: 3px; gap: 2px; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }
