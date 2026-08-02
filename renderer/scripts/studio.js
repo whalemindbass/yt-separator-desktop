@@ -416,7 +416,7 @@ function updatePlayhead(sec) {
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
   ph.style.left = (HEAD_W + sec * _pxPerSec) + 'px';
   ph.style.height = ($('daw-lanes').offsetHeight || 0) + 'px';
-  $('st-pos').textContent = fmtTC(sec);
+  const pos = $('st-pos'); if (pos) pos.textContent = fmtTC(sec);
   $('daw-ruler').style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
 }
 
