@@ -510,8 +510,45 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-import-audio', 'st-import-video', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
+}
+
+// ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
+function nextClipId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+async function ensureImportTrack() {
+  let id = _selTrack != null ? _selTrack : armedRecId();
+  if (id != null) return id;
+  const before = _recTracks.length;
+  api.engine.recTrackAdd();
+  await new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { if (_recTracks.length > before || Date.now() - t0 > 2000) { clearInterval(iv); res(); } }, 25); });
+  return _recTracks.length ? _recTracks[_recTracks.length - 1].id : null;
+}
+async function importAudio(paths, startSec, trackId) {
+  if (!_started) { flashTake('먼저 상단 “오디오 시작”을 누르세요.'); return; }
+  const tid = trackId != null ? trackId : await ensureImportTrack();
+  if (tid == null) { flashTake('트랙을 만들 수 없습니다.'); return; }
+  const startS = Math.round(Math.max(0, startSec || 0) * (_sr || 44100));
+  for (const p of paths) {
+    const id = nextClipId();
+    api.engine.takeLoad(p, startS, tid, id);
+    await renderTake(p, startS, id, tid);
+  }
+  flashTake(`오디오 임포트: ${paths.length}개`);
+}
+function importVideo(path) {
+  const v = $('daw-video'); if (!v) return;
+  const em = $('daw-video-empty'); if (em) em.hidden = true;
+  v.src = toYtsepUrl(path); v.load();
+  flashTake('영상 임포트됨');
+}
+async function pickImportAudio() {
+  const r = await api.dialog.pickAudioFiles();
+  if (r && r.ok && r.filePaths?.length) importAudio(r.filePaths, _lastSec, _selTrack != null ? _selTrack : armedRecId());
+}
+async function pickImportVideo() {
+  const r = await api.dialog.pickVideoFile();
+  if (r && r.ok && r.filePath) importVideo(r.filePath);
 }
 
 // ── 곡 로드 ────────────────────────────────────────
@@ -1107,6 +1144,25 @@ function wire() {
   }, { passive: false });
 
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
+
+  // 파일 임포트 — 버튼 + 타임라인 드래그드롭
+  $('st-import-audio').addEventListener('click', pickImportAudio);
+  $('st-import-video').addEventListener('click', pickImportVideo);
+  const tscroll = $('daw-tscroll');
+  ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
+  tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });
+  tscroll.addEventListener('drop', (e) => {
+    e.preventDefault(); tscroll.classList.remove('drop-hi');
+    const all = [...(e.dataTransfer?.files || [])].map(f => ({ name: f.name, path: api.pathForFile(f) })).filter(f => f.path);
+    const audio = all.filter(f => /\.(wav|mp3|flac|ogg|aif|aiff|m4a|aac)$/i.test(f.name));
+    const vid = all.find(f => /\.(mp4|mkv|webm|mov|avi|m4v)$/i.test(f.name));
+    const rect = $('daw-lanes').getBoundingClientRect();
+    const startSec = Math.max(0, (e.clientX - rect.left - HEAD_W) / _pxPerSec);
+    const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.daw-lane-rec');
+    const tid = lane ? Number(lane.dataset.recid) : null;
+    if (audio.length) importAudio(audio.map(f => f.path), startSec, tid);
+    if (vid) importVideo(vid.path);
+  });
 
   $('st-fx-add').addEventListener('click', () => {
     if (!_plugins.length) { api.engine.scanPlugins(); setTimeout(openVstPicker, 700); }

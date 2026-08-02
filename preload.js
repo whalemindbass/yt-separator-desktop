@@ -1,7 +1,9 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('yssApi', {
+  // 드래그드롭 파일 → 절대경로 (Electron 43: File.path 제거됨 → webUtils)
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
   // 앱 메타
   getVersion:      () => ipcRenderer.invoke('app:version'),
   getPlatform:     () => ipcRenderer.invoke('app:platform'),
@@ -47,6 +49,8 @@ contextBridge.exposeInMainWorld('yssApi', {
   // 로컬 파일/폴더 선택 · 저장
   dialog: {
     pickMedia:  ()               => ipcRenderer.invoke('dialog:pickMedia'),
+    pickAudioFiles: ()           => ipcRenderer.invoke('dialog:pickAudioFiles'),
+    pickVideoFile:  ()           => ipcRenderer.invoke('dialog:pickVideoFile'),
     saveAs:     (name, exts)     => ipcRenderer.invoke('dialog:saveAs', name, exts),
     pickFolder: (title)          => ipcRenderer.invoke('dialog:pickFolder', title),
   },

@@ -441,6 +441,32 @@ ipcMain.handle('dialog:pickMedia', async () => {
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0] };
 });
+// 스튜디오: 오디오 파일 여러 개 임포트 (트랙 클립)
+ipcMain.handle('dialog:pickAudioFiles', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: '오디오 파일 임포트',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '오디오', extensions: ['wav','mp3','flac','ogg','aif','aiff','m4a','aac'] },
+      { name: '모든 파일', extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePaths: res.filePaths };
+});
+// 스튜디오: 비디오 파일 임포트
+ipcMain.handle('dialog:pickVideoFile', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: '영상 파일 임포트',
+    properties: ['openFile'],
+    filters: [
+      { name: '영상', extensions: ['mp4','mkv','webm','mov','avi','m4v'] },
+      { name: '모든 파일', extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePath: res.filePaths[0] };
+});
 
 ipcMain.handle('update:check',    () => { checkForUpdates(); return { ok: true }; });
 ipcMain.handle('update:download', async () => {
