@@ -87,6 +87,7 @@ const HEAD_W = 140;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
+let _exporting = false, _exportPath = null;    // export 진행 상태
 const armedRecId = () => (_recTracks.find(r => r.armed) || _recTracks[0] || {}).id;
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
@@ -715,6 +716,18 @@ function onEngineEvent(m) {
     case 'fxError':
       flashTake(`⚠ 이펙트 ${m.failed}개 로드 실패 (플러그인 누락/버전)`);
       break;
+    case 'exportProgress':
+      flashTake(`내보내는 중… ${Math.round(m.pct)}%`);
+      break;
+    case 'exportDone':
+      _exporting = false;
+      flashTake('내보내기 완료: ' + (m.file || ''));
+      if (m.file) api.openPath(m.file);   // 저장된 파일 열기
+      break;
+    case 'exportError':
+      _exporting = false;
+      flashTake('내보내기 실패: ' + (m.msg || ''));
+      break;
     case 'plugins':
       _plugins = m.list || [];
       $('st-fx-add').disabled = false;
@@ -945,6 +958,17 @@ function wire() {
     openNameModal('녹음 저장', '', (name) => saveTakeSet(name));
   });
   $('st-take-load').addEventListener('click', openTakeSetPicker);
+
+  // Export — 전체 믹스(스템+내 녹음·FX·마스터)를 WAV 로 오프라인 렌더
+  $('st-export').addEventListener('click', async () => {
+    if (!_tracks.length && !_recTracks.length) { flashTake('내보낼 내용이 없습니다.'); return; }
+    if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
+    const res = await api.dialog.saveAs('mix.wav', ['wav']);
+    if (!res || !res.ok || !res.filePath) return;
+    _exporting = true; _exportPath = res.filePath;
+    flashTake('내보내는 중… 0%');
+    api.engine.cmd({ cmd: 'export', file: res.filePath });
+  });
 
   // 내 소리 모니터 on/off
   let _monOn = true;

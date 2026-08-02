@@ -34,6 +34,7 @@ struct Stem
 {
     std::unique_ptr<AudioFormatReaderSource> src;
     String name;
+    String path;   // export(오프라인 렌더)용 프레시 리더 생성
     std::atomic<float> gain { 1.0f };
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
@@ -66,6 +67,7 @@ struct TakePlay
     int64 start = 0;   // 타임라인 위치 (이동 가능)
     int64 len = 0;
     int   trackId = 0; // 소속 녹음 트랙
+    String path;       // export(오프라인 렌더)용
 };
 
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
@@ -112,6 +114,7 @@ public:
         if (r == nullptr) { std::cerr << "[engine] cannot read " << path << "\n"; return false; }
         auto s = std::make_unique<Stem>();
         s->name = f.getFileNameWithoutExtension();
+        s->path = f.getFullPathName();
         s->src  = std::make_unique<AudioFormatReaderSource> (r, true);
         stemSampleRate = r->sampleRate;
         stems.push_back (std::move (s));
@@ -177,6 +180,7 @@ public:
             tp->start = start;
             tp->len = reader->lengthInSamples;
             tp->trackId = trackId > 0 ? trackId : armedTrack.load();
+            tp->path = f.getFullPathName();
             const ScopedLock sl (takesLock);
             takesPlay.push_back (std::move (tp));
         }
@@ -582,6 +586,130 @@ public:
         emitChain (*rt);
     }
 
+    // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터)를 WAV 로 (message 스레드) ----
+    void exportMix (const String& outPath)
+    {
+        const double sr = (deviceSampleRate > 0 ? deviceSampleRate : stemSampleRate);
+        const int block = 2048;
+        if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
+
+        const int64 soff = stemOffset.load();
+        const bool anySolo = anyStemSolo.load() || anyRecSolo.load();
+        int64 total = 0;
+
+        // 스템: 프레시 리더(실시간 소스와 공유 안 함)
+        struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible; };
+        std::vector<SR> srs;
+        for (auto& s : stems)
+        {
+            auto* rd = fmt.createReaderFor (File (s->path));
+            if (rd == nullptr) continue;
+            auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
+            src->prepareToPlay (block, sr);
+            total = jmax (total, soff + rd->lengthInSamples);
+            srs.push_back ({ std::move (src), s->gain.load(), anySolo ? s->solo.load() : ! s->mute.load() });
+        }
+
+        // 트랙: 프레시 테이크 리더 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
+        struct TR { std::unique_ptr<AudioFormatReaderSource> src; int64 start; int64 len; };
+        struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
+        std::vector<TRK> trks;
+        {
+            const ScopedLock lk (takesLock);
+            for (auto& rt : recTracks)
+            {
+                TRK tk; tk.gain = rt->gain.load(); tk.audible = anySolo ? rt->solo.load() : ! rt->mute.load();
+                {
+                    const ScopedLock fl (rt->fxLock);
+                    for (auto& slot : rt->chain)
+                    {
+                        if (! slot || ! slot->plugin || slot->bypass.load()) continue;
+                        if (slot->descIndex < 0 || slot->descIndex >= scanned.size()) continue;
+                        String err;
+                        auto inst = pluginFmt.createPluginInstance (scanned[slot->descIndex], sr, block, err);
+                        if (inst == nullptr) continue;
+                        MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                        inst->setPlayConfigDetails (2, 2, sr, block);
+                        inst->prepareToPlay (sr, block);
+                        inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                        tk.fx.push_back (std::move (inst));
+                    }
+                }
+                for (auto& t : takesPlay)
+                {
+                    if (t->trackId != rt->id) continue;
+                    auto* rd = fmt.createReaderFor (File (t->path));
+                    if (rd == nullptr) continue;
+                    auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
+                    src->prepareToPlay (block, sr);
+                    total = jmax (total, t->start + t->len);
+                    tk.takes.push_back ({ std::move (src), t->start, t->len });
+                }
+                trks.push_back (std::move (tk));
+            }
+        }
+
+        if (total <= 0) { auto* e = ev ("exportError"); e->setProperty ("msg", "내보낼 오디오가 없습니다"); emit (var (e)); return; }
+
+        File out (outPath); out.deleteFile();
+        std::unique_ptr<FileOutputStream> os (out.createOutputStream());
+        if (os == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "파일 열기 실패"); emit (var (e)); return; }
+        WavAudioFormat wav;
+        std::unique_ptr<AudioFormatWriter> writer (wav.createWriterFor (os.get(), sr, 2, 24, {}, 0));
+        if (writer == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "writer 생성 실패"); emit (var (e)); return; }
+        os.release();
+
+        AudioBuffer<float> mix (2, block), sbuf (2, block), tbuf (2, block), tmp (2, block);
+        const float mg = monitorGain.load();
+        const float master = masterGain.load();
+        int64 pos = 0; int blk = 0;
+        while (pos < total)
+        {
+            const int n = (int) jmin<int64> ((int64) block, total - pos);
+            mix.clear();
+
+            for (auto& r : srs)   // 스템
+            {
+                sbuf.clear();
+                r.src->setNextReadPosition (jmax<int64> (0, pos - soff));
+                AudioSourceChannelInfo info (&sbuf, 0, n); r.src->getNextAudioBlock (info);
+                if (r.audible)
+                    for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, sbuf, jmin (c, sbuf.getNumChannels() - 1), 0, n, r.gain);
+            }
+
+            for (auto& tk : trks)   // 트랙(테이크 → FX → post-fx 게인)
+            {
+                if (! tk.audible) continue;
+                tbuf.clear();
+                bool any = false;
+                for (auto& t : tk.takes)
+                {
+                    const int64 rp = pos - t.start;
+                    if (rp < 0 || rp >= t.len) continue;
+                    tmp.clear(); t.src->setNextReadPosition (rp);
+                    AudioSourceChannelInfo info (&tmp, 0, n); t.src->getNextAudioBlock (info);
+                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, tmp, jmin (c, tmp.getNumChannels() - 1), 0, n);
+                    any = true;
+                }
+                if (! any && tk.fx.empty()) continue;
+                { AudioBuffer<float> pb (tbuf.getArrayOfWritePointers(), 2, n); MidiBuffer mm; for (auto& f : tk.fx) f->processBlock (pb, mm); }
+                for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, tbuf, c, 0, n, tk.gain * mg);
+            }
+
+            mix.applyGain (0, n, master);   // 마스터 + 세이프 클리퍼
+            for (int c = 0; c < 2; ++c)
+            {
+                FloatVectorOperations::max (mix.getWritePointer (c), mix.getReadPointer (c), -1.0f, n);
+                FloatVectorOperations::min (mix.getWritePointer (c), mix.getReadPointer (c),  1.0f, n);
+            }
+            writer->writeFromAudioSampleBuffer (mix, 0, n);
+            pos += n;
+            if ((++blk % 40) == 0) { auto* p = ev ("exportProgress"); p->setProperty ("pct", (double) pos / (double) total * 100.0); emit (var (p)); }
+        }
+        writer.reset();   // flush + close
+        auto* d = ev ("exportDone"); d->setProperty ("file", outPath); emit (var (d));
+    }
+
     // ---- 오디오 콜백 ----
     void audioDeviceAboutToStart (AudioIODevice* device) override
     {
@@ -795,6 +923,7 @@ private:
                 tp->start = timelineStart;
                 tp->len = reader->lengthInSamples;
                 tp->trackId = armedTrack.load();
+                tp->path = outFile.getFullPathName();
                 lastTakeId = takeId;
                 const ScopedLock sl (takesLock);
                 takesPlay.push_back (std::move (tp));
@@ -934,6 +1063,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["track"], (int) c["slot"]);
     else if (cmd == "fxSetState")  engine.fxSetState ((int) c["track"], (int) c["slot"], c["data"].toString());
     else if (cmd == "fxChainReq")  engine.emitChainFor ((int) c["track"]);
+    else if (cmd == "export")      engine.exportMix (c["file"].toString());
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
     else                           std::cerr << "[engine] unknown cmd: " << cmd << "\n";
 }
