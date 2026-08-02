@@ -419,10 +419,10 @@ public:
         if (! solo.isVoid()) t->solo = (bool) solo;
         recomputeSolos();
     }
-    void moveTake (int64 id, int64 newStart)
+    void moveTake (int64 id, int64 newStart, int trackId)   // trackId>0 이면 트랙 이동
     {
         const ScopedLock sl (takesLock);
-        for (auto& t : takesPlay) if (t->id == id) { t->start = newStart; break; }
+        for (auto& t : takesPlay) if (t->id == id) { t->start = newStart; if (trackId > 0) t->trackId = trackId; break; }
     }
     void setBypass (int trackId, int id, bool on)
     {
@@ -843,7 +843,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
     else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"]);
-    else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"]);
+    else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"], (int) c["trackId"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
     else if (cmd == "recTrackAdd") engine.addRecTrack();
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);

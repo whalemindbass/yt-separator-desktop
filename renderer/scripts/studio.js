@@ -457,12 +457,35 @@ function renderTakes() {
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
       selectTrack(tk.trackId);
-      const base = tk.start;
-      const lane = el.closest('.daw-lane-rec');
-      dragClip(e, (dSec) => {
-        tk.start = Math.max(0, base + dSec); el.style.left = (tk.start * _pxPerSec) + 'px';   // 0:00 뒤로 못 감
-        if (lane) showDragBadge(lane, tk.start - base);
-      }, () => { hideDragBadge(); api.engine.takeMove(tk.id, Math.round(tk.start * (_sr || 44100))); });
+      e.preventDefault(); e.stopPropagation();
+      const startX = e.clientX, base = tk.start;
+      const srcLane = el.closest('.daw-lane-rec');
+      let target = srcLane;
+      const move = (ev) => {
+        tk.start = Math.max(0, base + (ev.clientX - startX) / _pxPerSec);   // 좌우 = 시간
+        el.style.left = (tk.start * _pxPerSec) + 'px';
+        // 상하 = 대상 내 트랙 감지 (다른 내 트랙으로 이동)
+        const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
+        document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
+        if (lane) { target = lane; if (lane !== srcLane) lane.classList.add('drop-target'); }
+        showDragBadge(srcLane, tk.start - base);
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+        hideDragBadge();
+        document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
+        const newId = target ? Number(target.dataset.recid) : tk.trackId;
+        const startS = Math.round(tk.start * (_sr || 44100));
+        if (newId && newId !== tk.trackId) {   // 트랙 변경
+          tk.trackId = newId;
+          api.engine.takeMove(tk.id, startS, newId);
+          renderTakes();   // 새 레인으로 클립 이동
+        } else {
+          api.engine.takeMove(tk.id, startS, 0);
+        }
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
     });
     area.appendChild(el);
   }

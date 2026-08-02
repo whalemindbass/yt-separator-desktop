@@ -2274,6 +2274,9 @@ body { display: flex; flex-direction: column; }
 .daw-left.empty .daw-fx-actions, .daw-left.empty #st-fx-slots, .daw-left.empty #st-fx-add { display: none; }
 .daw-left.empty .daw-fx-empty { display: block; }
 
+/* 테이크를 다른 내 트랙으로 드래그 중인 대상 레인 */
+.daw-lane-rec.drop-target .daw-area { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+
 /* 드래그 이동량 배지 (+0:07) */
 .daw-drag-badge { position: absolute; top: 4px; left: 4px; z-index: 8; background: var(--accent); color: #fff; font: 700 10px/1 var(--mono); padding: 3px 6px; border-radius: 4px; pointer-events: none; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
 

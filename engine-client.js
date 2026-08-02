@@ -83,7 +83,7 @@ class AudioEngine extends EventEmitter {
   takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
   takeClear()        { return this.send({ cmd: 'takeClear' }); }
   takeLoad(file, start, trackId) { return this.send({ cmd: 'takeLoad', file, start, trackId }); }
-  takeMove(id, start){ return this.send({ cmd: 'takeMove', id, start }); }
+  takeMove(id, start, trackId){ return this.send({ cmd: 'takeMove', id, start, trackId }); }
   stemOffset(samples){ return this.send({ cmd: 'stemOffset', samples }); }
   // 녹음 트랙 (여러 개)
   recTrackAdd()      { return this.send({ cmd: 'recTrackAdd' }); }
