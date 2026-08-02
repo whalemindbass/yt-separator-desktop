@@ -115,24 +115,21 @@ function repositionStems() {
   });
 }
 // 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
-function scrubStart(e, area) {
-  const seekTo = (clientX) => {
-    const r = area.getBoundingClientRect();
-    const t = Math.max(0, Math.min(fullSec(), (clientX - r.left) / _pxPerSec));   // 소스 밖(타임라인 전체)까지 이동
-    api.engine.seek(Math.round(t * (_sr || 44100)));
-    syncVideo(t);
-    updatePlayhead(t);
+// 룰러/트랙 빈 곳 잡고 드래그 = 가로 스크롤(팬). 안 끌고 클릭만 하면 재생선 이동
+function grabPan(e) {
+  const sc = $('daw-tscroll'); if (!sc) return;
+  const startX = e.clientX, startScroll = sc.scrollLeft; let moved = false;
+  const seekAt = (cx) => {
+    const rect = $('daw-lanes').getBoundingClientRect();
+    const t = Math.max(0, Math.min(fullSec(), (cx - rect.left - HEAD_W) / _pxPerSec));
+    api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
   };
-  seekTo(e.clientX);
-  const mv = (ev) => seekTo(ev.clientX);
+  const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 3) moved = true; sc.scrollLeft = startScroll - dx; updatePlayhead(_lastSec); };
   const up = () => {
-    document.removeEventListener('pointermove', mv);
-    document.removeEventListener('pointerup', up);
-    document.removeEventListener('pointercancel', up);
+    document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+    if (!moved) seekAt(startX);   // 클릭(드래그 안 함) = 재생선 이동
   };
-  document.addEventListener('pointermove', mv);
-  document.addEventListener('pointerup', up);
-  document.addEventListener('pointercancel', up);
+  document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
 const fmtTC = (sec) => {
   sec = Math.max(0, sec || 0);
@@ -1056,15 +1053,16 @@ function wire() {
   $('st-play').addEventListener('click', play);
   $('st-stop').addEventListener('click', stopAll);
 
-  // 스페이스바 = 재생/정지 (스튜디오 뷰 활성 + 입력창 아닐 때)
+  // 단축키: Space=재생/정지, R=녹음 시작/정지 (스튜디오 뷰 활성 + 입력창 아닐 때)
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space') return;
+    if (e.code !== 'Space' && e.code !== 'KeyR') return;
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     e.preventDefault();
-    if (_playing) stopAll(); else play();
+    if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
+    else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
   const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; };
@@ -1108,15 +1106,6 @@ function wire() {
     sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
   }, { passive: false });
 
-  // 타임라인 클릭 → 이동 (소스 밖·영상 길이 밖까지 허용)
-  $('daw-tscroll').addEventListener('click', (e) => {
-    if (!_dur || _recArmed || e.target.closest('.daw-head')) return;
-    const rect = $('daw-lanes').getBoundingClientRect();
-    const x = e.clientX - rect.left - HEAD_W;
-    if (x < 0) return;
-    const t = Math.max(0, Math.min(fullSec(), x / _pxPerSec));
-    api.engine.seek(Math.round(t * _sr)); syncVideo(t); updatePlayhead(t);
-  });
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
   $('st-fx-add').addEventListener('click', () => {
@@ -1140,13 +1129,13 @@ function wire() {
     const allOff = _chain.every(s => s.bypass);   // 전부 꺼져있으면 → 켜기, 아니면 → 끄기
     api.engine.fxBypassAll(_selTrack, !allOff);
   });
-  // 트랙 빈 곳 스크럽 + 선택 (재렌더돼도 #daw-lanes 는 유지되므로 위임)
+  // 트랙 빈 곳 드래그 = 팬(가로 스크롤), 클릭 = 재생선 이동 + 트랙 선택
   $('daw-lanes').addEventListener('pointerdown', (e) => {
     const area = e.target.closest('.daw-area');
     if (!area || e.target.closest('.daw-clip, .daw-take-clip, .daw-drag-badge')) return;
     const lane = area.closest('.daw-lane-rec');
     if (lane) selectTrack(Number(lane.dataset.recid));
-    scrubStart(e, area);
+    grabPan(e);
   });
   // 룰러: 드래그 = 재생선 이동(스크럽) · Shift+드래그 = 내보내기 범위 선택
   $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
@@ -1163,12 +1152,8 @@ function wire() {
         else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)} (Shift+드래그)`);
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
-    } else {   // 재생선 이동
-      const seek = (cx) => { const t = toSec(cx); api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t); };
-      seek(e.clientX);
-      const mv = (ev) => seek(ev.clientX);
-      const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
-      document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    } else {   // 룰러 잡고 드래그 = 가로 스크롤(팬), 클릭 = 재생선 이동
+      grabPan(e);
     }
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
