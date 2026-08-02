@@ -410,6 +410,26 @@ public:
         emitRecTracks();
     }
     void armRec (int id) { if (findRec (id)) { armedTrack = id; emitRecTracks(); } }
+    // 녹음 트랙 전체 재구성 (녹음 저장 불러오기 — 트랙 수·상태 복원). 새 id 는 emitRecTracks 로 통지.
+    void setRecTracks (const var& list)
+    {
+        for (auto& rt : recTracks) clearChain (*rt);
+        { const ScopedLock sl (takesLock); takesPlay.clear(); recTracks.clear(); }
+        if (auto* a = list.getArray())
+            for (auto& v : *a)
+            {
+                auto t = std::make_unique<RecTrack>();
+                t->id = nextRecId++;
+                if (! v["gain"].isVoid()) t->gain = (float) (double) v["gain"];
+                if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
+                if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
+                const ScopedLock sl (takesLock);
+                recTracks.push_back (std::move (t));
+            }
+        armedTrack = recTracks.empty() ? 0 : recTracks.front()->id;
+        recomputeSolos();
+        emitRecTracks();
+    }
     void setRecTrack (int id, const var& gain, const var& mute, const var& solo)
     {
         auto* t = findRec (id);
@@ -850,6 +870,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
     else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "recTracks")   engine.emitRecTracks();
+    else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);

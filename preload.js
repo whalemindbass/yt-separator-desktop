@@ -151,6 +151,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     recArm:         (id)      => ipcRenderer.invoke('engine:cmd', { cmd: 'recArm', id }),
     recTrack:       (id, opts)=> ipcRenderer.invoke('engine:cmd', { cmd: 'recTrack', id, ...(opts || {}) }),
     recTracksReq:   ()        => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracks' }),
+    recTracksReset: (tracks)  => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracksReset', tracks }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

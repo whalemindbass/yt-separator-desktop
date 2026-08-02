@@ -91,6 +91,7 @@ class AudioEngine extends EventEmitter {
   recArm(id)         { return this.send({ cmd: 'recArm', id }); }
   recTrack(id, opts) { return this.send({ cmd: 'recTrack', id, ...(opts || {}) }); }
   recTracks()        { return this.send({ cmd: 'recTracks' }); }
+  recTracksReset(tracks) { return this.send({ cmd: 'recTracksReset', tracks }); }
 
   quit() {
     if (!this.proc) return;

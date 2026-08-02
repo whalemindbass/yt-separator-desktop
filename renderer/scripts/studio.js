@@ -546,15 +546,37 @@ function getTakeSets() { if (!_songKey) return []; try { return JSON.parse(local
 function setTakeSets(a) { if (!_songKey) return; try { localStorage.setItem(takesetKey(_songKey), JSON.stringify(a)); } catch {} }
 function saveTakeSet(name) {
   if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
+  // 트랙 레이아웃(개수·상태)까지 통째로 저장 → 나중에 그대로 복원
+  const tracks = _recTracks.map(r => ({ id: r.id, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo }));
   const takes = _takes.map(t => ({ file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
-  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, takes }); setTakeSets(a);
+  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
   flashTake('녹음 저장됨: ' + name);
+}
+function waitRecTracks(count) {   // recTracksReset 후 엔진이 새 트랙 목록 통지할 때까지 대기
+  return new Promise(res => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (_recTracks.length === count || Date.now() - t0 > 2500) { clearInterval(iv); res(); }
+    }, 25);
+  });
 }
 async function loadTakeSet(ts) {
   api.engine.takeClear();
   _takes = []; renderTakes();
+
+  // 트랙 레이아웃 복원 (구버전 세트는 tracks 없음 → 현재 트랙 유지)
+  let idMap = null;
+  if (Array.isArray(ts.tracks) && ts.tracks.length) {
+    api.engine.recTracksReset(ts.tracks.map(t => ({ gain: t.gain, mute: t.mute, solo: t.solo })));
+    await waitRecTracks(ts.tracks.length);
+    idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
+    ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+  }
+
   for (const t of ts.takes) {
-    const tid = (t.trackId != null && _recTracks.some(r => r.id === t.trackId)) ? t.trackId : armedRecId();
+    let tid = t.trackId;
+    if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
+    else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
     api.engine.takeLoad(t.file, t.start, tid);
     await renderTake(t.file, t.start, t.start, tid);   // start(samples) 로 클립·엔진 id 일치
   }
