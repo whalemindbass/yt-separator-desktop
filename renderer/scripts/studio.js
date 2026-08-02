@@ -19,6 +19,7 @@ let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _playStart = 0, _dawArmRecPlay = null;   // 재생 시작점 · R(즉시 녹음+재생) 핸들
+let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -443,7 +444,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -971,11 +972,13 @@ function wire() {
     _playing = false; api.engine.stop(); video.pause(); updatePlayIcon();
     if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
     clearRecLive();
-    // 정지 시 재생을 시작한 위치로 복귀
-    const back = Math.max(0, _playStart || 0);
-    api.engine.seek(Math.round(back * (_sr || 44100)));
-    if (video && isFinite(video.duration)) video.currentTime = back;
-    updatePlayhead(back);
+    // 정지 시 재생을 시작한 위치로 복귀 (옵션 켜졌을 때만)
+    if (_returnOnStop) {
+      const back = Math.max(0, _playStart || 0);
+      api.engine.seek(Math.round(back * (_sr || 44100)));
+      if (video && isFinite(video.duration)) video.currentTime = back;
+      updatePlayhead(back);
+    }
   };
   const armRecPlay = () => {   // R: 즉시 녹음 준비 + 재생 시작
     if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
@@ -1011,15 +1014,18 @@ function wire() {
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
   const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; };
   $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
+  $('mx-master').addEventListener('dblclick', () => applyMaster(100));   // 더블클릭 = 100 (유니티)
   // 선택 트랙 볼륨 페이더 (믹서 우측)
-  $('mx-track').addEventListener('input', (e) => {
+  const applyTrackVol = (v) => {
     if (_selTrack == null) return;
-    const v = Number(e.target.value), g = v / 100;
+    const g = v / 100;
     api.engine.recTrack(_selTrack, { gain: g });
     const rt = _recTracks.find(r => r.id === _selTrack); if (rt) rt.gain = g;
-    $('mx-track-val').textContent = v;
+    $('mx-track').value = v; $('mx-track-val').textContent = v;
     const lv = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .daw-vol`); if (lv) lv.value = v;
-  });
+  };
+  $('mx-track').addEventListener('input', (e) => applyTrackVol(Number(e.target.value)));
+  $('mx-track').addEventListener('dblclick', () => applyTrackVol(100));   // 더블클릭 = 100
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }
@@ -1098,6 +1104,18 @@ function wire() {
 
   // Export — 포맷/품질 선택 후 전체 믹스를 오프라인 렌더
   $('st-export').addEventListener('click', openExportModal);
+
+  // 정지 시 시작 위치 복귀 토글 (설정 유지)
+  _returnOnStop = localStorage.getItem('yss:returnOnStop') !== '0';
+  $('st-return').classList.toggle('on', _returnOnStop);
+  $('st-return').setAttribute('aria-pressed', String(_returnOnStop));
+  $('st-return').addEventListener('click', () => {
+    _returnOnStop = !_returnOnStop;
+    localStorage.setItem('yss:returnOnStop', _returnOnStop ? '1' : '0');
+    $('st-return').classList.toggle('on', _returnOnStop);
+    $('st-return').setAttribute('aria-pressed', String(_returnOnStop));
+    flashTake(_returnOnStop ? '정지 시 재생 시작 위치로 복귀 — 켬' : '정지 시 현재 위치 유지');
+  });
 
   // 내 소리 모니터 on/off
   let _monOn = true;
