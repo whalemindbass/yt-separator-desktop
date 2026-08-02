@@ -143,7 +143,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
     takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),
-    takeLoad:    (file, start, trackId) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeLoad', file, start, trackId }),
+    takeLoad:    (file, start, trackId, id) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeLoad', file, start, trackId, id }),
     takeMove:    (id, start, trackId) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeMove', id, start, trackId }),
     stemOffset:  (samples) => ipcRenderer.invoke('engine:cmd', { cmd: 'stemOffset', samples }),
     recTrackAdd:    ()        => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackAdd' }),
@@ -151,7 +151,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     recArm:         (id)      => ipcRenderer.invoke('engine:cmd', { cmd: 'recArm', id }),
     recTrack:       (id, opts)=> ipcRenderer.invoke('engine:cmd', { cmd: 'recTrack', id, ...(opts || {}) }),
     recTracksReq:   ()        => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracks' }),
-    recTracksReset: (tracks)  => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracksReset', tracks }),
+    recTracksReset: (tracks, gen) => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracksReset', tracks, gen }),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

@@ -126,6 +126,7 @@ public:
         outFile = out;
         auto* dev = currentDevice;
         if (dev == nullptr) { std::cerr << "[engine] no device\n"; return; }
+        if (numInputChans <= 0) { std::cerr << "[engine] no input channels — cannot record\n"; return; }
 
         std::unique_ptr<FileOutputStream> os (out.createOutputStream());
         if (os == nullptr) { std::cerr << "[engine] cannot open " << out.getFullPathName() << "\n"; return; }
@@ -151,7 +152,7 @@ public:
                              [id] (auto& t) { return t->id == id; }), takesPlay.end());
     }
     void clearTakes() { const ScopedLock sl (takesLock); takesPlay.clear(); }
-    void loadTake (const String& file, int64 start, int trackId)   // 저장된 테이크 파일을 재생 소스로 등록
+    void loadTake (const String& file, int64 start, int trackId, int64 id)   // 저장된 테이크 파일을 재생 소스로 등록
     {
         File f (file);
         if (auto* reader = fmt.createReaderFor (f))
@@ -159,7 +160,9 @@ public:
             auto tp = std::make_unique<TakePlay>();
             tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
             tp->src->prepareToPlay (blockSize, deviceSampleRate);
-            tp->id = start;
+            const int64 tid = id > 0 ? id : nextTakeId++;   // 저장된 고유 id 재사용, 없으면 새로
+            tp->id = tid;
+            if (tid >= nextTakeId) nextTakeId = tid + 1;     // 이후 녹음 id 와 충돌 방지
             tp->start = start;
             tp->len = reader->lengthInSamples;
             tp->trackId = trackId > 0 ? trackId : armedTrack.load();
@@ -262,6 +265,7 @@ public:
         if (currentDevice != nullptr)
             for (auto& s : stems) s->src->prepareToPlay (blockSize, deviceSampleRate);
         setPos (0);
+        recomputeSolos();   // 새 스템은 solo=false → 이전 곡 솔로 캐시 stale 방지(무음 버그)
         auto* o = ev ("stems");
         o->setProperty ("count", (int) stems.size());
         emit (var (o));
@@ -382,6 +386,7 @@ public:
         }
         auto* r = ev ("recTracks");
         r->setProperty ("list", var (list));
+        r->setProperty ("gen", recTracksGen);   // 재구성 동기화 토큰 에코
         emit (var (r));
     }
     void emitChainFor (int trackId) { if (auto* rt = findRec (trackId)) emitChain (*rt); }
@@ -411,8 +416,9 @@ public:
     }
     void armRec (int id) { if (findRec (id)) { armedTrack = id; emitRecTracks(); } }
     // 녹음 트랙 전체 재구성 (녹음 저장 불러오기 — 트랙 수·상태 복원). 새 id 는 emitRecTracks 로 통지.
-    void setRecTracks (const var& list)
+    void setRecTracks (const var& list, int gen)
     {
+        recTracksGen = gen;
         for (auto& rt : recTracks) clearChain (*rt);
         { const ScopedLock sl (takesLock); takesPlay.clear(); recTracks.clear(); }
         if (auto* a = list.getArray())
@@ -725,9 +731,9 @@ public:
         if (recordArmed.load())
         {
             if (recordedStart.load() < 0 && playing.load())
-                recordedStart = playhead.load();   // 첫 재생 블록에서 시작점 확정
+                recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart). playhead 는 이미 +numSamples 됨
 
-            if (recordedStart.load() >= 0)
+            if (recordedStart.load() >= 0 && numIn > 0)   // 입력 채널 없으면 write 안 함(크래시 방지)
                 if (auto* w = activeWriter.load())
                     w->write (inputs, numSamples);
         }
@@ -751,16 +757,18 @@ private:
                 auto tp = std::make_unique<TakePlay>();
                 tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
                 tp->src->prepareToPlay (blockSize, deviceSampleRate);
-                tp->id = timelineStart;
+                const int64 takeId = nextTakeId++;   // 트랙 무관 전역 고유 id (start 아님 → 충돌 방지)
+                tp->id = takeId;
                 tp->start = timelineStart;
                 tp->len = reader->lengthInSamples;
                 tp->trackId = armedTrack.load();
+                lastTakeId = takeId;
                 const ScopedLock sl (takesLock);
                 takesPlay.push_back (std::move (tp));
             }
 
             auto* o = ev ("take");
-            o->setProperty ("id", (int64) timelineStart);   // 렌더러 클립 식별용
+            o->setProperty ("id", lastTakeId);   // 렌더러 클립 식별용(고유 id)
             o->setProperty ("trackId", armedTrack.load());
             o->setProperty ("file", outFile.getFullPathName());
             o->setProperty ("startPlayhead", start);
@@ -797,6 +805,9 @@ private:
     std::vector<std::unique_ptr<RecTrack>> recTracks;
     std::atomic<int>  armedTrack { 0 };
     int nextRecId = 1;
+    std::atomic<int64> nextTakeId { 1 };   // 테이크 전역 고유 id (start 와 무관)
+    int64 lastTakeId = 0;
+    int recTracksGen = 0;                  // 트랙 재구성 동기화 토큰(렌더러 에코용)
     std::atomic<bool> anyStemSolo { false };
     std::atomic<bool> anyRecSolo  { false };
 
@@ -862,7 +873,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recordStop")  engine.stopRecord();
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
-    else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"]);
+    else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"], (int64) (double) c["id"]);
     else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"], (int) c["trackId"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
     else if (cmd == "recTrackAdd") engine.addRecTrack();
@@ -870,7 +881,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
     else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "recTracks")   engine.emitRecTracks();
-    else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"]);
+    else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"], (int) c["gen"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
@@ -890,6 +901,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxSetState")  engine.fxSetState ((int) c["track"], (int) c["slot"], c["data"].toString());
     else if (cmd == "fxChainReq")  engine.emitChainFor ((int) c["track"]);
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
+    else                           std::cerr << "[engine] unknown cmd: " << cmd << "\n";
 }
 
 int main (int argc, char* argv[])

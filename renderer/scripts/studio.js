@@ -5,6 +5,8 @@ import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
+// innerHTML 삽입 전 외부/사용자 유래 문자열 이스케이프 (yt 영상 제목·VST명·프리셋명 등)
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const STEM_COLOR = {
   vocals: 'var(--stem-vocals)', drums: 'var(--stem-drums)',
@@ -67,8 +69,8 @@ function openPresetPicker() {
   const host = $('daw-modal');
   if (!ps.length) { openModal('톤 불러오기', '<div class="daw-modal-empty">저장된 톤이 없습니다.</div>', () => {}); return; }
   const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
-    <div class="mt"><div class="n">${p.name}</div><div class="m">${(_plugins[p.index] && _plugins[p.index].name) || ('VST ' + p.index)}</div></div>
-    <button class="daw-preset-del" data-id="${p.id}" title="삭제">✕</button></div>`).join('');
+    <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${esc((_plugins[p.index] && _plugins[p.index].name) || ('VST ' + p.index))}</div></div>
+    <button class="daw-preset-del" data-id="${esc(p.id)}" title="삭제">✕</button></div>`).join('');
   openModal('톤 불러오기', html, (idx) => loadPreset(ps[Number(idx)]));
   host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -84,6 +86,7 @@ let _songKey = null;
 const HEAD_W = 140;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
+let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
 const armedRecId = () => (_recTracks.find(r => r.armed) || _recTracks[0] || {}).id;
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
@@ -526,8 +529,8 @@ function openSongPicker() {
   }
   if (!items.length) { openModal('곡 선택', `<div class="daw-modal-empty">라이브러리가 비어있습니다.</div>`, () => {}); return; }
   const html = items.map((it, i) =>
-    `<div class="daw-modal-item" data-idx="${i}"><div class="mt"><div class="n">${it.name}</div>
-      <div class="m">${Object.keys(it.stemPaths || {}).length} 스템${it.group ? ' · ' + it.group : ''}</div></div></div>`).join('');
+    `<div class="daw-modal-item" data-idx="${i}"><div class="mt"><div class="n">${esc(it.name)}</div>
+      <div class="m">${Object.keys(it.stemPaths || {}).length} 스템${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`).join('');
   openModal('곡 선택', html, (idx) => loadSong(items[Number(idx)]));
 }
 
@@ -535,8 +538,8 @@ function openVstPicker() {
   if (_selTrack == null) { flashTake('먼저 녹음 트랙을 선택하세요.'); return; }
   if (!_plugins.length) { openModal('VST 추가', `<div class="daw-modal-empty">감지된 VST 없음. 설정·스캔 필요.</div>`, () => {}); return; }
   const html = _plugins.map(p =>
-    `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${p.name}</div>
-      <div class="m">${p.manufacturer}</div></div></div>`).join('');
+    `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${esc(p.name)}</div>
+      <div class="m">${esc(p.manufacturer)}</div></div></div>`).join('');
   openModal('VST 추가', html, (idx) => api.engine.fxAdd(_selTrack, Number(idx)));   // 선택 트랙에 추가
 }
 
@@ -548,47 +551,56 @@ function saveTakeSet(name) {
   if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
   // 트랙 레이아웃(개수·상태)까지 통째로 저장 → 나중에 그대로 복원
   const tracks = _recTracks.map(r => ({ id: r.id, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo }));
-  const takes = _takes.map(t => ({ file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
+  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
   flashTake('녹음 저장됨: ' + name);
 }
-function waitRecTracks(count) {   // recTracksReset 후 엔진이 새 트랙 목록 통지할 때까지 대기
+function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
   return new Promise(res => {
     const t0 = Date.now();
     const iv = setInterval(() => {
-      if (_recTracks.length === count || Date.now() - t0 > 2500) { clearInterval(iv); res(); }
-    }, 25);
+      if (_recTracksGen === gen || Date.now() - t0 > 2500) { clearInterval(iv); res(_recTracksGen === gen); }
+    }, 20);
   });
 }
+let _loadingTakeSet = false;
 async function loadTakeSet(ts) {
-  api.engine.takeClear();
-  _takes = []; renderTakes();
+  if (_loadingTakeSet) return;   // 재진입 차단 (더블클릭 시 전역상태 오염 방지)
+  _loadingTakeSet = true;
+  try {
+    api.engine.takeClear();
+    _takes = []; renderTakes();
 
-  // 트랙 레이아웃 복원 (구버전 세트는 tracks 없음 → 현재 트랙 유지)
-  let idMap = null;
-  if (Array.isArray(ts.tracks) && ts.tracks.length) {
-    api.engine.recTracksReset(ts.tracks.map(t => ({ gain: t.gain, mute: t.mute, solo: t.solo })));
-    await waitRecTracks(ts.tracks.length);
-    idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
-    ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
-  }
+    // 트랙 레이아웃 복원 (구버전 세트는 tracks 없음 → 현재 트랙 유지)
+    let idMap = null;
+    if (Array.isArray(ts.tracks) && ts.tracks.length) {
+      _recTracks = [];   // stale 값으로 즉시 resolve 되지 않도록 비우고 이벤트로만 채움
+      const gen = ++_recTracksGenReq;
+      api.engine.recTracksReset(ts.tracks.map(t => ({ gain: t.gain, mute: t.mute, solo: t.solo })), gen);
+      const ok = await waitRecTracks(gen);
+      if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
+      idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
+      ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+    }
 
-  for (const t of ts.takes) {
-    let tid = t.trackId;
-    if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
-    else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
-    api.engine.takeLoad(t.file, t.start, tid);
-    await renderTake(t.file, t.start, t.start, tid);   // start(samples) 로 클립·엔진 id 일치
-  }
-  flashTake('녹음 불러옴: ' + ts.name);
+    for (const t of ts.takes) {
+      let tid = t.trackId;
+      if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
+      else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
+      const id = t.id != null ? t.id : t.start;   // 고유 id (구버전은 start 폴백)
+      api.engine.takeLoad(t.file, t.start, tid, id);
+      await renderTake(t.file, t.start, id, tid);
+    }
+    flashTake('녹음 불러옴: ' + ts.name);
+  } finally { _loadingTakeSet = false; }
 }
 function openTakeSetPicker() {
   const ps = getTakeSets();
   if (!ps.length) { openModal('녹음 불러오기', '<div class="daw-modal-empty">이 곡에 저장된 녹음이 없습니다.</div>', () => {}); return; }
   const host = $('daw-modal');
   const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
-    <div class="mt"><div class="n">${p.name}</div><div class="m">${p.takes.length} 테이크</div></div>
-    <button class="daw-preset-del" data-id="${p.id}" title="삭제">✕</button></div>`).join('');
+    <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${p.takes.length} 테이크</div></div>
+    <button class="daw-preset-del" data-id="${esc(p.id)}" title="삭제">✕</button></div>`).join('');
   openModal('녹음 불러오기', html, (idx) => loadTakeSet(ps[Number(idx)]));
   host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -671,6 +683,7 @@ function onEngineEvent(m) {
     case 'pitch': updateTuner(m.freq); break;
     case 'recTracks':
       _recTracks = m.list || [];
+      if (m.gen != null) _recTracksGen = m.gen;
       renderRecLanes(); updateSoloDim();
       if (_selTrack == null || !_recTracks.some(r => r.id === _selTrack)) {
         const a = armedRecId();                       // 선택 없으면 녹음 대상 자동 선택

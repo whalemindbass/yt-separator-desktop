@@ -412,12 +412,20 @@ ipcMain.handle('dialog:pickFolder', async (_ev, title) => {
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, dir: res.filePaths[0] };
 });
+// 렌더러가 쓰기 요청하는 경로는 반드시 허용 폴더(다운로드/스템/userData) 하위여야 함
+function allowedWriteTarget(p) {
+  if (typeof p !== 'string' || !p) return false;
+  const roots = [downloadsDir(), stemsDir(), app.getPath('userData')];
+  return roots.some(r => { try { return path.normalize(p) === path.normalize(r) || isInsideDir(r, p); } catch { return false; } });
+}
 ipcMain.handle('fs:copyFile', async (_ev, src, dst) => {
+  if (!allowedWriteTarget(dst)) return { ok: false, error: 'destination not allowed' };
   try { fs.copyFileSync(src, dst); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
-ipcMain.handle('fs:writeBuffer', async (_ev, path, data) => {
-  try { fs.writeFileSync(path, Buffer.from(data)); return { ok: true }; }
+ipcMain.handle('fs:writeBuffer', async (_ev, p, data) => {
+  if (!allowedWriteTarget(p)) return { ok: false, error: 'path not allowed' };
+  try { fs.writeFileSync(p, Buffer.from(data)); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -469,7 +477,18 @@ ipcMain.handle('engine:recordArm', () => {
   return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
 });
 ipcMain.handle('engine:quit', () => { audioEngine?.quit(); return { ok: true }; });
-app.on('will-quit', () => { audioEngine?.quit(); });
+// 종료 시 엔진 자식 프로세스가 orphan 으로 남지 않도록 exit 까지 기다림 (Windows 는 자동 종료 안 됨)
+let _quitting = false;
+app.on('will-quit', (e) => {
+  if (_quitting || !audioEngine) return;
+  e.preventDefault();
+  _quitting = true;
+  const eng = audioEngine;
+  const done = () => { audioEngine = null; try { app.quit(); } catch {} };
+  try { eng.once('exit', done); } catch {}
+  eng.quit();               // quit 명령 + 800ms 후 kill (engine-client)
+  setTimeout(done, 1500);   // 안전망: exit 이벤트 없어도 강제 진행
+});
 
 // ── IPC: 앱 메타 ──────────────────────────────────────
 ipcMain.handle('app:version', () => app.getVersion());

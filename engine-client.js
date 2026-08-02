@@ -82,7 +82,7 @@ class AudioEngine extends EventEmitter {
   recordStop()       { return this.send({ cmd: 'recordStop' }); }
   takeRemove(id)     { return this.send({ cmd: 'takeRemove', id }); }
   takeClear()        { return this.send({ cmd: 'takeClear' }); }
-  takeLoad(file, start, trackId) { return this.send({ cmd: 'takeLoad', file, start, trackId }); }
+  takeLoad(file, start, trackId, id) { return this.send({ cmd: 'takeLoad', file, start, trackId, id }); }
   takeMove(id, start, trackId){ return this.send({ cmd: 'takeMove', id, start, trackId }); }
   stemOffset(samples){ return this.send({ cmd: 'stemOffset', samples }); }
   // 녹음 트랙 (여러 개)
@@ -91,7 +91,7 @@ class AudioEngine extends EventEmitter {
   recArm(id)         { return this.send({ cmd: 'recArm', id }); }
   recTrack(id, opts) { return this.send({ cmd: 'recTrack', id, ...(opts || {}) }); }
   recTracks()        { return this.send({ cmd: 'recTracks' }); }
-  recTracksReset(tracks) { return this.send({ cmd: 'recTracksReset', tracks }); }
+  recTracksReset(tracks, gen) { return this.send({ cmd: 'recTracksReset', tracks, gen }); }
 
   quit() {
     if (!this.proc) return;
