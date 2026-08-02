@@ -127,7 +127,7 @@ function grabPan(e) {
   const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 3) moved = true; sc.scrollLeft = startScroll - dx; updatePlayhead(_lastSec); };
   const up = () => {
     document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
-    if (!moved) seekAt(startX);   // 클릭(드래그 안 함) = 재생선 이동
+    if (!moved && !_recArmed) seekAt(startX);   // 클릭(드래그 안 함) = 재생선 이동 (녹음 중엔 이동 금지)
   };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
@@ -235,11 +235,10 @@ function renderRecLanes() {
     const del = lane.querySelector('[data-m="del"]');
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
-    rBtn.addEventListener('click', (e) => {   // R = 이 트랙 녹음 대상 지정 + 즉시 녹음 준비·재생
+    rBtn.addEventListener('click', (e) => {   // R = 이 트랙을 녹음 대상으로 선택(arm). 녹음 시작은 ● 또는 R키
       e.stopPropagation();
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
-      armRecPlay();
     });
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
@@ -510,7 +509,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-import-audio', 'st-import-video', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-import-video', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -549,6 +548,16 @@ async function pickImportAudio() {
 async function pickImportVideo() {
   const r = await api.dialog.pickVideoFile();
   if (r && r.ok && r.filePath) importVideo(r.filePath);
+}
+
+// 불러온 스템 곡 닫기(되돌리기) — 스템·영상 비움, 내 녹음/임포트 트랙은 유지
+function closeSong() {
+  api.engine.loadStems([]);
+  _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null;
+  const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
+  const em = $('daw-video-empty'); if (em) em.hidden = false;
+  renderTracks();
+  flashTake('곡을 닫았습니다.');
 }
 
 // ── 곡 로드 ────────────────────────────────────────
@@ -1069,6 +1078,7 @@ function wire() {
   });
 
   $('st-load-song').addEventListener('click', openSongPicker);
+  $('st-close-song').addEventListener('click', closeSong);
 
   const video = $('daw-video');
   video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); $('daw-vplay').hidden = false; });
@@ -1193,9 +1203,9 @@ function wire() {
     if (lane) selectTrack(Number(lane.dataset.recid));
     grabPan(e);
   });
-  // 룰러: 드래그 = 재생선 이동(스크럽) · Shift+드래그 = 내보내기 범위 선택
+  // 룰러: 드래그 = 팬(스크롤) · 클릭 = 재생선 이동 · Shift+드래그 = 내보내기 범위
   $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
-    if (!_dur) return;
+    if (!_dur && !_takes.length && !_recTracks.length) return;   // 임포트만 있어도 동작
     e.preventDefault();
     const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
     const toSec = (cx) => { const r = wrap.getBoundingClientRect(); return Math.max(0, Math.min(fullSec(), (cx - r.left - HEAD_W + sc.scrollLeft) / _pxPerSec)); };
