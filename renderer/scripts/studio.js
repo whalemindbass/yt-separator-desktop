@@ -122,15 +122,12 @@ function seekToClientX(cx) {
   const t = Math.max(0, Math.min(fullSec(), (cx - rect.left - HEAD_W) / _pxPerSec));
   api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
 }
-// 룰러/트랙 잡고 드래그 = 가로 스크롤(팬). 안 끌고 클릭만 하면 재생선 이동
+// 룰러/트랙 빈 곳 클릭·드래그 = 재생선 따라오기(스크럽). 좌우 스크롤은 휠
 function grabPan(e) {
-  const sc = $('daw-tscroll'); if (!sc) return;
-  const startX = e.clientX, startScroll = sc.scrollLeft; let moved = false;
-  const mv = (ev) => { const dx = ev.clientX - startX; if (Math.abs(dx) > 3) moved = true; sc.scrollLeft = startScroll - dx; updatePlayhead(_lastSec); };
-  const up = () => {
-    document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
-    if (!moved && !_recArmed) seekToClientX(startX);   // 클릭(드래그 안 함) = 재생선 이동 (녹음 중엔 이동 금지)
-  };
+  if (_recArmed) return;   // 녹음 중 재생위치 이동 금지
+  seekToClientX(e.clientX);
+  const mv = (ev) => seekToClientX(ev.clientX);
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
 const fmtTC = (sec) => {
@@ -1221,7 +1218,7 @@ function wire() {
         else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)} (Shift+드래그)`);
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
-    } else {   // 룰러 잡고 드래그 = 가로 스크롤(팬), 클릭 = 재생선 이동
+    } else {   // 룰러 클릭·드래그 = 재생선 따라오기(스크럽)
       grabPan(e);
     }
   });
