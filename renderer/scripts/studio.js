@@ -259,10 +259,10 @@ function renderRecLanes() {
     });
     lanes.appendChild(lane);
   });
-  // + 녹음 트랙 추가
+  // + 녹음 트랙 추가 — 버튼은 헤드(컨트롤) 컬럼에 sticky 로 묶음
   const add = document.createElement('div');
   add.className = 'daw-addrec-row';
-  add.innerHTML = `<button class="daw-addrec" title="녹음 트랙 추가">+ 녹음 트랙</button>`;
+  add.innerHTML = `<div class="daw-addrec-head"><button class="daw-addrec" title="녹음 트랙 추가">＋ 녹음 트랙</button></div>`;
   add.querySelector('button').addEventListener('click', () => api.engine.recTrackAdd());
   lanes.appendChild(add);
   syncSelection();

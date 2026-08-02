@@ -2293,8 +2293,8 @@ body { display: flex; flex-direction: column; }
 .daw-rec-del { color: var(--tx-4); border-color: transparent; }
 .daw-rec-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .daw-addrec-row { display: grid; grid-template-columns: 140px 1fr; }
-.daw-addrec-row::before { content: ""; grid-column: 1; }
-.daw-addrec { grid-column: 1; margin: 6px 9px; padding: 6px 8px; border: 1px dashed var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 10.5px/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.daw-addrec-head { grid-column: 1; position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 6px 9px; }
+.daw-addrec { width: 100%; padding: 6px 8px; border: 1px dashed var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 10.5px/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .daw-addrec:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* 선택된 트랙 강조 (컨트롤부) */
