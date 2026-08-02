@@ -575,11 +575,36 @@ function openVstPicker() {
 function takesetKey(k) { return 'yss:takesets:' + String(k).replace(/\\/g, '/').toLowerCase(); }
 function getTakeSets() { if (!_songKey) return []; try { return JSON.parse(localStorage.getItem(takesetKey(_songKey)) || '[]'); } catch { return []; } }
 function setTakeSets(a) { if (!_songKey) return; try { localStorage.setItem(takesetKey(_songKey), JSON.stringify(a)); } catch {} }
+let _takeSetGather = null;
 function saveTakeSet(name) {
   if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
-  // 트랙 레이아웃(개수·상태)까지 통째로 저장 → 나중에 그대로 복원
-  const tracks = _recTracks.map(r => ({ id: r.id, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo }));
+  // 트랙 레이아웃(개수·게인·뮤트·솔로) + 트랙별 FX 체인까지 통째로 저장
+  const tracks = _recTracks.map(r => ({
+    id: r.id, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
+  }));
   const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
+  const need = [];
+  tracks.forEach(t => t.fxOrder.forEach(s => need.push({ track: t.id, id: s.id })));
+  if (!need.length) { persistTakeSet(name, stripFxOrder(tracks), takes); return; }   // FX 없으면 바로 저장
+  // FX 슬롯 상태(노브값)를 비동기로 모은 뒤 저장
+  _takeSetGather = { name, tracks, takes, need: need.map(n => n.id), states: {} };
+  flashTake('녹음 + 이펙트 저장 중…');
+  need.forEach(n => api.engine.fxSaveState(n.track, n.id));
+  _takeSetGather._t = setTimeout(finishTakeSetGather, 2000);   // 일부 못 받아도 저장(타임아웃)
+}
+function stripFxOrder(tracks) {
+  return tracks.map(t => ({ id: t.id, gain: t.gain, mute: t.mute, solo: t.solo, fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass })) }));
+}
+function finishTakeSetGather() {
+  const g = _takeSetGather; if (!g) return; _takeSetGather = null; clearTimeout(g._t);
+  const tracks = g.tracks.map(t => ({
+    id: t.id, gain: t.gain, mute: t.mute, solo: t.solo,
+    fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass, data: g.states[s.id] })),
+  }));
+  persistTakeSet(g.name, tracks, g.takes);
+}
+function persistTakeSet(name, tracks, takes) {
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
   flashTake('녹음 저장됨: ' + name);
 }
@@ -609,6 +634,11 @@ async function loadTakeSet(ts) {
       if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
       idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
       ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+      // 트랙별 FX 체인 복원 (선택 트랙만이 아니라 모든 트랙에 적용)
+      ts.tracks.forEach((t, i) => {
+        if (_recTracks[i] && Array.isArray(t.fx) && t.fx.length)
+          api.engine.fxSetChain(_recTracks[i].id, t.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
+      });
     }
 
     for (const t of ts.takes) {
@@ -695,6 +725,10 @@ function onEngineEvent(m) {
       hideFxOverlay();
       break;
     case 'fxState':
+      if (_takeSetGather) {
+        _takeSetGather.states[m.id] = m.data;
+        if (_takeSetGather.need.every(id => _takeSetGather.states[id] != null)) finishTakeSetGather();
+      }
       if (_presetGather) {
         _presetGather.states[m.id] = m.data;
         if (_presetGather.need.every(id => _presetGather.states[id] != null)) {
