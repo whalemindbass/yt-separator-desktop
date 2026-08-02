@@ -120,7 +120,7 @@ function scrubStart(e, area) {
     const r = area.getBoundingClientRect();
     const t = Math.max(0, Math.min(fullSec(), (clientX - r.left) / _pxPerSec));   // 소스 밖(타임라인 전체)까지 이동
     api.engine.seek(Math.round(t * (_sr || 44100)));
-    const v = $('daw-video'); if (v && isFinite(v.duration) && t <= v.duration) v.currentTime = t;
+    syncVideo(t);
     updatePlayhead(t);
   };
   seekTo(e.clientX);
@@ -377,7 +377,9 @@ const fmtBar = (sec) => '마디 ' + (Math.floor(sec / SEC_PER_BAR) + 1);
 function fullSec() {
   const sc = $('daw-tscroll');
   const vw = sc ? sc.clientWidth - HEAD_W : 1000;
-  const base = Math.max(_dur, vw / _pxPerSec) + 8;   // 소스보다 조금 더 길게
+  let content = _dur + _stemOffset;   // 오프셋된 스템 끝
+  for (const t of _takes) content = Math.max(content, t.start + t.dur);   // 녹음 테이크 끝
+  const base = Math.max(content, vw / _pxPerSec) + 8;   // 콘텐츠보다 조금 더 길게
   return Math.ceil(base / SEC_PER_BAR) * SEC_PER_BAR;
 }
 const timelineW = () => Math.max(1, fullSec() * _pxPerSec);
@@ -425,7 +427,7 @@ function updatePlayhead(sec) {
 function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
 function playStudio() {
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
-  _playing = true; api.engine.play(); const v = $('daw-video'); if (v) v.play().catch(() => {}); updatePlayIcon();
+  _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
 }
 function stopStudio() {
   _playing = false; api.engine.stop(); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
@@ -434,7 +436,7 @@ function stopStudio() {
   if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
     const back = Math.max(0, _playStart || 0);
     api.engine.seek(Math.round(back * (_sr || 44100)));
-    const v2 = $('daw-video'); if (v2 && isFinite(v2.duration)) v2.currentTime = back;
+    syncVideo(back);
     updatePlayhead(back);
   }
 }
@@ -459,13 +461,22 @@ function updateRecLive(t) {
 }
 function clearRecLive() { _recStartSec = null; document.querySelector('.daw-rec-live')?.remove(); }
 
+// 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
+function syncVideo(t) {
+  const v = $('daw-video'); if (!v || !isFinite(v.duration)) return;
+  const vt = t - _stemOffset;
+  if (vt < 0) { if (!v.paused) v.pause(); if (Math.abs(v.currentTime) > 0.05) v.currentTime = 0; return; }
+  const target = Math.min(vt, v.duration);
+  if (Math.abs(v.currentTime - target) > 0.15) v.currentTime = target;
+  if (_playing && v.paused && vt <= v.duration) v.play().catch(() => {});
+}
 function onPos(samples) {
   const t = (samples || 0) / (_sr || 44100);
   updatePlayhead(t);
   if (_recArmed && _playing) updateRecLive(t);
-  if (_dur > 0) $('daw-vbar-fill').style.width = Math.min(100, (t / _dur) * 100) + '%';
-  const v = $('daw-video');
-  if (v && _playing && isFinite(v.duration) && Math.abs(v.currentTime - t) > 0.15) v.currentTime = t;
+  const vdur = _dur > 0 ? _dur + _stemOffset : 0;
+  if (vdur > 0) $('daw-vbar-fill').style.width = Math.min(100, Math.max(0, ((t - _stemOffset) / _dur) * 100)) + '%';
+  syncVideo(t);
   const sc = $('daw-tscroll'), x = HEAD_W + t * _pxPerSec;
   if (x < sc.scrollLeft + HEAD_W || x > sc.scrollLeft + sc.clientWidth - 40)
     sc.scrollLeft = Math.max(0, x - sc.clientWidth / 2);
@@ -1037,8 +1048,9 @@ function wire() {
   $('daw-vbar').addEventListener('click', (e) => {
     if (!_dur || _recArmed) return;
     const r = $('daw-vbar').getBoundingClientRect();
-    const t = Math.max(0, Math.min(_dur, ((e.clientX - r.left) / r.width) * _dur));
-    api.engine.seek(Math.round(t * _sr)); video.currentTime = t; updatePlayhead(t);
+    const vt = Math.max(0, Math.min(_dur, ((e.clientX - r.left) / r.width) * _dur));   // 영상 시간
+    const t = vt + _stemOffset;   // 재생 위치 = 영상시간 + 스템 오프셋
+    api.engine.seek(Math.round(t * _sr)); syncVideo(t); updatePlayhead(t);
   });
 
   $('st-play').addEventListener('click', play);
@@ -1069,7 +1081,7 @@ function wire() {
   };
   $('mx-track').addEventListener('input', (e) => applyTrackVol(Number(e.target.value)));
   $('mx-track').addEventListener('dblclick', () => applyTrackVol(100));   // 더블클릭 = 100
-  $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
+  $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }
     _recArmed = !_recArmed;
@@ -1096,14 +1108,14 @@ function wire() {
     sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
   }, { passive: false });
 
-  // 타임라인 클릭 → 이동
+  // 타임라인 클릭 → 이동 (소스 밖·영상 길이 밖까지 허용)
   $('daw-tscroll').addEventListener('click', (e) => {
     if (!_dur || _recArmed || e.target.closest('.daw-head')) return;
     const rect = $('daw-lanes').getBoundingClientRect();
     const x = e.clientX - rect.left - HEAD_W;
     if (x < 0) return;
-    const t = Math.max(0, Math.min(_dur, x / _pxPerSec));
-    api.engine.seek(Math.round(t * _sr)); video.currentTime = t; updatePlayhead(t);
+    const t = Math.max(0, Math.min(fullSec(), x / _pxPerSec));
+    api.engine.seek(Math.round(t * _sr)); syncVideo(t); updatePlayhead(t);
   });
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
