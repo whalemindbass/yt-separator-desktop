@@ -588,7 +588,7 @@ public:
 
     // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터) (message 스레드) ----
     //   format: wav | flac | aiff (MP3 은 렌더러가 WAV 렌더 후 ffmpeg 변환)
-    void exportMix (const String& outPath, const String& format, int bitDepth, bool mineOnly)
+    void exportMix (const String& outPath, const String& format, int bitDepth, bool mineOnly, double startSec, double endSec)
     {
         const double sr = (deviceSampleRate > 0 ? deviceSampleRate : stemSampleRate);
         const int block = 2048;
@@ -670,13 +670,20 @@ public:
         if (writer == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "이 포맷/비트뎁스 지원 안 됨"); emit (var (e)); return; }
         os.release();
 
+        // 내보내기 범위 (선택 없으면 전체)
+        int64 s0 = startSec > 0 ? (int64) (startSec * sr) : 0;
+        int64 s1 = endSec   > 0 ? (int64) (endSec   * sr) : total;
+        s0 = jlimit<int64> (0, total, s0);
+        s1 = jlimit<int64> (s0 + 1, total, s1);
+        const int64 span = s1 - s0;
+
         AudioBuffer<float> mix (2, block), sbuf (2, block), tbuf (2, block), tmp (2, block);
         const float mg = monitorGain.load();
         const float master = masterGain.load();
-        int64 pos = 0; int blk = 0;
-        while (pos < total)
+        int64 pos = s0; int blk = 0;
+        while (pos < s1)
         {
-            const int n = (int) jmin<int64> ((int64) block, total - pos);
+            const int n = (int) jmin<int64> ((int64) block, s1 - pos);
             mix.clear();
 
             for (auto& r : srs)   // 스템
@@ -716,7 +723,7 @@ public:
                 }
             writer->writeFromAudioSampleBuffer (mix, 0, n);
             pos += n;
-            if ((++blk % 40) == 0) { auto* p = ev ("exportProgress"); p->setProperty ("pct", (double) pos / (double) total * 100.0); emit (var (p)); }
+            if ((++blk % 40) == 0) { auto* p = ev ("exportProgress"); p->setProperty ("pct", (double) (pos - s0) / (double) span * 100.0); emit (var (p)); }
         }
         writer.reset();   // flush + close
         auto* d = ev ("exportDone"); d->setProperty ("file", outPath); emit (var (d));
@@ -1075,7 +1082,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "fxSaveState") engine.fxSaveState ((int) c["track"], (int) c["slot"]);
     else if (cmd == "fxSetState")  engine.fxSetState ((int) c["track"], (int) c["slot"], c["data"].toString());
     else if (cmd == "fxChainReq")  engine.emitChainFor ((int) c["track"]);
-    else if (cmd == "export")      engine.exportMix (c["file"].toString(), c["format"].toString(), (int) c["bitDepth"], (bool) c["mineOnly"]);
+    else if (cmd == "export")      engine.exportMix (c["file"].toString(), c["format"].toString(), (int) c["bitDepth"], (bool) c["mineOnly"], (double) c["startSec"], (double) c["endSec"]);
     else if (cmd == "quit")        MessageManager::getInstance()->stopDispatchLoop();
     else                           std::cerr << "[engine] unknown cmd: " << cmd << "\n";
 }

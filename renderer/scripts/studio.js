@@ -355,6 +355,24 @@ function ensurePlayhead() {
   return ph;
 }
 
+// ── 내보내기 범위 (룰러에서 드래그 선택) ──
+let _exportRange = null;   // {start, end} 초
+function ensureExportEls() {
+  const ruler = $('daw-ruler');
+  if (ruler && !document.getElementById('daw-erange')) { const e = document.createElement('div'); e.id = 'daw-erange'; e.className = 'daw-erange'; e.hidden = true; ruler.appendChild(e); }
+  const lanes = $('daw-lanes');
+  let band = document.getElementById('daw-eband');
+  if (lanes && (!band || band.parentElement !== lanes)) { if (band) band.remove(); band = document.createElement('div'); band.id = 'daw-eband'; band.className = 'daw-eband'; band.hidden = true; lanes.appendChild(band); }
+}
+function renderExportRange() {
+  const e = document.getElementById('daw-erange'), band = document.getElementById('daw-eband');
+  if (!_exportRange) { if (e) e.hidden = true; if (band) band.hidden = true; return; }
+  const x = _exportRange.start * _pxPerSec, w = (_exportRange.end - _exportRange.start) * _pxPerSec;
+  if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
+  if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = ($('daw-lanes').offsetHeight || 0) + 'px'; }
+}
+const fmtBar = (sec) => '마디 ' + (Math.floor(sec / SEC_PER_BAR) + 1);
+
 // 타임라인 총 길이(초) — 소스 길이 + 여유(뷰포트는 채우되 무한 아님), 마디 단위로 반올림
 function fullSec() {
   const sc = $('daw-tscroll');
@@ -383,6 +401,7 @@ function layout() {
     ruler.appendChild(tk);
   }
   ensurePlayhead();   // 재생선을 lanes 안에 유지(헤드보다 아래 z → 컨트롤 컬럼에 안 비침)
+  ensureExportEls(); renderExportRange();
   renderTakes();
   repositionStems();
   updatePlayhead(_lastSec);
@@ -767,30 +786,36 @@ function openExportModal() {
         <option value="mp3">MP3 · 손실(공유용)</option>
       </select></div>
       <div class="dev-field" style="margin-top:10px"><span>품질</span><select id="exp-q"></select></div>
+      <div class="dev-field" style="margin-top:10px"><span>구간</span><select id="exp-span">
+        <option value="full">전체</option>
+        <option value="range"${_exportRange ? '' : ' disabled'}>${_exportRange ? '선택 범위 (' + fmtBar(_exportRange.start) + '–' + fmtBar(_exportRange.end) + ')' : '선택 범위 (룰러에서 드래그)'}</option>
+      </select></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="exp-go">내보내기</button></div>
     </div></div>`;
   host.hidden = false;
+  if (_exportRange) $('exp-span').value = 'range';
   host.querySelector('.x').addEventListener('click', () => host.hidden = true);
   host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
   const fmt = $('exp-fmt'), q = $('exp-q');
   const fillQ = () => { q.innerHTML = EXPORT_QUAL[fmt.value].map(([v, l]) => `<option value="${v}">${l}</option>`).join(''); };
   fmt.addEventListener('change', fillQ); fillQ();
-  $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value, $('exp-scope').value === 'mine'); });
+  $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value, $('exp-scope').value === 'mine', $('exp-span').value === 'range'); });
 }
-async function runExport(format, quality, mineOnly) {
+async function runExport(format, quality, mineOnly, useRange) {
   if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
   const base = mineOnly ? 'recording' : 'mix';
   const res = await api.dialog.saveAs(base + '.' + format, [format]);
   if (!res || !res.ok || !res.filePath) return;
+  const rg = (useRange && _exportRange) ? _exportRange : { start: 0, end: 0 };   // end 0 = 끝까지
   _exporting = true;
   flashTake('내보내는 중… 0%');
   if (format === 'mp3') {   // 임시 WAV 렌더 → ffmpeg MP3 변환
     _exportTmp = res.filePath.replace(/\.mp3$/i, '') + '.__export_tmp.wav';
     _exportMp3 = { dst: res.filePath, bitrate: quality };
-    api.engine.cmd({ cmd: 'export', file: _exportTmp, format: 'wav', bitDepth: 24, mineOnly });
+    api.engine.cmd({ cmd: 'export', file: _exportTmp, format: 'wav', bitDepth: 24, mineOnly, startSec: rg.start, endSec: rg.end });
   } else {
     _exportMp3 = null; _exportTmp = null;
-    api.engine.cmd({ cmd: 'export', file: res.filePath, format, bitDepth: Number(quality), mineOnly });
+    api.engine.cmd({ cmd: 'export', file: res.filePath, format, bitDepth: Number(quality), mineOnly, startSec: rg.start, endSec: rg.end });
   }
 }
 
@@ -1110,6 +1135,21 @@ function wire() {
     const lane = area.closest('.daw-lane-rec');
     if (lane) selectTrack(Number(lane.dataset.recid));
     scrubStart(e, area);
+  });
+  // 룰러에서 드래그 = 내보내기 범위 선택 (클릭만 하면 해제)
+  $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
+    if (!_dur) return;
+    e.preventDefault();
+    const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
+    const toSec = (cx) => { const r = wrap.getBoundingClientRect(); return Math.max(0, Math.min(fullSec(), (cx - r.left - HEAD_W + sc.scrollLeft) / _pxPerSec)); };
+    const a = toSec(e.clientX); let b = a;
+    const mv = (ev) => { b = toSec(ev.clientX); _exportRange = { start: Math.min(a, b), end: Math.max(a, b) }; renderExportRange(); };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+      if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }   // 드래그 안 하면 해제
+      else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`);
+    };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
