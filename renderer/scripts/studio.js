@@ -18,6 +18,7 @@ const STEM_LABEL = { vocals: '보컬', drums: '드럼', bass: '베이스', other
 let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
+let _playStart = 0, _dawArmRecPlay = null;   // 재생 시작점 · R(즉시 녹음+재생) 핸들
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -234,7 +235,12 @@ function renderRecLanes() {
     const del = lane.querySelector('[data-m="del"]');
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
-    rBtn.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recArm(rt.id); });   // 엔진이 recTracks 재발행 → 갱신
+    rBtn.addEventListener('click', (e) => {   // R = 이 트랙 녹음 대상 지정 + 즉시 녹음 준비·재생
+      e.stopPropagation();
+      selectTrack(rt.id);
+      api.engine.recArm(rt.id);
+      _dawArmRecPlay && _dawArmRecPlay();
+    });
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
     vol.addEventListener('input', () => {
@@ -884,7 +890,7 @@ function renderFxSlots() {
     row.className = 'daw-fx-slot' + (s.bypass ? ' bypassed' : '');
     row.draggable = true; row.dataset.id = s.id;
     row.innerHTML = `<span class="drag" title="드래그로 순서 변경">⠿</span>
-      <span class="pw ${s.bypass ? '' : 'on'}" title="On/Off"></span>
+      <span class="pw ${s.bypass ? '' : 'on'}" title="클릭하면 켜기/끄기"></span>
       <div class="info"><div class="n">${s.name}</div></div>
       <button class="ed" title="편집" ${s.hasEditor ? '' : 'disabled'}>✎</button>
       <button class="del" title="삭제">✕</button>`;
@@ -931,14 +937,27 @@ function wire() {
   const video = $('daw-video');
   video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); $('daw-vplay').hidden = false; });
 
-  const play = () => { _playing = true; api.engine.play(); video.play().catch(() => {}); updatePlayIcon(); };
+  const play = () => {
+    _playStart = _lastSec;   // 재생 시작점 기억 (정지 시 이 위치로 복귀)
+    _playing = true; api.engine.play(); video.play().catch(() => {}); updatePlayIcon();
+  };
   const stopAll = () => {
     _playing = false; api.engine.stop(); video.pause(); updatePlayIcon();
-    if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); api.engine.recordStop(); }
+    if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
     clearRecLive();
+    // 정지 시 재생을 시작한 위치로 복귀
+    const back = Math.max(0, _playStart || 0);
+    api.engine.seek(Math.round(back * (_sr || 44100)));
+    if (video && isFinite(video.duration)) video.currentTime = back;
+    updatePlayhead(back);
+  };
+  const armRecPlay = () => {   // R: 즉시 녹음 준비 + 재생 시작
+    if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
+    if (!_playing) play();
   };
   const updatePlayIcon = () => { $('daw-vplay').hidden = _playing; };
   window._dawUpdatePlayIcon = updatePlayIcon;
+  _dawArmRecPlay = armRecPlay;
 
   // 영상 클릭 = 재생/정지 (곡 로드 후에만)
   video.addEventListener('click', () => { if (!_dur) return; if (_playing) stopAll(); else play(); });
