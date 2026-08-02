@@ -2254,8 +2254,13 @@ body { display: flex; flex-direction: column; }
 /* 내 녹음 트랙(여러 개) */
 .daw-lane-rec .daw-ms { width: 16px; height: 16px; }
 .daw-lane-rec .daw-vol { min-width: 26px; }
-.daw-rec-arm { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+/* 뮤트=앰버, 솔로=블루 로 명확히 구분 (기존 .daw-ms.on 트랙색 오버라이드) */
+.daw-ms[data-m="mute"].on { color: #e2a03f; border-color: color-mix(in srgb, #e2a03f 55%, transparent); background: color-mix(in srgb, #e2a03f 16%, transparent); }
+.daw-ms[data-m="solo"].on { color: #4a90d9; border-color: color-mix(in srgb, #4a90d9 55%, transparent); background: color-mix(in srgb, #4a90d9 16%, transparent); }
+/* R(arm): 대기=중립, armed 일 때만 빨강 */
+.daw-rec-arm { color: var(--tx-3); border-color: var(--border-mid); }
 .daw-rec-arm.armed { color: #fff; background: var(--danger); border-color: var(--danger); box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent); }
+.daw-rec-del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
 .daw-rec-del { color: var(--tx-4); border-color: transparent; }
 .daw-rec-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .daw-addrec-row { display: grid; grid-template-columns: 140px 1fr; }
@@ -2286,3 +2291,8 @@ body { display: flex; flex-direction: column; }
 .daw-tool-tab:hover { color: var(--tx-1); }
 .daw-tool-tab.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .daw-tool-empty { padding: 26px 14px; text-align: center; color: var(--tx-4); font-size: 11.5px; }
+
+/* 트랙 타임라인 빈 상태 안내 */
+.daw-tracks-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--tx-4); font-size: 12px; line-height: 1.7; pointer-events: none; padding: 0 20px; }
+/* 줌 배율 표시 */
+.daw-zoom-val { min-width: 44px; text-align: center; font: 600 10px/1 var(--mono); color: var(--tx-3); }

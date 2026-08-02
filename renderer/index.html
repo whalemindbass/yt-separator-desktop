@@ -413,9 +413,9 @@
         <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><span id="st-engine-status">엔진 꺼짐</span></span>
         <button id="st-engine-start" class="btn" data-i18n="studio.engine.start">오디오 시작</button>
         <button id="st-engine-stop" class="btn" hidden data-i18n="studio.engine.stop">오디오 종료</button>
-        <button id="st-load-song" class="btn pri" disabled data-i18n="studio.loadSong">곡 불러오기</button>
+        <button id="st-load-song" class="btn pri" disabled title="오디오 시작 후 사용 가능" data-i18n="studio.loadSong">곡 불러오기</button>
         <span class="daw-sp"></span>
-        <button id="st-audio-settings" class="btn" disabled data-i18n="studio.audioSettings">오디오 설정</button>
+        <button id="st-audio-settings" class="btn" disabled title="오디오 시작 후 사용 가능" data-i18n="studio.audioSettings">오디오 설정</button>
       </div>
 
       <div class="daw-midrow">
@@ -470,6 +470,7 @@
         <div id="daw-tscroll" class="daw-tscroll">
           <div id="daw-lanes" class="daw-lanes"></div>
           <div id="daw-playhead" class="daw-ph" hidden></div>
+          <div id="daw-tracks-empty" class="daw-tracks-empty">곡을 불러오면 스템 트랙이 표시됩니다.<br>“＋ 녹음 트랙”으로 내 녹음 트랙을 추가하세요.</div>
         </div>
       </div>
 
@@ -490,6 +491,7 @@
         <span class="daw-master" title="마스터 볼륨">MASTER <input id="st-master" type="range" min="0" max="150" value="100" disabled></span>
         <span class="daw-zoom"><span data-i18n="studio.zoom">배율</span>
           <button id="st-zoom-out" class="btn icon" disabled>−</button>
+          <span id="st-zoom-val" class="daw-zoom-val">12 px/s</span>
           <button id="st-zoom-in" class="btn icon" disabled>＋</button></span>
         <button id="st-tools-toggle" class="btn" disabled data-i18n="studio.tools">도구</button>
         <button id="st-export" class="btn" disabled data-i18n="studio.export">Export ▾</button>

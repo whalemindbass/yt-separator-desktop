@@ -173,8 +173,8 @@ function renderTracks() {
       <div class="daw-head">
         <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
-          <button class="daw-ms" data-m="mute" title="뮤트">M</button>
-          <button class="daw-ms" data-m="solo" title="솔로">S</button>
+          <button class="daw-ms" data-m="mute" title="뮤트" aria-pressed="false">M</button>
+          <button class="daw-ms" data-m="solo" title="솔로" aria-pressed="false">S</button>
           <input class="daw-vol" type="range" min="0" max="150" value="100" title="볼륨">
         </div>
       </div>
@@ -182,8 +182,8 @@ function renderTracks() {
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
-    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { mute: on }); });
-    sBtn.addEventListener('click', () => { sBtn.classList.toggle('on'); api.engine.track(t.engineIndex, { solo: sBtn.classList.contains('on') }); updateSoloDim(); });
+    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); api.engine.track(t.engineIndex, { mute: on }); });
+    sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); });
     vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
@@ -211,12 +211,12 @@ function renderRecLanes() {
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
     lane.innerHTML = `
-      <div class="daw-head">
+      <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
         <div class="nm"><i></i>내 녹음 ${i + 1}</div>
         <div class="ctrls">
-          <button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상">R</button>
-          <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트">M</button>
-          <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로">S</button>
+          <button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>
+          <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
+          <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
           <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
           <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
         </div>
@@ -230,10 +230,18 @@ function renderRecLanes() {
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
     rBtn.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recArm(rt.id); });   // 엔진이 recTracks 재발행 → 갱신
-    mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
-    sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
+    mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
+    sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
     vol.addEventListener('input', () => { rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain }); });
-    del.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recTrackRemove(rt.id); });
+    // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const takesN = _takes.filter(t => t.trackId === rt.id).length;
+      if (del.dataset.confirm || takesN === 0) { clearTimeout(del._t); api.engine.recTrackRemove(rt.id); return; }
+      del.dataset.confirm = '1'; del.textContent = '‼'; del.classList.add('confirm');
+      flashTake(`이 트랙에 녹음 ${takesN}개 — 다시 누르면 함께 삭제`);
+      del._t = setTimeout(() => { del.dataset.confirm = ''; del.textContent = '✕'; del.classList.remove('confirm'); }, 2500);
+    });
     lanes.appendChild(lane);
   });
   // + 녹음 트랙 추가
@@ -325,6 +333,8 @@ function layout() {
   renderTakes();
   repositionStems();
   updatePlayhead(_lastSec);
+  const zv = $('st-zoom-val'); if (zv) zv.textContent = Math.round(_pxPerSec) + ' px/s';
+  const te = $('daw-tracks-empty'); if (te) te.hidden = _tracks.length > 0 || _recTracks.length > 0;
 }
 
 let _lastSec = 0;
@@ -706,6 +716,7 @@ function onEngineEvent(m) {
     case 'recTracks':
       _recTracks = m.list || [];
       if (m.gen != null) _recTracksGen = m.gen;
+      _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       renderRecLanes(); updateSoloDim();
       if (_selTrack == null || !_recTracks.some(r => r.id === _selTrack)) {
         const a = armedRecId();                       // 선택 없으면 녹음 대상 자동 선택
@@ -749,10 +760,13 @@ function renderFxSlots() {
       <div class="info"><div class="n">${s.name}</div></div>
       <button class="ed" title="편집" ${s.hasEditor ? '' : 'disabled'}>✎</button>
       <button class="del" title="삭제">✕</button>`;
-    row.querySelector('.pw').addEventListener('click', () => {
+    const pw = row.querySelector('.pw');
+    pw.setAttribute('role', 'button'); pw.setAttribute('aria-pressed', String(!s.bypass));
+    pw.addEventListener('click', () => {
       const ns = !s.bypass; s.bypass = ns;                     // 낙관적 갱신 (엔진 fxChain 로 재확정)
       row.classList.toggle('bypassed', ns);
-      row.querySelector('.pw').classList.toggle('on', !ns);
+      pw.classList.toggle('on', !ns);
+      pw.setAttribute('aria-pressed', String(!ns));
       api.engine.fxBypass(_selTrack, s.id, ns);
     });
     row.querySelector('.ed').addEventListener('click', () => api.engine.fxEditor(_selTrack, s.id));
@@ -824,7 +838,10 @@ function wire() {
   $('st-master').addEventListener('input', (e) => api.engine.master(Number(e.target.value) / 100));
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
-    _recArmed = !_recArmed; $('st-rec').classList.toggle('armed', _recArmed);
+    if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }
+    _recArmed = !_recArmed;
+    $('st-rec').classList.toggle('armed', _recArmed);
+    $('st-rec').setAttribute('aria-pressed', String(_recArmed));
     if (_recArmed) api.engine.recordArm(); else { api.engine.recordStop(); clearRecLive(); }
   });
 
@@ -900,6 +917,7 @@ function wire() {
   $('st-monitor').addEventListener('click', () => {
     _monOn = !_monOn;
     $('st-monitor').classList.toggle('on', _monOn);
+    $('st-monitor').setAttribute('aria-pressed', String(_monOn));
     api.engine.inputMonitor(_monOn);
   });
 
