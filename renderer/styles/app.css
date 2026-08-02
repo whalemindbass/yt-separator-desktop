@@ -2117,15 +2117,22 @@ body { display: flex; flex-direction: column; }
 .daw-left-soon { font-size: 11.5px; color: var(--tx-4); line-height: 1.5; }
 .daw-tool { background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 11px; }
 .daw-tool-h { font-size: 11px; font-weight: 700; color: var(--tx-3); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 9px; }
-.vu { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
-.vu-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--stem-drums) 75%, var(--danger)); transition: width .06s linear; }
-.vu-fill.clip { background: var(--danger); }
-.vu-db { margin-top: 5px; font-family: var(--mono); font-size: 11px; color: var(--tx-3); text-align: right; }
-.tuner-note { font-size: 30px; font-weight: 800; text-align: center; letter-spacing: -.02em; color: var(--tx-1); }
-.tuner-note.in-tune { color: var(--ok); }
-.tuner-meter { position: relative; height: 8px; margin: 8px 0 4px; border-radius: 4px; background: rgba(255,255,255,.1); }
-.tuner-center { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--tx-4); }
-.tuner-needle { position: absolute; top: -2px; left: 50%; width: 3px; height: 12px; border-radius: 2px; background: var(--accent); transform: translateX(-50%); transition: left .08s; }
+/* 레벨 미터 — 세그먼트 LED 스타일 (파인 트랙 + 눈금) */
+.vu { position: relative; height: 12px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border), inset 0 1px 3px rgba(0,0,0,.4); overflow: hidden; }
+.vu-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--ok) 55%, var(--stem-drums) 78%, var(--danger)); transition: width .05s linear; }
+.vu-fill.clip { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.vu::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 5px, var(--sunken) 5px 7px); }
+.vu-db { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--tx-2); text-align: right; font-variant-numeric: tabular-nums; }
+.tuner-note { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; text-shadow: 0 0 20px transparent; transition: color .12s, text-shadow .12s; }
+.tuner-note.in-tune { color: var(--ok); text-shadow: 0 0 22px color-mix(in srgb, var(--ok) 55%, transparent); }
+/* 튜너 미터 — 센트 색존(가운데 초록) + 눈금 */
+.tuner-meter { position: relative; height: 12px; margin: 10px 0 4px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--danger), var(--stem-drums) 30%, var(--ok) 46% 54%, var(--stem-drums) 70%, var(--danger));
+  box-shadow: inset 0 0 0 1px var(--border); }
+.tuner-meter::before { content: ""; position: absolute; inset: 0; border-radius: 3px; background: rgba(0,0,0,.42); }
+.tuner-meter::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), var(--hair-hi) calc(10% - 1px), var(--hair-hi) 10%); }
+.tuner-center { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--tx-2); z-index: 2; }
+.tuner-needle { position: absolute; top: -3px; left: 50%; width: 3px; height: 18px; border-radius: 2px; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,.6); transform: translateX(-50%); transition: left .08s; z-index: 3; }
 .tuner-cents { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--tx-3); min-height: 14px; }
 .metro-row { display: flex; align-items: center; gap: 8px; }
 .metro-row .btn { flex: none; }
