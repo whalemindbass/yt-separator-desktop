@@ -2279,6 +2279,23 @@ body { display: flex; flex-direction: column; }
 .daw-left.empty .daw-fx-actions, .daw-left.empty #st-fx-slots, .daw-left.empty #st-fx-add { display: none; }
 .daw-left.empty .daw-fx-empty { display: block; }
 
+/* FX 헤더 + 전원(일괄 켜기/끄기) 토글 */
+.daw-left-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.daw-fx-power { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-3); border-radius: 20px; font: 700 10px/1 var(--sans); cursor: pointer; transition: color .12s, border-color .12s; }
+.daw-fx-power:disabled { opacity: .4; cursor: default; }
+.daw-fx-power .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--tx-4); box-shadow: none; transition: background .12s, box-shadow .12s; }
+.daw-fx-power.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.daw-fx-power.active .pdot { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent); }
+.daw-left.empty .daw-fx-power { display: none; }
+
+/* 하단 믹서 — 마스터 / 선택 트랙 페이더 */
+.daw-mixer { margin-top: auto; display: flex; gap: 10px; padding: 12px 6px 4px; border-top: 1px solid var(--border); }
+.mx-strip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 4px 8px; }
+.mx-val { font: 700 10px/1 var(--mono); color: var(--tx-2); min-height: 10px; }
+.mx-fader { writing-mode: vertical-lr; direction: rtl; width: 22px; height: 130px; cursor: pointer; accent-color: var(--accent); }
+.mx-fader:disabled { opacity: .35; cursor: default; }
+.mx-lbl { font: 700 9px/1.1 var(--sans); letter-spacing: .04em; color: var(--tx-3); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 테이크를 다른 내 트랙으로 드래그 중인 대상 레인 */
 .daw-lane-rec.drop-target .daw-area { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
 

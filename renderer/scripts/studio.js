@@ -233,7 +233,10 @@ function renderRecLanes() {
     rBtn.addEventListener('click', (e) => { e.stopPropagation(); api.engine.recArm(rt.id); });   // 엔진이 recTracks 재발행 → 갱신
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
-    vol.addEventListener('input', () => { rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain }); });
+    vol.addEventListener('input', () => {
+      rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain });
+      if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
+    });
     // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
     del.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -280,6 +283,16 @@ function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
     const idx = _recTracks.findIndex(r => r.id === _selTrack);
     h.textContent = has ? `내 녹음 ${idx + 1} 이펙트` : '입력 이펙트';
   }
+  updateTrackFader();
+}
+function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
+  const f = $('mx-track'), val = $('mx-track-val'), lbl = $('mx-track-lbl'); if (!f) return;
+  const rt = _recTracks.find(r => r.id === _selTrack);
+  if (rt) {
+    const v = Math.round((rt.gain != null ? rt.gain : 1) * 100);
+    f.disabled = false; f.value = v; val.textContent = v;
+    lbl.textContent = '내 녹음 ' + (_recTracks.findIndex(r => r.id === _selTrack) + 1);
+  } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
 // ── 드래그 이동량 배지 (+0:07) ──
@@ -406,7 +419,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -857,6 +870,8 @@ function onEngineEvent(m) {
 }
 
 function renderFxSlots() {
+  const pb = $('st-fx-bypassall');   // 전원 토글: 하나라도 켜져 있으면 active(초록)
+  if (pb) { pb.classList.toggle('active', _chain.length > 0 && _chain.some(s => !s.bypass)); }
   const box = $('st-fx-slots'); if (!box) return;
   box.innerHTML = '';
   _chain.forEach((s) => {
@@ -943,7 +958,19 @@ function wire() {
     e.preventDefault();
     if (_playing) stopAll(); else play();
   });
-  $('st-master').addEventListener('input', (e) => api.engine.master(Number(e.target.value) / 100));
+  // 마스터 볼륨 — 하단바 슬라이더와 좌측 믹서 페이더 양방향 동기화
+  const applyMaster = (v) => { api.engine.master(v / 100); $('st-master').value = v; $('mx-master').value = v; $('mx-master-val').textContent = v; };
+  $('st-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
+  $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
+  // 선택 트랙 볼륨 페이더 (믹서 우측)
+  $('mx-track').addEventListener('input', (e) => {
+    if (_selTrack == null) return;
+    const v = Number(e.target.value), g = v / 100;
+    api.engine.recTrack(_selTrack, { gain: g });
+    const rt = _recTracks.find(r => r.id === _selTrack); if (rt) rt.gain = g;
+    $('mx-track-val').textContent = v;
+    const lv = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .daw-vol`); if (lv) lv.value = v;
+  });
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); video.currentTime = 0; updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }
