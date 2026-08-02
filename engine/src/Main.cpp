@@ -59,10 +59,10 @@ public:
     void closeButtonPressed() override { setVisible (false); }
 };
 
-// 녹음된 테이크 재생 (타임라인 start 위치부터)
+// 녹음/임포트 클립 재생 — 디바이스 SR 로 리샘플된 메모리 버퍼(오디오 스레드 디스크 I/O 없음)
 struct TakePlay
 {
-    std::unique_ptr<AudioFormatReaderSource> src;
+    AudioBuffer<float> buf;   // 2ch, 디바이스 SR
     int64 id = 0;      // 안정 식별자 (이동해도 유지)
     int64 start = 0;   // 타임라인 위치 (이동 가능)
     int64 len = 0;
@@ -166,24 +166,42 @@ public:
                              [id] (auto& t) { return t->id == id; }), takesPlay.end());
     }
     void clearTakes() { const ScopedLock sl (takesLock); takesPlay.clear(); }
-    void loadTake (const String& file, int64 start, int trackId, int64 id)   // 저장된 테이크 파일을 재생 소스로 등록
+
+    // 파일 → 디바이스 SR 2ch 메모리 버퍼로 (리샘플). 반환=샘플수. 오디오 스레드 디스크 I/O 제거 + SR 정합
+    int64 loadClipBuffer (const File& f, AudioBuffer<float>& out)
     {
-        File f (file);
-        if (auto* reader = fmt.createReaderFor (f))
+        std::unique_ptr<AudioFormatReader> r (fmt.createReaderFor (f));
+        if (r == nullptr) return 0;
+        const int64 srcLen = r->lengthInSamples;
+        if (srcLen <= 0) return 0;
+        const double srcSr = r->sampleRate > 0 ? r->sampleRate : deviceSampleRate;
+        AudioBuffer<float> src (2, (int) srcLen);
+        src.clear();
+        r->read (&src, 0, (int) srcLen, 0, true, true);
+        if (r->numChannels < 2) src.copyFrom (1, 0, src, 0, 0, (int) srcLen);   // 모노 → 스테레오
+        if (approximatelyEqual (srcSr, deviceSampleRate)) { out = std::move (src); return srcLen; }
+        const int outLen = (int) std::ceil ((double) srcLen * deviceSampleRate / srcSr);
+        out.setSize (2, outLen); out.clear();
+        for (int c = 0; c < 2; ++c)
         {
-            auto tp = std::make_unique<TakePlay>();
-            tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
-            tp->src->prepareToPlay (blockSize, deviceSampleRate);
-            const int64 tid = id > 0 ? id : nextTakeId++;   // 저장된 고유 id 재사용, 없으면 새로
-            tp->id = tid;
-            if (tid >= nextTakeId) nextTakeId = tid + 1;     // 이후 녹음 id 와 충돌 방지
-            tp->start = start;
-            tp->len = reader->lengthInSamples;
-            tp->trackId = trackId > 0 ? trackId : armedTrack.load();
-            tp->path = f.getFullPathName();
-            const ScopedLock sl (takesLock);
-            takesPlay.push_back (std::move (tp));
+            LagrangeInterpolator interp;
+            interp.process (srcSr / deviceSampleRate, src.getReadPointer (c), out.getWritePointer (c), outLen);
         }
+        return outLen;
+    }
+
+    void loadTake (const String& file, int64 start, int trackId, int64 id)   // 저장/임포트 클립을 재생 버퍼로 등록
+    {
+        auto tp = std::make_unique<TakePlay>();
+        tp->len = loadClipBuffer (File (file), tp->buf);
+        if (tp->len <= 0) { std::cerr << "[engine] loadTake: cannot read " << file << "\n"; return; }
+        const int64 tid = id > 0 ? id : nextTakeId++;
+        tp->id = tid;
+        if (tid >= nextTakeId) nextTakeId = tid + 1;
+        tp->start = start;
+        tp->trackId = trackId > 0 ? trackId : armedTrack.load();
+        const ScopedLock sl (takesLock);
+        takesPlay.push_back (std::move (tp));
     }
 
     // ---- VST3 호스팅 ----
@@ -612,8 +630,8 @@ public:
                 srs.push_back ({ std::move (src), s->gain.load(), anySolo ? s->solo.load() : ! s->mute.load() });
             }
 
-        // 트랙: 프레시 테이크 리더 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
-        struct TR { std::unique_ptr<AudioFormatReaderSource> src; int64 start; int64 len; };
+        // 트랙: 테이크 버퍼 스냅샷 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
+        struct TR { AudioBuffer<float> buf; int64 start; int64 len; };
         struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
         std::vector<TRK> trks;
         {
@@ -641,12 +659,9 @@ public:
                 for (auto& t : takesPlay)
                 {
                     if (t->trackId != rt->id) continue;
-                    auto* rd = fmt.createReaderFor (File (t->path));
-                    if (rd == nullptr) continue;
-                    auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
-                    src->prepareToPlay (block, sr);
+                    TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len;   // 버퍼 복사(스냅샷)
                     total = jmax (total, t->start + t->len);
-                    tk.takes.push_back ({ std::move (src), t->start, t->len });
+                    tk.takes.push_back (std::move (tr));
                 }
                 trks.push_back (std::move (tk));
             }
@@ -704,9 +719,8 @@ public:
                 {
                     const int64 rp = pos - t.start;
                     if (rp < 0 || rp >= t.len) continue;
-                    tmp.clear(); t.src->setNextReadPosition (rp);
-                    AudioSourceChannelInfo info (&tmp, 0, n); t.src->getNextAudioBlock (info);
-                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, tmp, jmin (c, tmp.getNumChannels() - 1), 0, n);
+                    const int nn = (int) jmin<int64> ((int64) n, t.len - rp);
+                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) rp, nn);
                     any = true;
                 }
                 if (! any && tk.fx.empty()) continue;
@@ -835,19 +849,16 @@ public:
                     fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
                     fxBuf.clear();
 
-                    // 테이크·입력은 유니티로 버스에 모음 (게인은 FX 뒤에 적용)
+                    // 테이크·입력은 유니티로 버스에 모음 (게인은 FX 뒤에 적용). 메모리 버퍼에서 직접(디스크 I/O 없음)
                     if (playing.load())
                         for (auto& t : takesPlay)
                         {
                             if (t->trackId != rt->id) continue;
                             const int64 pos = phStart - t->start;
                             if (pos < 0 || pos >= t->len) continue;
-                            t->src->setNextReadPosition (pos);
-                            scratch.setSize (2, numSamples, false, false, true); scratch.clear();
-                            AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                            t->src->getNextAudioBlock (info);
+                            const int n2 = (int) jmin<int64> ((int64) numSamples, t->len - pos);
                             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                                fxBuf.addFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
+                                fxBuf.addFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) pos, n2);
                         }
 
                     if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
@@ -931,21 +942,20 @@ private:
             const int64 comp = inLatSamp + outLatSamp;                 // 왕복 지연 = PDC
             const int64 timelineStart = jmax<int64> (0, start - comp); // 테이크를 앞당겨 정렬
 
-            // 저장된 테이크를 재생 소스로 등록 → 이후 재생 시 그 위치에서 들림
-            if (auto* reader = fmt.createReaderFor (outFile))
+            // 녹음 파일을 재생 버퍼로 등록 (녹음은 이미 디바이스 SR → 리샘플 없음)
             {
                 auto tp = std::make_unique<TakePlay>();
-                tp->src = std::make_unique<AudioFormatReaderSource> (reader, true);
-                tp->src->prepareToPlay (blockSize, deviceSampleRate);
-                const int64 takeId = nextTakeId++;   // 트랙 무관 전역 고유 id (start 아님 → 충돌 방지)
-                tp->id = takeId;
-                tp->start = timelineStart;
-                tp->len = reader->lengthInSamples;
-                tp->trackId = armedTrack.load();
-                tp->path = outFile.getFullPathName();
-                lastTakeId = takeId;
-                const ScopedLock sl (takesLock);
-                takesPlay.push_back (std::move (tp));
+                tp->len = loadClipBuffer (outFile, tp->buf);
+                if (tp->len > 0)
+                {
+                    const int64 takeId = nextTakeId++;
+                    tp->id = takeId;
+                    tp->start = timelineStart;
+                    tp->trackId = armedTrack.load();
+                    lastTakeId = takeId;
+                    const ScopedLock sl (takesLock);
+                    takesPlay.push_back (std::move (tp));
+                }
             }
 
             auto* o = ev ("take");
