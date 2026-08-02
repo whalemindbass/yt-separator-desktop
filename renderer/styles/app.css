@@ -2125,6 +2125,22 @@ body { display: flex; flex-direction: column; }
 .vu-db { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--tx-2); text-align: right; font-variant-numeric: tabular-nums; }
 .tuner-note { font-size: 34px; font-weight: 800; text-align: center; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; text-shadow: 0 0 20px transparent; transition: color .12s, text-shadow .12s; }
 .tuner-note.in-tune { color: var(--ok); text-shadow: 0 0 22px color-mix(in srgb, var(--ok) 55%, transparent); }
+
+/* 새 분리(첫 화면) — 워크플로우를 하나의 콘솔 패널로 */
+.body[data-view="separate"] > .hero {
+  position: relative;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, #fff), var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 1px 0 var(--hair-hi), var(--shadow-card);
+  padding: 30px 34px 34px;
+  margin: 34px auto;
+  overflow: hidden;
+}
+.body[data-view="separate"] > .hero::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, transparent), transparent);
+}
 /* 튜너 미터 — 센트 색존(가운데 초록) + 눈금 */
 .tuner-meter { position: relative; height: 12px; margin: 10px 0 4px; border-radius: 3px;
   background: linear-gradient(90deg, var(--danger), var(--stem-drums) 30%, var(--ok) 46% 54%, var(--stem-drums) 70%, var(--danger));
