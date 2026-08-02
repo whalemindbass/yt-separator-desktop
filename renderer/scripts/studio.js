@@ -306,7 +306,8 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   if (rt) {
     const v = Math.round((rt.gain != null ? rt.gain : 1) * 100);
     f.disabled = false; f.value = v; val.textContent = v;
-    lbl.textContent = '내 녹음 ' + (_recTracks.findIndex(r => r.id === _selTrack) + 1);
+    const laneLbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .nm`)?.textContent?.trim();
+    lbl.textContent = laneLbl || '트랙';
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
