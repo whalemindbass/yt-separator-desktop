@@ -2264,7 +2264,7 @@ body { display: flex; flex-direction: column; }
 .daw-vol:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .daw-vol:disabled { opacity: .4; }
 .daw-area { position: relative; overflow: hidden; }
-.daw-clip { position: absolute; inset: 6px 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); }
+.daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .daw-ph { position: absolute; top: 0; width: 1.5px; background: var(--accent); z-index: 4; pointer-events: none; }
 .daw-master { display: flex; align-items: center; gap: 7px; font: 700 10px/1 var(--mono); letter-spacing: .06em; color: var(--tx-3); }
@@ -2272,7 +2272,7 @@ body { display: flex; flex-direction: column; }
 .daw-fx-slot .del { flex: none; width: 24px; height: 24px; padding: 0; font-size: 12px; border: 1px solid transparent; background: transparent; color: var(--tx-4); border-radius: 5px; cursor: pointer; }
 .daw-fx-slot .del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); pointer-events: none; }
-.daw-take-clip { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); cursor: pointer; }
+.daw-take-clip { position: absolute; top: 0; bottom: 0; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); cursor: pointer; }
 .daw-take-clip svg { width: 100%; height: 100%; display: block; }
 .daw-ctx { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 7px; box-shadow: var(--shadow-pop); padding: 4px; }
 .daw-ctx button { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: 0; color: var(--tx-1); font-size: 12.5px; cursor: pointer; border-radius: 5px; }
@@ -2395,8 +2395,8 @@ body { display: flex; flex-direction: column; }
 .daw-lane .daw-area { border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
 .daw-head { background: var(--surface); }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
-.daw-clip { border: 1px solid rgba(255,255,255,.05); }
-.daw-take-clip { border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); }
+.daw-clip { border: 0; }
+.daw-take-clip { border: 0; }
 .daw-ruler { font-variant-numeric: tabular-nums; }
 
 /* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
@@ -2406,10 +2406,10 @@ body { display: flex; flex-direction: column; }
 .daw-head::before { width: 2px; box-shadow: none; }
 .daw-head .nm i { box-shadow: none; }
 /* 클립 모서리 정돈 */
-.daw-clip { border-radius: 6px; }
-.daw-take-clip { border-radius: 6px; }
+.daw-clip { border-radius: 0; }
+.daw-take-clip { border-radius: 0; }
 /* 오디오(임포트) 트랙 클립 = 다른 색(녹음 클립과 구분) */
-.daw-lane-audio .daw-take-clip { border-color: color-mix(in srgb, var(--stem-bass) 35%, transparent); background: color-mix(in srgb, var(--stem-bass) 14%, var(--elev)); }
+.daw-lane-audio .daw-take-clip { background: color-mix(in srgb, var(--stem-bass) 14%, var(--elev)); }
 .daw-lane:hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
 
 /* 믹서 페이더 — 채널 스트립 (플랫) */
