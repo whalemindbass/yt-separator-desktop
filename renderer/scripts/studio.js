@@ -1150,7 +1150,9 @@ function wire() {
       _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
       layout();
       sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
-    } else {                               // 그냥 휠 = 가로 스크롤
+    } else if (e.target.closest('.daw-head, .daw-addrec-head')) {
+      return;   // 트랙 컨트롤부 위 = 위아래 스크롤(native 세로)
+    } else {                               // 타임라인 위 = 가로 스크롤
       e.preventDefault();
       sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX);
       updatePlayhead(_lastSec);
