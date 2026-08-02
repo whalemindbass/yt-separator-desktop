@@ -106,8 +106,9 @@ function dragClip(e, onDelta, onEnd) {
   document.addEventListener('pointercancel', up);
 }
 function repositionStems() {
+  const w = contentW();   // 스템 클립 폭을 배율에 묶어야 줌이 파형에 반영됨
   document.querySelectorAll('.daw-lane:not(.daw-lane-rec) .daw-clip').forEach(c => {
-    c.style.left = (_stemOffset * _pxPerSec) + 'px'; c.style.right = 'auto';
+    c.style.left = (_stemOffset * _pxPerSec) + 'px'; c.style.width = w + 'px'; c.style.right = 'auto';
   });
 }
 // 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
@@ -430,7 +431,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'st-master', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -581,10 +582,23 @@ function openSongPicker() {
     const k = it.videoPath || it.id; if (seen.has(k)) continue; seen.add(k); items.push(it);
   }
   if (!items.length) { openModal('곡 선택', `<div class="daw-modal-empty">라이브러리가 비어있습니다.</div>`, () => {}); return; }
-  const html = items.map((it, i) =>
-    `<div class="daw-modal-item" data-idx="${i}"><div class="mt"><div class="n">${esc(it.name)}</div>
-      <div class="m">${Object.keys(it.stemPaths || {}).length} 스템${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`).join('');
-  openModal('곡 선택', html, (idx) => loadSong(items[Number(idx)]));
+  const groups = [...new Set(items.map(it => it.group).filter(Boolean))];
+  const chips = groups.length
+    ? `<div class="daw-modal-tabs"><button class="daw-mtab on" data-g="__all">전체</button>${groups.map(g => `<button class="daw-mtab" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>`
+    : '';
+  const row = (it, i) => `<div class="daw-modal-item" data-idx="${i}" data-g="${esc(it.group || '')}"><div class="mt"><div class="n">${esc(it.name)}</div>
+      <div class="m">${Object.keys(it.stemPaths || {}).length} 스템${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`;
+  const host = $('daw-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>곡 선택</span><button class="x">✕</button></div>${chips}<div class="daw-modal-list">${items.map(row).join('')}</div></div>`;
+  host.hidden = false;
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
+  host.querySelectorAll('.daw-modal-item').forEach(el => el.addEventListener('click', () => { host.hidden = true; loadSong(items[Number(el.dataset.idx)]); }));
+  host.querySelectorAll('.daw-mtab').forEach(b => b.addEventListener('click', () => {
+    host.querySelectorAll('.daw-mtab').forEach(x => x.classList.remove('on')); b.classList.add('on');
+    const g = b.dataset.g;
+    host.querySelectorAll('.daw-modal-item').forEach(el => { el.style.display = (g === '__all' || el.dataset.g === g) ? '' : 'none'; });
+  }));
 }
 
 function openVstPicker() {
@@ -982,9 +996,8 @@ function wire() {
     e.preventDefault();
     if (_playing) stopAll(); else play();
   });
-  // 마스터 볼륨 — 하단바 슬라이더와 좌측 믹서 페이더 양방향 동기화
-  const applyMaster = (v) => { api.engine.master(v / 100); $('st-master').value = v; $('mx-master').value = v; $('mx-master-val').textContent = v; };
-  $('st-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
+  // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
+  const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; };
   $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
   // 선택 트랙 볼륨 페이더 (믹서 우측)
   $('mx-track').addEventListener('input', (e) => {
