@@ -19,7 +19,6 @@ let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
-let _timelinePad = 180;   // 타임라인 여유 길이(초) — 스크롤로 늘어남(무한)
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
@@ -87,6 +86,8 @@ let _plugins = [];         // 스캔된 VST 목록
 let _songKey = null;
 
 const HEAD_W = 140;
+// 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
+const BPM = 120, BEATS_PER_BAR = 4, SEC_PER_BAR = BEATS_PER_BAR * 60 / BPM;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
@@ -115,12 +116,11 @@ function repositionStems() {
 }
 // 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
 function scrubStart(e, area) {
-  if (!_dur) return;
   const seekTo = (clientX) => {
     const r = area.getBoundingClientRect();
-    const t = Math.max(0, Math.min(_dur, (clientX - r.left) / _pxPerSec));
+    const t = Math.max(0, Math.min(fullSec(), (clientX - r.left) / _pxPerSec));   // 소스 밖(타임라인 전체)까지 이동
     api.engine.seek(Math.round(t * (_sr || 44100)));
-    const v = $('daw-video'); if (v && isFinite(v.duration)) v.currentTime = t;
+    const v = $('daw-video'); if (v && isFinite(v.duration) && t <= v.duration) v.currentTime = t;
     updatePlayhead(t);
   };
   seekTo(e.clientX);
@@ -355,27 +355,31 @@ function ensurePlayhead() {
   return ph;
 }
 
-// 타임라인 총 길이(초) — 스템 길이에 국한하지 않고 뷰포트 채움 + 여유(무한 느낌)
+// 타임라인 총 길이(초) — 소스 길이 + 여유(뷰포트는 채우되 무한 아님), 마디 단위로 반올림
 function fullSec() {
   const sc = $('daw-tscroll');
   const vw = sc ? sc.clientWidth - HEAD_W : 1000;
-  return Math.max(_dur, vw / _pxPerSec) + _timelinePad;
+  const base = Math.max(_dur, vw / _pxPerSec) + 8;   // 소스보다 조금 더 길게
+  return Math.ceil(base / SEC_PER_BAR) * SEC_PER_BAR;
 }
 const timelineW = () => Math.max(1, fullSec() * _pxPerSec);
 
 function layout() {
-  const w = timelineW();   // 스템 길이가 아니라 타임라인 전체 폭 (오른쪽 회색 여백 제거 + 무한)
+  const w = timelineW();   // 타임라인 전체 폭 (오른쪽 회색 여백 제거)
   $('daw-lanes').style.width = (HEAD_W + w) + 'px';
   document.querySelectorAll('.daw-lane').forEach(l => { l.style.width = (HEAD_W + w) + 'px'; });
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
-  const step = _pxPerSec >= 40 ? 2 : _pxPerSec >= 20 ? 5 : _pxPerSec >= 10 ? 10 : 20;
-  $('daw-lanes').style.setProperty('--grid', (step * _pxPerSec) + 'px');   // 타임라인 그리드 간격
+  const barPx = SEC_PER_BAR * _pxPerSec;
+  $('daw-lanes').style.setProperty('--grid', barPx + 'px');   // 마디마다 그리드선
+  const lblEvery = barPx >= 60 ? 1 : barPx >= 30 ? 2 : barPx >= 15 ? 4 : 8;   // 라벨 간격(마디)
   const end = fullSec();
-  for (let s = 0; s <= end; s += step) {
+  let bar = 1;
+  for (let s = 0; s <= end + 0.001; s += SEC_PER_BAR, bar++) {
     const tk = document.createElement('span');
-    tk.className = 'tk'; tk.style.left = (s * _pxPerSec) + 'px';
-    tk.textContent = fmtTC(s).replace(/\.000$/, '');
+    tk.className = 'tk' + ((bar - 1) % lblEvery === 0 ? '' : ' minor');
+    tk.style.left = (s * _pxPerSec) + 'px';
+    if ((bar - 1) % lblEvery === 0) tk.textContent = bar;
     ruler.appendChild(tk);
   }
   ensurePlayhead();   // 재생선을 lanes 안에 유지(헤드보다 아래 z → 컨트롤 컬럼에 안 비침)
@@ -493,7 +497,7 @@ async function loadSong(item) {
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
-  _takes = []; _stemOffset = 0; _timelinePad = 180;
+  _takes = []; _stemOffset = 0;
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -1076,11 +1080,7 @@ function wire() {
     const t = Math.max(0, Math.min(_dur, x / _pxPerSec));
     api.engine.seek(Math.round(t * _sr)); video.currentTime = t; updatePlayhead(t);
   });
-  $('daw-tscroll').addEventListener('scroll', () => {
-    updatePlayhead(_lastSec);
-    const sc = $('daw-tscroll');   // 오른쪽 끝 근처면 타임라인 더 늘림(무한)
-    if (sc.scrollLeft + sc.clientWidth > sc.scrollWidth - 300) { _timelinePad += 180; layout(); }
-  });
+  $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
   $('st-fx-add').addEventListener('click', () => {
     if (!_plugins.length) { api.engine.scanPlugins(); setTimeout(openVstPicker, 700); }
