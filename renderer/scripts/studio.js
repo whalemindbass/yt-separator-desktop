@@ -99,6 +99,7 @@ const DEFAULT_LANE_H = 64;   // CSS .daw-lane 기본 높이 — 이보다 작게
 const BEATS_PER_BAR = 4;
 let _bpm = 120;         // 조절 가능(그리드·스냅·룰러에 반영). 곡 로드 시 자동 감지
 let _gridOffset = 0;    // 마디 위상(초) — 첫 다운비트에 그리드 정렬
+let _beats = [];        // 감지된 실제 비트 시각(초, 스템 로컬) — 메트로놈 정확 정렬용
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
 // 그리드 스냅 — 위상(_gridOffset) 기준 1/4박(16분음표) 격자에 5px 이내면 스냅.
@@ -557,14 +558,16 @@ function updatePlayhead(sec) {
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
 function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
-const metroPhaseSamples = () => Math.round(_gridOffset * (_sr || 44100));   // 스템 다운비트 위상
+const metroPhaseSamples = () => Math.round(_gridOffset * (_sr || 44100));   // 스템 다운비트 위상(폴백용)
+// 감지된 비트를 타임라인·디바이스 샘플로 (스템 오프셋 반영)
+const metroBeatSamples = () => { const sr = _sr || 44100; return _beats.map(b => Math.round((b + _stemOffset) * sr)); };
 function playStudio() {
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
-  api.engine.metro(_metroOn, _bpm, metroPhaseSamples());   // 재생 시작 시 메트로놈 상태·위상 반영
+  api.engine.metro(_metroOn, _bpm, metroPhaseSamples(), metroBeatSamples());   // 상태·위상·실제비트 반영
 }
 function stopStudio() {
-  _playing = false; api.engine.stop(); api.engine.metro(false, _bpm, metroPhaseSamples()); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
+  _playing = false; api.engine.stop(); api.engine.metro(false, _bpm, metroPhaseSamples(), metroBeatSamples()); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
   if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
   clearRecLive();
   if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
@@ -710,7 +713,7 @@ async function loadSong(item, opts) {
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
-  _takes = []; _stemOffset = 0; _gridOffset = 0; clearUndo();
+  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
@@ -746,10 +749,12 @@ async function detectSongBpm(stems, sampleRate) {
     if (!res || !(res.tempo > 0)) return;
     _bpm = Math.max(20, Math.min(300, Math.round(res.tempo)));
     const b = $('st-bpm'); if (b) b.value = _bpm;
-    const phase = (res.downbeat != null ? res.downbeat : (Array.isArray(res.beats) && res.beats.length ? res.beats[0] : 0)) || 0;
+    _beats = Array.isArray(res.beats) ? res.beats.slice() : [];   // 실제 비트(메트로놈 정렬용)
+    const phase = (res.downbeat != null ? res.downbeat : (_beats.length ? _beats[0] : 0)) || 0;
     _gridOffset = Math.max(0, phase) + _stemOffset;   // 첫 다운비트에 마디 정렬
     layout();
-    flashTake(`BPM ${_bpm} · 박자 자동 정렬`);
+    if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroBeatSamples());
+    flashTake(`BPM ${_bpm} · 박자 자동 정렬 (비트 ${_beats.length})`);
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
 }
 
@@ -1215,7 +1220,7 @@ async function buildProjectObject() {
   // 스템 트랙 믹스(볼륨·뮤트·솔로)까지 기록
   const stemMix = _tracks.map(t => ({ key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo }));
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, gridOffset: _gridOffset, master, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, gridOffset: _gridOffset, beats: _beats, master, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1282,6 +1287,7 @@ async function applyProject(p) {
   _songName = p.name || '';
   if (p.bpm) { _bpm = p.bpm; const b = $('st-bpm'); if (b) b.value = p.bpm; }
   _gridOffset = p.gridOffset || 0;
+  _beats = Array.isArray(p.beats) ? p.beats.slice() : [];
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   let idMap = null;
   if (Array.isArray(p.tracks) && p.tracks.length) {
@@ -1398,8 +1404,8 @@ function reorderTracks(orderIds) {
   _recTracks.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
   renderRecLanes(); renderTakes();
 }
-function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples()); }
-function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); }
+function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroBeatSamples()); }
+function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroBeatSamples()); }
 // BPM 배수 보정 (감지가 ×2/÷2 로 틀릴 때)
 function adjustBpm(factor) {
   const old = _bpm;
@@ -1844,7 +1850,7 @@ function wire() {
     _metroOn = !_metroOn;
     $('st-metro').classList.toggle('on', _metroOn);
     $('st-metro').setAttribute('aria-pressed', String(_metroOn));
-    api.engine.metro(_metroOn && _playing, _bpm, metroPhaseSamples());   // 재생 중이면 즉시 반영
+    api.engine.metro(_metroOn && _playing, _bpm, metroPhaseSamples(), metroBeatSamples());   // 재생 중이면 즉시 반영
     flashTake(_metroOn ? '메트로놈 켜짐' : '메트로놈 꺼짐');
   });
   const tscroll = $('daw-tscroll');

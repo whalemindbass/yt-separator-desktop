@@ -377,7 +377,14 @@ public:
     }
 
     // ---- 부가: 레벨 미터 · 튜너 · 메트로놈 ----
-    void setMetro (bool on, double bpm, int64 phase) { metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase; lastBeatIdx = -1; }
+    void setMetro (bool on, double bpm, int64 phase, const var& beats)
+    {
+        metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase; lastBeatIdx = -1;
+        const ScopedLock sl (metroLock);
+        metroBeats.clearQuick();
+        if (auto* arr = beats.getArray())
+            for (auto& b : *arr) metroBeats.add ((int64) (double) b);   // 실제 감지 비트(샘플, 타임라인)
+    }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
     double detectPitch()
     {
@@ -981,20 +988,34 @@ public:
             }
         }
 
-        // 메트로놈 클릭 — 재생 위치(phStart) + 위상(metroPhase) 기준으로 박에 정렬(스템 기준)
+        // 메트로놈 클릭 — 감지된 실제 비트(metroBeats)에 정확히, 없으면 등간격(위상) 폴백
         if (metroOn.load() && numOut > 0)
         {
-            const double interval = 60.0 / metroBpm.load() * deviceSampleRate;
             const int clickLen = (int) (deviceSampleRate * 0.06);
+            const double interval = 60.0 / metroBpm.load() * deviceSampleRate;
             const double phase = (double) metroPhase.load();
             const bool playing_ = playing.load();
+            const ScopedTryLock stl (metroLock);
+            const bool useBeats = stl.isLocked() && metroBeats.size() > 0;
+            int bi = 0;
+            if (useBeats && playing_)   // 블록 시작 이상인 첫 비트로 이동
+                while (bi < metroBeats.size() && metroBeats[bi] < phStart) ++bi;
             for (int i = 0; i < numSamples; ++i)
             {
                 if (playing_)
                 {
-                    const double bpos = ((double) (phStart + i) - phase) / interval;
-                    const int64 beatIdx = (int64) std::floor (bpos + 1e-6);
-                    if (beatIdx >= 0 && beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; clickPos = 0; }
+                    bool onset = false;
+                    if (useBeats)
+                    {
+                        while (bi < metroBeats.size() && metroBeats[bi] < phStart + i) ++bi;   // 놓친 비트 스킵
+                        if (bi < metroBeats.size() && metroBeats[bi] == phStart + i) { onset = true; ++bi; }
+                    }
+                    else
+                    {
+                        const int64 beatIdx = (int64) std::floor (((double) (phStart + i) - phase) / interval + 1e-6);
+                        if (beatIdx >= 0 && beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; onset = true; }
+                    }
+                    if (onset) clickPos = 0;
                 }
                 if (clickPos >= 0)
                 {
@@ -1117,8 +1138,10 @@ private:
     SpinLock pitchLock;
     std::atomic<bool> metroOn { false };
     std::atomic<double> metroBpm { 120.0 };
-    std::atomic<int64> metroPhase { 0 };   // 첫 다운비트 위상(샘플)
+    std::atomic<int64> metroPhase { 0 };   // 첫 다운비트 위상(샘플) — 폴백(등간격)용
     int64 lastBeatIdx = -1;
+    CriticalSection metroLock;
+    Array<int64> metroBeats;                // 감지된 실제 비트 위치(샘플, 타임라인, 정렬됨)
     double metroCounter = 0.0;
     int clickPos = -1;
 
@@ -1186,7 +1209,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
-    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"]);
+    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], c["beats"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") engine.scanPlugins();
