@@ -651,7 +651,8 @@ function updateCloseSongBtn() {
 }
 
 // ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
-function nextClipId() { return Date.now() * 1000 + Math.floor(Math.random() * 1000); }
+let _clipSeq = Date.now() * 1000;   // 단조증가 → 루프·같은 ms 에도 항상 고유
+function nextClipId() { return ++_clipSeq; }
 async function newAudioTrack() {   // 오디오(임포트) 트랙 생성 후 새 id 반환
   const before = _recTracks.length;
   api.engine.recTrackAdd(1);   // type 1 = 오디오(녹음 불가)
@@ -942,7 +943,7 @@ function commitFade(tk) {
 }
 // 클립 복제 — 뒤로 dur 만큼 이어붙임
 function duplicateClip(tk) {
-  const id = Date.now();
+  const id = nextClipId();
   const copy = { ...tk, id, start: tk.start + tk.dur };
   reAddClip(copy);
   pushUndo(() => removeClipById(id), () => reAddClip(copy), '클립 복제');
@@ -956,7 +957,7 @@ function splitClip(tk, atSec) {
   const rel = atSec - tk.start;
   if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake('클립 안쪽에서만 분할됩니다.'); return; }
   const sr = _sr || 44100;
-  const newId = Date.now();
+  const newId = nextClipId();
   const origId = tk.id, origDur = tk.dur;
   // 뒷부분 = 새 클립
   const right = { ...tk, id: newId, start: tk.start + rel, inOff: tk.inOff + rel, dur: tk.dur - rel };
@@ -1282,7 +1283,7 @@ async function applyProject(p) {
     const gen = ++_recTracksGenReq;
     api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo })), gen);
     const ok = await waitRecTracks(gen);
-    if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
+    if (!ok) { _suppressDirty = false; flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
     idMap = {};
     p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
     applyTrackMeta(p.tracks);   // 이름·색·높이
@@ -1296,7 +1297,7 @@ async function applyProject(p) {
     let tid = t.trackId;
     if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
     else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
-    const id = Date.now() + Math.floor(Math.random() * 100000);
+    const id = nextClipId();
     api.engine.takeLoad(t.file, t.start, tid, id);
     await renderTake(t.file, t.start, id, tid);
     const tk = _takes.find(x => x.id === id);
@@ -1416,7 +1417,7 @@ function pasteClips() {
   const fallback = _selTrack != null ? _selTrack : armedRecId();
   const made = _clipboard.map((c) => {
     let tid = _recTracks.some(r => r.id === c.trackId) ? c.trackId : fallback;
-    return { file: c.file, id: Date.now() + Math.floor(Math.random() * 100000), trackId: tid,
+    return { file: c.file, id: nextClipId(), trackId: tid,
       start: at + c.relStart, inOff: c.inOff, dur: c.dur, srcDur: c.srcDur, fadeIn: c.fadeIn, fadeOut: c.fadeOut,
       svg: c.svg || (_takes.find(t => t.file === c.file) || {}).svg || '' };
   });
