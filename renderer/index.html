@@ -470,10 +470,19 @@
               <div class="vu"><div id="st-vu-fill" class="vu-fill"></div></div>
               <div id="st-vu-db" class="vu-db">—</div>
             </div>
-            <div class="daw-tool" id="tool-tuner" data-tool="tuner" hidden>
-              <div id="st-tuner-note" class="tuner-note">—</div>
-              <div class="tuner-meter"><span class="tuner-center"></span><div id="st-tuner-needle" class="tuner-needle"></div></div>
-              <div id="st-tuner-cents" class="tuner-cents"></div>
+            <div class="daw-tool tuner" id="tool-tuner" data-tool="tuner" hidden>
+              <div class="tuner-readout">
+                <span id="st-tuner-flat" class="tuner-arrow flat">♭</span>
+                <div class="tuner-note-wrap"><span id="st-tuner-note" class="tuner-note">—</span><sub id="st-tuner-oct" class="tuner-oct"></sub></div>
+                <span id="st-tuner-sharp" class="tuner-arrow sharp">♯</span>
+              </div>
+              <div class="tuner-meter">
+                <div class="tuner-ticks" id="st-tuner-ticks"></div>
+                <span class="tuner-center"></span>
+                <div id="st-tuner-needle" class="tuner-needle"></div>
+              </div>
+              <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
+              <div class="tuner-info"><span id="st-tuner-cents" class="tuner-cents">—</span><span id="st-tuner-freq" class="tuner-freq"></span></div>
             </div>
             <div class="daw-tool-empty" id="tool-empty">위에서 도구를 선택하세요</div>
           </div>
@@ -517,7 +526,6 @@
             <button id="st-bpm-double" disabled title="BPM ×2 (감지 배수 보정)">×2</button>
           </div>
         </div>
-        <button id="st-metro" class="btn icon" disabled title="메트로놈 (재생 중 클릭, 스템 박자 정렬)" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M5 14h6l-1.2-9.5a1 1 0 0 0-1-.9H7.2a1 1 0 0 0-1 .9z"/><path d="M8 11 12 3"/></svg></button>
         <span class="tp-div"></span>
         <span class="daw-zoom">
           <button id="st-zoom-out" class="btn icon" disabled title="축소"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg></button>

@@ -385,27 +385,65 @@ public:
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
+    // YIN 피치 검출 (De Cheveigné & Kawahara) — 옥타브 안정 + 포물선 보간으로 정밀.
     double detectPitch()
     {
-        const int N = 2048;
+        const int N = 4096;               // 저음(베이스)까지 커버
+        const int W = N / 2;              // 최대 lag
         std::vector<float> buf (N);
         {
             const SpinLock::ScopedLockType sl (pitchLock);
-            for (int i = 0; i < N; ++i) buf[i] = pitchRing[(pitchW + i) % N];
+            const int R = (int) pitchRing.size();
+            for (int i = 0; i < N; ++i) buf[i] = pitchRing[(pitchW + i) % R];
         }
         double mean = 0; for (float v : buf) mean += v; mean /= N;
         double rms = 0; for (int i = 0; i < N; ++i) { buf[i] -= (float) mean; rms += buf[i] * (double) buf[i]; }
         rms = std::sqrt (rms / N);
-        if (rms < 0.004) return 0.0;   // 너무 조용
-        const int minLag = (int) (deviceSampleRate / 1000.0);
-        const int maxLag = std::min (N - 1, (int) (deviceSampleRate / 60.0));
-        double best = 0; int bestLag = -1;
-        for (int lag = minLag; lag <= maxLag; ++lag)
+        if (rms < 0.004) return 0.0;      // 너무 조용
+
+        // 1) 차분 함수 d(tau)
+        std::vector<double> d ((size_t) W, 0.0);
+        for (int tau = 1; tau < W; ++tau)
         {
-            double c = 0; for (int i = 0; i < N - lag; ++i) c += buf[i] * (double) buf[i + lag];
-            if (c > best) { best = c; bestLag = lag; }
+            double sum = 0;
+            for (int i = 0; i < W; ++i) { const double diff = buf[i] - (double) buf[i + tau]; sum += diff * diff; }
+            d[(size_t) tau] = sum;
         }
-        return bestLag > 0 ? deviceSampleRate / (double) bestLag : 0.0;
+        // 2) 누적평균 정규화 차분 (CMND)
+        std::vector<double> cmnd ((size_t) W, 1.0);
+        double run = 0.0;
+        for (int tau = 1; tau < W; ++tau)
+        {
+            run += d[(size_t) tau];
+            cmnd[(size_t) tau] = run > 1e-12 ? d[(size_t) tau] * tau / run : 1.0;
+        }
+        // 3) 절대 임계 이하 첫 국소최소
+        const double thresh = 0.15;
+        int tau = -1;
+        for (int t = 2; t < W - 1; ++t)
+        {
+            if (cmnd[(size_t) t] < thresh)
+            {
+                while (t + 1 < W && cmnd[(size_t) (t + 1)] < cmnd[(size_t) t]) ++t;
+                tau = t; break;
+            }
+        }
+        if (tau < 0)   // 임계 미달 → 전역 최소 (신뢰도 낮으면 버림)
+        {
+            double m = 1e9;
+            for (int t = 2; t < W; ++t) if (cmnd[(size_t) t] < m) { m = cmnd[(size_t) t]; tau = t; }
+            if (tau < 0 || m > 0.5) return 0.0;
+        }
+        // 4) 포물선 보간으로 tau 정밀화
+        double betterTau = tau;
+        if (tau > 0 && tau < W - 1)
+        {
+            const double s0 = cmnd[(size_t) (tau - 1)], s1 = cmnd[(size_t) tau], s2 = cmnd[(size_t) (tau + 1)];
+            const double denom = 2.0 * (2.0 * s1 - s2 - s0);
+            if (std::abs (denom) > 1e-12) betterTau = tau + (s2 - s0) / denom;
+        }
+        const double f = deviceSampleRate / betterTau;
+        return (f >= 40.0 && f <= 2000.0) ? f : 0.0;
     }
 
     // 트랙 제어 (index = 스템 순서)
@@ -850,7 +888,7 @@ public:
         for (auto& s : stems) s->src->prepareToPlay (block, deviceSampleRate);
         for (auto& rt : recTracks) { const ScopedLock sl (rt->fxLock); for (auto& s : rt->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         scratch.setSize (2, block);
-        pitchRing.assign (2048, 0.0f); pitchW = 0;
+        pitchRing.assign (4096, 0.0f); pitchW = 0;
         if (! writerThread.isThreadRunning()) writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
@@ -1120,7 +1158,7 @@ private:
 
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
-    std::vector<float> pitchRing = std::vector<float> (2048, 0.0f);
+    std::vector<float> pitchRing = std::vector<float> (4096, 0.0f);
     int pitchW = 0;
     SpinLock pitchLock;
     std::atomic<bool> metroOn { false };

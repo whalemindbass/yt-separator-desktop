@@ -21,7 +21,6 @@ let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
-let _metroOn = false;       // 메트로놈 (재생 중 클릭, 스템 위상 정렬)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -560,21 +559,12 @@ function updatePlayhead(sec) {
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
 function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
-const metroPhaseSamples = () => Math.round(_gridOffset * (_sr || 44100));   // 스템 다운비트 위상(폴백용)
-// 정밀 박 간격(샘플). ÷2/×2 보정 반영(BPM 두배→간격 절반). 없으면 0 → 엔진 60/bpm 폴백.
-// 라이브러리 메트로놈과 동일한 균일 그리드 방식(다운비트 위상 + 이 간격) → 지터/엇박 없음.
-const metroIntervalSamples = () => {
-  const sr = _sr || 44100;
-  if (_beatInterval > 0 && _detBpm) return _beatInterval * (_detBpm / _bpm) * sr;
-  return 0;
-};
 function playStudio() {
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
-  api.engine.metro(_metroOn, _bpm, metroPhaseSamples(), metroIntervalSamples());   // 상태·위상·실제비트 반영
 }
 function stopStudio() {
-  _playing = false; api.engine.stop(); api.engine.metro(false, _bpm, metroPhaseSamples(), metroIntervalSamples()); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
+  _playing = false; api.engine.stop(); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
   if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
   clearRecLive();
   if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
@@ -637,27 +627,51 @@ function updateVU(peak) {
   fill.classList.toggle('clip', p >= 0.99);
   dbEl.textContent = p > 0.00001 ? `${db.toFixed(0)} dB` : '—';
 }
-let _tunerHold = 0;
+let _tunerHold = 0, _tunerBuf = [], _tunerNeedle = 50;
 function updateTuner(freq) {
   const noteEl = $('st-tuner-note'), needle = $('st-tuner-needle'), centsEl = $('st-tuner-cents');
   if (!noteEl) return;
+  const octEl = $('st-tuner-oct'), freqEl = $('st-tuner-freq'), flat = $('st-tuner-flat'), sharp = $('st-tuner-sharp');
+  const wrap = $('tool-tuner');
   if (!freq || freq < 40) {
-    if (Date.now() - _tunerHold > 700) { noteEl.textContent = '—'; centsEl.textContent = ''; needle.style.left = '50%'; }
+    _tunerBuf.length = 0;
+    if (Date.now() - _tunerHold > 900) {
+      noteEl.textContent = '—'; if (octEl) octEl.textContent = ''; centsEl.textContent = '—'; if (freqEl) freqEl.textContent = '';
+      flat && flat.classList.remove('on'); sharp && sharp.classList.remove('on');
+      wrap && wrap.classList.remove('in-tune');
+      _tunerNeedle += (50 - _tunerNeedle) * 0.2; needle.style.left = _tunerNeedle + '%';
+    }
     return;
   }
   _tunerHold = Date.now();
-  const n = 69 + 12 * Math.log2(freq / 440);
+  // 스무딩: 최근 프레임 중앙값(스파이크 제거)
+  _tunerBuf.push(freq); if (_tunerBuf.length > 7) _tunerBuf.shift();
+  const sorted = [..._tunerBuf].sort((a, b) => a - b);
+  const f = sorted[sorted.length >> 1];
+
+  const n = 69 + 12 * Math.log2(f / 440);
   const nearest = Math.round(n);
-  const cents = Math.round((n - nearest) * 100);
-  const name = NOTE_NAMES[((nearest % 12) + 12) % 12] + (Math.floor(nearest / 12) - 1);
+  const cents = (n - nearest) * 100;
+  const name = NOTE_NAMES[((nearest % 12) + 12) % 12];
+  const oct = Math.floor(nearest / 12) - 1;
   noteEl.textContent = name;
-  noteEl.classList.toggle('in-tune', Math.abs(cents) <= 5);
-  centsEl.textContent = (cents > 0 ? '+' : '') + cents + ' cent';
-  needle.style.left = Math.max(0, Math.min(100, 50 + cents)) + '%';
+  if (octEl) octEl.textContent = oct;
+  const inTune = Math.abs(cents) <= 4;
+  noteEl.classList.toggle('in-tune', inTune);
+  wrap && wrap.classList.toggle('in-tune', inTune);
+  centsEl.textContent = (cents > 0 ? '+' : '') + cents.toFixed(0) + '¢';
+  if (freqEl) freqEl.textContent = f.toFixed(1) + ' Hz';
+  flat && flat.classList.toggle('on', cents < -4);
+  sharp && sharp.classList.toggle('on', cents > 4);
+  // 바늘 부드럽게 (±50¢ → 0..100%)
+  const target = Math.max(0, Math.min(100, 50 + cents));
+  _tunerNeedle += (target - _tunerNeedle) * 0.35;
+  needle.style.left = _tunerNeedle + '%';
+  needle.classList.toggle('in-tune', inTune);
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -762,8 +776,7 @@ async function detectSongBpm(stems, sampleRate) {
     const phase = (res.downbeat != null ? res.downbeat : (_beats.length ? _beats[0] : 0)) || 0;
     _gridOffset = Math.max(0, phase) + _stemOffset;   // 첫 다운비트에 마디 정렬
     layout();
-    if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroIntervalSamples());
-    flashTake(`BPM ${_bpm} · 박자 자동 정렬 (비트 ${_beats.length})`);
+    flashTake(`BPM ${_bpm} · 박자 자동 정렬`);
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
 }
 
@@ -1414,8 +1427,8 @@ function reorderTracks(orderIds) {
   _recTracks.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
   renderRecLanes(); renderTakes();
 }
-function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroIntervalSamples()); }
-function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples(), metroIntervalSamples()); }
+function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); }
+function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); }
 // BPM 배수 보정 (감지가 ×2/÷2 로 틀릴 때)
 function adjustBpm(factor) {
   const old = _bpm;
@@ -1856,13 +1869,6 @@ function wire() {
   });
   $('st-bpm-half').addEventListener('click', () => adjustBpm(0.5));
   $('st-bpm-double').addEventListener('click', () => adjustBpm(2));
-  $('st-metro').addEventListener('click', () => {
-    _metroOn = !_metroOn;
-    $('st-metro').classList.toggle('on', _metroOn);
-    $('st-metro').setAttribute('aria-pressed', String(_metroOn));
-    api.engine.metro(_metroOn && _playing, _bpm, metroPhaseSamples(), metroIntervalSamples());   // 재생 중이면 즉시 반영
-    flashTake(_metroOn ? '메트로놈 켜짐' : '메트로놈 꺼짐');
-  });
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });
