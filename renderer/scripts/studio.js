@@ -2,6 +2,7 @@
 //   엔진(오디오)=마스터 클럭. 영상은 muted 로 playhead 따라감(드리프트 보정).
 import { Library } from './library.js';
 import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
+import { detectBeats } from './beat-detect.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -95,15 +96,16 @@ const HEAD_W = 140;
 const DEFAULT_LANE_H = 64;   // CSS .daw-lane 기본 높이 — 이보다 작게는 못 줄임(뷰 깨짐 방지)
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
 const BEATS_PER_BAR = 4;
-let _bpm = 120;   // 조절 가능(그리드·스냅·룰러에 반영)
+let _bpm = 120;         // 조절 가능(그리드·스냅·룰러에 반영). 곡 로드 시 자동 감지
+let _gridOffset = 0;    // 마디 위상(초) — 첫 다운비트에 그리드 정렬
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
-// 그리드 스냅 — 1/4박(16분음표) 격자에 5px 이내로 가까울 때만 살짝 스냅.
+// 그리드 스냅 — 위상(_gridOffset) 기준 1/4박(16분음표) 격자에 5px 이내면 스냅.
 // 그 밖은 연속(픽셀 단위) 이동 → 세밀 배치 가능. Alt 누르면 스냅 완전 해제.
 function snapSec(sec, disable) {
   if (disable) return Math.max(0, sec);
   const g = secPerBeat() / 4;   // 16분음표 격자(촘촘)
-  const near = Math.round(sec / g) * g;
+  const near = _gridOffset + Math.round((sec - _gridOffset) / g) * g;
   return Math.abs(near - sec) * _pxPerSec <= 5 ? Math.max(0, near) : Math.max(0, sec);
 }
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
@@ -493,7 +495,7 @@ function renderExportRange() {
   if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
   if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = ($('daw-lanes').offsetHeight || 0) + 'px'; }
 }
-const fmtBar = (sec) => '마디 ' + (Math.floor(sec / secPerBar()) + 1);
+const fmtBar = (sec) => '마디 ' + (Math.floor((sec - _gridOffset) / secPerBar()) + 1);
 
 // 타임라인 총 길이(초) — 소스 길이 + 여유(뷰포트는 채우되 무한 아님), 마디 단위로 반올림
 function fullSec() {
@@ -512,16 +514,20 @@ function layout() {
   document.querySelectorAll('.daw-lane').forEach(l => { l.style.width = (HEAD_W + w) + 'px'; });
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
-  const barPx = secPerBar() * _pxPerSec;
+  const spb = secPerBar();
+  const barPx = spb * _pxPerSec;
+  const phase = ((_gridOffset % spb) + spb) % spb;   // 첫 마디선 위치(0~1마디)
   $('daw-lanes').style.setProperty('--grid', barPx + 'px');   // 마디마다 그리드선
+  $('daw-lanes').style.setProperty('--grid-off', (phase * _pxPerSec) + 'px');   // 다운비트 정렬
   const lblEvery = barPx >= 60 ? 1 : barPx >= 30 ? 2 : barPx >= 15 ? 4 : 8;   // 라벨 간격(마디)
   const end = fullSec();
-  let bar = 1;
-  for (let s = 0; s <= end + 0.001; s += secPerBar(), bar++) {
+  let bar = Math.round((phase - _gridOffset) / spb) + 1;   // 첫 선의 마디 번호
+  for (let s = phase; s <= end + 0.001; s += spb, bar++) {
+    const isLabel = bar >= 1 && (bar - 1) % lblEvery === 0;
     const tk = document.createElement('span');
-    tk.className = 'tk' + ((bar - 1) % lblEvery === 0 ? '' : ' minor');
+    tk.className = 'tk' + (isLabel ? '' : ' minor');
     tk.style.left = (s * _pxPerSec) + 'px';
-    if ((bar - 1) % lblEvery === 0) tk.textContent = bar;
+    if (isLabel) tk.textContent = bar;
     ruler.appendChild(tk);
   }
   ensurePlayhead();   // 재생선을 lanes 안에 유지(헤드보다 아래 z → 컨트롤 컬럼에 안 비침)
@@ -681,16 +687,17 @@ function closeSong() {
 
 // ── 곡 로드 ────────────────────────────────────────
 let _loadingSong = false;
-async function loadSong(item) {
+async function loadSong(item, opts) {
   if (_loadingSong) return;   // 재진입 차단 (더블클릭 시 전역상태 오염)
   const it = item || Library.getSelected();
   if (!it) return;
+  const autoBpm = !(opts && opts.autoBpm === false);   // 프로젝트 복원 시엔 감지 생략
   const paths = Object.values(it.stemPaths || {}).filter(Boolean);
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
-  _takes = []; _stemOffset = 0; clearUndo();
+  _takes = []; _stemOffset = 0; _gridOffset = 0; clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
@@ -708,11 +715,28 @@ async function loadSong(item) {
   // 파형 (렌더러에서 디코드)
   flashTake(`불러옴: ${it.name} · 파형 분석 중…`);
   try {
-    const { stems } = await loadStemFilesToBuffers(it.stemPaths);
+    const { stems, sampleRate } = await loadStemFilesToBuffers(it.stemPaths);
     renderWaves(stems);
     flashTake(`불러옴: ${it.name}`);
+    if (autoBpm) detectSongBpm(stems, sampleRate || _sr || 44100);   // drums 에서 BPM·박자 감지(비동기)
   } catch (e) { flashTake(`파형 디코드 실패: ${e && e.message || e}`); }
   finally { _loadingSong = false; }
+}
+// 곡 로드 후 drums stem 에서 BPM·다운비트 감지 → 그리드·스냅 정렬
+async function detectSongBpm(stems, sampleRate) {
+  try {
+    const d = stems.drums;
+    if (!d || !d[0] || !d[0].length) return;
+    const mix = stems.other || stems.vocals || null;
+    const res = await detectBeats(d[0], d[1] || d[0], sampleRate || 44100, mix ? [mix[0], mix[1] || mix[0]] : null);
+    if (!res || !(res.tempo > 0)) return;
+    _bpm = Math.max(20, Math.min(300, Math.round(res.tempo)));
+    const b = $('st-bpm'); if (b) b.value = _bpm;
+    const phase = (res.downbeat != null ? res.downbeat : (Array.isArray(res.beats) && res.beats.length ? res.beats[0] : 0)) || 0;
+    _gridOffset = Math.max(0, phase) + _stemOffset;   // 첫 다운비트에 마디 정렬
+    layout();
+    flashTake(`BPM ${_bpm} · 박자 자동 정렬`);
+  } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
 }
 
 function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
@@ -1177,7 +1201,7 @@ async function buildProjectObject() {
   // 스템 트랙 믹스(볼륨·뮤트·솔로)까지 기록
   const stemMix = _tracks.map(t => ({ key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo }));
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, master, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, gridOffset: _gridOffset, master, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1221,7 +1245,7 @@ async function applyProject(p) {
   api.engine.takeClear(); _takes = []; renderTakes();
   // 1) 스템 (있으면 로드, 없으면 스템 트랙 비움)
   if (p.stems && p.stems.paths && Object.keys(p.stems.paths).length) {
-    await loadSong({ stemPaths: p.stems.paths, videoPath: p.stems.videoPath, name: p.name, id: p.name });
+    await loadSong({ stemPaths: p.stems.paths, videoPath: p.stems.videoPath, name: p.name, id: p.name }, { autoBpm: false });
     _stemOffset = (p.stems.offset || 0) / sr;
     api.engine.stemOffset(Math.round(_stemOffset * sr));
     repositionStems();
@@ -1243,6 +1267,7 @@ async function applyProject(p) {
   }
   _songName = p.name || '';
   if (p.bpm) { _bpm = p.bpm; const b = $('st-bpm'); if (b) b.value = p.bpm; }
+  _gridOffset = p.gridOffset || 0;
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   let idMap = null;
   if (Array.isArray(p.tracks) && p.tracks.length) {
