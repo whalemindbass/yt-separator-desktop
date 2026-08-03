@@ -21,7 +21,7 @@ const LOCALES = {
     'common.error':     '오류',
     'common.done':      '완료',
     // 상단바 · 창 컨트롤
-    'title.brand':      'YT Separator',
+    'title.brand':      'Dr.studio',
     'title.brand.sub':  'Desktop',
     'title.tab.separate': '새 분리',
     'title.tab.library':  '라이브러리',
@@ -272,7 +272,7 @@ const LOCALES = {
     'common.checking':  'Checking…',
     'common.error':     'Error',
     'common.done':      'Done',
-    'title.brand':      'YT Separator',
+    'title.brand':      'Dr.studio',
     'title.brand.sub':  'Desktop',
     'title.tab.separate': 'New',
     'title.tab.library':  'Library',
