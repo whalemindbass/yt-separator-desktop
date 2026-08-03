@@ -1191,8 +1191,8 @@ public:
         }
         // 입력 레벨 (매 틱)
         { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel()); emit (var (o)); }
-        // 튜너 피치 (3틱마다 — 무거움)
-        if (++tick % 3 == 0)
+        // 튜너 피치 (2틱=10Hz. rAF 보간과 함께 부드럽게)
+        if (++tick % 2 == 0)
         {
             const double f = engine.detectPitch();
             auto* o = ev ("pitch"); o->setProperty ("freq", f); emit (var (o));

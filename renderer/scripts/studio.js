@@ -627,10 +627,23 @@ function updateVU(peak) {
   fill.classList.toggle('clip', p >= 0.99);
   dbEl.textContent = p > 0.00001 ? `${db.toFixed(0)} dB` : '—';
 }
-let _tunerHold = 0, _tunerBuf = [], _tunerNeedle = 50;
+let _tunerHold = 0, _tunerBuf = [], _tunerNeedle = 50, _tunerTarget = 50, _tunerRAFon = false;
+// 데이터는 저빈도(엔진 이벤트)라도 바늘은 rAF 로 60fps 보간 → 부드러움
+function tunerRAF() {
+  const needle = $('st-tuner-needle');
+  const tool = $('tool-tuner');
+  if (needle && tool && !tool.hidden) {
+    const d = _tunerTarget - _tunerNeedle;
+    _tunerNeedle += d * 0.22;
+    if (Math.abs(d) < 0.05) _tunerNeedle = _tunerTarget;
+    needle.style.transform = `translateX(-50%) translateX(${((_tunerNeedle - 50) * 0.01) * (needle.parentElement?.clientWidth || 200)}px)`;
+  }
+  requestAnimationFrame(tunerRAF);
+}
 function updateTuner(freq) {
   const noteEl = $('st-tuner-note'), needle = $('st-tuner-needle'), centsEl = $('st-tuner-cents');
   if (!noteEl) return;
+  if (!_tunerRAFon) { _tunerRAFon = true; requestAnimationFrame(tunerRAF); }   // 최초 1회 시작
   const octEl = $('st-tuner-oct'), freqEl = $('st-tuner-freq'), flat = $('st-tuner-flat'), sharp = $('st-tuner-sharp');
   const wrap = $('tool-tuner');
   if (!freq || freq < 40) {
@@ -639,7 +652,8 @@ function updateTuner(freq) {
       noteEl.textContent = '—'; if (octEl) octEl.textContent = ''; centsEl.textContent = '—'; if (freqEl) freqEl.textContent = '';
       flat && flat.classList.remove('on'); sharp && sharp.classList.remove('on');
       wrap && wrap.classList.remove('in-tune');
-      _tunerNeedle += (50 - _tunerNeedle) * 0.2; needle.style.left = _tunerNeedle + '%';
+      needle && needle.classList.remove('in-tune');
+      _tunerTarget = 50;   // 바늘은 rAF 가 가운데로 복귀
     }
     return;
   }
@@ -663,11 +677,8 @@ function updateTuner(freq) {
   if (freqEl) freqEl.textContent = f.toFixed(1) + ' Hz';
   flat && flat.classList.toggle('on', cents < -4);
   sharp && sharp.classList.toggle('on', cents > 4);
-  // 바늘 부드럽게 (±50¢ → 0..100%)
-  const target = Math.max(0, Math.min(100, 50 + cents));
-  _tunerNeedle += (target - _tunerNeedle) * 0.35;
-  needle.style.left = _tunerNeedle + '%';
   needle.classList.toggle('in-tune', inTune);
+  _tunerTarget = Math.max(0, Math.min(100, 50 + cents));   // rAF 가 여기로 부드럽게 이동
 }
 
 function setEnabled(on) {
