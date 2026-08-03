@@ -1414,10 +1414,11 @@ function cutClips() {
 function pasteClips() {
   if (!_clipboard.length) { flashTake('붙여넣을 클립이 없습니다.'); return; }
   const at = _lastSec;
-  const fallback = _selTrack != null ? _selTrack : armedRecId();
+  // 현재 선택된 트랙에 붙여넣기 (선택 없으면 녹음 대상 트랙)
+  const target = (_selTrack != null && _recTracks.some(r => r.id === _selTrack)) ? _selTrack : armedRecId();
+  if (target == null) { flashTake('붙여넣을 트랙을 선택하세요.'); return; }
   const made = _clipboard.map((c) => {
-    let tid = _recTracks.some(r => r.id === c.trackId) ? c.trackId : fallback;
-    return { file: c.file, id: nextClipId(), trackId: tid,
+    return { file: c.file, id: nextClipId(), trackId: target,
       start: at + c.relStart, inOff: c.inOff, dur: c.dur, srcDur: c.srcDur, fadeIn: c.fadeIn, fadeOut: c.fadeOut,
       svg: c.svg || (_takes.find(t => t.file === c.file) || {}).svg || '' };
   });
