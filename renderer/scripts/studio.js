@@ -284,10 +284,13 @@ function renderRecLanes() {
       const inp = document.createElement('input');
       inp.className = 'daw-nm-edit'; inp.value = rt.name || autoLabel;
       lbl.replaceWith(inp); inp.focus(); inp.select();
+      const oldName = rt.name || '';
       const commit = () => {
         const v = inp.value.trim();
-        rt.name = (v && v !== autoLabel) ? v : '';
+        const nw = (v && v !== autoLabel) ? v : '';
+        rt.name = nw;
         renderRecLanes(); updateFxPanel(); updateTrackFader();
+        if (nw !== oldName) pushUndo(() => setTrackProp(rt.id, 'name', oldName), () => setTrackProp(rt.id, 'name', nw), '트랙 이름');
       };
       inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); else if (ev.key === 'Escape') { inp.value = rt.name || autoLabel; inp.blur(); } });
       inp.addEventListener('blur', commit);
@@ -300,17 +303,22 @@ function renderRecLanes() {
       ci.type = 'color'; ci.value = rt.color ? rgbToHex(resolveColor(rt.color)) : rgbToHex(resolveColor(defColor));
       ci.style.cssText = 'position:fixed;left:-9999px';
       document.body.appendChild(ci);
+      const oldColor = rt.color || '';
       ci.addEventListener('input', () => { rt.color = ci.value; lane.style.setProperty('--c', ci.value); });
-      ci.addEventListener('change', () => ci.remove());
+      ci.addEventListener('change', () => { const nw = rt.color; ci.remove(); if (nw !== oldColor) pushUndo(() => setTrackProp(rt.id, 'color', oldColor), () => setTrackProp(rt.id, 'color', nw), '트랙 색'); });
       ci.click();
     });
     // 높이 조절 — 하단 그립 드래그
     const grip = lane.querySelector('.daw-lane-resize');
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
-      const startY = e.clientY, base = lane.offsetHeight;
+      const startY = e.clientY, base = lane.offsetHeight, oldH = rt.height || 0;
       const mv = (ev) => { const h = Math.max(44, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); };
-      const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); };
+      const up = () => {
+        document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+        const nw = rt.height || 0;
+        if (nw !== oldH) pushUndo(() => setTrackProp(rt.id, 'height', oldH), () => setTrackProp(rt.id, 'height', nw), '트랙 높이');
+      };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
     });
     // 순서 변경 — 그립 드래그로 리오더
@@ -414,9 +422,14 @@ function wireReorder(e, rt, lane) {
     const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
     document.querySelectorAll('.daw-lane-rec.reorder-target').forEach(l => l.classList.remove('reorder-target'));
     if (over && over !== lane) {
+      const oldOrder = _recTracks.map(r => r.id);
       const from = _recTracks.findIndex(r => r.id === rt.id);
       const to = _recTracks.findIndex(r => r.id === Number(over.dataset.recid));
-      if (from >= 0 && to >= 0) { const [m] = _recTracks.splice(from, 1); _recTracks.splice(to, 0, m); renderRecLanes(); renderTakes(); }
+      if (from >= 0 && to >= 0) {
+        const [m] = _recTracks.splice(from, 1); _recTracks.splice(to, 0, m); renderRecLanes(); renderTakes();
+        const newOrder = _recTracks.map(r => r.id);
+        pushUndo(() => reorderTracks(oldOrder), () => reorderTracks(newOrder), '트랙 순서');
+      }
     }
   };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
@@ -654,7 +667,7 @@ async function loadSong(item) {
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
-  _takes = []; _stemOffset = 0;
+  _takes = []; _stemOffset = 0; clearUndo();
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -753,6 +766,7 @@ function renderTakes() {
       selectTrack(tk.trackId); _selClipId = tk.id;
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX, base = tk.start;
+      const before = clipState(tk);   // 실행취소용 이전 상태
       const srcLane = el.closest('.daw-lane-rec');
       let target = srcLane, dragging = false;
       const move = (ev) => {
@@ -778,6 +792,8 @@ function renderTakes() {
         if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, startS, newId); }
         else api.engine.takeMove(tk.id, startS, 0);
         layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
+        const after = clipState(tk); const id = tk.id;
+        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '클립 이동');
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
@@ -793,6 +809,7 @@ function wireTrim(handle, tk, el, wave, dir) {
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.inOff, bDur = tk.dur, bStart = tk.start;
+    const before = clipState(tk);
     const move = (ev) => {
       let d = (ev.clientX - startX) / _pxPerSec;   // 초
       if (dir < 0) {   // 좌측: inOff·start·dur 동시 이동
@@ -810,6 +827,9 @@ function wireTrim(handle, tk, el, wave, dir) {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       commitTrim(tk); layout();
+      const after = clipState(tk), id = tk.id;
+      if (after.inOff !== before.inOff || after.dur !== before.dur || after.start !== before.start)
+        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '클립 트림');
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -825,6 +845,7 @@ function wireFade(handle, tk, paint, dir) {
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.fadeIn, bOut = tk.fadeOut;
+    const before = clipState(tk);
     const move = (ev) => {
       const d = (ev.clientX - startX) / _pxPerSec;
       if (dir < 0) tk.fadeIn  = Math.max(0, Math.min(tk.dur, bIn + d));
@@ -835,6 +856,9 @@ function wireFade(handle, tk, paint, dir) {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
       commitFade(tk);
+      const after = clipState(tk), id = tk.id;
+      if (after.fadeIn !== before.fadeIn || after.fadeOut !== before.fadeOut)
+        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '페이드');
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -846,15 +870,10 @@ function commitFade(tk) {
 }
 // 클립 복제 — 뒤로 dur 만큼 이어붙임
 function duplicateClip(tk) {
-  const sr = _sr || 44100;
   const id = Date.now();
   const copy = { ...tk, id, start: tk.start + tk.dur };
-  _takes.push(copy);
-  api.engine.takeLoad(tk.file, Math.round(copy.start * sr), tk.trackId, id);
-  // 원본과 동일한 트림·페이드 적용
-  if (copy.inOff || copy.dur < copy.srcDur - 1e-4) api.engine.takeTrim(id, Math.round(copy.start * sr), Math.round(copy.inOff * sr), Math.round(copy.dur * sr));
-  if (copy.fadeIn || copy.fadeOut) api.engine.takeFade(id, Math.round(copy.fadeIn * sr), Math.round(copy.fadeOut * sr));
-  renderTakes(); layout();
+  reAddClip(copy);
+  pushUndo(() => removeClipById(id), () => reAddClip(copy), '클립 복제');
 }
 // 재생선 위치에서 선택 클립 분할
 function splitSelectedAtPlayhead() {
@@ -866,12 +885,21 @@ function splitClip(tk, atSec) {
   if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake('클립 안쪽에서만 분할됩니다.'); return; }
   const sr = _sr || 44100;
   const newId = Date.now();
+  const origId = tk.id, origDur = tk.dur;
   // 뒷부분 = 새 클립
   const right = { ...tk, id: newId, start: tk.start + rel, inOff: tk.inOff + rel, dur: tk.dur - rel };
   tk.dur = rel;   // 앞부분
   _takes.push(right);
   api.engine.takeSplit(tk.id, Math.round(atSec * sr), newId);
   renderTakes();
+  const doSplit = () => {   // 다시실행: 뒷조각 재생성 + 앞조각 길이 축소
+    const o = _takes.find(t => t.id === origId); if (o) { o.dur = rel; api.engine.takeTrim(o.id, Math.round(o.start * sr), Math.round(o.inOff * sr), Math.round(rel * sr)); }
+    reAddClip({ ...right });
+  };
+  pushUndo(() => {   // 실행취소: 뒷조각 제거 + 앞조각 원래 길이 복원
+    removeClipById(newId);
+    const o = _takes.find(t => t.id === origId); if (o) { o.dur = origDur; api.engine.takeTrim(o.id, Math.round(o.start * sr), Math.round(o.inOff * sr), Math.round(origDur * sr)); renderTakes(); layout(); }
+  }, doSplit, '클립 분할');
 }
 function showTakeMenu(x, y, id) {
   document.querySelector('.daw-ctx')?.remove();
@@ -886,8 +914,10 @@ function showTakeMenu(x, y, id) {
     const tk = _takes.find(t => t.id === id); if (tk) duplicateClip(tk); menu.remove();
   });
   menu.querySelector('.del').addEventListener('click', () => {
-    api.engine.takeRemove(id);   // 엔진 재생 소스도 제거
-    _takes = _takes.filter(t => t.id !== id); renderTakes(); menu.remove();
+    const tk = _takes.find(t => t.id === id);
+    const removed = tk ? { ...tk } : null;
+    removeClipById(id); menu.remove();
+    if (removed) pushUndo(() => reAddClip(removed), () => removeClipById(id), '클립 삭제');
   });
   document.body.appendChild(menu);
   const close = (e) => { if (menu.contains(e.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
@@ -1030,6 +1060,7 @@ async function loadTakeSet(ts) {
       }
     }
     renderTakes();
+    clearUndo();
     flashTake('녹음 불러옴: ' + ts.name);
   } finally { _loadingTakeSet = false; }
 }
@@ -1144,8 +1175,61 @@ async function applyProject(p) {
     const mv = $('mx-master-val'); if (mv) mv.textContent = v;
   }
   layout();
+  clearUndo();   // 새 상태 로드 → 히스토리 초기화
   flashTake('프로젝트 열림: ' + (p.name || ''));
 }
+
+// ── 실행취소/다시실행 (커맨드+역커맨드 스택) ──
+let _undoStack = [], _redoStack = [];
+const UNDO_MAX = 100;
+function pushUndo(undo, redo, label) {
+  _undoStack.push({ undo, redo, label });
+  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
+  _redoStack = [];
+  updateUndoUI();
+}
+function doUndo() { const a = _undoStack.pop(); if (!a) return; a.undo(); _redoStack.push(a); updateUndoUI(); flashTake('실행취소: ' + (a.label || '')); }
+function doRedo() { const a = _redoStack.pop(); if (!a) return; a.redo(); _undoStack.push(a); updateUndoUI(); flashTake('다시실행: ' + (a.label || '')); }
+function clearUndo() { _undoStack = []; _redoStack = []; updateUndoUI(); }
+function updateUndoUI() {
+  const u = $('st-undo'), r = $('st-redo');
+  if (u) u.disabled = !_undoStack.length;
+  if (r) r.disabled = !_redoStack.length;
+}
+// 클립 기하 스냅샷·복원 (엔진 커맨드로 재적용)
+function clipState(tk) { return { start: tk.start, inOff: tk.inOff, dur: tk.dur, fadeIn: tk.fadeIn, fadeOut: tk.fadeOut, trackId: tk.trackId }; }
+function setClipState(id, st) {
+  const tk = _takes.find(t => t.id === id); if (!tk) return;
+  Object.assign(tk, st);
+  const sr = _sr || 44100;
+  api.engine.takeMove(tk.id, Math.round(tk.start * sr), tk.trackId);
+  api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round(tk.inOff * sr), Math.round(tk.dur * sr));
+  api.engine.takeFade(tk.id, Math.round(tk.fadeIn * sr), Math.round(tk.fadeOut * sr));
+  renderTakes(); layout();
+}
+function reAddClip(tkObj) {   // 삭제/분할 취소용 — 보관한 take 객체를 엔진·렌더러에 복구
+  const sr = _sr || 44100;
+  if (!_takes.some(t => t.id === tkObj.id)) _takes.push(tkObj);
+  api.engine.takeLoad(tkObj.file, Math.round(tkObj.start * sr), tkObj.trackId, tkObj.id);
+  api.engine.takeTrim(tkObj.id, Math.round(tkObj.start * sr), Math.round(tkObj.inOff * sr), Math.round(tkObj.dur * sr));
+  api.engine.takeFade(tkObj.id, Math.round((tkObj.fadeIn || 0) * sr), Math.round((tkObj.fadeOut || 0) * sr));
+  renderTakes(); layout();
+}
+function removeClipById(id) {
+  api.engine.takeRemove(id);
+  _takes = _takes.filter(t => t.id !== id);
+  renderTakes(); layout();
+}
+function setTrackProp(id, key, val) {   // 이름·색·높이 (렌더러 전용 메타)
+  const rt = _recTracks.find(r => r.id === id); if (!rt) return;
+  rt[key] = val || (key === 'height' ? 0 : '');
+  renderRecLanes(); updateFxPanel(); updateTrackFader();
+}
+function reorderTracks(orderIds) {
+  _recTracks.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
+  renderRecLanes(); renderTakes();
+}
+function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); }
 // ── Export: 포맷·품질 선택 ──
 const EXPORT_QUAL = {
   wav:  [['24', '24-bit'], ['16', '16-bit'], ['32', '32-bit float']],
@@ -1436,15 +1520,20 @@ function wire() {
   $('st-play').addEventListener('click', play);
   $('st-stop').addEventListener('click', stopAll);
 
-  // 단축키: Space=재생/정지, R=녹음 시작/정지 (스튜디오 뷰 활성 + 입력창 아닐 때)
+  // 단축키: Space=재생/정지, R=녹음, S=분할, Ctrl+Z/Y=실행취소/다시실행
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' && e.code !== 'KeyR' && e.code !== 'KeyS') return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const isUndoKey = ctrl && e.code === 'KeyZ';
+    const isRedoKey = ctrl && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey));
+    if (e.code !== 'Space' && e.code !== 'KeyR' && !(e.code === 'KeyS' && !ctrl) && !isUndoKey && !isRedoKey) return;
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     e.preventDefault();
-    if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
+    if (isRedoKey) doRedo();
+    else if (isUndoKey) doUndo();
+    else if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
@@ -1502,9 +1591,13 @@ function wire() {
   $('st-import-audio').addEventListener('click', pickImportAudio);
   $('st-proj-save').addEventListener('click', saveProject);
   $('st-proj-open').addEventListener('click', openProject);
+  $('st-undo').addEventListener('click', doUndo);
+  $('st-redo').addEventListener('click', doRedo);
   $('st-bpm').addEventListener('change', (e) => {
+    const old = _bpm;
     const v = Math.max(20, Math.min(300, Number(e.target.value) || 120));
     _bpm = v; e.target.value = v; layout();   // 그리드·스냅·룰러 재계산
+    if (v !== old) pushUndo(() => setBpm(old), () => setBpm(v), 'BPM');
   });
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));

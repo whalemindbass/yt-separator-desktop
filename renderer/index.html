@@ -497,9 +497,12 @@
 
       <!-- 하단: 트랜스포트 -->
       <div class="daw-bottombar">
-        <!-- 좌: 녹음 저장/불러오기 -->
+        <!-- 좌: 녹음 저장/불러오기 · 실행취소 -->
         <button id="st-take-save" class="btn" disabled title="현재 녹음(테이크) 저장">녹음 저장</button>
         <button id="st-take-load" class="btn" disabled title="저장한 녹음 불러오기">녹음 불러오기</button>
+        <span class="tp-div"></span>
+        <button id="st-undo" class="btn icon" disabled title="실행취소 (Ctrl+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5 2.5 8 6 11.5"/><path d="M2.5 8h7a4 4 0 0 1 0 8" transform="translate(0 -2)"/></svg></button>
+        <button id="st-redo" class="btn icon" disabled title="다시실행 (Ctrl+Y)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4.5 13.5 8 10 11.5"/><path d="M13.5 8h-7a4 4 0 0 0 0 8" transform="translate(0 -2)"/></svg></button>
         <span class="daw-sp"></span>
         <!-- 가운데: 재생·녹음 트랜스포트 -->
         <button id="st-seek0" class="btn icon" disabled title="처음으로"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.4" y="3.4" width="1.7" height="9.2" rx=".7"/><path d="M12.6 3.5v9L6.1 8z"/></svg></button>
