@@ -100,6 +100,7 @@ const BEATS_PER_BAR = 4;
 let _bpm = 120;         // 조절 가능(그리드·스냅·룰러에 반영). 곡 로드 시 자동 감지
 let _gridOffset = 0;    // 마디 위상(초) — 첫 다운비트에 그리드 정렬
 let _beats = [];        // 감지된 실제 비트 시각(초, 스템 로컬) — 메트로놈 정확 정렬용
+let _detBpm = 0;        // 감지 당시 BPM(반올림) — ÷2/×2 보정 시 클릭 밀도 조정 기준
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
 // 그리드 스냅 — 위상(_gridOffset) 기준 1/4박(16분음표) 격자에 5px 이내면 스냅.
@@ -559,8 +560,28 @@ function updatePlayhead(sec) {
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
 function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
 const metroPhaseSamples = () => Math.round(_gridOffset * (_sr || 44100));   // 스템 다운비트 위상(폴백용)
-// 감지된 비트를 타임라인·디바이스 샘플로 (스템 오프셋 반영)
-const metroBeatSamples = () => { const sr = _sr || 44100; return _beats.map(b => Math.round((b + _stemOffset) * sr)); };
+// 감지된 비트를 전체 타임라인으로 외삽해 디바이스 샘플로.
+// 실제 비트 구간은 감지값, 앞뒤(음원 밖·카운트인 구간)는 등간격 연장 → 어디서 재생해도 박에 맞춰 울림.
+const metroBeatSamples = () => {
+  const sr = _sr || 44100, off = _stemOffset;
+  if (_beats.length < 2) return [];   // 감지 부족 → 엔진 등간격 폴백
+  // ÷2/×2 보정 반영해 클릭 밀도 조정 (감지 대비 현재 BPM 비율)
+  const ratio = _detBpm ? _bpm / _detBpm : 1;
+  let base = _beats;
+  if (ratio <= 0.6) base = _beats.filter((_, i) => i % 2 === 0);        // 절반(÷2)
+  else if (ratio >= 1.7) { base = []; for (let i = 0; i < _beats.length; i++) { base.push(_beats[i]); if (i + 1 < _beats.length) base.push((_beats[i] + _beats[i + 1]) / 2); } }  // 두 배(×2)
+  if (base.length < 2) base = _beats;
+  const d = []; for (let i = 1; i < base.length; i++) d.push(base[i] - base[i - 1]);
+  d.sort((a, b) => a - b);
+  const iv = d[d.length >> 1] || (60 / _bpm);   // 비트 간격(중앙값)
+  const end = fullSec();
+  const grid = [];
+  for (let t = base[0] + off - iv; t >= -1e-6; t -= iv) grid.push(t);   // 앞으로 0까지 연장(음원 밖·카운트인)
+  grid.reverse();
+  for (const b of base) grid.push(b + off);                            // 실제 비트
+  for (let t = base[base.length - 1] + off + iv; t <= end + iv; t += iv) grid.push(t);   // 뒤로 연장
+  return grid.filter(t => t >= -1e-6).map(t => Math.round(Math.max(0, t) * sr));
+};
 function playStudio() {
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
@@ -713,7 +734,7 @@ async function loadSong(item, opts) {
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
-  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; clearUndo();
+  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
@@ -748,6 +769,7 @@ async function detectSongBpm(stems, sampleRate) {
     const res = await detectBeats(d[0], d[1] || d[0], sampleRate || 44100, mix ? [mix[0], mix[1] || mix[0]] : null);
     if (!res || !(res.tempo > 0)) return;
     _bpm = Math.max(20, Math.min(300, Math.round(res.tempo)));
+    _detBpm = _bpm;
     const b = $('st-bpm'); if (b) b.value = _bpm;
     _beats = Array.isArray(res.beats) ? res.beats.slice() : [];   // 실제 비트(메트로놈 정렬용)
     const phase = (res.downbeat != null ? res.downbeat : (_beats.length ? _beats[0] : 0)) || 0;
@@ -1220,7 +1242,7 @@ async function buildProjectObject() {
   // 스템 트랙 믹스(볼륨·뮤트·솔로)까지 기록
   const stemMix = _tracks.map(t => ({ key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo }));
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, gridOffset: _gridOffset, beats: _beats, master, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, gridOffset: _gridOffset, beats: _beats, master, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1288,6 +1310,7 @@ async function applyProject(p) {
   if (p.bpm) { _bpm = p.bpm; const b = $('st-bpm'); if (b) b.value = p.bpm; }
   _gridOffset = p.gridOffset || 0;
   _beats = Array.isArray(p.beats) ? p.beats.slice() : [];
+  _detBpm = p.detBpm || 0;
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   let idMap = null;
   if (Array.isArray(p.tracks) && p.tracks.length) {
