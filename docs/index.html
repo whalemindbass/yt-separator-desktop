@@ -151,6 +151,19 @@
   @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   .reveal{opacity:0;transform:translateY(12px)}
   .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.2,.7,.2,1)}
+
+  /* responsive */
+  @media(max-width:640px){
+    .wrap{padding:0 22px}
+    .nav-in{height:56px}.brand{font-size:16px}
+    .hero{padding:56px 0 40px}
+    .sec{padding:52px 0}.sec-head{margin-bottom:30px}
+    h1.title{font-size:clamp(30px,8.5vw,42px)}
+    .cta-row{gap:10px}.cta-row .btn{flex:1 1 auto;justify-content:center;min-width:150px}
+    .final{padding:34px 18px}
+    .foot-in{flex-direction:column;align-items:flex-start;gap:10px}
+  }
+  @media(max-width:400px){ .wrap{padding:0 20px} .meta{font-size:11px;gap:8px} .lineage{font-size:10px;padding:5px 10px} .demo-time{font-size:11px} }
 </style>
 
 <div class="page">
@@ -164,9 +177,10 @@
           <g fill="#0a1712"><rect x="6.8" y="11.2" width="2.9" height="9.6" rx="1.45"/><rect x="11.4" y="7.3" width="2.9" height="17.4" rx="1.45"/><rect x="16" y="13.6" width="2.9" height="4.8" rx="1.45"/><rect x="20.6" y="9.4" width="2.9" height="13.2" rx="1.45"/></g>
         </svg><span class="wm">Dr<span class="dot">.</span>studio</span></a>
       <div class="nav-links">
-        <a href="#how">사용 방법</a>
-        <a href="#features">기능</a>
-        <a href="#get">다운로드</a>
+        <a href="#how" data-i18n="nav.how">사용 방법</a>
+        <a href="#features" data-i18n="nav.features">기능</a>
+        <a href="#get" data-i18n="nav.download">다운로드</a>
+        <button class="icon-btn" id="langBtn" aria-label="언어 전환" style="width:auto;padding:0 10px;font:600 12px var(--mono)">EN</button>
         <button class="icon-btn" id="theme" aria-label="테마 전환">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M13 3l-1.4 1.4M4.4 11.6 3 13" stroke-linecap="round"/></svg>
         </button>
@@ -179,13 +193,13 @@
     <div class="wrap hero-grid">
       <div>
         <div class="lineage"><span class="from">YT Separator</span><span class="arrow">→</span><span class="to">Dr.studio</span></div>
-        <h1 class="title">곡을 나누고,<br>내 연주를 더해<br><span class="hl">한 곡으로</span> 완성합니다.</h1>
-        <p class="lede">유튜브나 내 파일에서 원하는 파트를 분리하고, 원곡 영상을 보며 녹음하고, 다듬어 내보냅니다. 커버 한 곡에 필요한 과정을 한자리에서. 웹의 YT Separator를 데스크톱 앱으로 확장했습니다.</p>
+        <h1 class="title" data-i18n-html="hero.title">곡을 나누고,<br>내 연주를 더해<br><span class="hl">한 곡으로</span> 완성합니다.</h1>
+        <p class="lede" data-i18n="hero.lede">유튜브나 내 파일에서 원하는 파트를 분리하고, 원곡 영상을 보며 녹음하고, 다듬어 내보냅니다. 커버 한 곡에 필요한 과정을 한자리에서. 웹의 YT Separator를 데스크톱 앱으로 확장했습니다.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio-1.4.0-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg>Windows용 다운로드</a>
-          <a class="btn btn-ghost" href="#how">사용 방법 보기</a>
+          <a class="btn btn-primary" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaDownload">Windows용 다운로드</span></a>
+          <a class="btn btn-ghost" href="#how" data-i18n="hero.ctaHow">사용 방법 보기</a>
         </div>
-        <p class="meta"><span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span></p>
+        <p class="meta" data-i18n-html="hero.meta"><span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span></p>
       </div>
 
       <div class="shot reveal" aria-hidden="true">
@@ -200,24 +214,24 @@
     <div class="wrap sec">
       <div class="sec-head reveal">
         <p class="eyebrow">How it works</p>
-        <h2>세 단계면 충분합니다</h2>
-        <p>분리하고, 녹음하고, 내보냅니다. 순서대로 따라가면 커버가 완성됩니다.</p>
+        <h2 data-i18n="how.title">세 단계면 충분합니다</h2>
+        <p data-i18n="how.sub">분리하고, 녹음하고, 내보냅니다. 순서대로 따라가면 커버가 완성됩니다.</p>
       </div>
       <div class="steps">
         <div class="step reveal">
           <div class="rule"><span>01</span><span class="bar"></span></div>
-          <h3>분리</h3>
-          <p>원곡을 보컬·드럼·베이스·기타 등 4·6스템으로 나눕니다. 지울 파트와 남길 파트를 먼저 정할 수 있습니다.</p>
+          <h3 data-i18n="s1h">분리</h3>
+          <p data-i18n="s1p">원곡을 보컬·드럼·베이스·기타 등 4·6스템으로 나눕니다. 지울 파트와 남길 파트를 먼저 정할 수 있습니다.</p>
         </div>
         <div class="step reveal">
           <div class="rule"><span>02</span><span class="bar"></span></div>
-          <h3>녹음과 믹스</h3>
-          <p>원곡 영상을 보며 내 파트를 얹습니다. 저지연 모니터링과 VST 이펙트, 트랙별 볼륨으로 소리를 정리합니다.</p>
+          <h3 data-i18n="s2h">녹음과 믹스</h3>
+          <p data-i18n="s2p">원곡 영상을 보며 내 파트를 얹습니다. 저지연 모니터링과 VST 이펙트, 트랙별 볼륨으로 소리를 정리합니다.</p>
         </div>
         <div class="step reveal">
           <div class="rule"><span>03</span><span class="bar"></span></div>
-          <h3>내보내기</h3>
-          <p>편집한 뒤 원하는 구간만 골라 저장합니다. 전체 믹스와 내 트랙만 중에서 선택해 WAV·MP3로.</p>
+          <h3 data-i18n="s3h">내보내기</h3>
+          <p data-i18n="s3p">편집한 뒤 원하는 구간만 골라 저장합니다. 전체 믹스와 내 트랙만 중에서 선택해 WAV·MP3로.</p>
         </div>
       </div>
     </div>
@@ -227,19 +241,19 @@
     <div class="wrap sec">
       <div class="sec-head reveal">
         <p class="eyebrow">Features</p>
-        <h2>커버 작업에 필요한 도구</h2>
-        <p>연습부터 완성까지, 데스크톱 성능으로 한자리에서.</p>
+        <h2 data-i18n="feat.title">커버 작업에 필요한 도구</h2>
+        <p data-i18n="feat.sub">연습부터 완성까지, 데스크톱 성능으로 한자리에서.</p>
       </div>
       <div class="feat">
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h2l1.5-4 2 8 2-6 1.5 2H14" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>스템 분리</h3><p>4·6스템, GPU 또는 CPU로. 로컬 파일도 인터넷 없이 처리합니다.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M6.5 6 10 7.5 6.5 9z" fill="currentColor" stroke="none"/></svg></div><h3>영상 보며 녹음</h3><p>원곡 영상과 맞춰진 타임라인에서 내 연주를 그대로 얹습니다.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M4 5v6M12 5v6M2 7v2M14 7v2" stroke-linecap="round"/></svg></div><h3>저지연 모니터링</h3><p>ASIO로 연주하는 즉시 들립니다. 밀리초 단위의 반응.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 8h6M8 5v6" stroke-linecap="round"/></svg></div><h3>VST3 이펙트</h3><p>내 플러그인을 트랙마다 체인으로. 프리셋을 저장해 다시 씁니다.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v9" stroke-linecap="round"/><circle cx="8" cy="12.5" r="1.4"/><path d="M4 6l4-3 4 3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>내장 튜너</h3><p>정밀한 음정 검출과 A4 기준음 선택. 저음까지 안정적으로.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 11V6M6.5 11V3M10 11V7M13.5 11V4" stroke-linecap="round"/></svg></div><h3>믹싱과 페이더</h3><p>마스터·트랙 볼륨, 뮤트와 솔로, 스템 믹스까지 프로젝트에 담깁니다.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="5" width="12" height="6" rx="1.5"/><path d="M6 5V3.5M10 11v1.5" stroke-linecap="round"/></svg></div><h3>정밀 편집</h3><p>트림·분할·페이드와 실행취소, BPM 감지로 그리드에 맞춥니다.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v7m0 0 3-3M8 9 5 6M3 12h10" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>내보내기</h3><p>WAV·FLAC·MP3, 품질과 구간을 골라. 전체 믹스 또는 내 트랙만.</p></div>
-        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3h7l3 3v7H3z"/><path d="M6 3v4h4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>프로젝트 저장</h3><p>스템·클립·이펙트·믹스를 하나로. 저장한 그대로 다시 엽니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h2l1.5-4 2 8 2-6 1.5 2H14" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3 data-i18n="f1h">스템 분리</h3><p data-i18n="f1p">4·6스템, GPU 또는 CPU로. 로컬 파일도 인터넷 없이 처리합니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M6.5 6 10 7.5 6.5 9z" fill="currentColor" stroke="none"/></svg></div><h3 data-i18n="f2h">영상 보며 녹음</h3><p data-i18n="f2p">원곡 영상과 맞춰진 타임라인에서 내 연주를 그대로 얹습니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M4 5v6M12 5v6M2 7v2M14 7v2" stroke-linecap="round"/></svg></div><h3 data-i18n="f3h">저지연 모니터링</h3><p data-i18n="f3p">ASIO로 연주하는 즉시 들립니다. 밀리초 단위의 반응.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 8h6M8 5v6" stroke-linecap="round"/></svg></div><h3 data-i18n="f4h">VST3 이펙트</h3><p data-i18n="f4p">내 플러그인을 트랙마다 체인으로. 프리셋을 저장해 다시 씁니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v9" stroke-linecap="round"/><circle cx="8" cy="12.5" r="1.4"/><path d="M4 6l4-3 4 3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3 data-i18n="f5h">내장 튜너</h3><p data-i18n="f5p">정밀한 음정 검출과 A4 기준음 선택. 저음까지 안정적으로.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 11V6M6.5 11V3M10 11V7M13.5 11V4" stroke-linecap="round"/></svg></div><h3 data-i18n="f6h">믹싱과 페이더</h3><p data-i18n="f6p">마스터·트랙 볼륨, 뮤트와 솔로, 스템 믹스까지 프로젝트에 담깁니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="5" width="12" height="6" rx="1.5"/><path d="M6 5V3.5M10 11v1.5" stroke-linecap="round"/></svg></div><h3 data-i18n="f7h">정밀 편집</h3><p data-i18n="f7p">트림·분할·페이드와 실행취소, BPM 감지로 그리드에 맞춥니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v7m0 0 3-3M8 9 5 6M3 12h10" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3 data-i18n="f8h">내보내기</h3><p data-i18n="f8p">WAV·FLAC·MP3, 품질과 구간을 골라. 전체 믹스 또는 내 트랙만.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3h7l3 3v7H3z"/><path d="M6 3v4h4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3 data-i18n="f9h">프로젝트 저장</h3><p data-i18n="f9p">스템·클립·이펙트·믹스를 하나로. 저장한 그대로 다시 엽니다.</p></div>
       </div>
     </div>
   </section>
@@ -248,8 +262,8 @@
   <div class="wrap sec">
     <div class="sec-head reveal" style="text-align:center;margin-left:auto;margin-right:auto">
       <p class="eyebrow" style="display:inline-block">Try it</p>
-      <h2>각 악기를 마음대로 켜고 끄세요</h2>
-      <p>"Sound of Morning" · AI 생성 데모 · 6스템이 한 박자로 재생됩니다.</p>
+      <h2 data-i18n="demo.title">각 악기를 마음대로 켜고 끄세요</h2>
+      <p data-i18n="demo.sub">"Sound of Morning" · AI 생성 데모 · 6스템이 한 박자로 재생됩니다.</p>
     </div>
     <div class="demo-card reveal">
       <div class="demo-transport">
@@ -259,20 +273,20 @@
         </button>
         <div class="demo-meta">
           <div class="demo-track-name">Sound of Morning</div>
-          <div class="demo-track-sub">AI 생성 데모</div>
+          <div class="demo-track-sub" data-i18n="demo.trackSub">AI 생성 데모</div>
         </div>
         <div class="demo-time"><span id="demoCur">0:00</span> / <span id="demoDur">0:26</span></div>
       </div>
       <div class="demo-bar"><div id="demoFill" class="demo-fill"></div></div>
       <div class="demo-stems" id="demoStems">
-        <button class="stem" data-n="vocals" style="--sc:#d9756a"><span class="sdot"></span><span class="snm">보컬</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
-<button class="stem" data-n="drums" style="--sc:#cfa24d"><span class="sdot"></span><span class="snm">드럼</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
-<button class="stem" data-n="bass" style="--sc:#5f8fce"><span class="sdot"></span><span class="snm">베이스</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
-<button class="stem" data-n="guitar" style="--sc:#b078c2"><span class="sdot"></span><span class="snm">기타</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
-<button class="stem" data-n="piano" style="--sc:#4fbf9b"><span class="sdot"></span><span class="snm">피아노</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
-<button class="stem" data-n="other" style="--sc:#8a93a0"><span class="sdot"></span><span class="snm">그외</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+        <button class="stem" data-n="vocals" style="--sc:#d9756a"><span class="sdot"></span><span class="snm" data-i18n="stem.vocals">보컬</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="drums" style="--sc:#cfa24d"><span class="sdot"></span><span class="snm" data-i18n="stem.drums">드럼</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="bass" style="--sc:#5f8fce"><span class="sdot"></span><span class="snm" data-i18n="stem.bass">베이스</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="guitar" style="--sc:#b078c2"><span class="sdot"></span><span class="snm" data-i18n="stem.guitar">기타</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="piano" style="--sc:#4fbf9b"><span class="sdot"></span><span class="snm" data-i18n="stem.piano">피아노</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="other" style="--sc:#8a93a0"><span class="sdot"></span><span class="snm" data-i18n="stem.other">그외</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
       </div>
-      <div class="demo-status" id="demoStatus">재생 버튼을 눌러 시작하세요</div>
+      <div class="demo-status" id="demoStatus" data-i18n="demo.statusIdle">재생 버튼을 눌러 시작하세요</div>
     </div>
   </div>
 </section>
@@ -281,11 +295,11 @@
     <div class="wrap sec">
       <div class="final reveal">
         <p class="eyebrow" style="display:inline-block">Get started</p>
-        <h2>지금 바로 시작해 보세요</h2>
-        <p>설치판이나 무설치 포터블 중에서 선택하세요.</p>
+        <h2 data-i18n="get.title">지금 바로 시작해 보세요</h2>
+        <p data-i18n="get.sub">설치판이나 무설치 포터블 중에서 선택하세요.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio-1.4.0-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg>설치판 다운로드</a>
-          <a class="btn btn-ghost" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio.exe" target="_blank" rel="noopener">포터블 버전</a>
+          <a class="btn btn-primary" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="get.ctaSetup">설치판 다운로드</span></a>
+          <a class="btn btn-ghost" href="https://github.com/whalemindbass/yt-separator-releases/releases/download/v1.4.0/Dr.studio.exe" target="_blank" rel="noopener" data-i18n="get.ctaPortable">포터블 버전</a>
         </div>
       </div>
     </div>
@@ -325,6 +339,18 @@
 </style>
 
 <script>
+window.I18N = {"ko": {"nav.how": "사용 방법", "nav.features": "기능", "nav.download": "다운로드", "hero.title": "곡을 나누고,<br>내 연주를 더해<br><span class=\"hl\">한 곡으로</span> 완성합니다.", "hero.lede": "유튜브나 내 파일에서 원하는 파트를 분리하고, 원곡 영상을 보며 녹음하고, 다듬어 내보냅니다. 커버 한 곡에 필요한 과정을 한자리에서. 웹의 YT Separator를 데스크톱 앱으로 확장했습니다.", "hero.ctaDownload": "Windows용 다운로드", "hero.ctaHow": "사용 방법 보기", "hero.meta": "<span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span>", "how.title": "세 단계면 충분합니다", "how.sub": "분리하고, 녹음하고, 내보냅니다. 순서대로 따라가면 커버가 완성됩니다.", "s1h": "분리", "s1p": "원곡을 보컬·드럼·베이스·기타 등 4·6스템으로 나눕니다. 지울 파트와 남길 파트를 먼저 정할 수 있습니다.", "s2h": "녹음과 믹스", "s2p": "원곡 영상을 보며 내 파트를 얹습니다. 저지연 모니터링과 VST 이펙트, 트랙별 볼륨으로 소리를 정리합니다.", "s3h": "내보내기", "s3p": "편집한 뒤 원하는 구간만 골라 저장합니다. 전체 믹스와 내 트랙만 중에서 선택해 WAV·MP3로.", "feat.title": "커버 작업에 필요한 도구", "feat.sub": "연습부터 완성까지, 데스크톱 성능으로 한자리에서.", "f1h": "스템 분리", "f1p": "4·6스템, GPU 또는 CPU로. 로컬 파일도 인터넷 없이 처리합니다.", "f2h": "영상 보며 녹음", "f2p": "원곡 영상과 맞춰진 타임라인에서 내 연주를 그대로 얹습니다.", "f3h": "저지연 모니터링", "f3p": "ASIO로 연주하는 즉시 들립니다. 밀리초 단위의 반응.", "f4h": "VST3 이펙트", "f4p": "내 플러그인을 트랙마다 체인으로. 프리셋을 저장해 다시 씁니다.", "f5h": "내장 튜너", "f5p": "정밀한 음정 검출과 A4 기준음 선택. 저음까지 안정적으로.", "f6h": "믹싱과 페이더", "f6p": "마스터·트랙 볼륨, 뮤트와 솔로, 스템 믹스까지 프로젝트에 담깁니다.", "f7h": "정밀 편집", "f7p": "트림·분할·페이드와 실행취소, BPM 감지로 그리드에 맞춥니다.", "f8h": "내보내기", "f8p": "WAV·FLAC·MP3, 품질과 구간을 골라. 전체 믹스 또는 내 트랙만.", "f9h": "프로젝트 저장", "f9p": "스템·클립·이펙트·믹스를 하나로. 저장한 그대로 다시 엽니다.", "demo.title": "각 악기를 마음대로 켜고 끄세요", "demo.sub": "\"Sound of Morning\" · AI 생성 데모 · 6스템이 한 박자로 재생됩니다.", "demo.trackSub": "AI 생성 데모", "demo.statusIdle": "재생 버튼을 눌러 시작하세요", "demo.loading": "로딩 중…", "demo.allPlaying": "6개 트랙 모두 재생 중", "demo.nPlaying": "%n개 트랙 재생 중", "demo.paused": "일시정지", "demo.err": "오디오 재생 불가: ", "stem.vocals": "보컬", "stem.drums": "드럼", "stem.bass": "베이스", "stem.guitar": "기타", "stem.piano": "피아노", "stem.other": "그외", "lane.vocals": "보컬", "lane.drums": "드럼", "lane.bass": "베이스", "lane.guitar": "기타", "lane.myrec": "내 녹음", "get.title": "지금 바로 시작해 보세요", "get.sub": "설치판이나 무설치 포터블 중에서 선택하세요.", "get.ctaSetup": "설치판 다운로드", "get.ctaPortable": "포터블 버전", "footer.note": "YT Separator 기반 · Windows 10 / 11 · © 2026"}, "en": {"nav.how": "How", "nav.features": "Features", "nav.download": "Download", "hero.title": "Split the song,<br>add your part,<br>and make it <span class=\"hl\">one track</span>.", "hero.lede": "Separate the parts you want from YouTube or your own files, record along with the video, then polish and export. Everything a cover takes, in one place. The web YT Separator, grown into a desktop app.", "hero.ctaDownload": "Download for Windows", "hero.ctaHow": "See how it works", "hero.meta": "<span>Free</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>Installer</b> & <b>Portable</b></span>", "how.title": "Three steps is all it takes", "how.sub": "Separate, record, export. Follow them in order and your cover is done.", "s1h": "Separate", "s1p": "Split the original into 4 or 6 stems — vocals, drums, bass, guitar and more. Decide what to drop and what to keep first.", "s2h": "Record & Mix", "s2p": "Lay your part over the original video. Low-latency monitoring, VST effects and per-track volume to shape the sound.", "s3h": "Export", "s3p": "Edit, then pick just the section you want. Choose the full mix or only your tracks, as WAV or MP3.", "feat.title": "Everything a cover takes", "feat.sub": "From practice to finish — in one place, with desktop power.", "f1h": "Stem separation", "f1p": "4 or 6 stems, on GPU or CPU. Local files work with no internet.", "f2h": "Record with the video", "f2p": "Lay your take on a timeline synced to the original video.", "f3h": "Low-latency monitoring", "f3p": "Hear yourself the instant you play, via ASIO. Millisecond response.", "f4h": "VST3 effects", "f4p": "Chain your own plugins per track. Save presets and reuse them.", "f5h": "Built-in tuner", "f5p": "Precise pitch detection with A4 reference. Stable down to the low end.", "f6h": "Mixing & faders", "f6p": "Master and track volume, mute and solo, stem mix — all saved to the project.", "f7h": "Precise editing", "f7p": "Trim, split, fade and undo. BPM detection snaps to the grid.", "f8h": "Export", "f8p": "WAV, FLAC or MP3 — choose quality and range. Full mix or your tracks only.", "f9h": "Save projects", "f9p": "Stems, clips, effects and mix in one file. Reopen exactly as you left it.", "demo.title": "Toggle each instrument on and off", "demo.sub": "\"Sound of Morning\" · AI-generated demo · 6 stems play in perfect sync.", "demo.trackSub": "AI-generated demo", "demo.statusIdle": "Press play to start", "demo.loading": "Loading…", "demo.allPlaying": "All 6 tracks playing", "demo.nPlaying": "%n tracks playing", "demo.paused": "Paused", "demo.err": "Playback failed: ", "stem.vocals": "Vocals", "stem.drums": "Drums", "stem.bass": "Bass", "stem.guitar": "Guitar", "stem.piano": "Piano", "stem.other": "Other", "lane.vocals": "Vocals", "lane.drums": "Drums", "lane.bass": "Bass", "lane.guitar": "Guitar", "lane.myrec": "My take", "get.title": "Get started now", "get.sub": "Choose the installer or the no-install portable build.", "get.ctaSetup": "Download installer", "get.ctaPortable": "Portable build", "footer.note": "Based on YT Separator · Windows 10 / 11 · © 2026"}};
+window.LANG = localStorage.getItem('drlang') || ((navigator.language||'en').slice(0,2)==='ko'?'ko':'en');
+window.tr = function(k){ var d=window.I18N[window.LANG]||window.I18N.ko; return d[k]!=null?d[k]:(window.I18N.ko[k]!=null?window.I18N.ko[k]:k); };
+window.applyLang = function(l){
+  window.LANG=l; try{localStorage.setItem('drlang',l);}catch(e){}
+  document.documentElement.lang=l;
+  document.querySelectorAll('[data-i18n]').forEach(function(e){ var t=window.tr(e.getAttribute('data-i18n')); if(t!=null) e.textContent=t; });
+  document.querySelectorAll('[data-i18n-html]').forEach(function(e){ var t=window.tr(e.getAttribute('data-i18n-html')); if(t!=null) e.innerHTML=t; });
+  var b=document.getElementById('langBtn'); if(b) b.textContent = l==='ko'?'EN':'한';
+};
+</script>
+<script>
 (function(){
   const STEMS = {"vocals":"./samples/vocals.mp3","drums":"./samples/drums.mp3","bass":"./samples/bass.mp3","guitar":"./samples/guitar.mp3","piano":"./samples/piano.mp3","other":"./samples/other.mp3"};
   const order = ["vocals", "drums", "bass", "guitar", "piano", "other"];
@@ -336,7 +362,7 @@
   async function ensure(){
     if(loaded) return;
     ctx = new (window.AudioContext||window.webkitAudioContext)();
-    $('demoStatus').textContent='로딩 중…';
+    $('demoStatus').textContent=window.tr('demo.loading');
     await Promise.all(order.map(async n=>{
       const r = await fetch(STEMS[n]); const ab = await r.arrayBuffer();
       buffers[n] = await ctx.decodeAudioData(ab);
@@ -362,7 +388,7 @@
   }
   function status(){
     const c = order.filter(n=>on[n]).length;
-    $('demoStatus').textContent = playing ? (c===order.length?'6개 트랙 모두 재생 중':c+'개 트랙 재생 중') : '일시정지';
+    $('demoStatus').textContent = playing ? (c===order.length?window.tr('demo.allPlaying'):window.tr('demo.nPlaying').replace('%n',c)) : window.tr('demo.paused');
   }
   async function toggle(){
     const p=$('demoPlay');
@@ -374,7 +400,7 @@
     playing=true; p.querySelector('.ic-play').hidden=true; p.querySelector('.ic-pause').hidden=false;
     status(); tick();
   }
-  $('demoPlay').addEventListener('click', ()=>toggle().catch(e=>{$('demoStatus').textContent='오디오 재생 불가: '+e.message}));
+  $('demoPlay').addEventListener('click', ()=>toggle().catch(e=>{$('demoStatus').textContent=window.tr('demo.err')+e.message}));
   $('demoStems').querySelectorAll('.stem').forEach(btn=>{
     btn.classList.add('on');
     btn.addEventListener('click', ()=>{
@@ -395,7 +421,7 @@
           
           <g fill="#0a1712"><rect x="6.8" y="11.2" width="2.9" height="9.6" rx="1.45"/><rect x="11.4" y="7.3" width="2.9" height="17.4" rx="1.45"/><rect x="16" y="13.6" width="2.9" height="4.8" rx="1.45"/><rect x="20.6" y="9.4" width="2.9" height="13.2" rx="1.45"/></g>
         </svg><span class="wm">Dr<span class="dot">.</span>studio</span></span>
-      <span class="mono">YT Separator 기반 · Windows 10 / 11 · © 2026</span>
+      <span class="mono" data-i18n="footer.note">YT Separator 기반 · Windows 10 / 11 · © 2026</span>
     </div>
   </footer>
 </div>
@@ -406,6 +432,8 @@
     const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
     root.setAttribute('data-theme',cur==='dark'?'light':'dark');
   });
+  applyLang(window.LANG);
+  document.getElementById('langBtn').addEventListener('click',()=>applyLang(window.LANG==='ko'?'en':'ko'));
   const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
   document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
@@ -418,10 +446,11 @@
       for(let i=N;i>=0;i--){const x=i/N*100;const a=(Math.sin(i*0.5)*0.5+Math.sin(i*0.17)*0.3+Math.sin(i*0.9)*0.2);const h=Math.abs(a)*13+1;d+=' L'+x.toFixed(1)+' '+(18+h).toFixed(1);}
       return '<svg viewBox="0 0 100 36" preserveAspectRatio="none"><path d="'+d+'Z" fill="'+color+'"/></svg>';
     }
-    const rows=[['보컬','#d9756a',3,60],['드럼','#cfa24d',6,50],['베이스','#5f8fce',12,42],['기타','#b078c2',2,64],['내 녹음','#e0655f',26,38]];
+    const laneKeys=['lane.vocals','lane.drums','lane.bass','lane.guitar','lane.myrec'];
+    const rows=[[laneKeys[0],'#d9756a',3,60],[laneKeys[1],'#cfa24d',6,50],[laneKeys[2],'#5f8fce',12,42],[laneKeys[3],'#b078c2',2,64],[laneKeys[4],'#e0655f',26,38]];
     rows.forEach(([nm,c,l,w])=>{
       const lane=document.createElement('div');lane.className='lane';
-      lane.innerHTML='<div class="lhead"><i style="background:'+c+'"></i>'+nm+'</div>';
+      lane.innerHTML='<div class="lhead"><i style="background:'+c+'"></i><span data-i18n="'+nm+'">'+window.tr(nm)+'</span></div>';
       const area=document.createElement('div');area.className='larea';
       const clip=document.createElement('div');clip.className='clip';
       clip.style.left=l+'%';clip.style.width=w+'%';
