@@ -2127,17 +2127,28 @@ body { display: flex; flex-direction: column; }
 .vu-fill.clip { background: var(--danger); }
 .vu::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 5px, var(--sunken) 5px 7px); }
 .vu-db { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--tx-2); text-align: right; font-variant-numeric: tabular-nums; }
-/* 튜너 — 리드아웃(♭ 음이름 옥타브 ♯) */
-.daw-tool.tuner { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
-.tuner-readout { display: flex; align-items: center; justify-content: center; gap: 14px; }
-.tuner-note-wrap { display: flex; align-items: baseline; }
-.tuner-note { font-size: 42px; font-weight: 800; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; transition: color .12s, text-shadow .12s; line-height: 1; }
-.tuner-note.in-tune { color: var(--ok); text-shadow: 0 0 16px color-mix(in srgb, var(--ok) 55%, transparent); }
-.tuner-oct { font-size: 15px; font-weight: 700; color: var(--tx-3); margin-left: 2px; }
-.tuner-arrow { font-size: 22px; font-weight: 700; color: var(--border-mid); transition: color .1s, transform .1s; }
-.tuner-arrow.on { transform: scale(1.25); }
+/* 튜너 — 카드 + 리드아웃(♭ 음이름 옥타브 ♯) */
+.daw-tool.tuner { display: flex; flex-direction: column; gap: 10px; padding: 2px; }
+.tuner-card { display: flex; flex-direction: column; gap: 7px; padding: 14px 14px 12px; border-radius: 12px;
+  background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border), inset 0 1px 0 var(--hair-hi);
+  transition: box-shadow .15s, background .15s; }
+.daw-tool.tuner.in-tune .tuner-card { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 50%, var(--border)), 0 0 20px -6px color-mix(in srgb, var(--ok) 40%, transparent); }
+.tuner-readout { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.tuner-note-wrap { display: flex; align-items: baseline; min-width: 62px; justify-content: center; }
+.tuner-note { font-size: 48px; font-weight: 800; letter-spacing: -.02em; color: var(--tx-1); font-variant-numeric: tabular-nums; transition: color .12s, text-shadow .12s; line-height: 1; }
+.tuner-note.in-tune { color: var(--ok); text-shadow: 0 0 20px color-mix(in srgb, var(--ok) 60%, transparent); }
+.tuner-oct { font-size: 16px; font-weight: 700; color: var(--tx-3); margin-left: 1px; }
+.tuner-arrow { font-size: 24px; font-weight: 700; color: var(--border-mid); transition: color .1s, transform .1s; }
+.tuner-arrow.on { transform: scale(1.3); }
 .tuner-arrow.flat.on { color: var(--stem-bass); }
 .tuner-arrow.sharp.on { color: var(--danger); }
+/* 기준음 칩 */
+.tuner-ref { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.tuner-ref-lab { font: 600 10px var(--sans); color: var(--tx-3); flex: none; }
+.tuner-ref-chips { display: flex; gap: 3px; flex: 1; }
+.tuner-ref-chips button { flex: 1; padding: 4px 0; border: 1px solid var(--border); border-radius: 5px; background: var(--elev); color: var(--tx-3); font: 600 10.5px var(--mono); cursor: pointer; transition: all .1s; }
+.tuner-ref-chips button:hover { color: var(--tx-1); border-color: var(--border-mid); }
+.tuner-ref-chips button.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* 새 분리(첫 화면) — 워크플로우를 하나의 콘솔 패널로 */
 .body[data-view="separate"] > .hero {
@@ -2161,10 +2172,9 @@ body { display: flex; flex-direction: column; }
 .tuner-needle { position: absolute; top: -4px; left: 50%; width: 4px; height: 24px; border-radius: 2px; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,.7); transform: translateX(-50%); z-index: 3; }
 .tuner-needle.in-tune { background: var(--ok); box-shadow: 0 0 12px color-mix(in srgb, var(--ok) 70%, transparent); }
 .tuner-scale { display: flex; justify-content: space-between; font: 600 9px var(--mono); color: var(--tx-3); padding: 0 1px; }
-.tuner-info { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); }
-.tuner-cents { font-size: 13px; font-weight: 700; color: var(--tx-2); font-variant-numeric: tabular-nums; }
-.tool-tuner.in-tune .tuner-cents, .daw-tool.tuner.in-tune .tuner-cents { color: var(--ok); }
-.tuner-freq { font-size: 10.5px; color: var(--tx-3); }
+.tuner-cents { text-align: center; font: 700 15px var(--mono); color: var(--tx-2); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.daw-tool.tuner.in-tune .tuner-cents { color: var(--ok); }
+.tuner-freq { text-align: center; font: 500 10.5px var(--mono); color: var(--tx-3); }
 .metro-row .btn { flex: none; }
 .metro-row .btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .metro-bpm { width: 60px; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--tx-1); font: 600 13px/1 var(--mono); outline: none; }

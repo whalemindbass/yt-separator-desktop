@@ -628,6 +628,12 @@ function updateVU(peak) {
   dbEl.textContent = p > 0.00001 ? `${db.toFixed(0)} dB` : '—';
 }
 let _tunerHold = 0, _tunerBuf = [], _tunerNeedle = 50, _tunerTarget = 50, _tunerRAFon = false;
+let _tunerRef = Number(localStorage.getItem('yss:tunerRef')) || 440;   // A4 기준음(Hz)
+function setTunerRef(hz) {
+  _tunerRef = hz; localStorage.setItem('yss:tunerRef', String(hz));
+  document.querySelectorAll('#st-tuner-ref button').forEach(b => b.classList.toggle('on', Number(b.dataset.hz) === hz));
+  _tunerBuf.length = 0;   // 기준 바뀌면 스무딩 리셋
+}
 // 데이터는 저빈도(엔진 이벤트)라도 바늘은 rAF 로 60fps 보간 → 부드러움
 function tunerRAF() {
   const needle = $('st-tuner-needle');
@@ -663,7 +669,7 @@ function updateTuner(freq) {
   const sorted = [..._tunerBuf].sort((a, b) => a - b);
   const f = sorted[sorted.length >> 1];
 
-  const n = 69 + 12 * Math.log2(f / 440);
+  const n = 69 + 12 * Math.log2(f / _tunerRef);
   const nearest = Math.round(n);
   const cents = (n - nearest) * 100;
   const name = NOTE_NAMES[((nearest % 12) + 12) % 12];
@@ -1971,6 +1977,9 @@ function wire() {
     api.engine.inputMonitor(_monOn);
   });
 
+  // 튜너 기준음 칩
+  const refBox = $('st-tuner-ref');
+  if (refBox) { refBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setTunerRef(Number(b.dataset.hz)))); setTunerRef(_tunerRef); }
   // 도구 드로어 — 열면 도구 선택 탭. 하나씩 사용.
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });
   $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; });

@@ -471,18 +471,27 @@
               <div id="st-vu-db" class="vu-db">—</div>
             </div>
             <div class="daw-tool tuner" id="tool-tuner" data-tool="tuner" hidden>
-              <div class="tuner-readout">
-                <span id="st-tuner-flat" class="tuner-arrow flat">♭</span>
-                <div class="tuner-note-wrap"><span id="st-tuner-note" class="tuner-note">—</span><sub id="st-tuner-oct" class="tuner-oct"></sub></div>
-                <span id="st-tuner-sharp" class="tuner-arrow sharp">♯</span>
+              <div class="tuner-card">
+                <div class="tuner-readout">
+                  <span id="st-tuner-flat" class="tuner-arrow flat">♭</span>
+                  <div class="tuner-note-wrap"><span id="st-tuner-note" class="tuner-note">—</span><sub id="st-tuner-oct" class="tuner-oct"></sub></div>
+                  <span id="st-tuner-sharp" class="tuner-arrow sharp">♯</span>
+                </div>
+                <div id="st-tuner-cents" class="tuner-cents">—</div>
+                <div class="tuner-meter">
+                  <div class="tuner-ticks"></div>
+                  <span class="tuner-center"></span>
+                  <div id="st-tuner-needle" class="tuner-needle"></div>
+                </div>
+                <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
+                <div id="st-tuner-freq" class="tuner-freq">—</div>
               </div>
-              <div class="tuner-meter">
-                <div class="tuner-ticks" id="st-tuner-ticks"></div>
-                <span class="tuner-center"></span>
-                <div id="st-tuner-needle" class="tuner-needle"></div>
+              <div class="tuner-ref">
+                <span class="tuner-ref-lab">기준음 A4</span>
+                <div class="tuner-ref-chips" id="st-tuner-ref">
+                  <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
+                </div>
               </div>
-              <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
-              <div class="tuner-info"><span id="st-tuner-cents" class="tuner-cents">—</span><span id="st-tuner-freq" class="tuner-freq"></span></div>
             </div>
             <div class="daw-tool-empty" id="tool-empty">위에서 도구를 선택하세요</div>
           </div>
