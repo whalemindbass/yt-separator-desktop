@@ -92,17 +92,19 @@ let _songName = '';        // 현재 곡/프로젝트 이름
 let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
 
 const HEAD_W = 140;
+const DEFAULT_LANE_H = 64;   // CSS .daw-lane 기본 높이 — 이보다 작게는 못 줄임(뷰 깨짐 방지)
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
 const BEATS_PER_BAR = 4;
 let _bpm = 120;   // 조절 가능(그리드·스냅·룰러에 반영)
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
-// 그리드 스냅 — 가장 가까운 박에 8px 이내면 스냅. Alt 누르면 해제
+// 그리드 스냅 — 1/4박(16분음표) 격자에 5px 이내로 가까울 때만 살짝 스냅.
+// 그 밖은 연속(픽셀 단위) 이동 → 세밀 배치 가능. Alt 누르면 스냅 완전 해제.
 function snapSec(sec, disable) {
   if (disable) return Math.max(0, sec);
-  const g = secPerBeat();
+  const g = secPerBeat() / 4;   // 16분음표 격자(촘촘)
   const near = Math.round(sec / g) * g;
-  return Math.abs(near - sec) * _pxPerSec <= 8 ? Math.max(0, near) : Math.max(0, sec);
+  return Math.abs(near - sec) * _pxPerSec <= 5 ? Math.max(0, near) : Math.max(0, sec);
 }
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
@@ -316,7 +318,7 @@ function renderRecLanes() {
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       const startY = e.clientY, base = lane.offsetHeight, oldH = rt.height || 0;
-      const mv = (ev) => { const h = Math.max(44, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); };
+      const mv = (ev) => { const h = Math.max(DEFAULT_LANE_H, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); };
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
         const nw = rt.height || 0;
@@ -462,10 +464,31 @@ function ensurePlayhead() {
 let _exportRange = null;   // {start, end} 초
 function ensureExportEls() {
   const ruler = $('daw-ruler');
-  if (ruler && !document.getElementById('daw-erange')) { const e = document.createElement('div'); e.id = 'daw-erange'; e.className = 'daw-erange'; e.hidden = true; ruler.appendChild(e); }
+  if (ruler && !document.getElementById('daw-erange')) {
+    const e = document.createElement('div'); e.id = 'daw-erange'; e.className = 'daw-erange'; e.hidden = true;
+    e.innerHTML = '<div class="daw-eh l" title="시작 조절"></div><div class="daw-eh r" title="끝 조절"></div>';
+    ruler.appendChild(e);
+    e.querySelector('.daw-eh.l').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'start'));
+    e.querySelector('.daw-eh.r').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'end'));
+    e.addEventListener('dblclick', (ev) => { ev.stopPropagation(); _exportRange = null; renderExportRange(); flashTake('내보내기 범위 해제'); });
+  }
   const lanes = $('daw-lanes');
   let band = document.getElementById('daw-eband');
   if (lanes && (!band || band.parentElement !== lanes)) { if (band) band.remove(); band = document.createElement('div'); band.id = 'daw-eband'; band.className = 'daw-eband'; band.hidden = true; lanes.appendChild(band); }
+}
+// 범위 가장자리 핸들 드래그로 시작/끝 조절
+function dragExportEdge(e, which) {
+  e.preventDefault(); e.stopPropagation();
+  const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
+  const toSec = (cx) => Math.max(0, Math.min(fullSec(), (cx - wrap.getBoundingClientRect().left - HEAD_W + sc.scrollLeft) / _pxPerSec));
+  const mv = (ev) => {
+    const v = toSec(ev.clientX);
+    if (which === 'start') _exportRange.start = Math.min(v, _exportRange.end - 0.02);
+    else _exportRange.end = Math.max(v, _exportRange.start + 0.02);
+    renderExportRange();
+  };
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`); };
+  document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function renderExportRange() {
   const e = document.getElementById('daw-erange'), band = document.getElementById('daw-eband');
@@ -616,7 +639,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-proj-open', 'st-proj-save', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-file-menu', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -944,6 +967,23 @@ function showTakeMenu(x, y, id) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
+// 앵커 아래 붙는 드롭다운 메뉴 (툴바 버튼용)
+function openDropdown(anchor, items) {
+  document.querySelector('.daw-ctx')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'daw-ctx daw-dropdown';
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = r.left + 'px'; menu.style.top = (r.bottom + 4) + 'px';
+  items.forEach(it => {
+    const b = document.createElement('button');
+    b.textContent = it.label;
+    b.addEventListener('click', () => { menu.remove(); it.fn(); });
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu);
+  const close = (ev) => { if (menu.contains(ev.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
 // ── 모달 ───────────────────────────────────────────
 function openModal(title, itemsHtml, onClick) {
   const host = $('daw-modal');
@@ -1655,9 +1695,14 @@ function wire() {
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
 
   // 오디오 파일 임포트 — 버튼 + 타임라인 드래그드롭
-  $('st-import-audio').addEventListener('click', pickImportAudio);
-  $('st-proj-save').addEventListener('click', saveProject);
-  $('st-proj-open').addEventListener('click', openProject);
+  $('st-file-menu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openDropdown(e.currentTarget, [
+      { label: '오디오 임포트…', fn: pickImportAudio },
+      { label: '프로젝트 열기…', fn: openProject },
+      { label: '프로젝트 저장…', fn: saveProject },
+    ]);
+  });
   $('st-undo').addEventListener('click', doUndo);
   $('st-redo').addEventListener('click', doRedo);
   $('st-bpm').addEventListener('change', (e) => {

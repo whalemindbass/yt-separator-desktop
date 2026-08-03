@@ -2244,7 +2244,14 @@ body { display: flex; flex-direction: column; }
 .daw-ruler-wrap { cursor: ew-resize; }
 /* 내보내기 범위 선택 */
 .daw-erange { position: absolute; top: 0; height: 24px; background: color-mix(in srgb, var(--accent) 26%, transparent); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); z-index: 3; pointer-events: none; }
+/* 범위 조절 핸들 (양 끝) */
+.daw-eh { position: absolute; top: 0; width: 9px; height: 24px; pointer-events: auto; cursor: ew-resize; background: var(--accent); opacity: .0; }
+.daw-eh.l { left: -5px; } .daw-eh.r { right: -5px; }
+.daw-erange:hover .daw-eh { opacity: .55; }
+.daw-eh:hover { opacity: .9 !important; }
 .daw-eband { position: absolute; top: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-right: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); z-index: 2; pointer-events: none; }
+.daw-dropdown { min-width: 150px; }
+.daw-dropdown button { white-space: nowrap; }
 .daw-tscroll { flex: 1; min-height: 0; overflow: auto; position: relative; }
 /* 가로 스크롤은 휠로 하므로 가로 스크롤바 숨김(컨트롤 컬럼 침범 방지). 세로바는 유지 */
 .daw-tscroll::-webkit-scrollbar:horizontal { height: 0; }
