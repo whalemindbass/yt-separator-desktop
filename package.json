@@ -94,7 +94,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Dr.studio",
-      "artifactName": "${productName}-Setup.${ext}"
+      "artifactName": "${productName}-${version}-Setup.${ext}"
     },
     "portable": {
       "artifactName": "${productName}.${ext}"
