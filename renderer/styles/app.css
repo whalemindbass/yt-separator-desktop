@@ -2506,7 +2506,10 @@ body { display: flex; flex-direction: column; }
 .daw-take-clip { border-radius: 0; }
 /* 오디오(임포트) 트랙 클립 = 다른 색(녹음 클립과 구분) */
 .daw-lane-audio .daw-take-clip { background: color-mix(in srgb, var(--stem-bass) 14%, var(--elev)); }
-.daw-lane:hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
+.daw-lane:not(.selected):hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
+/* 선택 트랙 — 호버해도 회색 안 되고 강조색 유지(살짝 밝게) */
+.daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); box-shadow: inset 2px 0 0 var(--accent); }
+.daw-lane.selected:hover .daw-head { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
 
 /* 믹서 페이더 — 채널 스트립 (플랫) */
 .mx-strip { background: var(--elev); box-shadow: none; }
