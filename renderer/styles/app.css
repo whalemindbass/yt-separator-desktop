@@ -2275,7 +2275,12 @@ body { display: flex; flex-direction: column; }
 .daw-fx-slot .del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); pointer-events: none; }
 .daw-take-clip { position: absolute; top: 0; bottom: 0; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); cursor: pointer; }
+.daw-clip-wave { position: absolute; top: 0; bottom: 0; }
 .daw-take-clip svg { width: 100%; height: 100%; display: block; }
+/* 트림 핸들 — 클립 좌·우 가장자리 */
+.daw-trim { position: absolute; top: 0; bottom: 0; width: 7px; z-index: 3; cursor: ew-resize; }
+.daw-trim.l { left: 0; } .daw-trim.r { right: 0; }
+.daw-trim:hover { background: color-mix(in srgb, var(--tx-1) 24%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tx-1) 40%, transparent); }
 .daw-ctx { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border-mid); border-radius: 7px; box-shadow: var(--shadow-pop); padding: 4px; }
 .daw-ctx button { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: 0; color: var(--tx-1); font-size: 12.5px; cursor: pointer; border-radius: 5px; }
 .daw-ctx button:hover { background: var(--elev); }

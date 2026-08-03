@@ -152,6 +152,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),
     takeLoad:    (file, start, trackId, id) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeLoad', file, start, trackId, id }),
     takeMove:    (id, start, trackId) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeMove', id, start, trackId }),
+    takeTrim:    (id, start, inOffset, len) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeTrim', id, start, inOffset, len }),
+    takeSplit:   (id, at, newId) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeSplit', id, at, newId }),
     stemOffset:  (samples) => ipcRenderer.invoke('engine:cmd', { cmd: 'stemOffset', samples }),
     recTrackAdd:    (type)    => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackAdd', type: type || 0 }),
     recTrackRemove: (id)      => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackRemove', id }),

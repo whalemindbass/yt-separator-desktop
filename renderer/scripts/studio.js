@@ -24,6 +24,7 @@ let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
 let _selTrack = null;         // 선택(편집 대상) 녹음 트랙 id — 이펙트 패널 대상
+let _selClipId = null;        // 선택 클립 id — 분할(S) 대상
 let _activePresetId = null;
 let _presetGather = null;     // 저장: {name,id?,states:{slotId:data},need:[ids],meta:[{index,bypass}],order:[ids]}
 let _pendingPreset = null;    // 로드: {slots:[{index,bypass,data}]}
@@ -604,11 +605,12 @@ async function renderTake(file, startSamples, engineId, trackId) {
     const ch = stems.take;
     const tid = trackId != null ? trackId : armedRecId();
     const isAudio = (_recTracks.find(r => r.id === tid) || {}).type === 1;   // 오디오 트랙 클립 = 다른 색
+    const srcDur = ch[0].length / (_sr || 44100);
     _takes.push({
       id: engineId != null ? engineId : Date.now(), file,
       trackId: tid,
       start: (startSamples || 0) / (_sr || 44100),
-      dur: ch[0].length / (_sr || 44100),
+      inOff: 0, srcDur, dur: srcDur,   // 트림: inOff(소스 내 시작)·dur(가시 길이)·srcDur(전체)
       svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
     });
     renderTakes();
@@ -628,12 +630,25 @@ function renderTakes() {
     el.className = 'daw-take-clip';
     el.style.left = (tk.start * _pxPerSec) + 'px';
     el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
-    el.innerHTML = tk.svg;
     el.title = tk.file;
+    // 파형 슬라이스: overflow 컨테이너 안에서 전체 소스 svg 를 inOff 만큼 밀기
+    const wave = document.createElement('div');
+    wave.className = 'daw-clip-wave';
+    wave.style.left = (-tk.inOff * _pxPerSec) + 'px';
+    wave.style.width = Math.max(3, tk.srcDur * _pxPerSec) + 'px';
+    wave.innerHTML = tk.svg;
+    el.appendChild(wave);
+    // 좌·우 트림 핸들
+    const hL = document.createElement('div'); hL.className = 'daw-trim l';
+    const hR = document.createElement('div'); hR.className = 'daw-trim r';
+    el.appendChild(hL); el.appendChild(hR);
+    wireTrim(hL, tk, el, wave, -1);
+    wireTrim(hR, tk, el, wave, +1);
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
-      selectTrack(tk.trackId);
+      if (e.target.classList.contains('daw-trim')) return;   // 핸들은 트림
+      selectTrack(tk.trackId); _selClipId = tk.id;
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX, base = tk.start;
       const srcLane = el.closest('.daw-lane-rec');
@@ -669,12 +684,65 @@ function renderTakes() {
     area.appendChild(el);
   }
 }
+const MIN_CLIP = 0.02;   // 최소 클립 길이(초)
+// 트림 핸들: dir -1=좌, +1=우. 드래그로 inOff/dur 갱신, up 시 엔진 커밋
+function wireTrim(handle, tk, el, wave, dir) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    selectTrack(tk.trackId); _selClipId = tk.id;
+    const startX = e.clientX, bIn = tk.inOff, bDur = tk.dur, bStart = tk.start;
+    const move = (ev) => {
+      let d = (ev.clientX - startX) / _pxPerSec;   // 초
+      if (dir < 0) {   // 좌측: inOff·start·dur 동시 이동
+        d = Math.max(-bIn, Math.min(bDur - MIN_CLIP, d));
+        tk.inOff = bIn + d; tk.start = bStart + d; tk.dur = bDur - d;
+      } else {         // 우측: dur 만
+        d = Math.max(MIN_CLIP - bDur, Math.min(tk.srcDur - bIn - bDur, d));
+        tk.dur = bDur + d;
+      }
+      el.style.left = (tk.start * _pxPerSec) + 'px';
+      el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
+      wave.style.left = (-tk.inOff * _pxPerSec) + 'px';
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      commitTrim(tk); layout();
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  });
+}
+function commitTrim(tk) {
+  const sr = _sr || 44100;
+  api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round(tk.inOff * sr), Math.round(tk.dur * sr));
+}
+// 재생선 위치에서 선택 클립 분할
+function splitSelectedAtPlayhead() {
+  const tk = _takes.find(t => t.id === _selClipId); if (!tk) { flashTake('분할할 클립을 선택하세요.'); return; }
+  splitClip(tk, _lastSec);
+}
+function splitClip(tk, atSec) {
+  const rel = atSec - tk.start;
+  if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake('클립 안쪽에서만 분할됩니다.'); return; }
+  const sr = _sr || 44100;
+  const newId = Date.now();
+  // 뒷부분 = 새 클립
+  const right = { ...tk, id: newId, start: tk.start + rel, inOff: tk.inOff + rel, dur: tk.dur - rel };
+  tk.dur = rel;   // 앞부분
+  _takes.push(right);
+  api.engine.takeSplit(tk.id, Math.round(atSec * sr), newId);
+  renderTakes();
+}
 function showTakeMenu(x, y, id) {
   document.querySelector('.daw-ctx')?.remove();
   const menu = document.createElement('div');
   menu.className = 'daw-ctx';
   menu.style.left = x + 'px'; menu.style.top = y + 'px';
-  menu.innerHTML = `<button class="del">삭제</button>`;
+  menu.innerHTML = `<button class="split">재생선에서 분할</button><button class="del">삭제</button>`;
+  menu.querySelector('.split').addEventListener('click', () => {
+    const tk = _takes.find(t => t.id === id); if (tk) splitClip(tk, _lastSec); menu.remove();
+  });
   menu.querySelector('.del').addEventListener('click', () => {
     api.engine.takeRemove(id);   // 엔진 재생 소스도 제거
     _takes = _takes.filter(t => t.id !== id); renderTakes(); menu.remove();
@@ -744,7 +812,7 @@ function saveTakeSet(name) {
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
-  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, trackId: t.trackId }));
+  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, trackId: t.trackId }));
   const need = [];
   tracks.forEach(t => t.fxOrder.forEach(s => need.push({ track: t.id, id: s.id })));
   if (!need.length) { persistTakeSet(name, stripFxOrder(tracks), takes); return; }   // FX 없으면 바로 저장
@@ -809,7 +877,13 @@ async function loadTakeSet(ts) {
       const id = t.id != null ? t.id : t.start;   // 고유 id (구버전은 start 폴백)
       api.engine.takeLoad(t.file, t.start, tid, id);
       await renderTake(t.file, t.start, id, tid);
+      // 트림 복원 (구버전 세트는 inOff 없음)
+      if (t.inOff || (t.srcDur && t.dur < t.srcDur - 1e-4)) {
+        const tk = _takes.find(x => x.id === id);
+        if (tk) { tk.inOff = t.inOff || 0; tk.dur = t.dur; commitTrim(tk); }
+      }
     }
+    renderTakes();
     flashTake('녹음 불러옴: ' + ts.name);
   } finally { _loadingTakeSet = false; }
 }
@@ -1099,13 +1173,14 @@ function wire() {
 
   // 단축키: Space=재생/정지, R=녹음 시작/정지 (스튜디오 뷰 활성 + 입력창 아닐 때)
   document.addEventListener('keydown', (e) => {
-    if (e.code !== 'Space' && e.code !== 'KeyR') return;
+    if (e.code !== 'Space' && e.code !== 'KeyR' && e.code !== 'KeyS') return;
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     e.preventDefault();
     if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
+    else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)

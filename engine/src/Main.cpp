@@ -62,10 +62,11 @@ public:
 // 녹음/임포트 클립 재생 — 디바이스 SR 로 리샘플된 메모리 버퍼(오디오 스레드 디스크 I/O 없음)
 struct TakePlay
 {
-    AudioBuffer<float> buf;   // 2ch, 디바이스 SR
+    AudioBuffer<float> buf;   // 2ch, 디바이스 SR (전체 소스)
     int64 id = 0;      // 안정 식별자 (이동해도 유지)
     int64 start = 0;   // 타임라인 위치 (이동 가능)
-    int64 len = 0;
+    int64 inOffset = 0;// 버퍼 내 시작(트림 좌측)
+    int64 len = 0;     // 재생 길이(트림 반영)
     int   trackId = 0; // 소속 녹음 트랙
     String path;       // export(오프라인 렌더)용
 };
@@ -487,6 +488,43 @@ public:
         const ScopedLock sl (takesLock);
         for (auto& t : takesPlay) if (t->id == id) { t->start = newStart; if (trackId > 0) t->trackId = trackId; break; }
     }
+    // 클립 트림 — 타임라인 start·버퍼 내 시작·길이 갱신 (버퍼 범위로 클램프)
+    void trimTake (int64 id, int64 start, int64 inOffset, int64 len)
+    {
+        const ScopedLock sl (takesLock);
+        for (auto& t : takesPlay) if (t->id == id)
+        {
+            const int64 total = t->buf.getNumSamples();
+            int64 io = jlimit<int64> (0, jmax<int64> (0, total - 1), inOffset);
+            int64 ln = jlimit<int64> (1, total - io, len);
+            t->start = jmax<int64> (0, start); t->inOffset = io; t->len = ln;
+            break;
+        }
+    }
+    // 클립 분할 — atSample(타임라인) 에서 둘로. 새 클립 id 를 받음(버퍼 공유 복사)
+    void splitTake (int64 id, int64 atSample, int64 newId)
+    {
+        const ScopedLock sl (takesLock);
+        for (size_t i = 0; i < takesPlay.size(); ++i)
+        {
+            auto& t = takesPlay[i];
+            if (t->id != id) continue;
+            const int64 rel = atSample - t->start;
+            if (rel <= 0 || rel >= t->len) return;   // 클립 안에서만 분할
+            auto nt = std::make_unique<TakePlay>();
+            nt->buf = t->buf;                          // 버퍼 복사(공유 소스)
+            nt->id = newId > 0 ? newId : nextTakeId++;
+            if (nt->id >= nextTakeId) nextTakeId = nt->id + 1;
+            nt->start   = t->start + rel;
+            nt->inOffset = t->inOffset + rel;
+            nt->len     = t->len - rel;
+            nt->trackId = t->trackId;
+            nt->path    = t->path;
+            t->len = rel;                               // 원본은 앞부분
+            takesPlay.push_back (std::move (nt));
+            return;
+        }
+    }
     void setBypass (int trackId, int id, bool on)
     {
         auto* rt = findRec (trackId); if (rt == nullptr) return;
@@ -635,7 +673,7 @@ public:
             }
 
         // 트랙: 테이크 버퍼 스냅샷 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
-        struct TR { AudioBuffer<float> buf; int64 start; int64 len; };
+        struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; };
         struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
         std::vector<TRK> trks;
         {
@@ -663,7 +701,7 @@ public:
                 for (auto& t : takesPlay)
                 {
                     if (t->trackId != rt->id) continue;
-                    TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len;   // 버퍼 복사(스냅샷)
+                    TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len; tr.inOffset = t->inOffset;   // 스냅샷
                     total = jmax (total, t->start + t->len);
                     tk.takes.push_back (std::move (tr));
                 }
@@ -724,7 +762,7 @@ public:
                     const int64 rp = pos - t.start;
                     if (rp < 0 || rp >= t.len) continue;
                     const int nn = (int) jmin<int64> ((int64) n, t.len - rp);
-                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) rp, nn);
+                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) (t.inOffset + rp), nn);
                     any = true;
                 }
                 if (! any && tk.fx.empty()) continue;
@@ -862,7 +900,7 @@ public:
                             if (pos < 0 || pos >= t->len) continue;
                             const int n2 = (int) jmin<int64> ((int64) numSamples, t->len - pos);
                             for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                                fxBuf.addFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) pos, n2);
+                                fxBuf.addFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) (t->inOffset + pos), n2);
                         }
 
                     if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
@@ -1071,6 +1109,8 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "takeClear")   engine.clearTakes();
     else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"], (int64) (double) c["id"]);
     else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"], (int) c["trackId"]);
+    else if (cmd == "takeTrim")    engine.trimTake ((int64) (double) c["id"], (int64) (double) c["start"], (int64) (double) c["inOffset"], (int64) (double) c["len"]);
+    else if (cmd == "takeSplit")   engine.splitTake ((int64) (double) c["id"], (int64) (double) c["at"], (int64) (double) c["newId"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
     else if (cmd == "recTrackAdd") engine.addRecTrack ((int) c["type"]);
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
