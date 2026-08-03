@@ -1069,7 +1069,7 @@ function finishTakeSetGather() {
 }
 function persistTakeSet(name, tracks, takes) {
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
-  flashTake('녹음 저장됨: ' + name);
+  flashTake('버전 저장됨: ' + name);
 }
 function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
   return new Promise(res => {
@@ -1121,7 +1121,7 @@ async function loadTakeSet(ts) {
     }
     renderTakes();
     clearUndo();
-    flashTake('녹음 불러옴: ' + ts.name);
+    flashTake('버전 불러옴: ' + ts.name);
   } finally { _loadingTakeSet = false; }
 }
 
@@ -1390,12 +1390,12 @@ async function runExport(format, quality, mineOnly, useRange) {
 
 function openTakeSetPicker() {
   const ps = getTakeSets();
-  if (!ps.length) { openModal('녹음 불러오기', '<div class="daw-modal-empty">이 곡에 저장된 녹음이 없습니다.</div>', () => {}); return; }
+  if (!ps.length) { openModal('버전 불러오기 (이 곡)', '<div class="daw-modal-empty">이 곡에 저장된 버전이 없습니다.</div>', () => {}); return; }
   const host = $('daw-modal');
   const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
     <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${p.takes.length} 테이크</div></div>
     <button class="daw-preset-del" data-id="${esc(p.id)}" title="삭제">✕</button></div>`).join('');
-  openModal('녹음 불러오기', html, (idx) => loadTakeSet(ps[Number(idx)]));
+  openModal('버전 불러오기 (이 곡)', html, (idx) => loadTakeSet(ps[Number(idx)]));
   host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
     setTakeSets(getTakeSets().filter(p => p.id !== b.dataset.id));
@@ -1699,8 +1699,8 @@ function wire() {
     e.stopPropagation();
     openDropdown(e.currentTarget, [
       { label: '오디오 임포트…', fn: pickImportAudio },
-      { label: '프로젝트 열기…', fn: openProject },
-      { label: '프로젝트 저장…', fn: saveProject },
+      { label: '프로젝트 열기 (.yssproj)…', fn: openProject },
+      { label: '프로젝트 저장 (독립 파일)…', fn: saveProject },
     ]);
   });
   $('st-undo').addEventListener('click', doUndo);
@@ -1778,7 +1778,7 @@ function wire() {
   $('st-take-save').addEventListener('click', () => {
     if (!_songKey) { flashTake('곡을 먼저 불러오세요.'); return; }
     if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
-    openNameModal('녹음 저장', '', (name) => saveTakeSet(name));
+    openNameModal('버전 저장 (이 곡)', '', (name) => saveTakeSet(name));
   });
   $('st-take-load').addEventListener('click', openTakeSetPicker);
 
