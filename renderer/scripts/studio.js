@@ -501,7 +501,7 @@ function renderExportRange() {
   if (!_exportRange) { if (e) e.hidden = true; if (band) band.hidden = true; return; }
   const x = _exportRange.start * _pxPerSec, w = (_exportRange.end - _exportRange.start) * _pxPerSec;
   if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
-  if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = ($('daw-lanes').offsetHeight || 0) + 'px'; }
+  if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = tracksHeight() + 'px'; }
 }
 const fmtBar = (sec) => '마디 ' + (Math.floor((sec - _gridOffset) / secPerBar()) + 1);
 
@@ -548,13 +548,19 @@ function layout() {
 }
 
 let _lastSec = 0;
+// 트랙 영역 높이 — 하단 여유 스페이서 제외(재생선·범위밴드가 빈칸으로 안 나가게)
+function tracksHeight() {
+  const lanes = $('daw-lanes'); if (!lanes) return 0;
+  const sp = lanes.querySelector('.daw-lanes-spacer');
+  return (lanes.offsetHeight || 0) - (sp ? sp.offsetHeight : 0);
+}
 function updatePlayhead(sec) {
   _lastSec = sec;
   const ph = $('daw-playhead');
   if (!ph) return;
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
   ph.style.left = (HEAD_W + sec * _pxPerSec) + 'px';
-  ph.style.height = ($('daw-lanes').offsetHeight || 0) + 'px';
+  ph.style.height = tracksHeight() + 'px';
   const pos = $('st-pos'); if (pos) pos.textContent = fmtTC(sec);
   $('daw-ruler').style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
 }
