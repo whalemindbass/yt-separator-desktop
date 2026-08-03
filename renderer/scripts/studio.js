@@ -301,6 +301,7 @@ function renderRecLanes() {
       openDropdownAt(e.clientX, e.clientY, [
         { label: '이름 변경', fn: () => startRenameTrack(rt.id) },
         { label: '색 변경', fn: () => lane.querySelector('.nm i').click() },
+        { label: '녹음 트랙 추가', fn: () => api.engine.recTrackAdd() },
         { label: '트랙 삭제', fn: () => del.click() },
       ]);
     });
@@ -322,7 +323,7 @@ function renderRecLanes() {
     grip.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       const startY = e.clientY, base = lane.offsetHeight, oldH = rt.height || 0;
-      const mv = (ev) => { const h = Math.max(DEFAULT_LANE_H, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); };
+      const mv = (ev) => { const h = Math.max(DEFAULT_LANE_H, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); renderExportRange(); };
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
         const nw = rt.height || 0;
@@ -335,12 +336,7 @@ function renderRecLanes() {
     reorder.addEventListener('pointerdown', (e) => wireReorder(e, rt, lane));
     lanes.appendChild(lane);
   });
-  // + 녹음 트랙 추가 — 버튼은 헤드(컨트롤) 컬럼에 sticky 로 묶음
-  const add = document.createElement('div');
-  add.className = 'daw-addrec-row';
-  add.innerHTML = `<div class="daw-addrec-head"><button class="daw-addrec" title="녹음 트랙 추가">＋ 녹음 트랙</button></div>`;
-  add.querySelector('button').addEventListener('click', () => api.engine.recTrackAdd());
-  lanes.appendChild(add);
+  // 하단 추가버튼 제거(재생선 침범 방지). 추가는 좌상단 ＋ 버튼·트랙 우클릭으로.
   syncSelection();
   layout();
 }
@@ -689,7 +685,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1957,6 +1953,14 @@ function wire() {
     $('st-range-mode').setAttribute('aria-pressed', String(_rangeMode));
     $('daw-ruler-wrap').classList.toggle('range-mode', _rangeMode);
     flashTake(_rangeMode ? '영역 선택 모드 — 룰러를 드래그하세요' : '영역 선택 모드 해제');
+  });
+  $('st-add-rec').addEventListener('click', () => api.engine.recTrackAdd());   // 코너 ＋ = 녹음 트랙 추가
+  // 트랙 빈 영역(레인 스크롤) 우클릭 = 트랙 추가
+  $('daw-tscroll').addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.daw-lane-rec, .daw-take-clip, .daw-clip')) return;   // 트랙/클립 위는 각자 메뉴
+    if (!_started) return;
+    e.preventDefault();
+    openDropdownAt(e.clientX, e.clientY, [{ label: '녹음 트랙 추가', fn: () => api.engine.recTrackAdd() }]);
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
