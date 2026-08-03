@@ -2251,7 +2251,21 @@ body { display: flex; flex-direction: column; }
 .daw-tscroll.drop-hi { box-shadow: inset 0 0 0 2px var(--accent); }
 .daw-tscroll.drop-hi::after { content: "여기에 놓아 임포트"; position: absolute; inset: 0; display: grid; place-items: center; font: 700 13px var(--sans); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 20; }
 .daw-lanes { position: relative; }
-.daw-lane { display: grid; grid-template-columns: 140px 1fr; height: 64px; border-bottom: 1px solid var(--border); }
+.daw-lane { display: grid; grid-template-columns: 140px 1fr; height: 64px; border-bottom: 1px solid var(--border); position: relative; }
+/* Phase4 트랙 편집 — 리오더 그립·색점·이름편집·높이조절 */
+.daw-reorder { cursor: grab; color: var(--tx-3); font-size: 11px; line-height: 1; letter-spacing: -1px; user-select: none; }
+.daw-reorder:active { cursor: grabbing; }
+.daw-head .nm i { cursor: pointer; }
+.daw-nm-edit { font: 700 11.5px var(--sans); color: var(--tx-1); background: var(--input); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; width: 84px; outline: none; }
+.daw-lane-resize { position: absolute; left: 140px; right: 0; bottom: 0; height: 5px; cursor: ns-resize; z-index: 6; }
+.daw-lane-resize:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.daw-lane-rec.reordering { opacity: .5; }
+.daw-lane-rec.reorder-target { box-shadow: inset 0 3px 0 var(--accent); }
+/* BPM 위젯 (트랜스포트) */
+.daw-bpm { display: inline-flex; align-items: center; gap: 5px; font: 600 10.5px var(--sans); color: var(--tx-3); }
+.daw-bpm input { width: 46px; background: var(--input); border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; color: var(--tx-1); font: 600 12px var(--mono); text-align: center; outline: none; }
+.daw-bpm input:focus { border-color: var(--accent); }
+.daw-bpm input:disabled { opacity: .5; }
 .daw-head { position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 8px 9px; display: flex; flex-direction: column; gap: 5px; }
 .daw-head::before { content: none; }
 .daw-head .nm { font-size: 11.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }

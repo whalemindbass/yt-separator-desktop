@@ -91,12 +91,14 @@ let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
 
 const HEAD_W = 140;
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
-const BPM = 120, BEATS_PER_BAR = 4, SEC_PER_BAR = BEATS_PER_BAR * 60 / BPM;
-const SEC_PER_BEAT = SEC_PER_BAR / BEATS_PER_BAR;
+const BEATS_PER_BAR = 4;
+let _bpm = 120;   // 조절 가능(그리드·스냅·룰러에 반영)
+const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
+const secPerBeat = () => 60 / _bpm;
 // 그리드 스냅 — 가장 가까운 박에 8px 이내면 스냅. Alt 누르면 해제
 function snapSec(sec, disable) {
   if (disable) return Math.max(0, sec);
-  const g = SEC_PER_BEAT;
+  const g = secPerBeat();
   const near = Math.round(sec / g) * g;
   return Math.abs(near - sec) * _pxPerSec <= 8 ? Math.max(0, near) : Math.max(0, sec);
 }
@@ -222,19 +224,22 @@ function renderRecLanes() {
   const lanes = $('daw-lanes');
   lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row').forEach(el => el.remove());
   let recN = 0, audN = 0;
-  _recTracks.forEach((rt) => {
+  _recTracks.forEach((rt, idx) => {
     const isAudio = rt.type === 1;
-    const label = isAudio ? `오디오 ${++audN}` : `내 녹음 ${++recN}`;
+    const autoLabel = isAudio ? `오디오 ${++audN}` : `내 녹음 ${++recN}`;
+    const label = rt.name || autoLabel;
+    const defColor = isAudio ? 'var(--stem-bass)' : 'var(--accent)';
     const lane = document.createElement('div');
     lane.className = 'daw-lane daw-lane-rec' + (isAudio ? ' daw-lane-audio' : '');
-    lane.style.setProperty('--c', isAudio ? 'var(--stem-bass)' : 'var(--accent)');
+    lane.style.setProperty('--c', rt.color || defColor);
+    if (rt.height) lane.style.height = rt.height + 'px';
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
     lane.dataset.type = isAudio ? 'audio' : 'rec';
     const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>`;
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
-        <div class="nm"><i></i>${label}</div>
+        <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span></div>
         <div class="ctrls">
           ${rBtnHtml}
           <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
@@ -243,7 +248,8 @@ function renderRecLanes() {
           <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
         </div>
       </div>
-      <div class="daw-area"></div>`;
+      <div class="daw-area"></div>
+      <div class="daw-lane-resize" title="드래그해 높이 조절"></div>`;
     const rBtn = lane.querySelector('[data-m="arm"]');
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
@@ -271,6 +277,45 @@ function renderRecLanes() {
       flashTake(`이 트랙에 녹음 ${takesN}개 — 다시 누르면 함께 삭제`);
       del._t = setTimeout(() => { del.dataset.confirm = ''; del.textContent = '✕'; del.classList.remove('confirm'); }, 2500);
     });
+    // 이름 변경 — 라벨 더블클릭 → 인라인 편집
+    const lbl = lane.querySelector('.lbl');
+    lbl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const inp = document.createElement('input');
+      inp.className = 'daw-nm-edit'; inp.value = rt.name || autoLabel;
+      lbl.replaceWith(inp); inp.focus(); inp.select();
+      const commit = () => {
+        const v = inp.value.trim();
+        rt.name = (v && v !== autoLabel) ? v : '';
+        renderRecLanes(); updateFxPanel(); updateTrackFader();
+      };
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); else if (ev.key === 'Escape') { inp.value = rt.name || autoLabel; inp.blur(); } });
+      inp.addEventListener('blur', commit);
+    });
+    // 색 변경 — 점 클릭 → 색상 선택기
+    const dot = lane.querySelector('.nm i');
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ci = document.createElement('input');
+      ci.type = 'color'; ci.value = rt.color ? rgbToHex(resolveColor(rt.color)) : rgbToHex(resolveColor(defColor));
+      ci.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ci);
+      ci.addEventListener('input', () => { rt.color = ci.value; lane.style.setProperty('--c', ci.value); });
+      ci.addEventListener('change', () => ci.remove());
+      ci.click();
+    });
+    // 높이 조절 — 하단 그립 드래그
+    const grip = lane.querySelector('.daw-lane-resize');
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const startY = e.clientY, base = lane.offsetHeight;
+      const mv = (ev) => { const h = Math.max(44, Math.min(280, base + (ev.clientY - startY))); rt.height = h; lane.style.height = h + 'px'; updatePlayhead(_lastSec); };
+      const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); };
+      document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+    });
+    // 순서 변경 — 그립 드래그로 리오더
+    const reorder = lane.querySelector('.daw-reorder');
+    reorder.addEventListener('pointerdown', (e) => wireReorder(e, rt, lane));
     lanes.appendChild(lane);
   });
   // + 녹음 트랙 추가 — 버튼은 헤드(컨트롤) 컬럼에 sticky 로 묶음
@@ -305,7 +350,7 @@ function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   left.classList.toggle('empty', !has);
   const h = $('daw-left-h');
   if (h) {
-    const lbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .nm`)?.textContent?.trim();
+    const lbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .lbl`)?.textContent?.trim();
     h.textContent = has ? `${lbl || '트랙'} 이펙트` : '입력 이펙트';
   }
   updateTrackFader();
@@ -316,7 +361,7 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   if (rt) {
     const v = Math.round((rt.gain != null ? rt.gain : 1) * 100);
     f.disabled = false; f.value = v; val.textContent = v;
-    const laneLbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .nm`)?.textContent?.trim();
+    const laneLbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .lbl`)?.textContent?.trim();
     lbl.textContent = laneLbl || '트랙';
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
@@ -346,6 +391,35 @@ function resolveColor(cssVar) {
   const m = String(cssVar).match(/var\((--[\w-]+)\)/);
   if (m) return getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || '#8a8f99';
   return cssVar;
+}
+function rgbToHex(c) {   // "rgb(r,g,b)" 또는 "#rrggbb" → "#rrggbb" (색상 input 기본값용)
+  c = String(c).trim();
+  if (c[0] === '#') return c.length === 4 ? '#' + [...c.slice(1)].map(x => x + x).join('') : c.slice(0, 7);
+  const m = c.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (!m) return '#888888';
+  return '#' + [1, 2, 3].map(i => Number(m[i]).toString(16).padStart(2, '0')).join('');
+}
+// 트랙 순서 변경 — 그립 드래그. 포인터 아래 rec 레인 감지, up 시 배열 재배치
+function wireReorder(e, rt, lane) {
+  e.preventDefault(); e.stopPropagation();
+  lane.classList.add('reordering');
+  const mv = (ev) => {
+    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
+    document.querySelectorAll('.daw-lane-rec.reorder-target').forEach(l => l.classList.remove('reorder-target'));
+    if (over && over !== lane) over.classList.add('reorder-target');
+  };
+  const up = (ev) => {
+    document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+    lane.classList.remove('reordering');
+    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
+    document.querySelectorAll('.daw-lane-rec.reorder-target').forEach(l => l.classList.remove('reorder-target'));
+    if (over && over !== lane) {
+      const from = _recTracks.findIndex(r => r.id === rt.id);
+      const to = _recTracks.findIndex(r => r.id === Number(over.dataset.recid));
+      if (from >= 0 && to >= 0) { const [m] = _recTracks.splice(from, 1); _recTracks.splice(to, 0, m); renderRecLanes(); renderTakes(); }
+    }
+  };
+  document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function renderWaves(buffers) {
   _tracks.forEach((t) => {
@@ -384,7 +458,7 @@ function renderExportRange() {
   if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
   if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = ($('daw-lanes').offsetHeight || 0) + 'px'; }
 }
-const fmtBar = (sec) => '마디 ' + (Math.floor(sec / SEC_PER_BAR) + 1);
+const fmtBar = (sec) => '마디 ' + (Math.floor(sec / secPerBar()) + 1);
 
 // 타임라인 총 길이(초) — 소스 길이 + 여유(뷰포트는 채우되 무한 아님), 마디 단위로 반올림
 function fullSec() {
@@ -393,7 +467,7 @@ function fullSec() {
   let content = _dur + _stemOffset;   // 오프셋된 스템 끝
   for (const t of _takes) content = Math.max(content, t.start + t.dur);   // 녹음 테이크 끝
   const base = Math.max(content, vw / _pxPerSec) + 8;   // 콘텐츠보다 조금 더 길게
-  return Math.ceil(base / SEC_PER_BAR) * SEC_PER_BAR;
+  return Math.ceil(base / secPerBar()) * secPerBar();
 }
 const timelineW = () => Math.max(1, fullSec() * _pxPerSec);
 
@@ -403,12 +477,12 @@ function layout() {
   document.querySelectorAll('.daw-lane').forEach(l => { l.style.width = (HEAD_W + w) + 'px'; });
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
-  const barPx = SEC_PER_BAR * _pxPerSec;
+  const barPx = secPerBar() * _pxPerSec;
   $('daw-lanes').style.setProperty('--grid', barPx + 'px');   // 마디마다 그리드선
   const lblEvery = barPx >= 60 ? 1 : barPx >= 30 ? 2 : barPx >= 15 ? 4 : 8;   // 라벨 간격(마디)
   const end = fullSec();
   let bar = 1;
-  for (let s = 0; s <= end + 0.001; s += SEC_PER_BAR, bar++) {
+  for (let s = 0; s <= end + 0.001; s += secPerBar(), bar++) {
     const tk = document.createElement('span');
     tk.className = 'tk' + ((bar - 1) % lblEvery === 0 ? '' : ' minor');
     tk.style.left = (s * _pxPerSec) + 'px';
@@ -526,7 +600,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-proj-open', 'st-proj-save', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-proj-open', 'st-proj-save', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -878,6 +952,7 @@ function saveTakeSet(name) {
   // 트랙 레이아웃(개수·게인·뮤트·솔로) + 트랙별 FX 체인까지 통째로 저장
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    name: r.name || '', color: r.color || '', height: r.height || 0,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
   const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId }));
@@ -891,12 +966,13 @@ function saveTakeSet(name) {
   _takeSetGather._t = setTimeout(finishTakeSetGather, 2000);   // 일부 못 받아도 저장(타임아웃)
 }
 function stripFxOrder(tracks) {
-  return tracks.map(t => ({ id: t.id, type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo, fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass })) }));
+  return tracks.map(t => ({ id: t.id, type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo, name: t.name || '', color: t.color || '', height: t.height || 0, fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass })) }));
 }
 function finishTakeSetGather() {
   const g = _takeSetGather; if (!g) return; _takeSetGather = null; clearTimeout(g._t);
   const tracks = g.tracks.map(t => ({
     id: t.id, type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo,
+    name: t.name || '', color: t.color || '', height: t.height || 0,
     fx: t.fxOrder.map(s => ({ index: s.index, bypass: s.bypass, data: g.states[s.id] })),
   }));
   persistTakeSet(g.name, tracks, g.takes);
@@ -931,6 +1007,7 @@ async function loadTakeSet(ts) {
       if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
       idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
       ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+      applyTrackMeta(ts.tracks);   // 이름·색·높이 복원
       // 트랙별 FX 체인 복원 (선택 트랙만이 아니라 모든 트랙에 적용)
       ts.tracks.forEach((t, i) => {
         if (_recTracks[i] && Array.isArray(t.fx) && t.fx.length)
@@ -968,6 +1045,15 @@ function gatherFx(pairs) {   // pairs:[{track,id}] → Promise<{id:data}>
   });
 }
 const baseName = (p) => String(p || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
+function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높이를 현재 트랙에 입힘
+  savedTracks.forEach((t, i) => {
+    if (!_recTracks[i]) return;
+    if (t.name) _recTracks[i].name = t.name;
+    if (t.color) _recTracks[i].color = t.color;
+    if (t.height) _recTracks[i].height = t.height;
+  });
+  renderRecLanes();   // 이벤트 렌더는 메타 전이라 여기서 재렌더
+}
 async function buildProjectObject() {
   const sr = _sr || 44100;
   const master = Number($('mx-master')?.value ?? 100) / 100;
@@ -976,6 +1062,7 @@ async function buildProjectObject() {
   const states = await gatherFx(pairs);
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    name: r.name || '', color: r.color || '', height: r.height || 0,
     fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
   }));
   const takes = _takes.map(t => ({
@@ -983,7 +1070,7 @@ async function buildProjectObject() {
     srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId,
   }));
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: BPM, master, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, master, stems, tracks, takes };
 }
 async function saveProject() {
   if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake('저장할 내용이 없습니다.'); return; }
@@ -1017,6 +1104,7 @@ async function applyProject(p) {
     closeSong();
   }
   _songName = p.name || '';
+  if (p.bpm) { _bpm = p.bpm; const b = $('st-bpm'); if (b) b.value = p.bpm; }
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   let idMap = null;
   if (Array.isArray(p.tracks) && p.tracks.length) {
@@ -1027,6 +1115,7 @@ async function applyProject(p) {
     if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
     idMap = {};
     p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+    applyTrackMeta(p.tracks);   // 이름·색·높이
     p.tracks.forEach((t, i) => {
       if (_recTracks[i] && Array.isArray(t.fx) && t.fx.length)
         api.engine.fxSetChain(_recTracks[i].id, t.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
@@ -1235,8 +1324,9 @@ function onEngineEvent(m) {
     case 'pos': onPos(m.samples); break;
     case 'level': updateVU(m.peak); break;
     case 'pitch': updateTuner(m.freq); break;
-    case 'recTracks':
-      _recTracks = m.list || [];
+    case 'recTracks': {
+      const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
+      _recTracks = (m.list || []).map(r => { const p = prevMeta.get(r.id); return p ? { ...r, ...p } : r; });   // 렌더러 전용 메타(이름·색·높이) id로 보존
       if (m.gen != null) _recTracksGen = m.gen;
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       renderRecLanes(); updateSoloDim();
@@ -1245,6 +1335,7 @@ function onEngineEvent(m) {
         selectTrack(a != null ? a : null);
       } else updateFxPanel();
       break;
+    }
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
@@ -1411,6 +1502,10 @@ function wire() {
   $('st-import-audio').addEventListener('click', pickImportAudio);
   $('st-proj-save').addEventListener('click', saveProject);
   $('st-proj-open').addEventListener('click', openProject);
+  $('st-bpm').addEventListener('change', (e) => {
+    const v = Math.max(20, Math.min(300, Number(e.target.value) || 120));
+    _bpm = v; e.target.value = v; layout();   // 그리드·스냅·룰러 재계산
+  });
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });
