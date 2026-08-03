@@ -49,15 +49,6 @@ function mdToHtml(md) {
   return html;
 }
 
-// ── 앱 메타 표시 ───────────────────────────────
-(async () => {
-  try {
-    const [v, p] = await Promise.all([api.getVersion(), api.getPlatform()]);
-    $('v').textContent = 'v' + v;
-    $('platform').textContent = p;
-  } catch (err) { console.error(err); }
-})();
-
 // ── Titlebar: window controls ───────────────────
 const titlebarEl = document.querySelector('.titlebar');
 $('win-min')  .addEventListener('click', () => api.window.minimize());
