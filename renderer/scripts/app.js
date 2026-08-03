@@ -171,7 +171,7 @@ async function refreshSettingsView() {
   // App info
   try {
     const info = await api.settings.appInfo();
-    sAppInfo.textContent = `v${info.appVersion} · Electron ${info.electronVersion} · Chromium ${info.chromeVersion} · Node ${info.nodeVersion}`;
+    sAppInfo.textContent = `v${info.appVersion}`;
     sUpdateStatus.textContent = (getLocale() === 'en' ? 'Current: v' : '현재 버전 v') + info.appVersion;
   } catch {}
 }
