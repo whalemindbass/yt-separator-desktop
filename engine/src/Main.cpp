@@ -6,6 +6,7 @@
 //            ready device plugins fx stems pos take error
 //   stderr : 사람용 진단 로그
 
+#include <limits>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -377,13 +378,11 @@ public:
     }
 
     // ---- 부가: 레벨 미터 · 튜너 · 메트로놈 ----
-    void setMetro (bool on, double bpm, int64 phase, const var& beats)
+    void setMetro (bool on, double bpm, int64 phase, double interval)
     {
-        metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase; lastBeatIdx = -1;
-        const ScopedLock sl (metroLock);
-        metroBeats.clearQuick();
-        if (auto* arr = beats.getArray())
-            for (auto& b : *arr) metroBeats.add ((int64) (double) b);   // 실제 감지 비트(샘플, 타임라인)
+        metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase;
+        metroInterval = interval;                 // 샘플 단위 정밀 박 간격(감지값). <=1 이면 bpm 기반
+        lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
     double detectPitch()
@@ -988,34 +987,22 @@ public:
             }
         }
 
-        // 메트로놈 클릭 — 감지된 실제 비트(metroBeats)에 정확히, 없으면 등간격(위상) 폴백
+        // 메트로놈 클릭 — 다운비트(phase) + 정밀 박 간격(interval) 균일 그리드.
+        // 재생 중일 때만, 박 경계에서만 클릭(음원 밖·다운비트 이전 포함).
         if (metroOn.load() && numOut > 0)
         {
             const int clickLen = (int) (deviceSampleRate * 0.06);
-            const double interval = 60.0 / metroBpm.load() * deviceSampleRate;
+            double interval = metroInterval.load();
+            if (interval <= 1.0) interval = 60.0 / metroBpm.load() * deviceSampleRate;   // 폴백
             const double phase = (double) metroPhase.load();
             const bool playing_ = playing.load();
-            const ScopedTryLock stl (metroLock);
-            const bool useBeats = stl.isLocked() && metroBeats.size() > 0;
-            int bi = 0;
-            if (useBeats && playing_)   // 블록 시작 이상인 첫 비트로 이동
-                while (bi < metroBeats.size() && metroBeats[bi] < phStart) ++bi;
             for (int i = 0; i < numSamples; ++i)
             {
                 if (playing_)
                 {
-                    bool onset = false;
-                    if (useBeats)
-                    {
-                        while (bi < metroBeats.size() && metroBeats[bi] < phStart + i) ++bi;   // 놓친 비트 스킵
-                        if (bi < metroBeats.size() && metroBeats[bi] == phStart + i) { onset = true; ++bi; }
-                    }
-                    else
-                    {
-                        const int64 beatIdx = (int64) std::floor (((double) (phStart + i) - phase) / interval + 1e-6);
-                        if (beatIdx >= 0 && beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; onset = true; }
-                    }
-                    if (onset) clickPos = 0;
+                    const int64 beatIdx = (int64) std::floor (((double) (phStart + i) - phase) / interval + 1e-6);
+                    if (lastBeatIdx == std::numeric_limits<int64>::min()) lastBeatIdx = beatIdx;   // 시작 지점: 클릭 없이 기준만
+                    else if (beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; clickPos = 0; }       // 경계 넘을 때만
                 }
                 if (clickPos >= 0)
                 {
@@ -1138,11 +1125,9 @@ private:
     SpinLock pitchLock;
     std::atomic<bool> metroOn { false };
     std::atomic<double> metroBpm { 120.0 };
-    std::atomic<int64> metroPhase { 0 };   // 첫 다운비트 위상(샘플) — 폴백(등간격)용
-    int64 lastBeatIdx = -1;
-    CriticalSection metroLock;
-    Array<int64> metroBeats;                // 감지된 실제 비트 위치(샘플, 타임라인, 정렬됨)
-    double metroCounter = 0.0;
+    std::atomic<int64> metroPhase { 0 };        // 다운비트 위상(샘플, 타임라인)
+    std::atomic<double> metroInterval { 0.0 };  // 정밀 박 간격(샘플). <=1 이면 bpm 기반
+    int64 lastBeatIdx = std::numeric_limits<int64>::min();
     int clickPos = -1;
 
     TimeSliceThread writerThread;
@@ -1209,7 +1194,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
-    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], c["beats"]);
+    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") engine.scanPlugins();
