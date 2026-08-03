@@ -688,7 +688,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
