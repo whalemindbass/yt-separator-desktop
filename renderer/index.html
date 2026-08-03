@@ -494,9 +494,8 @@
 
       <!-- 하단: 트랜스포트 -->
       <div class="daw-bottombar">
-        <!-- 좌: 버전(곡 종속 빠른 저장) · 실행취소 -->
-        <button id="st-take-save" class="btn" disabled title="이 곡에 트랙·녹음·이펙트를 파일 없이 빠르게 저장 (여러 버전 관리). 독립 파일은 파일▸프로젝트 저장">버전 저장</button>
-        <button id="st-take-load" class="btn" disabled title="이 곡에 저장한 버전 불러오기">버전 불러오기</button>
+        <!-- 좌: 현재 프로젝트 이름·저장 상태 · 실행취소 -->
+        <button id="st-proj-name" class="daw-projname" disabled title="현재 프로젝트 — 클릭하면 저장 (Ctrl+S)"><span class="pn-dot"></span><span class="pn-label">새 프로젝트</span></button>
         <span class="tp-div"></span>
         <button id="st-undo" class="btn icon" disabled title="실행취소 (Ctrl+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 5.5 3.5 8l3 2.5"/><path d="M3.5 8h5.5a3.5 3.5 0 0 1 0 7H8"/></svg></button>
         <button id="st-redo" class="btn icon" disabled title="다시실행 (Ctrl+Y)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 5.5 12.5 8l-3 2.5"/><path d="M12.5 8H7a3.5 3.5 0 0 0 0 7H8"/></svg></button>

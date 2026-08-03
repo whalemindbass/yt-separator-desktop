@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     writeBuffer: (path, data)    => ipcRenderer.invoke('fs:writeBuffer', path, data),
   },
   project: {
-    save: (json, name) => ipcRenderer.invoke('project:save', json, name),
+    save: (json, name, path) => ipcRenderer.invoke('project:save', json, name, path),
     open: ()           => ipcRenderer.invoke('project:open'),
   },
   audio: {

@@ -116,7 +116,7 @@ const armedRecId = () => (_recTracks.find(r => r.armed && r.type !== 1) || _recT
 function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
   const startX = e.clientX; let moved = false;
-  const move = (ev) => { moved = true; onDelta((ev.clientX - startX) / _pxPerSec); };
+  const move = (ev) => { moved = true; onDelta((ev.clientX - startX) / _pxPerSec, ev.clientX, ev.clientY); };
   const up = () => {
     document.removeEventListener('pointermove', move);
     document.removeEventListener('pointerup', up);
@@ -214,9 +214,9 @@ function renderTracks() {
     clip.addEventListener('click', (e) => e.stopPropagation());
     clip.addEventListener('pointerdown', (e) => {
       const base = _stemOffset;
-      dragClip(e, (dSec) => {
+      dragClip(e, (dSec, cx, cy) => {
         _stemOffset = Math.max(0, base + dSec); repositionStems();   // 0:00 뒤로 못 감
-        showDragBadge(lane, _stemOffset - base);
+        showDragBadge(_stemOffset - base, cx, cy);
       }, () => { hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); });
     });
     lanes.appendChild(lane);
@@ -380,17 +380,18 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
 }
 
 // ── 드래그 이동량 배지 (+0:07) ──
-function fmtDelta(sec) {
-  const s = Math.round(sec), a = Math.abs(s);
-  return `${s >= 0 ? '+' : '-'}${Math.floor(a / 60)}:${String(a % 60).padStart(2, '0')}`;
+function fmtDelta(sec) {   // +M:SS.cc (센티초까지) — 세밀 이동 확인용
+  const a = Math.abs(sec), m = Math.floor(a / 60), s = a - m * 60;
+  return `${sec >= 0 ? '+' : '−'}${m}:${s.toFixed(2).padStart(5, '0')}`;
 }
-function showDragBadge(laneEl, deltaSec) {
-  const area = laneEl.querySelector('.daw-area'); if (!area) return;
-  let b = area.querySelector('.daw-drag-badge');
-  if (!b) { b = document.createElement('div'); b.className = 'daw-drag-badge'; area.appendChild(b); }
+// 커서를 따라다니는 배지 (트랙 뒤쪽에서 이동해도 보이게 화면 고정)
+function showDragBadge(deltaSec, cx, cy) {
+  let b = document.getElementById('daw-drag-badge');
+  if (!b) { b = document.createElement('div'); b.id = 'daw-drag-badge'; b.className = 'daw-drag-badge'; document.body.appendChild(b); }
   b.textContent = fmtDelta(deltaSec);
+  b.style.left = (cx + 14) + 'px'; b.style.top = (cy - 26) + 'px';
 }
-function hideDragBadge() { document.querySelectorAll('.daw-drag-badge').forEach(b => b.remove()); }
+function hideDragBadge() { document.getElementById('daw-drag-badge')?.remove(); }
 
 function updateSoloDim() {
   const anySolo = [...document.querySelectorAll('.daw-ms[data-m="solo"].on')].length > 0;
@@ -639,7 +640,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-file-menu', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -664,6 +665,7 @@ async function importAudio(paths, startSec, trackId) {
     await renderTake(p, startS, id, tid);
   }
   layout();   // 임포트 클립이 범위 밖이면 타임라인 연장
+  markDirty();
   flashTake(`오디오 임포트: ${paths.length}개`);
 }
 async function pickImportAudio() {
@@ -694,6 +696,7 @@ async function loadSong(item) {
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
   _takes = []; _stemOffset = 0; clearUndo();
+  _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -818,7 +821,7 @@ function renderTakes() {
           document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
           if (lane) { target = lane; if (lane !== srcLane) lane.classList.add('drop-target'); }
         }
-        showDragBadge(srcLane, tk.start - base);
+        showDragBadge(tk.start - base, ev.clientX, ev.clientY);
       };
       const up = () => {
         document.removeEventListener('pointermove', move);
@@ -1163,14 +1166,31 @@ async function buildProjectObject() {
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null } : null;
   return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, master, stems, tracks, takes };
 }
-async function saveProject() {
-  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake('저장할 내용이 없습니다.'); return; }
-  flashTake('프로젝트 저장 중…');
-  const obj = await buildProjectObject();
-  const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || '프로젝트');
-  if (r && r.ok) { _songName = baseName(r.path); flashTake('프로젝트 저장됨: ' + r.path); }
-  else if (!r || !r.canceled) flashTake('프로젝트 저장 실패');
+// 저장 상태 (프로젝트 경로 + 변경 여부)
+let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
+let _dirty = false;        // 마지막 저장 이후 변경 여부
+let _suppressDirty = false;// 로드 중 dirty 표시 억제
+function markDirty() { if (_suppressDirty) return; if (!_dirty) { _dirty = true; updateProjectLabel(); } }
+function markClean() { _dirty = false; updateProjectLabel(); }
+function updateProjectLabel() {
+  const el = $('st-proj-name'); if (!el) return;
+  const lab = el.querySelector('.pn-label'), dot = el.querySelector('.pn-dot');
+  const name = _projectPath ? baseName(_projectPath) : (_songName ? _songName : '새 프로젝트');
+  if (lab) lab.textContent = name + (_dirty ? ' •' : '');
+  el.classList.toggle('dirty', _dirty);
+  el.classList.toggle('unsaved', !_projectPath);
+  el.title = (_projectPath ? name : '아직 저장 안 됨')
+    + (_dirty ? ' — 저장되지 않은 변경 있음' : ' — 저장됨') + ' (Ctrl+S)';
 }
+// 저장: 경로 있으면 덮어쓰기, 없으면 새로 저장(다이얼로그)
+async function saveProjectSmart() {
+  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake('저장할 내용이 없습니다.'); return; }
+  const obj = await buildProjectObject();
+  const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || '프로젝트', _projectPath || undefined);
+  if (r && r.ok) { _projectPath = r.path; _songName = baseName(r.path); markClean(); flashTake('저장됨: ' + r.path); }
+  else if (!r || !r.canceled) flashTake('저장 실패');
+}
+const saveProject = saveProjectSmart;   // 드롭다운 '프로젝트 저장' 도 동일 로직
 let _openingProject = false;
 async function openProject() {
   if (_openingProject) return;
@@ -1179,11 +1199,12 @@ async function openProject() {
   let p; try { p = JSON.parse(r.data); } catch { flashTake('프로젝트 파싱 실패'); return; }
   if (p.kind !== 'yssproj') { flashTake('올바른 프로젝트 파일이 아닙니다.'); return; }
   _openingProject = true;
-  try { _songName = baseName(r.path); await applyProject(p); }
+  try { _songName = baseName(r.path); await applyProject(p); _projectPath = r.path; markClean(); }
   finally { _openingProject = false; }
 }
 async function applyProject(p) {
   const sr = _sr || 44100;
+  _suppressDirty = true;
   api.engine.takeClear(); _takes = []; renderTakes();
   // 1) 스템 (있으면 로드, 없으면 스템 트랙 비움)
   if (p.stems && p.stems.paths && Object.keys(p.stems.paths).length) {
@@ -1236,6 +1257,7 @@ async function applyProject(p) {
   }
   layout();
   clearUndo();   // 새 상태 로드 → 히스토리 초기화
+  _suppressDirty = false;
   flashTake('프로젝트 열림: ' + (p.name || ''));
 }
 
@@ -1246,10 +1268,11 @@ function pushUndo(undo, redo, label) {
   _undoStack.push({ undo, redo, label });
   if (_undoStack.length > UNDO_MAX) _undoStack.shift();
   _redoStack = [];
+  markDirty();   // 편집 발생 → 저장 필요 표시
   updateUndoUI();
 }
-function doUndo() { const a = _undoStack.pop(); if (!a) return; a.undo(); _redoStack.push(a); updateUndoUI(); flashTake('실행취소: ' + (a.label || '')); }
-function doRedo() { const a = _redoStack.pop(); if (!a) return; a.redo(); _undoStack.push(a); updateUndoUI(); flashTake('다시실행: ' + (a.label || '')); }
+function doUndo() { const a = _undoStack.pop(); if (!a) return; a.undo(); _redoStack.push(a); updateUndoUI(); markDirty(); flashTake('실행취소: ' + (a.label || '')); }
+function doRedo() { const a = _redoStack.pop(); if (!a) return; a.redo(); _undoStack.push(a); updateUndoUI(); markDirty(); flashTake('다시실행: ' + (a.label || '')); }
 function clearUndo() { _undoStack = []; _redoStack = []; updateUndoUI(); }
 function updateUndoUI() {
   const u = $('st-undo'), r = $('st-redo');
@@ -1519,12 +1542,14 @@ function onEngineEvent(m) {
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
         selectTrack(a != null ? a : null);
       } else updateFxPanel();
+      markDirty();
       break;
     }
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
       renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
+      markDirty();
       break;
     case 'exit':
       _started = false; _playing = false;
@@ -1627,14 +1652,16 @@ function wire() {
     const isUndoKey = ctrl && e.code === 'KeyZ' && !e.shiftKey;
     const isRedoKey = ctrl && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey));
     const isClip = ctrl && (e.code === 'KeyC' || e.code === 'KeyX' || e.code === 'KeyV');
+    const isSaveKey = ctrl && e.code === 'KeyS';   // Ctrl+S = 프로젝트 저장
     const isDel = e.code === 'Delete' || e.code === 'Backspace';
-    if (e.code !== 'Space' && e.code !== 'KeyR' && !(e.code === 'KeyS' && !ctrl) && !isUndoKey && !isRedoKey && !isClip && !isDel) return;
+    if (e.code !== 'Space' && e.code !== 'KeyR' && !(e.code === 'KeyS' && !ctrl) && !isSaveKey && !isUndoKey && !isRedoKey && !isClip && !isDel) return;
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     e.preventDefault();
-    if (isRedoKey) doRedo();
+    if (isSaveKey) saveProjectSmart();
+    else if (isRedoKey) doRedo();
     else if (isUndoKey) doUndo();
     else if (e.code === 'KeyC' && ctrl) copyClips();
     else if (e.code === 'KeyX' && ctrl) cutClips();
@@ -1775,12 +1802,8 @@ function wire() {
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
-  $('st-take-save').addEventListener('click', () => {
-    if (!_songKey) { flashTake('곡을 먼저 불러오세요.'); return; }
-    if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
-    openNameModal('버전 저장 (이 곡)', '', (name) => saveTakeSet(name));
-  });
-  $('st-take-load').addEventListener('click', openTakeSetPicker);
+  $('st-proj-name').addEventListener('click', saveProjectSmart);   // 이름 클릭 = 저장
+  updateProjectLabel();
 
   // Export — 포맷/품질 선택 후 전체 믹스를 오프라인 렌더
   $('st-export').addEventListener('click', openExportModal);

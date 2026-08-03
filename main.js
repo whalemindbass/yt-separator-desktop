@@ -405,14 +405,18 @@ ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
   return { ok: true, filePath: res.filePath };
 });
 // 프로젝트(.yssproj) — 사용자가 고른 임의 경로에 JSON 저장/열기
-ipcMain.handle('project:save', async (_ev, json, name) => {
-  const res = await dialog.showSaveDialog(mainWindow || null, {
-    title: '프로젝트 저장',
-    defaultPath: (name || '프로젝트') + '.yssproj',
-    filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
-  });
-  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  try { fs.writeFileSync(res.filePath, String(json), 'utf8'); return { ok: true, path: res.filePath }; }
+ipcMain.handle('project:save', async (_ev, json, name, existingPath) => {
+  let target = existingPath;
+  if (!target) {   // 경로 없으면 새로 저장(다이얼로그)
+    const res = await dialog.showSaveDialog(mainWindow || null, {
+      title: '프로젝트 저장',
+      defaultPath: (name || '프로젝트') + '.yssproj',
+      filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    target = res.filePath;
+  }
+  try { fs.writeFileSync(target, String(json), 'utf8'); return { ok: true, path: target }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('project:open', async () => {
