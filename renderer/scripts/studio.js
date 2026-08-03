@@ -283,23 +283,17 @@ function renderRecLanes() {
       flashTake(`이 트랙에 녹음 ${takesN}개 — 다시 누르면 함께 삭제`);
       del._t = setTimeout(() => { del.dataset.confirm = ''; del.textContent = '✕'; del.classList.remove('confirm'); }, 2500);
     });
-    // 이름 변경 — 라벨 더블클릭 → 인라인 편집
+    // 이름 변경 — 라벨 더블클릭 · 우클릭 메뉴 (autoLabel 기억)
     const lbl = lane.querySelector('.lbl');
-    lbl.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      const inp = document.createElement('input');
-      inp.className = 'daw-nm-edit'; inp.value = rt.name || autoLabel;
-      lbl.replaceWith(inp); inp.focus(); inp.select();
-      const oldName = rt.name || '';
-      const commit = () => {
-        const v = inp.value.trim();
-        const nw = (v && v !== autoLabel) ? v : '';
-        rt.name = nw;
-        renderRecLanes(); updateFxPanel(); updateTrackFader();
-        if (nw !== oldName) pushUndo(() => setTrackProp(rt.id, 'name', oldName), () => setTrackProp(rt.id, 'name', nw), '트랙 이름');
-      };
-      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); else if (ev.key === 'Escape') { inp.value = rt.name || autoLabel; inp.blur(); } });
-      inp.addEventListener('blur', commit);
+    lbl.dataset.auto = autoLabel;
+    lbl.addEventListener('dblclick', (e) => { e.stopPropagation(); startRenameTrack(rt.id); });
+    lane.querySelector('.daw-head').addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation(); selectTrack(rt.id);
+      openDropdownAt(e.clientX, e.clientY, [
+        { label: '이름 변경', fn: () => startRenameTrack(rt.id) },
+        { label: '색 변경', fn: () => lane.querySelector('.nm i').click() },
+        { label: '트랙 삭제', fn: () => del.click() },
+      ]);
     });
     // 색 변경 — 점 클릭 → 색상 선택기
     const dot = lane.querySelector('.nm i');
@@ -971,13 +965,12 @@ function showTakeMenu(x, y, id) {
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
-// 앵커 아래 붙는 드롭다운 메뉴 (툴바 버튼용)
-function openDropdown(anchor, items) {
+// 좌표에 드롭다운 메뉴 열기
+function openDropdownAt(x, y, items) {
   document.querySelector('.daw-ctx')?.remove();
   const menu = document.createElement('div');
   menu.className = 'daw-ctx daw-dropdown';
-  const r = anchor.getBoundingClientRect();
-  menu.style.left = r.left + 'px'; menu.style.top = (r.bottom + 4) + 'px';
+  menu.style.left = x + 'px'; menu.style.top = y + 'px';
   items.forEach(it => {
     const b = document.createElement('button');
     b.textContent = it.label;
@@ -987,6 +980,11 @@ function openDropdown(anchor, items) {
   document.body.appendChild(menu);
   const close = (ev) => { if (menu.contains(ev.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+// 앵커 버튼 아래 드롭다운 (툴바용)
+function openDropdown(anchor, items) {
+  const r = anchor.getBoundingClientRect();
+  openDropdownAt(r.left, r.bottom + 4, items);
 }
 // ── 모달 ───────────────────────────────────────────
 function openModal(title, itemsHtml, onClick) {
@@ -1330,6 +1328,27 @@ function removeClipById(id) {
   api.engine.takeRemove(id);
   _takes = _takes.filter(t => t.id !== id);
   renderTakes(); layout();
+}
+// 트랙 이름 인라인 편집 시작 (라벨 → input)
+function startRenameTrack(id) {
+  const rt = _recTracks.find(r => r.id === id); if (!rt) return;
+  const lbl = document.querySelector(`.daw-lane-rec[data-recid="${id}"] .lbl`); if (!lbl) return;
+  const autoLabel = lbl.dataset.auto || '';
+  const oldName = rt.name || '';
+  const inp = document.createElement('input');
+  inp.className = 'daw-nm-edit'; inp.value = rt.name || autoLabel;
+  lbl.replaceWith(inp); inp.focus(); inp.select();
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    const nw = (v && v !== autoLabel) ? v : '';
+    rt.name = nw;
+    renderRecLanes(); updateFxPanel(); updateTrackFader();
+    if (nw !== oldName) pushUndo(() => setTrackProp(rt.id, 'name', oldName), () => setTrackProp(rt.id, 'name', nw), '트랙 이름');
+  };
+  inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') inp.blur(); else if (ev.key === 'Escape') { done = true; renderRecLanes(); } });
+  inp.addEventListener('blur', commit);
 }
 function setTrackProp(id, key, val) {   // 이름·색·높이 (렌더러 전용 메타)
   const rt = _recTracks.find(r => r.id === id); if (!rt) return;
