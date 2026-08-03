@@ -24,7 +24,9 @@ let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
 let _selTrack = null;         // 선택(편집 대상) 녹음 트랙 id — 이펙트 패널 대상
-let _selClipId = null;        // 선택 클립 id — 분할(S) 대상
+let _selClipId = null;        // 선택 클립 id — 분할(S) 대상(마지막 클릭=주 선택)
+let _selClips = new Set();    // 다중 선택 클립 id 집합
+let _clipboard = [];          // 복사/잘라낸 클립 스냅샷 [{file,inOff,dur,srcDur,fadeIn,fadeOut,trackId,relStart}]
 let _activePresetId = null;
 let _presetGather = null;     // 저장: {name,id?,states:{slotId:data},need:[ids],meta:[{index,bypass}],order:[ids]}
 let _pendingPreset = null;    // 로드: {slots:[{index,bypass,data}]}
@@ -139,6 +141,7 @@ function seekToClientX(cx) {
 // 룰러/트랙 빈 곳 클릭·드래그 = 재생선 따라오기(스크럽). 좌우 스크롤은 휠
 function grabPan(e) {
   if (_recArmed) return;   // 녹음 중 재생위치 이동 금지
+  clearClipSelection();    // 빈 곳 클릭 = 클립 선택 해제
   seekToClientX(e.clientX);
   const mv = (ev) => seekToClientX(ev.clientX);
   const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
@@ -728,7 +731,7 @@ function renderTakes() {
     const tid = (tk.trackId != null && areas[tk.trackId]) ? tk.trackId : fallback;
     const area = areas[tid]; if (!area) continue;
     const el = document.createElement('div');
-    el.className = 'daw-take-clip';
+    el.className = 'daw-take-clip' + (_selClips.has(tk.id) ? ' sel' : '');
     el.style.left = (tk.start * _pxPerSec) + 'px';
     el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
     el.title = tk.file;
@@ -763,21 +766,35 @@ function renderTakes() {
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
       if (e.target.classList.contains('daw-trim') || e.target.classList.contains('daw-fadeh')) return;   // 핸들은 트림·페이드
-      selectTrack(tk.trackId); _selClipId = tk.id;
       e.preventDefault(); e.stopPropagation();
+      // 선택 관리 — Ctrl/Cmd = 토글(멀티), 그 외 = 미선택이면 단독 선택
+      if (e.ctrlKey || e.metaKey) {
+        if (_selClips.has(tk.id)) _selClips.delete(tk.id); else _selClips.add(tk.id);
+        _selClipId = tk.id; selectTrack(tk.trackId); renderTakes();
+        return;   // Ctrl-클릭은 선택만
+      }
+      if (!_selClips.has(tk.id)) { _selClips = new Set([tk.id]); renderTakes(); }
+      _selClipId = tk.id; selectTrack(tk.trackId);
+      const multi = _selClips.size > 1;
       const startX = e.clientX, base = tk.start;
-      const before = clipState(tk);   // 실행취소용 이전 상태
+      // 그룹 이동 대상 + 이전 상태 스냅샷
+      const group = multi ? _takes.filter(t => _selClips.has(t.id)) : [tk];
+      const befores = group.map(t => ({ id: t.id, st: clipState(t), base: t.start }));
       const srcLane = el.closest('.daw-lane-rec');
       let target = srcLane, dragging = false;
       const move = (ev) => {
         if (!dragging && Math.abs(ev.clientX - startX) < 4) return;   // 임계값 전엔 클릭으로 취급
         dragging = true;
-        tk.start = snapSec(base + (ev.clientX - startX) / _pxPerSec, ev.altKey);   // 좌우 = 시간(그리드 스냅)
-        el.style.left = (tk.start * _pxPerSec) + 'px';
-        // 상하 = 대상 내 트랙 감지 (다른 내 트랙으로 이동)
-        const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
-        document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
-        if (lane) { target = lane; if (lane !== srcLane) lane.classList.add('drop-target'); }
+        const dSnap = snapSec(base + (ev.clientX - startX) / _pxPerSec, ev.altKey) - base;   // 스냅된 델타(주 클립 기준)
+        group.forEach((t, i) => { t.start = Math.max(0, befores[i].base + dSnap); });
+        if (multi) renderTakes();
+        else el.style.left = (tk.start * _pxPerSec) + 'px';   // 단일은 가볍게
+        // 단일 선택만 상하 트랙 이동 허용
+        if (!multi) {
+          const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
+          document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
+          if (lane) { target = lane; if (lane !== srcLane) lane.classList.add('drop-target'); }
+        }
         showDragBadge(srcLane, tk.start - base);
       };
       const up = () => {
@@ -787,13 +804,16 @@ function renderTakes() {
         hideDragBadge();
         document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
         if (!dragging) { if (!_recArmed) seekToClientX(startX); return; }   // 클릭 = 재생선 이동(클립 위에서도)
-        const newId = target ? Number(target.dataset.recid) : tk.trackId;
-        const startS = Math.round(tk.start * (_sr || 44100));
-        if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, startS, newId); }
-        else api.engine.takeMove(tk.id, startS, 0);
+        const sr = _sr || 44100;
+        if (!multi) {
+          const newId = target ? Number(target.dataset.recid) : tk.trackId;
+          if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, Math.round(tk.start * sr), newId); }
+          else api.engine.takeMove(tk.id, Math.round(tk.start * sr), 0);
+        } else group.forEach(t => api.engine.takeMove(t.id, Math.round(t.start * sr), 0));
         layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
-        const after = clipState(tk); const id = tk.id;
-        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '클립 이동');
+        const afters = group.map(t => ({ id: t.id, st: clipState(t) }));
+        pushUndo(() => afters.forEach((a, i) => setClipState(befores[i].id, befores[i].st)),
+                 () => afters.forEach(a => setClipState(a.id, a.st)), multi ? '클립 이동(다중)' : '클립 이동');
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
@@ -1230,6 +1250,47 @@ function reorderTracks(orderIds) {
   renderRecLanes(); renderTakes();
 }
 function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); }
+// ── 다중선택 클립보드 (복사/잘라내기/붙여넣기/삭제) ──
+function selectedTakes() { return _takes.filter(t => _selClips.has(t.id)); }
+function clearClipSelection() { if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); } }
+function copyClips() {
+  const sel = selectedTakes(); if (!sel.length) return false;
+  const minStart = Math.min(...sel.map(t => t.start));
+  _clipboard = sel.map(t => ({ file: t.file, inOff: t.inOff, dur: t.dur, srcDur: t.srcDur, fadeIn: t.fadeIn, fadeOut: t.fadeOut, trackId: t.trackId, relStart: t.start - minStart, svg: t.svg }));
+  flashTake(`복사됨: 클립 ${sel.length}개`);
+  return true;
+}
+function cutClips() {
+  const sel = selectedTakes(); if (!sel.length) return;
+  copyClips();
+  const removed = sel.map(t => ({ ...t }));
+  removed.forEach(t => removeClipById(t.id));
+  _selClips = new Set();
+  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, '잘라내기');
+}
+function pasteClips() {
+  if (!_clipboard.length) { flashTake('붙여넣을 클립이 없습니다.'); return; }
+  const at = _lastSec;
+  const fallback = _selTrack != null ? _selTrack : armedRecId();
+  const made = _clipboard.map((c) => {
+    let tid = _recTracks.some(r => r.id === c.trackId) ? c.trackId : fallback;
+    return { file: c.file, id: Date.now() + Math.floor(Math.random() * 100000), trackId: tid,
+      start: at + c.relStart, inOff: c.inOff, dur: c.dur, srcDur: c.srcDur, fadeIn: c.fadeIn, fadeOut: c.fadeOut,
+      svg: c.svg || (_takes.find(t => t.file === c.file) || {}).svg || '' };
+  });
+  made.forEach(reAddClip);
+  _selClips = new Set(made.map(m => m.id));
+  renderTakes();
+  pushUndo(() => { made.forEach(m => removeClipById(m.id)); }, () => { made.forEach(reAddClip); }, '붙여넣기');
+  flashTake(`붙여넣음: 클립 ${made.length}개`);
+}
+function deleteSelectedClips() {
+  const sel = selectedTakes(); if (!sel.length) return;
+  const removed = sel.map(t => ({ ...t }));
+  removed.forEach(t => removeClipById(t.id));
+  _selClips = new Set();
+  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, '클립 삭제');
+}
 // ── Export: 포맷·품질 선택 ──
 const EXPORT_QUAL = {
   wav:  [['24', '24-bit'], ['16', '16-bit'], ['32', '32-bit float']],
@@ -1523,9 +1584,11 @@ function wire() {
   // 단축키: Space=재생/정지, R=녹음, S=분할, Ctrl+Z/Y=실행취소/다시실행
   document.addEventListener('keydown', (e) => {
     const ctrl = e.ctrlKey || e.metaKey;
-    const isUndoKey = ctrl && e.code === 'KeyZ';
+    const isUndoKey = ctrl && e.code === 'KeyZ' && !e.shiftKey;
     const isRedoKey = ctrl && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey));
-    if (e.code !== 'Space' && e.code !== 'KeyR' && !(e.code === 'KeyS' && !ctrl) && !isUndoKey && !isRedoKey) return;
+    const isClip = ctrl && (e.code === 'KeyC' || e.code === 'KeyX' || e.code === 'KeyV');
+    const isDel = e.code === 'Delete' || e.code === 'Backspace';
+    if (e.code !== 'Space' && e.code !== 'KeyR' && !(e.code === 'KeyS' && !ctrl) && !isUndoKey && !isRedoKey && !isClip && !isDel) return;
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
@@ -1533,6 +1596,10 @@ function wire() {
     e.preventDefault();
     if (isRedoKey) doRedo();
     else if (isUndoKey) doUndo();
+    else if (e.code === 'KeyC' && ctrl) copyClips();
+    else if (e.code === 'KeyX' && ctrl) cutClips();
+    else if (e.code === 'KeyV' && ctrl) pasteClips();
+    else if (isDel) deleteSelectedClips();
     else if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }

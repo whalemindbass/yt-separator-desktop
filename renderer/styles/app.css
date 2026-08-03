@@ -2320,6 +2320,7 @@ body { display: flex; flex-direction: column; }
 .daw .btn#st-return:not(.on) { color: var(--tx-4); }   /* off = 흐리게 (켜짐/꺼짐 구분) */
 
 .daw-clip, .daw-take-clip { cursor: grab; }
+.daw-take-clip.sel { box-shadow: inset 0 0 0 2px var(--accent); z-index: 2; }
 .daw-clip:active, .daw-take-clip:active { cursor: grabbing; }
 
 /* 내 녹음 트랙(여러 개) */
