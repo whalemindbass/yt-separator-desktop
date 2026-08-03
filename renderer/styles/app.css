@@ -2157,7 +2157,7 @@ body { display: flex; flex-direction: column; }
 .metro-bpm:focus { border-color: var(--accent); }
 .metro-unit { font-size: 11px; color: var(--tx-4); }
 .daw-content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.daw-bottombar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--surface); border-top: 1px solid var(--border); flex-wrap: wrap; }
+.daw-bottombar { display: flex; align-items: center; gap: 5px; padding: 9px 14px; background: var(--surface); border-top: 1px solid var(--border); flex-wrap: wrap; }
 .daw-toast { position: absolute; top: 14px; left: 50%; transform: translate(-50%, -8px); background: var(--elev); border: 1px solid var(--border-mid); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--tx-1); box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 60; max-width: 70%; }
 .daw-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .daw-hero { display: flex; background: var(--video-bg); border-bottom: 1px solid var(--border); flex: none; height: 46vh; min-height: 200px; }
@@ -2278,15 +2278,20 @@ body { display: flex; flex-direction: column; }
 .daw-lane-rec.reordering { opacity: .5; }
 .daw-lane-rec.reorder-target { box-shadow: inset 0 3px 0 var(--accent); }
 /* BPM 위젯 (트랜스포트) */
-.daw-bpm { display: inline-flex; align-items: center; gap: 5px; font: 600 10.5px var(--sans); color: var(--tx-3); }
-.daw-bpm input { width: 58px; box-sizing: content-box; background: var(--input); border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px; color: var(--tx-1); font: 600 12px var(--mono); text-align: center; outline: none; -moz-appearance: textfield; appearance: textfield; }
+/* BPM 위젯 — 라벨·숫자 위, ÷2/×2 아래 */
+.daw-bpm { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; font: 600 9px var(--sans); color: var(--tx-3); line-height: 1; }
+.daw-bpm-lab { font-size: 8.5px; letter-spacing: .04em; }
+.daw-bpm input { width: 52px; box-sizing: content-box; background: var(--input); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; color: var(--tx-1); font: 600 12px var(--mono); text-align: center; outline: none; -moz-appearance: textfield; appearance: textfield; }
 .daw-bpm input::-webkit-inner-spin-button, .daw-bpm input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .daw-bpm input:focus { border-color: var(--accent); }
 .daw-bpm input:disabled { opacity: .5; }
-/* BPM 보정·메트로놈·카운트인 */
-.btn.icon.sm { min-width: 30px; width: auto; padding: 0 7px; font: 700 11px var(--mono); }
-#st-countin { width: auto; padding: 0 10px; font: 600 11px var(--sans); white-space: nowrap; }
-#st-metro.on, #st-countin.on { color: var(--accent); border-color: var(--accent-soft-border); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.daw-bpm-adj { display: flex; gap: 8px; }
+.daw-bpm-adj button { background: none; border: 0; padding: 0; color: var(--tx-3); font: 700 9.5px var(--mono); cursor: pointer; }
+.daw-bpm-adj button:hover:not(:disabled) { color: var(--accent); }
+.daw-bpm-adj button:disabled { opacity: .4; cursor: default; }
+#st-metro.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* 툴바 버튼 테두리 제거 — 난잡함 완화 */
+.daw-tbar .btn:not(.pri), .daw-bottombar .btn { border-color: transparent; }
 .daw-head { position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 8px 9px; display: flex; flex-direction: column; gap: 5px; }
 .daw-head::before { content: none; }
 .daw-head .nm { font-size: 11.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }

@@ -377,7 +377,7 @@ public:
     }
 
     // ---- 부가: 레벨 미터 · 튜너 · 메트로놈 ----
-    void setMetro (bool on, double bpm) { metroOn = on; if (bpm > 20.0) metroBpm = bpm; }
+    void setMetro (bool on, double bpm, int64 phase) { metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase; lastBeatIdx = -1; }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
     double detectPitch()
     {
@@ -981,15 +981,21 @@ public:
             }
         }
 
-        // 메트로놈 클릭
+        // 메트로놈 클릭 — 재생 위치(phStart) + 위상(metroPhase) 기준으로 박에 정렬(스템 기준)
         if (metroOn.load() && numOut > 0)
         {
             const double interval = 60.0 / metroBpm.load() * deviceSampleRate;
             const int clickLen = (int) (deviceSampleRate * 0.06);
+            const double phase = (double) metroPhase.load();
+            const bool playing_ = playing.load();
             for (int i = 0; i < numSamples; ++i)
             {
-                metroCounter += 1.0;
-                if (metroCounter >= interval) { metroCounter -= interval; clickPos = 0; }
+                if (playing_)
+                {
+                    const double bpos = ((double) (phStart + i) - phase) / interval;
+                    const int64 beatIdx = (int64) std::floor (bpos + 1e-6);
+                    if (beatIdx >= 0 && beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; clickPos = 0; }
+                }
                 if (clickPos >= 0)
                 {
                     const float env = std::exp (-(float) clickPos / ((float) deviceSampleRate * 0.012f));
@@ -1111,6 +1117,8 @@ private:
     SpinLock pitchLock;
     std::atomic<bool> metroOn { false };
     std::atomic<double> metroBpm { 120.0 };
+    std::atomic<int64> metroPhase { 0 };   // 첫 다운비트 위상(샘플)
+    int64 lastBeatIdx = -1;
     double metroCounter = 0.0;
     int clickPos = -1;
 
@@ -1178,7 +1186,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
-    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"]);
+    else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") engine.scanPlugins();

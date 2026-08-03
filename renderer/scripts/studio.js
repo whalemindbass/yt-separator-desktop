@@ -21,9 +21,7 @@ let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
-let _metroOn = false;       // 메트로놈 (재생 중 클릭)
-let _countInBars = 0;       // 카운트인 마디 수 (0=끄기)
-let _countingIn = false, _countInTimer = null;
+let _metroOn = false;       // 메트로놈 (재생 중 클릭, 스템 위상 정렬)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -221,9 +219,12 @@ function renderTracks() {
     clip.addEventListener('pointerdown', (e) => {
       const base = _stemOffset;
       dragClip(e, (dSec, cx, cy) => {
-        _stemOffset = Math.max(0, base + dSec); repositionStems();   // 0:00 뒤로 못 감
+        _stemOffset = snapSec(base + dSec, e.altKey); repositionStems();   // 0:00 뒤로 못 감 + 그리드 스냅
         showDragBadge(_stemOffset - base, cx, cy);
-      }, () => { hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); markDirty(); });
+      }, (moved) => {
+        hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100)));
+        if (moved && _stemOffset !== base) { const nw = _stemOffset; pushUndo(() => setStemOffset(base), () => setStemOffset(nw), '스템 이동'); markDirty(); }
+      });
     });
     lanes.appendChild(lane);
   });
@@ -556,23 +557,14 @@ function updatePlayhead(sec) {
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
 function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
+const metroPhaseSamples = () => Math.round(_gridOffset * (_sr || 44100));   // 스템 다운비트 위상
 function playStudio() {
-  // 녹음 대기 + 카운트인 켜짐 → 예비박 클릭 후 실제 시작
-  if (_recArmed && _countInBars > 0 && !_countingIn) { startCountIn(); return; }
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
-  api.engine.metro(_metroOn, _bpm);   // 재생 시작 시 메트로놈 상태 반영(카운트인 클릭도 정리)
-}
-function startCountIn() {
-  _countingIn = true;
-  api.engine.metro(true, _bpm);
-  flashTake(`카운트인 ${_countInBars}마디…`);
-  clearTimeout(_countInTimer);
-  _countInTimer = setTimeout(() => { _countingIn = false; playStudio(); }, _countInBars * secPerBar() * 1000);
+  api.engine.metro(_metroOn, _bpm, metroPhaseSamples());   // 재생 시작 시 메트로놈 상태·위상 반영
 }
 function stopStudio() {
-  clearTimeout(_countInTimer); _countingIn = false;
-  _playing = false; api.engine.stop(); api.engine.metro(false, _bpm); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
+  _playing = false; api.engine.stop(); api.engine.metro(false, _bpm, metroPhaseSamples()); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
   if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
   clearRecLive();
   if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
@@ -655,7 +647,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-countin', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1406,7 +1398,8 @@ function reorderTracks(orderIds) {
   _recTracks.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
   renderRecLanes(); renderTakes();
 }
-function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); if (_metroOn && _playing || _countingIn) api.engine.metro(true, _bpm); }
+function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); if (_metroOn && _playing) api.engine.metro(true, _bpm, metroPhaseSamples()); }
+function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); }
 // BPM 배수 보정 (감지가 ×2/÷2 로 틀릴 때)
 function adjustBpm(factor) {
   const old = _bpm;
@@ -1851,13 +1844,8 @@ function wire() {
     _metroOn = !_metroOn;
     $('st-metro').classList.toggle('on', _metroOn);
     $('st-metro').setAttribute('aria-pressed', String(_metroOn));
-    api.engine.metro(_metroOn && (_playing || _countingIn), _bpm);   // 재생/카운트인 중이면 즉시 반영
+    api.engine.metro(_metroOn && _playing, _bpm, metroPhaseSamples());   // 재생 중이면 즉시 반영
     flashTake(_metroOn ? '메트로놈 켜짐' : '메트로놈 꺼짐');
-  });
-  $('st-countin').addEventListener('click', () => {
-    _countInBars = _countInBars === 0 ? 1 : _countInBars === 1 ? 2 : 0;   // 끄기→1→2→끄기
-    $('st-countin').textContent = _countInBars === 0 ? '카운트인 끄기' : `카운트인 ${_countInBars}마디`;
-    $('st-countin').classList.toggle('on', _countInBars > 0);
   });
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
