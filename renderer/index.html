@@ -508,8 +508,12 @@
         <button id="st-monitor" class="btn icon on" disabled title="내 소리 모니터 on/off" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9V8a5 5 0 0 1 10 0v1"/><rect x="2.3" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/><rect x="11" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/></svg></button>
         <button id="st-return" class="btn icon on" title="정지 시 재생 시작 위치로 복귀" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5 2.5 8 6 11.5"/><path d="M2.5 8h7a4 4 0 0 1 0 8H8"/></svg></button>
         <span class="daw-sp"></span>
-        <!-- 우: BPM · 배율 −/+ · 도구 · Export -->
+        <!-- 우: BPM · 메트로놈 · 카운트인 · 배율 −/+ · 도구 · Export -->
         <label class="daw-bpm" title="템포(BPM) — 그리드·스냅 기준"><span>BPM</span><input id="st-bpm" type="number" min="20" max="300" step="1" value="120" disabled></label>
+        <button id="st-bpm-half" class="btn icon sm" disabled title="BPM ÷2 (감지 배수 보정)">÷2</button>
+        <button id="st-bpm-double" class="btn icon sm" disabled title="BPM ×2 (감지 배수 보정)">×2</button>
+        <button id="st-metro" class="btn icon" disabled title="메트로놈 (재생 중 클릭)" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M5 14h6l-1.2-9.5a1 1 0 0 0-1-.9H7.2a1 1 0 0 0-1 .9z"/><path d="M8 11 12 3"/></svg></button>
+        <button id="st-countin" class="btn icon" disabled title="카운트인 (녹음 전 예비박)">카운트인 끄기</button>
         <span class="tp-div"></span>
         <span class="daw-zoom">
           <button id="st-zoom-out" class="btn icon" disabled title="축소"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg></button>
