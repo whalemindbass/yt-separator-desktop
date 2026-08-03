@@ -2262,6 +2262,10 @@ body { display: flex; flex-direction: column; }
 .daw-fx-add:disabled { opacity: .4; cursor: default; }
 
 .daw-tracks { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
+/* 맨 아래 트랙 리사이즈 여유 빈칸 (컨트롤 컬럼 이어짐) */
+.daw-lanes-spacer { display: grid; grid-template-columns: 140px 1fr; height: 52px; }
+.daw-lanes-spacer .sp-head { position: sticky; left: 0; background: var(--surface); border-right: 1px solid var(--border); }
+.daw-lanes-spacer .sp-area { background: transparent; }
 .daw-ruler-wrap { height: 24px; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; padding-left: 140px; position: relative; }
 .daw-ruler { height: 24px; position: relative; will-change: transform; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border-mid); font: 600 9.5px/24px var(--mono); color: var(--tx-3); padding-left: 5px; }

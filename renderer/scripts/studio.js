@@ -237,7 +237,7 @@ function renderTracks() {
 // 내 녹음 트랙 레인(여러 개) — 스템 레인은 건드리지 않음(파형 보존)
 function renderRecLanes() {
   const lanes = $('daw-lanes');
-  lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row').forEach(el => el.remove());
+  lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row, .daw-lanes-spacer').forEach(el => el.remove());
   let recN = 0, audN = 0;
   _recTracks.forEach((rt, idx) => {
     const isAudio = rt.type === 1;
@@ -337,6 +337,11 @@ function renderRecLanes() {
     lanes.appendChild(lane);
   });
   // 하단 추가버튼 제거(재생선 침범 방지). 추가는 좌상단 ＋ 버튼·트랙 우클릭으로.
+  // 맨 아래 트랙 높이 조절 시 여유용 빈칸
+  const spacer = document.createElement('div');
+  spacer.className = 'daw-lanes-spacer';
+  spacer.innerHTML = '<div class="sp-head"></div><div class="sp-area"></div>';
+  lanes.appendChild(spacer);
   syncSelection();
   layout();
 }
@@ -1040,6 +1045,9 @@ function showTakeMenu(x, y, id) {
     if (removed) pushUndo(() => reAddClip(removed), () => removeClipById(id), '클립 삭제');
   });
   document.body.appendChild(menu);
+  const rc = menu.getBoundingClientRect(), mg = 8;
+  if (rc.right > innerWidth - mg) menu.style.left = Math.max(mg, innerWidth - rc.width - mg) + 'px';
+  if (rc.bottom > innerHeight - mg) menu.style.top = Math.max(mg, y - rc.height) + 'px';
   const close = (e) => { if (menu.contains(e.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -1057,6 +1065,10 @@ function openDropdownAt(x, y, items) {
     menu.appendChild(b);
   });
   document.body.appendChild(menu);
+  // 화면 밖으로 나가지 않게 클램프
+  const r = menu.getBoundingClientRect(), m = 8;
+  if (r.right > innerWidth - m) menu.style.left = Math.max(m, innerWidth - r.width - m) + 'px';
+  if (r.bottom > innerHeight - m) menu.style.top = Math.max(m, y - r.height) + 'px';
   const close = (ev) => { if (menu.contains(ev.target)) return; menu.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
