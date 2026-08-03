@@ -21,6 +21,7 @@ let _sr = 44100, _dur = 0, _pxPerSec = 12;
 let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
+let _rangeMode = false;     // 영역 선택 모드(룰러 드래그 = 내보내기 구간)
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -688,7 +689,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1930,23 +1931,32 @@ function wire() {
     grabPan(e);
   });
   // 룰러: 드래그 = 팬(스크롤) · 클릭 = 재생선 이동 · Shift+드래그 = 내보내기 범위
+  document.querySelector('.daw-ruler-ctrl')?.addEventListener('pointerdown', (e) => e.stopPropagation());   // 코너에서 스크럽 방지
   $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.daw-ruler-ctrl, .daw-eh')) return;   // 토글 셀·범위핸들은 각자 처리
     if (!_dur && !_takes.length && !_recTracks.length) return;   // 임포트만 있어도 동작
     e.preventDefault();
     const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
     const toSec = (cx) => { const r = wrap.getBoundingClientRect(); return Math.max(0, Math.min(fullSec(), (cx - r.left - HEAD_W + sc.scrollLeft) / _pxPerSec)); };
-    if (e.shiftKey) {   // 내보내기 범위
+    if (_rangeMode || e.shiftKey) {   // 영역 선택 모드(또는 Shift) = 내보내기 범위
       const a = toSec(e.clientX); let b = a;
       const mv = (ev) => { b = toSec(ev.clientX); _exportRange = { start: Math.min(a, b), end: Math.max(a, b) }; renderExportRange(); };
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
         if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }
-        else flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)} (Shift+드래그)`);
+        else flashTake(`영역: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`);
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
     } else {   // 룰러 클릭·드래그 = 재생선 따라오기(스크럽)
       grabPan(e);
     }
+  });
+  $('st-range-mode').addEventListener('click', () => {
+    _rangeMode = !_rangeMode;
+    $('st-range-mode').classList.toggle('on', _rangeMode);
+    $('st-range-mode').setAttribute('aria-pressed', String(_rangeMode));
+    $('daw-ruler-wrap').classList.toggle('range-mode', _rangeMode);
+    flashTake(_rangeMode ? '영역 선택 모드 — 룰러를 드래그하세요' : '영역 선택 모드 해제');
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });

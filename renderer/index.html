@@ -500,7 +500,12 @@
 
       <!-- 트랙 -->
       <div class="daw-tracks">
-        <div id="daw-ruler-wrap" class="daw-ruler-wrap"><div id="daw-ruler" class="daw-ruler"></div></div>
+        <div id="daw-ruler-wrap" class="daw-ruler-wrap">
+          <div class="daw-ruler-ctrl">
+            <button id="st-range-mode" class="daw-rtog" disabled title="영역 선택 모드 — 룰러를 드래그해 내보내기 구간 지정" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 5l3 3-3 3z"/><path d="M14 5l-3 3 3 3z"/></svg></button>
+          </div>
+          <div id="daw-ruler" class="daw-ruler"></div>
+        </div>
         <div id="daw-tscroll" class="daw-tscroll">
           <div id="daw-lanes" class="daw-lanes"></div>
           <div id="daw-tracks-empty" class="daw-tracks-empty">곡을 불러오면 스템 트랙이 표시됩니다.<br>“＋ 녹음 트랙”으로 내 녹음 트랙을 추가하세요.</div>

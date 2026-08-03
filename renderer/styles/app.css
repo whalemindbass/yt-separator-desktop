@@ -2267,13 +2267,24 @@ body { display: flex; flex-direction: column; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border-mid); font: 600 9.5px/24px var(--mono); color: var(--tx-3); padding-left: 5px; }
 .daw-ruler .tk.minor { height: 7px; top: 17px; border-left-color: var(--border); }   /* 라벨 없는 마디 = 짧은 눈금 */
 .daw-ruler-wrap { cursor: ew-resize; }
+/* 룰러 좌측 코너 — 토글 영역(트랙 컨트롤 위, 룰러 안 보임) */
+.daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 140px; height: 24px; z-index: 6; display: flex; align-items: center; gap: 4px; padding: 0 6px; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
+.daw-rtog { width: 26px; height: 18px; display: grid; place-items: center; border: 1px solid var(--border-mid); border-radius: 4px; background: transparent; color: var(--tx-3); cursor: pointer; padding: 0; }
+.daw-rtog svg { width: 13px; height: 13px; }
+.daw-rtog:hover:not(:disabled) { color: var(--tx-1); border-color: var(--tx-3); }
+.daw-rtog:disabled { opacity: .4; cursor: default; }
+.daw-rtog.on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 /* 내보내기 범위 선택 */
 .daw-erange { position: absolute; top: 0; height: 24px; background: color-mix(in srgb, var(--accent) 26%, transparent); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); z-index: 3; pointer-events: none; }
-/* 범위 조절 핸들 (양 끝) */
-.daw-eh { position: absolute; top: 0; width: 9px; height: 24px; pointer-events: auto; cursor: ew-resize; background: var(--accent); opacity: .0; }
-.daw-eh.l { left: -5px; } .daw-eh.r { right: -5px; }
-.daw-erange:hover .daw-eh { opacity: .55; }
-.daw-eh:hover { opacity: .9 !important; }
+/* 범위 조절 핸들 (양 끝) — 삼각형 마커 */
+.daw-eh { position: absolute; top: 0; width: 12px; height: 24px; pointer-events: auto; cursor: ew-resize; z-index: 4; }
+.daw-eh.l { left: -6px; } .daw-eh.r { right: -6px; }
+.daw-eh::before { content: ""; position: absolute; top: 0; width: 0; height: 0; border-style: solid; }
+.daw-eh.l::before { left: 6px; border-width: 8px 0 0 8px; border-color: var(--accent) transparent transparent transparent; }   /* ◤ 왼쪽 위 삼각 */
+.daw-eh.r::before { right: 6px; border-width: 8px 8px 0 0; border-color: var(--accent) transparent transparent transparent; }  /* ◥ 오른쪽 위 삼각 */
+.daw-eh:hover::before { filter: brightness(1.3); }
+/* 범위 선택 모드 — 룰러 커서 표시 */
+.daw-ruler-wrap.range-mode { cursor: crosshair; }
 .daw-eband { position: absolute; top: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-right: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); z-index: 2; pointer-events: none; }
 .daw-dropdown { min-width: 150px; }
 .daw-dropdown button { white-space: nowrap; }
