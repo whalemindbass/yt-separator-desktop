@@ -641,8 +641,13 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
+  updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
+}
+// 곡 닫기 버튼 — 라이브러리 스템 곡을 불러온 경우에만 활성화
+function updateCloseSongBtn() {
+  const el = $('st-close-song'); if (el) el.disabled = !(_started && _stemPaths);
 }
 
 // ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
@@ -682,6 +687,7 @@ function closeSong() {
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
   renderTracks();
+  updateCloseSongBtn();
   flashTake('곡을 닫았습니다.');
 }
 
@@ -703,6 +709,7 @@ async function loadSong(item, opts) {
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
   renderTracks();
+  updateCloseSongBtn();
 
   const v = $('daw-video');
   $('daw-video-empty').hidden = true;
