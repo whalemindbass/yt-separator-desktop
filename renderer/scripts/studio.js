@@ -492,7 +492,7 @@ function dragExportEdge(e, which) {
     else _exportRange.end = Math.max(v, _exportRange.start + 0.02);
     renderExportRange();
   };
-  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); flashTake(`내보내기 범위: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`); };
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); flashTake(`내보내기 범위: ${fmtTC(_exportRange.start)}–${fmtTC(_exportRange.end)}`); };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function renderExportRange() {
@@ -1523,7 +1523,7 @@ function openExportModal() {
       <div class="dev-field" style="margin-top:10px"><span>품질</span><select id="exp-q"></select></div>
       <div class="dev-field" style="margin-top:10px"><span>구간</span><select id="exp-span">
         <option value="full">전체</option>
-        <option value="range"${_exportRange ? '' : ' disabled'}>${_exportRange ? '선택 범위 (' + fmtBar(_exportRange.start) + '–' + fmtBar(_exportRange.end) + ')' : '선택 범위 (룰러에서 드래그)'}</option>
+        <option value="range"${_exportRange ? '' : ' disabled'}>${_exportRange ? '선택 범위 (' + fmtTC(_exportRange.start) + '–' + fmtTC(_exportRange.end) + ')' : '선택 범위 (룰러에서 드래그)'}</option>
       </select></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="exp-go">내보내기</button></div>
     </div></div>`;
@@ -1944,7 +1944,7 @@ function wire() {
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
         if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }
-        else flashTake(`영역: ${fmtBar(_exportRange.start)}–${fmtBar(_exportRange.end)}`);
+        else flashTake(`영역: ${fmtTC(_exportRange.start)}–${fmtTC(_exportRange.end)}`);
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
     } else {   // 룰러 클릭·드래그 = 재생선 따라오기(스크럽)
