@@ -404,6 +404,27 @@ ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePath };
 });
+// 프로젝트(.yssproj) — 사용자가 고른 임의 경로에 JSON 저장/열기
+ipcMain.handle('project:save', async (_ev, json, name) => {
+  const res = await dialog.showSaveDialog(mainWindow || null, {
+    title: '프로젝트 저장',
+    defaultPath: (name || '프로젝트') + '.yssproj',
+    filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try { fs.writeFileSync(res.filePath, String(json), 'utf8'); return { ok: true, path: res.filePath }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('project:open', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: '프로젝트 열기',
+    properties: ['openFile'],
+    filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle('dialog:pickFolder', async (_ev, title) => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
     title: title || '폴더 선택',

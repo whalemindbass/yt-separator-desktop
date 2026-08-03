@@ -85,6 +85,9 @@ function openPresetPicker() {
 }
 let _plugins = [];         // 스캔된 VST 목록
 let _songKey = null;
+let _stemPaths = null;     // 현재 스템 경로맵 {key:path} — 프로젝트 저장용
+let _songName = '';        // 현재 곡/프로젝트 이름
+let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
 
 const HEAD_W = 140;
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
@@ -523,7 +526,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
+  ['st-load-song', 'st-close-song', 'st-import-audio', 'st-proj-open', 'st-proj-save', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor', 'st-take-save', 'st-take-load']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
 }
 
@@ -559,6 +562,7 @@ async function pickImportAudio() {
 function closeSong() {
   api.engine.loadStems([]);
   _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null;
+  _stemPaths = null; _videoPath = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
   renderTracks();
@@ -575,6 +579,7 @@ async function loadSong(item) {
   if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
+  _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
   _takes = []; _stemOffset = 0;
 
   const keys = Object.keys(it.stemPaths || {});
@@ -951,6 +956,107 @@ async function loadTakeSet(ts) {
     flashTake('녹음 불러옴: ' + ts.name);
   } finally { _loadingTakeSet = false; }
 }
+
+// ── 프로젝트(.yssproj) 저장/열기 — 라이브러리 탈종속 ──
+let _fxGather = null;
+function gatherFx(pairs) {   // pairs:[{track,id}] → Promise<{id:data}>
+  return new Promise((res) => {
+    if (!pairs.length) return res({});
+    _fxGather = { need: pairs.map(p => p.id), states: {}, res };
+    pairs.forEach(p => api.engine.fxSaveState(p.track, p.id));
+    _fxGather._t = setTimeout(() => { const g = _fxGather; _fxGather = null; g.res(g.states); }, 2000);
+  });
+}
+const baseName = (p) => String(p || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
+async function buildProjectObject() {
+  const sr = _sr || 44100;
+  const master = Number($('mx-master')?.value ?? 100) / 100;
+  const pairs = [];
+  _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
+  const states = await gatherFx(pairs);
+  const tracks = _recTracks.map(r => ({
+    id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
+  }));
+  const takes = _takes.map(t => ({
+    file: t.file, start: Math.round(t.start * sr), inOff: t.inOff || 0, dur: t.dur,
+    srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId,
+  }));
+  const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null } : null;
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: BPM, master, stems, tracks, takes };
+}
+async function saveProject() {
+  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake('저장할 내용이 없습니다.'); return; }
+  flashTake('프로젝트 저장 중…');
+  const obj = await buildProjectObject();
+  const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || '프로젝트');
+  if (r && r.ok) { _songName = baseName(r.path); flashTake('프로젝트 저장됨: ' + r.path); }
+  else if (!r || !r.canceled) flashTake('프로젝트 저장 실패');
+}
+let _openingProject = false;
+async function openProject() {
+  if (_openingProject) return;
+  const r = await api.project.open();
+  if (!r || !r.ok) { if (r && r.error) flashTake('열기 실패: ' + r.error); return; }
+  let p; try { p = JSON.parse(r.data); } catch { flashTake('프로젝트 파싱 실패'); return; }
+  if (p.kind !== 'yssproj') { flashTake('올바른 프로젝트 파일이 아닙니다.'); return; }
+  _openingProject = true;
+  try { _songName = baseName(r.path); await applyProject(p); }
+  finally { _openingProject = false; }
+}
+async function applyProject(p) {
+  const sr = _sr || 44100;
+  api.engine.takeClear(); _takes = []; renderTakes();
+  // 1) 스템 (있으면 로드, 없으면 스템 트랙 비움)
+  if (p.stems && p.stems.paths && Object.keys(p.stems.paths).length) {
+    await loadSong({ stemPaths: p.stems.paths, videoPath: p.stems.videoPath, name: p.name, id: p.name });
+    _stemOffset = (p.stems.offset || 0) / sr;
+    api.engine.stemOffset(Math.round(_stemOffset * sr));
+    repositionStems();
+  } else {
+    closeSong();
+  }
+  _songName = p.name || '';
+  // 2) 녹음/오디오 트랙 레이아웃 + FX
+  let idMap = null;
+  if (Array.isArray(p.tracks) && p.tracks.length) {
+    _recTracks = [];
+    const gen = ++_recTracksGenReq;
+    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo })), gen);
+    const ok = await waitRecTracks(gen);
+    if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
+    idMap = {};
+    p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
+    p.tracks.forEach((t, i) => {
+      if (_recTracks[i] && Array.isArray(t.fx) && t.fx.length)
+        api.engine.fxSetChain(_recTracks[i].id, t.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
+    });
+  }
+  // 3) 클립 (트림·페이드 복원)
+  for (const t of (p.takes || [])) {
+    let tid = t.trackId;
+    if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
+    else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
+    const id = Date.now() + Math.floor(Math.random() * 100000);
+    api.engine.takeLoad(t.file, t.start, tid, id);
+    await renderTake(t.file, t.start, id, tid);
+    const tk = _takes.find(x => x.id === id);
+    if (tk) {
+      if (t.inOff || (t.srcDur && t.dur < t.srcDur - 1e-4)) { tk.inOff = t.inOff || 0; tk.dur = t.dur; commitTrim(tk); }
+      if (t.fadeIn || t.fadeOut) { tk.fadeIn = t.fadeIn || 0; tk.fadeOut = t.fadeOut || 0; commitFade(tk); }
+    }
+  }
+  renderTakes();
+  // 4) 마스터
+  if (p.master != null) {
+    api.engine.master(p.master);
+    const v = Math.round(p.master * 100);
+    const s = $('mx-master'); if (s) s.value = v;
+    const mv = $('mx-master-val'); if (mv) mv.textContent = v;
+  }
+  layout();
+  flashTake('프로젝트 열림: ' + (p.name || ''));
+}
 // ── Export: 포맷·품질 선택 ──
 const EXPORT_QUAL = {
   wav:  [['24', '24-bit'], ['16', '16-bit'], ['32', '32-bit float']],
@@ -1103,6 +1209,10 @@ function onEngineEvent(m) {
       hideFxOverlay();
       break;
     case 'fxState':
+      if (_fxGather) {
+        _fxGather.states[m.id] = m.data;
+        if (_fxGather.need.every(id => _fxGather.states[id] != null)) { const g = _fxGather; _fxGather = null; clearTimeout(g._t); g.res(g.states); }
+      }
       if (_takeSetGather) {
         _takeSetGather.states[m.id] = m.data;
         if (_takeSetGather.need.every(id => _takeSetGather.states[id] != null)) finishTakeSetGather();
@@ -1299,6 +1409,8 @@ function wire() {
 
   // 오디오 파일 임포트 — 버튼 + 타임라인 드래그드롭
   $('st-import-audio').addEventListener('click', pickImportAudio);
+  $('st-proj-save').addEventListener('click', saveProject);
+  $('st-proj-open').addEventListener('click', openProject);
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });
