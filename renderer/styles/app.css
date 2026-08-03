@@ -2269,8 +2269,8 @@ body { display: flex; flex-direction: column; }
 .daw-ruler-wrap { cursor: ew-resize; }
 /* 룰러 좌측 코너 — 토글 영역(트랙 컨트롤 위, 룰러 안 보임) */
 .daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 140px; height: 24px; z-index: 6; display: flex; align-items: stretch; gap: 0; padding: 0; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
-.daw-rtog { width: 34px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: var(--tx-3); cursor: pointer; padding: 0; }
-.daw-rtog svg { width: 15px; height: 15px; }
+.daw-rtog { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: var(--tx-3); cursor: pointer; padding: 0; }
+.daw-rtog svg { width: 20px; height: 20px; }
 .daw-rtog:hover:not(:disabled) { color: var(--tx-1); background: var(--elev); }
 .daw-rtog:disabled { opacity: .4; cursor: default; }
 .daw-rtog.on { color: var(--accent-fg); background: var(--accent); }
