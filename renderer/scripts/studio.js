@@ -199,9 +199,10 @@ function renderTracks() {
     lane.className = 'daw-lane';
     lane.style.setProperty('--c', t.color);
     lane.dataset.key = t.key;
+    lane.dataset.selid = stemIdOf(t.engineIndex);   // 스템도 선택 가능(FX·볼륨 대상)
     const g100 = Math.round((t.gain != null ? t.gain : 1) * 100);
     lane.innerHTML = `
-      <div class="daw-head">
+      <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
         <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
           <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
@@ -210,12 +211,16 @@ function renderTracks() {
         </div>
       </div>
       <div class="daw-area"><div class="daw-clip"></div></div>`;
+    lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(stemIdOf(t.engineIndex)));
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
     mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); t.mute = on; api.engine.track(t.engineIndex, { mute: on }); markDirty(); });
     sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); t.solo = on; api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); markDirty(); });
-    vol.addEventListener('input', () => { t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty(); });
+    vol.addEventListener('input', () => {
+      t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
+      if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
+    });
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
     clip.addEventListener('click', (e) => e.stopPropagation());
@@ -250,6 +255,7 @@ function renderRecLanes() {
     if (rt.height) lane.style.height = rt.height + 'px';
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
+    lane.dataset.selid = rt.id;
     lane.dataset.type = isAudio ? 'audio' : 'rec';
     const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>`;
     lane.innerHTML = `
@@ -346,9 +352,26 @@ function renderRecLanes() {
   layout();
 }
 
-// ── 트랙 선택 (편집 대상) — 이펙트 패널 대상 ──
+// ── 트랙 선택 (편집 대상) — 이펙트 패널 대상. 스템 트랙도 선택 가능 ──
+const STEM_ID_BASE = 90001;
+const isStemId = (id) => id != null && id >= STEM_ID_BASE;
+const stemIdOf = (engineIndex) => STEM_ID_BASE + engineIndex;
+const stemForId = (id) => (isStemId(id) ? _tracks.find(t => t.engineIndex === id - STEM_ID_BASE) : null);
+function selTrackObj(id) { return isStemId(id) ? stemForId(id) : _recTracks.find(r => r.id === id); }
+function selTrackLabel(id) {
+  if (isStemId(id)) { const t = stemForId(id); return t ? t.label : '트랙'; }
+  return document.querySelector(`.daw-lane-rec[data-recid="${id}"] .lbl`)?.textContent?.trim() || '트랙';
+}
+function selTrackGain(id) { const o = selTrackObj(id); return o && o.gain != null ? o.gain : 1; }
+function applySelTrackGain(id, g) {   // 볼륨 라우팅 — 스템=track(index), 녹음=recTrack(id)
+  const o = selTrackObj(id); if (o) o.gain = g;
+  if (isStemId(id)) api.engine.track(id - STEM_ID_BASE, { gain: g });
+  else api.engine.recTrack(id, { gain: g });
+  markDirty();
+}
+function selValid(id) { return id != null && (_recTracks.some(r => r.id === id) || stemForId(id) != null); }
 function selectTrack(id) {
-  if (id != null && !_recTracks.some(r => r.id === id)) id = null;
+  if (!selValid(id)) id = null;
   _selTrack = id;
   if (id != null) { _chain = _chainByTrack[id] || []; api.engine.fxChainReq(id); }
   else _chain = [];
@@ -356,10 +379,10 @@ function selectTrack(id) {
   renderFxSlots();
   updateFxPanel();
 }
-function syncSelection() {   // 재렌더 후 선택 하이라이트 재적용
-  if (_selTrack != null && !_recTracks.some(r => r.id === _selTrack)) _selTrack = null;
+function syncSelection() {   // 재렌더 후 선택 하이라이트 재적용 (data-selid: 녹음=id, 스템=stemId)
+  if (!selValid(_selTrack)) _selTrack = null;
   document.querySelectorAll('.daw-lane').forEach(l =>
-    l.classList.toggle('selected', l.dataset.recid != null && Number(l.dataset.recid) === _selTrack));
+    l.classList.toggle('selected', l.dataset.selid != null && Number(l.dataset.selid) === _selTrack));
 }
 function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   const left = document.querySelector('.daw-left');
@@ -367,20 +390,15 @@ function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   const has = _selTrack != null;
   left.classList.toggle('empty', !has);
   const h = $('daw-left-h');
-  if (h) {
-    const lbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .lbl`)?.textContent?.trim();
-    h.textContent = has ? `${lbl || '트랙'} 이펙트` : '입력 이펙트';
-  }
+  if (h) h.textContent = has ? `${selTrackLabel(_selTrack)} 이펙트` : '입력 이펙트';
   updateTrackFader();
 }
 function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   const f = $('mx-track'), val = $('mx-track-val'), lbl = $('mx-track-lbl'); if (!f) return;
-  const rt = _recTracks.find(r => r.id === _selTrack);
-  if (rt) {
-    const v = Math.round((rt.gain != null ? rt.gain : 1) * 100);
+  if (selValid(_selTrack)) {
+    const v = Math.round(selTrackGain(_selTrack) * 100);
     f.disabled = false; f.value = v; val.textContent = v;
-    const laneLbl = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .lbl`)?.textContent?.trim();
-    lbl.textContent = laneLbl || '트랙';
+    lbl.textContent = selTrackLabel(_selTrack);
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
@@ -1258,9 +1276,11 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
 async function buildProjectObject() {
   const sr = _sr || 44100;
   const master = Number($('mx-master')?.value ?? 100) / 100;
-  await gatherChains(_recTracks.map(r => r.id));   // 모든 트랙 FX 체인 확보(선택 안 된 것 포함)
+  const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
+  await gatherChains([..._recTracks.map(r => r.id), ...stemIds]);   // 녹음+스템 FX 체인 확보(선택 안 된 것 포함)
   const pairs = [];
   _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
+  stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
   const states = await gatherFx(pairs);
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
@@ -1271,8 +1291,12 @@ async function buildProjectObject() {
     file: t.file, start: Math.round(t.start * sr), inOff: t.inOff || 0, dur: t.dur,
     srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId,
   }));
-  // 스템 트랙 믹스(볼륨·뮤트·솔로)까지 기록
-  const stemMix = _tracks.map(t => ({ key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo }));
+  // 스템 트랙 믹스(볼륨·뮤트·솔로 + FX)까지 기록
+  const stemMix = _tracks.map(t => {
+    const sid = stemIdOf(t.engineIndex);
+    return { key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo,
+      fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
+  });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
   return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, stems, tracks, takes };
 }
@@ -1332,6 +1356,8 @@ async function applyProject(p) {
         const v = lane.querySelector('.daw-vol'); if (v) v.value = Math.round(t.gain * 100);
         const mb = lane.querySelector('[data-m="mute"]'); if (mb) { mb.classList.toggle('on', t.mute); mb.setAttribute('aria-pressed', String(t.mute)); }
         const sb = lane.querySelector('[data-m="solo"]'); if (sb) { sb.classList.toggle('on', t.solo); sb.setAttribute('aria-pressed', String(t.solo)); }
+        if (Array.isArray(m.fx) && m.fx.length)   // 스템 FX 체인 복원
+          api.engine.fxSetChain(stemIdOf(t.engineIndex), m.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
       });
       updateSoloDim();
     }
@@ -1699,10 +1725,10 @@ function onEngineEvent(m) {
       if (m.gen != null) _recTracksGen = m.gen;
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       renderRecLanes(); updateSoloDim();
-      if (_selTrack == null || !_recTracks.some(r => r.id === _selTrack)) {
+      if (!selValid(_selTrack)) {   // 스템 선택은 유지
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
         selectTrack(a != null ? a : null);
-      } else updateFxPanel();
+      } else { syncSelection(); updateFxPanel(); }
       markDirty();
       break;
     }
@@ -1838,12 +1864,10 @@ function wire() {
   $('mx-master').addEventListener('dblclick', () => applyMaster(100));   // 더블클릭 = 100 (유니티)
   // 선택 트랙 볼륨 페이더 (믹서 우측)
   const applyTrackVol = (v) => {
-    if (_selTrack == null) return;
-    const g = v / 100;
-    api.engine.recTrack(_selTrack, { gain: g });
-    const rt = _recTracks.find(r => r.id === _selTrack); if (rt) rt.gain = g;
+    if (!selValid(_selTrack)) return;
+    applySelTrackGain(_selTrack, v / 100);   // 스템=track(index)·녹음=recTrack(id) 라우팅
     $('mx-track').value = v; $('mx-track-val').textContent = v;
-    const lv = document.querySelector(`.daw-lane-rec[data-recid="${_selTrack}"] .daw-vol`); if (lv) lv.value = v;
+    const lv = document.querySelector(`.daw-lane[data-selid="${_selTrack}"] .daw-vol`); if (lv) lv.value = v;
   };
   $('mx-track').addEventListener('input', (e) => applyTrackVol(Number(e.target.value)));
   $('mx-track').addEventListener('dblclick', () => applyTrackVol(100));   // 더블클릭 = 100
@@ -1873,9 +1897,9 @@ function wire() {
       sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
     } else if (e.target.closest('.daw-head, .daw-addrec-head')) {
       return;   // 트랙 컨트롤부 위 = 위아래 스크롤(native 세로)
-    } else {                               // 타임라인 위 = 가로 스크롤
+    } else {                               // 타임라인 위 = 가로 스크롤(촘촘하게)
       e.preventDefault();
-      sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX);
+      sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * 0.4;
       updatePlayhead(_lastSec);
     }
   }, { passive: false });

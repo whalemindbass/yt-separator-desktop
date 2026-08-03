@@ -31,14 +31,27 @@ static DynamicObject* ev (const char* name)
 static var strArr (const StringArray& a) { Array<var> v; for (auto& s : a) v.add (s); return var (v); }
 template <typename T> static var numArr (const Array<T>& a) { Array<var> v; for (auto x : a) v.add ((double) x); return var (v); }
 
+// FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
+struct FxSlot
+{
+    std::unique_ptr<AudioPluginInstance> plugin;
+    std::unique_ptr<DocumentWindow> editor;
+    std::atomic<bool> bypass { false };
+    int id = 0;
+    int descIndex = -1;
+};
+
 struct Stem
 {
     std::unique_ptr<AudioFormatReaderSource> src;
     String name;
     String path;   // export(오프라인 렌더)용 프레시 리더 생성
+    int id = 0;    // FX 주소용 id (스템은 90001+ 범위 — 녹음 트랙 id와 충돌 방지)
     std::atomic<float> gain { 1.0f };
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
+    std::vector<std::unique_ptr<FxSlot>> chain;   // 스템별 독립 FX
+    CriticalSection fxLock;
     float curGain = 1.0f;   // 오디오 스레드 전용 — 게인/뮤트/솔로 램프(클릭/지퍼 방지)
 };
 
@@ -91,15 +104,6 @@ static void applyClipFades (AudioBuffer<float>& buf, int64 pos, int64 len, int64
     }
 }
 
-// FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
-struct FxSlot
-{
-    std::unique_ptr<AudioPluginInstance> plugin;
-    std::unique_ptr<DocumentWindow> editor;
-    std::atomic<bool> bypass { false };
-    int id = 0;
-    int descIndex = -1;
-};
 
 // 트랙 (내 녹음/오디오 임포트 — 각각 뮤트/솔로/게인 + 독립 FX 체인). type: 0=녹음, 1=오디오(녹음불가)
 struct RecTrack
@@ -137,6 +141,7 @@ public:
         auto s = std::make_unique<Stem>();
         s->name = f.getFileNameWithoutExtension();
         s->path = f.getFullPathName();
+        s->id   = 90001 + (int) stems.size();   // 스템 FX 주소용 id (녹음 트랙 id와 분리된 범위)
         s->src  = std::make_unique<AudioFormatReaderSource> (r, true);
         stemSampleRate = r->sampleRate;
         stems.push_back (std::move (s));
@@ -287,10 +292,41 @@ public:
         r->setProperty ("list", var (list));
         emit (var (r));
     }
+    // ── FX 호스트 통합(녹음 트랙 + 스템) — id 로 체인/락 조회 ──
+    using FxChainVec = std::vector<std::unique_ptr<FxSlot>>;
+    FxChainVec* fxChainOf (int id, CriticalSection*& lock)
+    {
+        if (auto* rt = findRec (id)) { lock = &rt->fxLock; return &rt->chain; }
+        for (auto& s : stems) if (s->id == id) { lock = &s->fxLock; return &s->chain; }
+        lock = nullptr; return nullptr;
+    }
+    static FxSlot* findSlotIn (FxChainVec& chain, int id)
+    {
+        for (auto& s : chain) if (s && s->id == id) return s.get();
+        return nullptr;
+    }
+    void emitChainId (int id, FxChainVec& chain)
+    {
+        Array<var> list;
+        for (auto& s : chain)
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("id", s->id);
+            o->setProperty ("index", s->descIndex);
+            o->setProperty ("name", s->plugin->getName());
+            o->setProperty ("hasEditor", s->plugin->hasEditor());
+            o->setProperty ("bypass", s->bypass.load());
+            list.add (var (o));
+        }
+        auto* r = ev ("fxChain");
+        r->setProperty ("trackId", id);
+        r->setProperty ("list", var (list));
+        emit (var (r));
+    }
     void addFx (int trackId, int index)
     {
-        auto* rt = findRec (trackId);
-        if (rt == nullptr) { std::cerr << "[engine] addFx: no track\n"; return; }
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk);
+        if (chain == nullptr) { std::cerr << "[engine] addFx: no host\n"; return; }
         if (index < 0 || index >= scanned.size()) { std::cerr << "[engine] bad index\n"; return; }
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
         String err;
@@ -302,11 +338,8 @@ public:
         slot->id = nextSlotId++;
         slot->descIndex = index;
         slot->plugin = std::move (inst);
-        {
-            const ScopedLock sl (rt->fxLock);
-            rt->chain.push_back (std::move (slot));
-        }
-        emitChain (*rt);
+        { const ScopedLock sl (*lk); chain->push_back (std::move (slot)); }
+        emitChainId (trackId, *chain);
     }
 
     // ---- 스템 로드 ----
@@ -488,7 +521,7 @@ public:
         r->setProperty ("gen", recTracksGen);   // 재구성 동기화 토큰 에코
         emit (var (r));
     }
-    void emitChainFor (int trackId) { if (auto* rt = findRec (trackId)) emitChain (*rt); }
+    void emitChainFor (int trackId) { CriticalSection* lk = nullptr; if (auto* chain = fxChainOf (trackId, lk)) emitChainId (trackId, *chain); }
     void addRecTrack (int type = 0)
     {
         auto t = std::make_unique<RecTrack>();
@@ -607,48 +640,47 @@ public:
     }
     void setBypass (int trackId, int id, bool on)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        if (auto* s = findSlot (*rt, id)) { s->bypass = on; emitChain (*rt); }
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        if (auto* s = findSlotIn (*chain, id)) { s->bypass = on; emitChainId (trackId, *chain); }
     }
     void setBypassAll (int trackId, bool on)   // 일괄 끄기/켜기
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        for (auto& s : rt->chain) if (s) s->bypass = on;
-        emitChain (*rt);
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        for (auto& s : *chain) if (s) s->bypass = on;
+        emitChainId (trackId, *chain);
     }
     void removeFx (int trackId, int id)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        if (auto* s = findSlot (*rt, id)) s->editor.reset();   // message 스레드
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        if (auto* s = findSlotIn (*chain, id)) s->editor.reset();   // message 스레드
         {
-            const ScopedLock sl (rt->fxLock);
-            rt->chain.erase (std::remove_if (rt->chain.begin(), rt->chain.end(),
-                             [id] (auto& x) { return x->id == id; }), rt->chain.end());
+            const ScopedLock sl (*lk);
+            chain->erase (std::remove_if (chain->begin(), chain->end(),
+                          [id] (auto& x) { return x->id == id; }), chain->end());
         }
-        emitChain (*rt);
+        emitChainId (trackId, *chain);
     }
     void reorderFx (int trackId, const Array<int>& order)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         {
-            const ScopedLock sl (rt->fxLock);
+            const ScopedLock sl (*lk);
             std::vector<std::unique_ptr<FxSlot>> next;
             for (int id : order)
             {
-                auto it = std::find_if (rt->chain.begin(), rt->chain.end(), [id] (auto& x) { return x && x->id == id; });
-                if (it != rt->chain.end()) { next.push_back (std::move (*it)); }
+                auto it = std::find_if (chain->begin(), chain->end(), [id] (auto& x) { return x && x->id == id; });
+                if (it != chain->end()) { next.push_back (std::move (*it)); }
             }
-            for (auto& x : rt->chain) if (x) next.push_back (std::move (x));   // 누락분 보존
-            rt->chain = std::move (next);
+            for (auto& x : *chain) if (x) next.push_back (std::move (x));   // 누락분 보존
+            *chain = std::move (next);
         }
-        emitChain (*rt);
+        emitChainId (trackId, *chain);
     }
     // VST 세부 설정(노브값) 직렬화 — 슬롯 단위 base64
     void fxSaveState (int trackId, int id)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        auto* s = findSlot (*rt, id);
-        if (s == nullptr) return;
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        auto* s = findSlotIn (*chain, id); if (s == nullptr) return;
         MemoryBlock mb;
         s->plugin->getStateInformation (mb);
         auto* o = ev ("fxState");
@@ -659,36 +691,37 @@ public:
     }
     void fxSetState (int trackId, int id, const String& b64)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        auto* s = findSlot (*rt, id);
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        auto* s = findSlotIn (*chain, id);
         if (s == nullptr || b64.isEmpty()) return;
         MemoryOutputStream mo;
         if (Base64::convertFromBase64 (mo, b64))
         {
-            const ScopedLock sl (rt->fxLock);
+            const ScopedLock sl (*lk);
             s->plugin->setStateInformation (mo.getData(), (int) mo.getDataSize());
         }
     }
     void showEditor (int trackId, int id)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
-        auto* s = findSlot (*rt, id);
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
+        auto* s = findSlotIn (*chain, id);
         if (s == nullptr || ! s->plugin->hasEditor()) return;
         if (s->editor != nullptr) { s->editor->setVisible (true); s->editor->toFront (true); return; }
         s->editor.reset (new PluginWindow (s->plugin->createEditorIfNeeded(), s->plugin->getName()));
         s->editor->toFront (true);
     }
-    void clearChain (RecTrack& rt)
+    void clearChainVec (FxChainVec& chain, CriticalSection& lock)
     {
-        for (auto& s : rt.chain) if (s) s->editor.reset();
-        const ScopedLock sl (rt.fxLock);
-        rt.chain.clear();
+        for (auto& s : chain) if (s) s->editor.reset();
+        const ScopedLock sl (lock);
+        chain.clear();
     }
-    void clearAllChains() { for (auto& rt : recTracks) clearChain (*rt); }
-    // 프리셋 로드 — 트랙 체인 전체를 한 번에 재구성(원자적). churn 없이 안전.
+    void clearChain (RecTrack& rt) { clearChainVec (rt.chain, rt.fxLock); }
+    void clearAllChains() { for (auto& rt : recTracks) clearChain (*rt); for (auto& s : stems) clearChainVec (s->chain, s->fxLock); }
+    // 프리셋 로드 — 체인 전체를 한 번에 재구성(원자적). churn 없이 안전.
     void setChain (int trackId, const var& list)
     {
-        auto* rt = findRec (trackId); if (rt == nullptr) return;
+        CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
 
         // 새 체인을 락 밖에서 완성한 뒤 한 번에 스왑(원자적) — 재생 중 빈/부분 체인 노출·드롭 방지
@@ -716,14 +749,14 @@ public:
 
         std::vector<std::unique_ptr<FxSlot>> old;   // 이전 체인은 락 밖에서 소멸(에디터/플러그인 소멸이 오디오 스레드 안 막게)
         {
-            const ScopedLock sl (rt->fxLock);
-            old.swap (rt->chain);
-            rt->chain = std::move (next);
+            const ScopedLock sl (*lk);
+            old.swap (*chain);
+            *chain = std::move (next);
         }
         for (auto& s : old) if (s) s->editor.reset();   // message 스레드에서 정리
         old.clear();
         if (failed > 0) { auto* e = ev ("fxError"); e->setProperty ("trackId", trackId); e->setProperty ("failed", failed); emit (var (e)); }
-        emitChain (*rt);
+        emitChainId (trackId, *chain);
     }
 
     // ---- Export: 전체 믹스 오프라인 렌더링(스템+테이크→트랙 FX→마스터) (message 스레드) ----
@@ -887,6 +920,7 @@ public:
 
         for (auto& s : stems) s->src->prepareToPlay (block, deviceSampleRate);
         for (auto& rt : recTracks) { const ScopedLock sl (rt->fxLock); for (auto& s : rt->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
+        for (auto& st : stems) { const ScopedLock sl (st->fxLock); for (auto& s : st->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         scratch.setSize (2, block);
         pitchRing.assign (4096, 0.0f); pitchW = 0;
         if (! writerThread.isThreadRunning()) writerThread.startThread();
@@ -940,9 +974,27 @@ public:
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
                 const float target = audible ? s->gain.load() : 0.0f;   // 뮤트/솔로도 램프로 declick
-                for (int c = 0; c < numOut; ++c)
-                    addRamped (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
-                               numSamples, s->curGain, target);
+
+                // 스템별 독립 FX 체인 (있으면 별도 버퍼에서 처리 후 합산)
+                const ScopedTryLock fl (s->fxLock);
+                if (fl.isLocked() && ! s->chain.empty())
+                {
+                    stemFxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
+                    stemFxBuf.clear();
+                    for (int c = 0; c < stemFxBuf.getNumChannels(); ++c)
+                        stemFxBuf.copyFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
+                    for (auto& sl : s->chain)
+                        if (sl && sl->plugin && ! sl->bypass.load()) { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
+                    for (int c = 0; c < numOut; ++c)
+                        addRamped (outputs[c], stemFxBuf.getReadPointer (jmin (c, stemFxBuf.getNumChannels() - 1)),
+                                   numSamples, s->curGain, target);
+                }
+                else
+                {
+                    for (int c = 0; c < numOut; ++c)
+                        addRamped (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
+                                   numSamples, s->curGain, target);
+                }
                 s->curGain = target;
             }
             playhead.fetch_add (numSamples);
@@ -1131,6 +1183,7 @@ private:
     Array<PluginDescription> scanned;
     int nextSlotId = 1;       // 슬롯 id 는 트랙 간 전역 유일 (에디터 매핑용)
     AudioBuffer<float> fxBuf;  // 트랙별 처리용 스크래치
+    AudioBuffer<float> stemFxBuf;// 스템 FX 처리용 스크래치
     AudioBuffer<float> clipTmp;// 페이드 적용용 클립 스크래치
 
     std::atomic<bool>  playing { false };
