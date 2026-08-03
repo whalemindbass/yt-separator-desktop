@@ -193,22 +193,23 @@ function renderTracks() {
     lane.className = 'daw-lane';
     lane.style.setProperty('--c', t.color);
     lane.dataset.key = t.key;
+    const g100 = Math.round((t.gain != null ? t.gain : 1) * 100);
     lane.innerHTML = `
       <div class="daw-head">
         <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
-          <button class="daw-ms" data-m="mute" title="뮤트" aria-pressed="false">M</button>
-          <button class="daw-ms" data-m="solo" title="솔로" aria-pressed="false">S</button>
-          <input class="daw-vol" type="range" min="0" max="150" value="100" title="볼륨">
+          <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
+          <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
+          <input class="daw-vol" type="range" min="0" max="150" value="${g100}" title="볼륨">
         </div>
       </div>
       <div class="daw-area"><div class="daw-clip"></div></div>`;
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
-    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); api.engine.track(t.engineIndex, { mute: on }); });
-    sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); });
-    vol.addEventListener('input', () => api.engine.track(t.engineIndex, { gain: Number(vol.value) / 100 }));
+    mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); t.mute = on; api.engine.track(t.engineIndex, { mute: on }); markDirty(); });
+    sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); t.solo = on; api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); markDirty(); });
+    vol.addEventListener('input', () => { t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty(); });
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
     clip.addEventListener('click', (e) => e.stopPropagation());
@@ -217,7 +218,7 @@ function renderTracks() {
       dragClip(e, (dSec, cx, cy) => {
         _stemOffset = Math.max(0, base + dSec); repositionStems();   // 0:00 뒤로 못 감
         showDragBadge(_stemOffset - base, cx, cy);
-      }, () => { hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); });
+      }, () => { hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); markDirty(); });
     });
     lanes.appendChild(lane);
   });
@@ -1130,6 +1131,17 @@ async function loadTakeSet(ts) {
 
 // ── 프로젝트(.yssproj) 저장/열기 — 라이브러리 탈종속 ──
 let _fxGather = null;
+let _chainGather = null;
+// 모든 트랙의 FX 체인 목록을 엔진에서 받아와 _chainByTrack 채움(선택 안 된 트랙도).
+// 저장 시 FX 누락 방지 — 이전엔 선택 트랙 체인만 알고 있었음.
+function gatherChains(ids) {
+  return new Promise((res) => {
+    if (!ids.length) return res();
+    _chainGather = { need: new Set(ids), res };
+    ids.forEach(id => api.engine.fxChainReq(id));
+    _chainGather._t = setTimeout(() => { const g = _chainGather; _chainGather = null; g.res(); }, 1500);
+  });
+}
 function gatherFx(pairs) {   // pairs:[{track,id}] → Promise<{id:data}>
   return new Promise((res) => {
     if (!pairs.length) return res({});
@@ -1151,6 +1163,7 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
 async function buildProjectObject() {
   const sr = _sr || 44100;
   const master = Number($('mx-master')?.value ?? 100) / 100;
+  await gatherChains(_recTracks.map(r => r.id));   // 모든 트랙 FX 체인 확보(선택 안 된 것 포함)
   const pairs = [];
   _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
   const states = await gatherFx(pairs);
@@ -1163,7 +1176,9 @@ async function buildProjectObject() {
     file: t.file, start: Math.round(t.start * sr), inOff: t.inOff || 0, dur: t.dur,
     srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId,
   }));
-  const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null } : null;
+  // 스템 트랙 믹스(볼륨·뮤트·솔로)까지 기록
+  const stemMix = _tracks.map(t => ({ key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo }));
+  const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
   return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, master, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
@@ -1212,6 +1227,19 @@ async function applyProject(p) {
     _stemOffset = (p.stems.offset || 0) / sr;
     api.engine.stemOffset(Math.round(_stemOffset * sr));
     repositionStems();
+    // 스템 트랙 믹스(볼륨·뮤트·솔로) 복원 — 파형 유지 위해 DOM 직접 갱신
+    if (Array.isArray(p.stems.mix)) {
+      p.stems.mix.forEach(m => {
+        const t = _tracks.find(x => x.key === m.key); if (!t) return;
+        t.gain = m.gain != null ? m.gain : 1; t.mute = !!m.mute; t.solo = !!m.solo;
+        api.engine.track(t.engineIndex, { gain: t.gain, mute: t.mute, solo: t.solo });
+        const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`); if (!lane) return;
+        const v = lane.querySelector('.daw-vol'); if (v) v.value = Math.round(t.gain * 100);
+        const mb = lane.querySelector('[data-m="mute"]'); if (mb) { mb.classList.toggle('on', t.mute); mb.setAttribute('aria-pressed', String(t.mute)); }
+        const sb = lane.querySelector('[data-m="solo"]'); if (sb) { sb.classList.toggle('on', t.solo); sb.setAttribute('aria-pressed', String(t.solo)); }
+      });
+      updateSoloDim();
+    }
   } else {
     closeSong();
   }
@@ -1504,6 +1532,10 @@ function onEngineEvent(m) {
       _chainByTrack[m.trackId] = m.list || [];
       if (m.trackId === _selTrack) { _chain = m.list || []; renderFxSlots(); }
       hideFxOverlay();
+      if (_chainGather && _chainGather.need.has(m.trackId)) {
+        _chainGather.need.delete(m.trackId);
+        if (!_chainGather.need.size) { const g = _chainGather; _chainGather = null; clearTimeout(g._t); g.res(); }
+      }
       break;
     case 'fxState':
       if (_fxGather) {
@@ -1672,7 +1704,7 @@ function wire() {
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
-  const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; };
+  const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; markDirty(); };
   $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
   $('mx-master').addEventListener('dblclick', () => applyMaster(100));   // 더블클릭 = 100 (유니티)
   // 선택 트랙 볼륨 페이더 (믹서 우측)
