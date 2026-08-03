@@ -1,1142 +1,436 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>YT Separator — 데스크톱 스템 분리 도구</title>
-  <meta name="description" content="YouTube 링크나 로컬 파일에서 보컬·베이스·드럼·기타를 분리해 로컬에서 재생합니다. 4-stem·6-stem·키 변경·라이브러리 지원." />
-  <meta property="og:title" content="YT Separator — 스템 분리 데스크톱 앱" />
-  <meta property="og:description" content="YouTube · 로컬 파일 → 스템 분리 → 영상과 함께 sync 재생. Windows 전용." />
+  <title>Dr.studio — 커버 음악 데스크톱 스튜디오</title>
+  <meta name="description" content="유튜브·로컬 음원을 스템으로 분리하고, 영상을 보며 녹음하고, 다듬어 내보냅니다. 커버 한 곡에 필요한 과정을 한자리에서. Windows 전용, 무료." />
+  <meta property="og:title" content="Dr.studio — 커버 음악 데스크톱 스튜디오" />
+  <meta property="og:description" content="스템 분리 → 영상 보며 녹음 → 믹스 → 내보내기. YT Separator 기반 데스크톱 앱." />
   <meta property="og:url" content="https://ytseparator.com" />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="https://ytseparator.com/icon.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="google-adsense-account" content="ca-pub-2241731653339774" />
   <meta name="naver-site-verification" content="2e2aa9e58a45b8521cef1f7ae14341257a3c0e01" />
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2241731653339774"
-          crossorigin="anonymous"></script>
-  <meta name="twitter:title" content="YT Separator — 스템 분리 데스크톱 앱" />
-  <meta name="twitter:description" content="YouTube · 로컬 파일 → 스템 분리 → 영상과 함께 sync 재생. Windows 전용, 로컬 처리, 무료." />
+  <meta name="twitter:title" content="Dr.studio — 커버 음악 데스크톱 스튜디오" />
+  <meta name="twitter:description" content="스템 분리 → 영상 보며 녹음 → 믹스 → 내보내기. Windows 전용, 로컬 처리, 무료." />
   <meta name="twitter:image" content="https://ytseparator.com/icon.png" />
-  <meta name="keywords" content="스템 분리, 보컬 리무버, AI 음원 분리, YouTube 스템, htdemucs, WebGPU, karaoke, stem separation, vocal remover, YT Separator" />
+  <meta name="keywords" content="Dr.studio, 스템 분리, 커버 녹음, 보컬 리무버, AI 음원 분리, YouTube 스템, htdemucs, VST, 튜너, stem separation, cover, YT Separator" />
   <meta name="author" content="Whale Mind" />
   <meta name="robots" content="index, follow, max-image-preview:large" />
-  <meta name="theme-color" content="#0f1114" />
-  <meta name="application-name" content="YT Separator" />
+  <meta name="theme-color" content="#0c1110" />
+  <meta name="application-name" content="Dr.studio" />
   <link rel="canonical" href="https://ytseparator.com/" />
-  <link rel="alternate" hreflang="ko" href="https://ytseparator.com/" />
-  <link rel="alternate" hreflang="en" href="https://ytseparator.com/?lang=en" />
-  <link rel="alternate" hreflang="x-default" href="https://ytseparator.com/" />
   <link rel="icon" type="image/png" href="./icon.png" />
   <link rel="apple-touch-icon" href="./icon.png" />
-
-  <!-- Structured Data (SoftwareApplication) -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "YT Separator",
-    "description": "YouTube 링크나 로컬 파일에서 보컬, 베이스, 드럼, 기타, 피아노를 분리해 원본 영상과 sync 재생하는 Windows 데스크톱 앱. AI 기반, 로컬 처리, 무료.",
-    "applicationCategory": "MultimediaApplication",
-    "applicationSubCategory": "Audio",
-    "operatingSystem": "Windows 10, Windows 11",
-    "url": "https://ytseparator.com",
-    "downloadUrl": "https://ytseparator.com",
-    "softwareVersion": "1.2.3",
-    "inLanguage": ["ko", "en"],
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "author": {
-      "@type": "Organization",
-      "name": "Whale Mind",
-      "email": "whalemindbass@gmail.com"
-    },
-    "featureList": [
-      "AI-based stem separation (htdemucs / htdemucs_6s)",
-      "4-stem and 6-stem models",
-      "Video-synced playback",
-      "Key change (±6 semitones)",
-      "Pitch-preserved playback speed",
-      "A-B loop for practice",
-      "Solo per track",
-      "WebGPU acceleration",
-      "Fully offline processing"
-    ]
-  }
-  </script>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="preconnect" href="https://api.github.com" crossorigin />
-  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
-  <style>
-    :root {
-      --bg: #0f1114;
-      --surface: #161a20;
-      --elev: #1c2028;
-      --border: rgba(255,255,255,.08);
-      --border-mid: rgba(255,255,255,.14);
-      --tx-1: #ececef;
-      --tx-2: #9aa4b2;
-      --tx-3: #6b7280;
-      --tx-4: #4a5261;
-      --accent: #35d1a6;
-      --accent-hover: #48deb4;
-      --accent-fg: #071913;
-      --stem-vocal: #e15b5b;
-      --stem-drums: #e6c33a;
-      --stem-bass:  #4b7bff;
-      --stem-other: #e75ea0;
-      --stem-guitar:#f97316;
-      --stem-piano: #a78bfa;
-      --sans: 'Pretendard Variable', Pretendard, system-ui, -apple-system, 'Segoe UI', 'Noto Sans KR', sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      background: var(--bg);
-      color: var(--tx-1);
-      font-family: var(--sans);
-      line-height: 1.65;
-      -webkit-font-smoothing: antialiased;
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-    a { color: var(--accent); text-decoration: none; transition: color .12s; }
-    a:hover { color: var(--accent-hover); }
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
-
-    /* 한국어 자연 줄바꿈: 어절 단위 유지 + widow 방지 */
-    html[lang="ko"] { word-break: keep-all; }
-    h1, h2, h3, p { text-wrap: pretty; }
-
-    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
-
-    /* ── Header ───────────────────────────────── */
-    header {
-      padding: 18px 0;
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(10px);
-      background: rgba(15,17,20,.72);
-      position: sticky; top: 0; z-index: 30;
-    }
-    .header-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 34px; height: 34px; display: grid; place-items: center; }
-    .logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
-    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -.005em; }
-    .brand-sub   { font-size: 11px; color: var(--tx-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-    .lang-switch {
-      display: inline-flex;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 2px;
-      font-size: 12px;
-      background: var(--surface);
-    }
-    .lang-switch button {
-      background: transparent; border: 0; color: var(--tx-2);
-      padding: 5px 12px; border-radius: 999px; cursor: pointer;
-      font: 600 12px/1 var(--sans);
-      transition: background .16s, color .16s;
-    }
-    .lang-switch button:hover { color: var(--tx-1); }
-    .lang-switch button.on { background: var(--elev); color: var(--tx-1); }
-
-    /* ── Hero ─────────────────────────────────── */
-    .hero { position: relative; padding: 96px 0 72px; text-align: center; overflow: hidden; }
-    .hero-glow {
-      position: absolute; top: -40%; left: 50%;
-      transform: translateX(-50%);
-      width: 900px; height: 900px;
-      background: radial-gradient(closest-side, rgba(53,209,166,.18), rgba(53,209,166,0) 68%);
-      filter: blur(30px);
-      pointer-events: none;
-      z-index: 0;
-    }
-    .hero > .container { position: relative; z-index: 1; }
-    .hero-eyebrow {
-      display: inline-block;
-      padding: 4px 12px;
-      background: rgba(53,209,166,.08);
-      border: 1px solid rgba(53,209,166,.22);
-      color: var(--accent);
-      border-radius: 999px;
-      font-size: 11px; font-weight: 600;
-      letter-spacing: .06em; text-transform: uppercase;
-      margin-bottom: 22px;
-    }
-    .hero h1 {
-      font-size: clamp(30px, 5.2vw, 46px);
-      font-weight: 800; letter-spacing: -.032em; line-height: 1.15;
-      margin-bottom: 22px;
-      text-wrap: balance;
-    }
-    .hero h1 .hl { color: var(--accent); }
-    .hero p.lede {
-      font-size: clamp(15px, 1.7vw, 17px);
-      color: var(--tx-2);
-      max-width: 620px; margin: 0 auto 40px;
-      text-wrap: pretty;
-    }
-
-    /* Animated stem bars (visual hero accent) */
-    .stem-bars {
-      display: flex; align-items: flex-end; justify-content: center; gap: 6px;
-      height: 74px; margin: 0 auto 48px;
-      max-width: 520px;
-    }
-    .stem-bars .bar {
-      width: 100%; max-width: 42px;
-      background: var(--c, var(--accent));
-      border-radius: 4px 4px 0 0;
-      transform-origin: bottom;
-      animation: barPulse 1.6s ease-in-out infinite;
-      opacity: .78;
-      box-shadow: 0 0 20px -6px var(--c);
-    }
-    .stem-bars .bar:nth-child(1) { --c: var(--stem-vocal);  animation-delay: 0s;   height: 62%; }
-    .stem-bars .bar:nth-child(2) { --c: var(--stem-drums);  animation-delay: .15s; height: 44%; }
-    .stem-bars .bar:nth-child(3) { --c: var(--stem-bass);   animation-delay: .30s; height: 72%; }
-    .stem-bars .bar:nth-child(4) { --c: var(--stem-other);  animation-delay: .45s; height: 38%; }
-    .stem-bars .bar:nth-child(5) { --c: var(--stem-guitar); animation-delay: .60s; height: 56%; }
-    .stem-bars .bar:nth-child(6) { --c: var(--stem-piano);  animation-delay: .75s; height: 30%; }
-    @keyframes barPulse {
-      0%, 100% { transform: scaleY(.65); opacity: .55; }
-      50%      { transform: scaleY(1.15); opacity: 1;   }
-    }
-
-    /* Download card */
-    .download-card {
-      background: linear-gradient(180deg, var(--surface) 0%, rgba(22,26,32,.6) 100%);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 28px;
-      max-width: 500px; margin: 0 auto;
-      box-shadow: 0 1px 2px rgba(0,0,0,.35), 0 30px 60px -30px rgba(0,0,0,.65);
-      backdrop-filter: blur(6px);
-    }
-    .card-meta { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 10px; flex-wrap: wrap; }
-    .version-tag {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 12px;
-      background: rgba(53,209,166,.14);
-      color: var(--accent);
-      border-radius: 999px;
-      font: 600 11.5px/1.4 var(--sans);
-      letter-spacing: .04em;
-    }
-    .version-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: dotPulse 2s ease-in-out infinite; }
-    @keyframes dotPulse { 0%, 100% { opacity: .5; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.2); } }
-    .download-count {
-      font-size: 11px; color: var(--tx-3);
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-    .download-count svg { width: 11px; height: 11px; opacity: .8; }
-
-    .download-btn {
-      display: block; width: 100%;
-      padding: 15px 20px;
-      background: linear-gradient(180deg, var(--accent-hover), var(--accent));
-      color: var(--accent-fg);
-      border: 0; border-radius: 10px;
-      font: 700 15px/1.2 var(--sans);
-      cursor: pointer;
-      text-align: center; text-decoration: none;
-      transition: transform .08s ease, box-shadow .16s, filter .16s;
-      box-shadow: 0 6px 24px -8px rgba(53,209,166,.5), inset 0 -1px 0 rgba(0,0,0,.1);
-      position: relative; overflow: hidden;
-    }
-    .download-btn::after {
-      content: ''; position: absolute; inset: 0;
-      background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,.28) 50%, transparent 70%);
-      transform: translateX(-100%);
-      transition: transform .6s ease;
-    }
-    .download-btn:hover::after { transform: translateX(100%); }
-    .download-btn:hover { color: var(--accent-fg); filter: brightness(1.05); box-shadow: 0 10px 30px -8px rgba(53,209,166,.6); }
-    .download-btn:active { transform: translateY(1px); }
-    .download-sub { display: block; font-size: 12px; font-weight: 500; opacity: .82; margin-top: 4px; }
-
-    .download-alt {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      margin-top: 10px; padding: 11px;
-      color: var(--tx-2);
-      font-size: 13px; font-weight: 500;
-      text-align: center;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      transition: color .12s, border-color .12s, background .12s;
-    }
-    .download-alt:hover { color: var(--tx-1); border-color: var(--border-mid); background: rgba(255,255,255,.02); }
-    .download-alt .arrow { transition: transform .18s; }
-    .download-alt:hover .arrow { transform: translateX(3px); }
-
-    .warn {
-      margin-top: 18px; padding: 12px 14px;
-      background: rgba(255,255,255,.025);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 12.5px; color: var(--tx-3);
-      line-height: 1.6;
-    }
-    .warn strong { color: var(--tx-2); font-weight: 600; }
-
-    /* ── Interactive demo strip ──────────────── */
-    .demo-strip {
-      padding: 50px 0;
-      border-top: 1px solid var(--border);
-    }
-    .demo-strip h2 {
-      font-size: 22px; font-weight: 700; text-align: center;
-      margin-bottom: 8px; letter-spacing: -.012em;
-    }
-    .demo-strip .demo-sub {
-      text-align: center; color: var(--tx-3); font-size: 13px; margin-bottom: 32px;
-    }
-    /* Demo player */
-    .demo-player {
-      max-width: 620px; margin: 0 auto 24px;
-      display: flex; align-items: center; gap: 14px;
-      padding: 14px 18px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-    }
-    .demo-play {
-      flex-shrink: 0;
-      width: 44px; height: 44px;
-      border-radius: 50%;
-      background: var(--accent);
-      color: var(--accent-fg);
-      border: 0;
-      cursor: pointer;
-      display: grid; place-items: center;
-      font-size: 14px;
-      transition: transform .08s, filter .16s;
-      box-shadow: 0 4px 14px -4px rgba(53,209,166,.5);
-    }
-    .demo-play:hover { filter: brightness(1.06); }
-    .demo-play:active { transform: scale(.94); }
-    .demo-play svg { width: 16px; height: 16px; fill: currentColor; }
-    .demo-play.loading svg { animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .demo-track { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-    .demo-track-head {
-      display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-      font-size: 12.5px;
-    }
-    .demo-track-title { color: var(--tx-1); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .demo-track-attr { color: var(--tx-4); font-size: 11px; }
-    .demo-time { color: var(--tx-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; flex-shrink: 0; }
-    .demo-progress {
-      height: 4px; background: var(--elev);
-      border-radius: 2px; overflow: hidden;
-      cursor: pointer;
-    }
-    .demo-progress-fill {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, var(--accent), var(--accent-hover));
-      transition: width .08s linear;
-    }
-
-    .stem-toggle-row {
-      display: flex; flex-wrap: wrap; justify-content: center;
-      gap: 10px; max-width: 640px; margin: 0 auto;
-    }
-    .stem-chip {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 10px 16px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      color: var(--tx-2);
-      font: 600 13px/1 var(--sans);
-      cursor: pointer;
-      transition: color .14s, border-color .14s, background .14s, transform .08s;
-      user-select: none;
-    }
-    .stem-chip .swatch {
-      width: 10px; height: 10px; border-radius: 50%;
-      background: var(--c, var(--accent));
-      box-shadow: 0 0 8px -1px var(--c);
-      transition: transform .14s;
-    }
-    .stem-chip.on { color: var(--tx-1); border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c) 12%, var(--surface)); }
-    .stem-chip.on .swatch { transform: scale(1.2); }
-    .stem-chip:hover { transform: translateY(-1px); color: var(--tx-1); }
-    .stem-chip[data-stem="vocals"] { --c: var(--stem-vocal); }
-    .stem-chip[data-stem="drums"]  { --c: var(--stem-drums); }
-    .stem-chip[data-stem="bass"]   { --c: var(--stem-bass); }
-    .stem-chip[data-stem="other"]  { --c: var(--stem-other); }
-    .stem-chip[data-stem="guitar"] { --c: var(--stem-guitar); }
-    .stem-chip[data-stem="piano"]  { --c: var(--stem-piano); }
-    .demo-hint {
-      margin-top: 22px; text-align: center;
-      color: var(--tx-4); font-size: 12px;
-    }
-
-    /* ── Features ────────────────────────────── */
-    section.features { padding: 72px 0; border-top: 1px solid var(--border); }
-    section.features h2 {
-      font-size: 24px; font-weight: 700;
-      margin-bottom: 8px;
-      text-align: center;
-      letter-spacing: -.012em;
-    }
-    section.features .features-sub {
-      text-align: center; color: var(--tx-3); font-size: 13px; margin-bottom: 40px;
-    }
-    .feat-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 14px;
-    }
-    .feat {
-      padding: 22px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      transition: transform .18s ease, border-color .18s, background .18s;
-      position: relative;
-      overflow: hidden;
-    }
-    .feat::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(120% 80% at 100% 0%, var(--accent-glow, rgba(53,209,166,.10)), transparent 60%);
-      opacity: 0; transition: opacity .3s;
-    }
-    .feat:hover { transform: translateY(-3px); border-color: var(--border-mid); }
-    .feat:hover::before { opacity: 1; }
-    .feat > * { position: relative; z-index: 1; }
-    .feat-title {
-      font-weight: 700; font-size: 14.5px;
-      margin-bottom: 8px;
-      display: flex; align-items: center; gap: 10px;
-      color: var(--tx-1);
-    }
-    .feat-title svg {
-      width: 16px; height: 16px; color: var(--accent);
-      flex-shrink: 0;
-      transition: transform .3s ease;
-    }
-    .feat:hover .feat-title svg { transform: scale(1.15) rotate(-5deg); }
-    .feat p { font-size: 13px; color: var(--tx-3); line-height: 1.65; }
-
-    /* ── FAQ ─────────────────────────────────── */
-    section.faq { padding: 72px 0; border-top: 1px solid var(--border); }
-    section.faq h2 {
-      font-size: 24px; font-weight: 700; text-align: center;
-      margin-bottom: 32px; letter-spacing: -.012em;
-    }
-    .faq-list { max-width: 720px; margin: 0 auto; }
-    .faq-item {
-      border-bottom: 1px solid var(--border);
-    }
-    .faq-item:first-child { border-top: 1px solid var(--border); }
-    .faq-q {
-      width: 100%;
-      padding: 18px 8px;
-      background: transparent;
-      border: 0;
-      color: var(--tx-1);
-      font: 600 14.5px/1.4 var(--sans);
-      text-align: left;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 14px;
-      transition: color .14s;
-    }
-    .faq-q:hover { color: var(--accent); }
-    .faq-q .chev {
-      flex-shrink: 0;
-      width: 16px; height: 16px;
-      transition: transform .22s ease;
-      color: var(--tx-3);
-    }
-    .faq-item.open .faq-q .chev { transform: rotate(180deg); color: var(--accent); }
-    .faq-a {
-      max-height: 0; overflow: hidden;
-      transition: max-height .28s ease, padding .18s ease;
-      color: var(--tx-2); font-size: 13.5px; line-height: 1.7;
-      padding: 0 8px;
-    }
-    .faq-item.open .faq-a { max-height: 400px; padding: 0 8px 18px; }
-
-    /* ── Reveal-on-scroll ────────────────────── */
-    .reveal { opacity: 0; transform: translateY(14px); transition: opacity .55s ease, transform .55s ease; }
-    .reveal.in { opacity: 1; transform: none; }
-    @media (prefers-reduced-motion: reduce) {
-      .reveal, .reveal.in { opacity: 1; transform: none; transition: none; }
-      .stem-bars .bar, .version-tag .dot { animation: none; opacity: 1; }
-    }
-
-    /* ── Footer ──────────────────────────────── */
-    footer {
-      padding: 40px 0;
-      border-top: 1px solid var(--border);
-      text-align: center;
-      color: var(--tx-3);
-      font-size: 12px;
-    }
-    footer .links a { color: var(--tx-2); margin: 0 10px; font-weight: 500; }
-    footer .links a:hover { color: var(--accent); }
-    footer .cw { margin-top: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-
-    /* ── Responsive tweaks ───────────────────── */
-    @media (max-width: 780px) {
-      .container { padding: 0 18px; }
-      .hero { padding: 60px 0 48px; }
-      .hero h1 { line-height: 1.2; }
-      .download-card { padding: 22px; }
-      .stem-bars { height: 60px; max-width: 340px; gap: 4px; }
-      section.features, section.faq, .demo-strip { padding: 52px 0; }
-      .demo-player { padding: 12px 14px; gap: 10px; }
-      .demo-play { width: 40px; height: 40px; }
-      .demo-track-title { font-size: 12px; }
-      .demo-track-attr { display: none; }
-      .demo-time { font-size: 10.5px; }
-      .stem-chip { padding: 9px 14px; font-size: 12.5px; }
-      .feat { padding: 18px; }
-      .faq-q { padding: 16px 8px; font-size: 13.5px; }
-      .faq-a { font-size: 13px; }
-    }
-    @media (max-width: 460px) {
-      header { padding: 12px 0; }
-      .brand-title { font-size: 14px; }
-      .brand-sub { font-size: 10px; }
-      .lang-switch button { padding: 4px 10px; font-size: 11px; }
-      .hero { padding: 44px 0 32px; }
-      .hero-eyebrow { font-size: 10px; padding: 3px 10px; margin-bottom: 16px; }
-      .hero p.lede { margin-bottom: 28px; }
-      .stem-bars { height: 48px; max-width: 280px; margin-bottom: 32px; }
-      .download-card { padding: 18px 16px; border-radius: 12px; }
-      .download-btn { padding: 13px 16px; font-size: 14.5px; }
-      .warn { padding: 10px 12px; font-size: 12px; }
-      .demo-player { flex-wrap: wrap; }
-      .demo-time { flex-basis: 100%; text-align: right; margin-top: 2px; }
-      section.features h2, section.faq h2, .demo-strip h2 { font-size: 20px; }
-      .feat { padding: 16px; }
-      .feat-title { font-size: 13.5px; }
-      .feat p { font-size: 12.5px; }
-      footer .links a { display: inline-block; margin: 4px 8px; }
-    }
-  </style>
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2241731653339774" crossorigin="anonymous"></script>
 </head>
 <body>
-  <header>
-    <div class="container">
-      <div class="header-row">
-        <div class="brand">
-          <div class="logo" aria-hidden="true">
-            <img src="./icon.png" alt="" />
-          </div>
-          <div>
-            <div class="brand-title">YT Separator</div>
-            <div class="brand-sub">Desktop · Windows</div>
-          </div>
+<style>
+  
+  :root{
+    --bg:#0c1110; --surface:#121a18; --surface-2:#0f1615; --line:#1e2b28; --line-soft:#182320;
+    --ink:#e9f1ee; --ink-dim:#b3c2bd; --muted:#7f938e;
+    --accent:#35d1a6; --accent-deep:#17a884; --accent-fg:#05130f;
+    --sans:"Pretendard Variable","Pretendard",system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --maxw:1060px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f8f6; --surface:#ffffff; --surface-2:#eef3f1; --line:#e0e8e5; --line-soft:#e9efec;
+      --ink:#101917; --ink-dim:#465350; --muted:#6b7c77; --accent:#0f9a72; --accent-deep:#0c7d5d; --accent-fg:#ffffff; }
+  }
+  :root[data-theme="dark"]{ --bg:#0c1110; --surface:#121a18; --surface-2:#0f1615; --line:#1e2b28; --line-soft:#182320;
+    --ink:#e9f1ee; --ink-dim:#b3c2bd; --muted:#7f938e; --accent:#35d1a6; --accent-deep:#17a884; --accent-fg:#05130f; }
+  :root[data-theme="light"]{ --bg:#f5f8f6; --surface:#ffffff; --surface-2:#eef3f1; --line:#e0e8e5; --line-soft:#e9efec;
+    --ink:#101917; --ink-dim:#465350; --muted:#6b7c77; --accent:#0f9a72; --accent-deep:#0c7d5d; --accent-fg:#ffffff; }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .page{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3,p,.lede{word-break:keep-all}
+  h1,h2,h3{margin:0;text-wrap:balance;letter-spacing:-.025em;font-weight:750}
+  p,.lede{text-wrap:pretty}
+  p{margin:0}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent)}
+  .lineage{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--muted);padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);margin-bottom:22px}
+  .lineage .arrow{color:var(--accent)}
+  .lineage .to{color:var(--ink-dim);font-weight:600}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+  /* nav */
+  .nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);background:color-mix(in srgb,var(--bg) 84%,transparent);border-bottom:1px solid var(--line-soft)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:750;font-size:18px;letter-spacing:-.03em}
+  .mono-logo{width:30px;height:30px;flex:none;display:block}
+  .brand .dot{color:var(--accent)}
+  .wm{display:inline-block;letter-spacing:-.03em}
+  .nav-links{display:flex;align-items:center;gap:24px;font-size:14px;color:var(--ink-dim)}
+  .nav-links a:hover{color:var(--ink)}
+  .icon-btn{width:34px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink-dim);cursor:pointer;display:grid;place-items:center}
+  .icon-btn:hover{color:var(--ink);border-color:var(--accent-deep)}
+  @media(max-width:620px){.nav-links a{display:none}}
+
+  /* hero */
+  .hero{padding:88px 0 56px}
+  .hero-grid{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
+  @media(max-width:900px){.hero-grid{grid-template-columns:1fr;gap:36px}}
+  h1.title{font-size:clamp(34px,5vw,54px);line-height:1.18;font-weight:780}
+  .title .hl{color:var(--accent)}
+  .lede{margin-top:24px;font-size:clamp(15px,1.6vw,17px);color:var(--ink-dim);max-width:32em;line-height:1.75}
+  .cta-row{margin-top:32px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:9px;height:48px;padding:0 20px;border-radius:10px;font-weight:650;font-size:14.5px;cursor:pointer;border:1px solid transparent;transition:background .14s,border-color .14s,transform .1s}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--accent);color:var(--accent-fg)}
+  .btn-primary:hover{background:var(--accent-deep)}
+  .btn-ghost{background:transparent;border-color:var(--line);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--accent-deep)}
+  .win{width:15px;height:15px}
+  .meta{margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .meta b{color:var(--ink-dim);font-weight:500}
+
+  /* studio mock */
+  .shot{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 24px 60px -36px rgba(0,0,0,.5)}
+  .shot-bar{height:36px;display:flex;align-items:center;gap:6px;padding:0 14px;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .dot3{width:8px;height:8px;border-radius:50%;background:var(--line)}
+  .ruler{height:22px;border-bottom:1px solid var(--line-soft);background:
+    repeating-linear-gradient(90deg,transparent 0 calc(100%/8 - 1px),var(--line-soft) calc(100%/8 - 1px) calc(100%/8));
+    display:flex;align-items:center;padding-left:98px}
+  .ruler span{font-family:var(--mono);font-size:9px;color:var(--muted);width:calc(100%/8);flex:none;padding-left:5px}
+  .lanes{padding:12px;display:flex;flex-direction:column;gap:8px}
+  .lane{display:grid;grid-template-columns:86px 1fr;gap:9px;align-items:center}
+  .lhead{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);display:flex;align-items:center;gap:6px}
+  .lhead i{width:7px;height:7px;border-radius:50%;flex:none}
+  .larea{height:36px;border-radius:6px;background-color:var(--surface);position:relative;overflow:hidden}
+  .clip{position:absolute;top:3px;bottom:3px;border-radius:4px}
+  .clip svg{width:100%;height:100%;display:block;opacity:.8}
+
+  /* sections */
+  section{position:relative}
+  .band{border-top:1px solid var(--line-soft)}
+  .sec{padding:78px 0}
+  .sec-head{max-width:38em;margin-bottom:44px}
+  .sec-head h2{font-size:clamp(24px,3.2vw,34px);margin-top:12px}
+  .sec-head p{margin-top:14px;color:var(--ink-dim);font-size:16px}
+
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px}
+  @media(max-width:820px){.steps{grid-template-columns:1fr;gap:24px}}
+  .step .rule{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .step .rule span{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.12em}
+  .step .rule .bar{height:1px;flex:1;background:var(--line)}
+  .step h3{font-size:19px}
+  .step p{color:var(--ink-dim);margin-top:10px;font-size:14.5px;line-height:1.7}
+
+  /* features */
+  .feat{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:820px){.feat{grid-template-columns:1fr 1fr}}
+  @media(max-width:540px){.feat{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:22px;transition:border-color .15s}
+  .card:hover{border-color:var(--accent-deep)}
+  .card .ic{width:32px;height:32px;border-radius:8px;background:color-mix(in srgb,var(--accent) 14%,transparent);display:grid;place-items:center;color:var(--accent);margin-bottom:15px}
+  .card .ic svg{width:17px;height:17px}
+  .card h3{font-size:15.5px}
+  .card p{color:var(--ink-dim);margin-top:8px;font-size:13.5px;line-height:1.65}
+
+  /* final */
+  .final{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:52px 32px;text-align:center}
+  .final h2{font-size:clamp(24px,3.6vw,36px)}
+  .final p{color:var(--ink-dim);margin-top:14px;font-size:16px}
+  .final .cta-row{justify-content:center;margin-top:28px}
+
+  footer{border-top:1px solid var(--line-soft);padding:32px 0;color:var(--muted);font-size:13px}
+  .foot-in{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+  .foot-in .mono{font-family:var(--mono);font-size:11.5px}
+
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .reveal{opacity:0;transform:translateY(12px)}
+  .reveal.in{opacity:1;transform:none;transition:opacity .55s ease,transform .55s cubic-bezier(.2,.7,.2,1)}
+</style>
+
+<div class="page">
+  <nav class="nav">
+    <div class="wrap nav-in">
+      <a class="brand" href="#top">
+        <svg class="mono-logo" viewBox="0 0 32 32" aria-hidden="true">
+          
+          <rect x="1" y="1" width="30" height="30" rx="8" fill="#33cfa3"/>
+          
+          <g fill="#0a1712"><rect x="6.8" y="11.2" width="2.9" height="9.6" rx="1.45"/><rect x="11.4" y="7.3" width="2.9" height="17.4" rx="1.45"/><rect x="16" y="13.6" width="2.9" height="4.8" rx="1.45"/><rect x="20.6" y="9.4" width="2.9" height="13.2" rx="1.45"/></g>
+        </svg><span class="wm">Dr<span class="dot">.</span>studio</span></a>
+      <div class="nav-links">
+        <a href="#how">사용 방법</a>
+        <a href="#features">기능</a>
+        <a href="#get">다운로드</a>
+        <button class="icon-btn" id="theme" aria-label="테마 전환">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M13 3l-1.4 1.4M4.4 11.6 3 13" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <a id="top"></a>
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="lineage"><span class="from">YT Separator</span><span class="arrow">→</span><span class="to">Dr.studio</span></div>
+        <h1 class="title">곡을 나누고,<br>내 연주를 더해<br><span class="hl">한 곡으로</span> 완성합니다.</h1>
+        <p class="lede">유튜브나 내 파일에서 원하는 파트를 분리하고, 원곡 영상을 보며 녹음하고, 다듬어 내보냅니다. 커버 한 곡에 필요한 과정을 한자리에서. 웹의 YT Separator를 데스크톱 앱으로 확장했습니다.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#get"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg>Windows용 다운로드</a>
+          <a class="btn btn-ghost" href="#how">사용 방법 보기</a>
         </div>
-        <div class="lang-switch" role="group" aria-label="Language">
-          <button data-lang="ko">한국어</button>
-          <button data-lang="en">English</button>
-        </div>
+        <p class="meta"><span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span></p>
+      </div>
+
+      <div class="shot reveal" aria-hidden="true">
+        <div class="shot-bar"><span class="dot3"></span><span class="dot3"></span><span class="dot3"></span><span style="margin-left:6px">Dr.studio</span></div>
+        <div class="ruler"><span>1</span><span>3</span><span>5</span><span>7</span></div>
+        <div class="lanes" id="lanes"></div>
       </div>
     </div>
   </header>
 
-  <section class="hero">
-    <div class="hero-glow" aria-hidden="true"></div>
-    <div class="container">
-      <div class="hero-eyebrow" data-i18n="hero.eyebrow">Windows · 로컬 처리</div>
-      <h1 data-i18n-html="hero.title">영상에서 <span class="hl">스템</span>을<br />분리해서 재생하세요</h1>
-      <p class="lede" data-i18n="hero.sub">YouTube 링크 또는 로컬 파일에서 보컬 · 베이스 · 드럼 · 기타 · 피아노를 분리합니다. 완전히 오프라인.</p>
-
-      <div class="stem-bars" aria-hidden="true">
-        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
-        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+  <section id="how" class="band">
+    <div class="wrap sec">
+      <div class="sec-head reveal">
+        <p class="eyebrow">How it works</p>
+        <h2>세 단계면 충분합니다</h2>
+        <p>분리하고, 녹음하고, 내보냅니다. 순서대로 따라가면 커버가 완성됩니다.</p>
       </div>
-
-      <div class="download-card">
-        <div class="card-meta">
-          <span class="version-tag" id="version"><span class="dot"></span><span id="version-text">Loading…</span></span>
-          <span class="download-count" id="download-count" hidden>
-            <svg viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 3 4-3M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span id="download-count-num">—</span>
-          </span>
+      <div class="steps">
+        <div class="step reveal">
+          <div class="rule"><span>01</span><span class="bar"></span></div>
+          <h3>분리</h3>
+          <p>원곡을 보컬·드럼·베이스·기타 등 4·6스템으로 나눕니다. 지울 파트와 남길 파트를 먼저 정할 수 있습니다.</p>
         </div>
-        <a class="download-btn" id="setup-btn" href="#" rel="noopener">
-          <span data-i18n="dl.setup">Windows 설치 파일 다운로드</span>
-          <span class="download-sub" id="setup-size">Setup.exe</span>
-        </a>
-        <a class="download-alt" id="portable-btn" href="#" rel="noopener">
-          <span data-i18n="dl.portable">설치 없이 실행 (Portable)</span>
-          <span class="arrow">→</span>
-        </a>
-        <div class="warn">
-          <strong data-i18n="dl.warn.strong">Windows Defender SmartScreen</strong>
-          <span data-i18n="dl.warn.msg">경고가 표시될 수 있습니다. "추가 정보" → "실행" 으로 진행하세요.</span>
+        <div class="step reveal">
+          <div class="rule"><span>02</span><span class="bar"></span></div>
+          <h3>녹음과 믹스</h3>
+          <p>원곡 영상을 보며 내 파트를 얹습니다. 저지연 모니터링과 VST 이펙트, 트랙별 볼륨으로 소리를 정리합니다.</p>
+        </div>
+        <div class="step reveal">
+          <div class="rule"><span>03</span><span class="bar"></span></div>
+          <h3>내보내기</h3>
+          <p>편집한 뒤 원하는 구간만 골라 저장합니다. 전체 믹스와 내 트랙만 중에서 선택해 WAV·MP3로.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="demo-strip reveal">
-    <div class="container">
-      <h2 data-i18n="demo.title">각 악기를 마음대로 켜고 끄세요</h2>
-      <p class="demo-sub" data-i18n="demo.sub">아래 칩을 눌러 실제로 들어보세요 — 실제 앱에서도 이렇게 작동합니다.</p>
+  <section id="features" class="band">
+    <div class="wrap sec">
+      <div class="sec-head reveal">
+        <p class="eyebrow">Features</p>
+        <h2>커버 작업에 필요한 도구</h2>
+        <p>연습부터 완성까지, 데스크톱 성능으로 한자리에서.</p>
+      </div>
+      <div class="feat">
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h2l1.5-4 2 8 2-6 1.5 2H14" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>스템 분리</h3><p>4·6스템, GPU 또는 CPU로. 로컬 파일도 인터넷 없이 처리합니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="9" rx="1.5"/><path d="M6.5 6 10 7.5 6.5 9z" fill="currentColor" stroke="none"/></svg></div><h3>영상 보며 녹음</h3><p>원곡 영상과 맞춰진 타임라인에서 내 연주를 그대로 얹습니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M4 5v6M12 5v6M2 7v2M14 7v2" stroke-linecap="round"/></svg></div><h3>저지연 모니터링</h3><p>ASIO로 연주하는 즉시 들립니다. 밀리초 단위의 반응.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 8h6M8 5v6" stroke-linecap="round"/></svg></div><h3>VST3 이펙트</h3><p>내 플러그인을 트랙마다 체인으로. 프리셋을 저장해 다시 씁니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v9" stroke-linecap="round"/><circle cx="8" cy="12.5" r="1.4"/><path d="M4 6l4-3 4 3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>내장 튜너</h3><p>정밀한 음정 검출과 A4 기준음 선택. 저음까지 안정적으로.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 11V6M6.5 11V3M10 11V7M13.5 11V4" stroke-linecap="round"/></svg></div><h3>믹싱과 페이더</h3><p>마스터·트랙 볼륨, 뮤트와 솔로, 스템 믹스까지 프로젝트에 담깁니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="5" width="12" height="6" rx="1.5"/><path d="M6 5V3.5M10 11v1.5" stroke-linecap="round"/></svg></div><h3>정밀 편집</h3><p>트림·분할·페이드와 실행취소, BPM 감지로 그리드에 맞춥니다.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v7m0 0 3-3M8 9 5 6M3 12h10" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>내보내기</h3><p>WAV·FLAC·MP3, 품질과 구간을 골라. 전체 믹스 또는 내 트랙만.</p></div>
+        <div class="card reveal"><div class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3h7l3 3v7H3z"/><path d="M6 3v4h4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>프로젝트 저장</h3><p>스템·클립·이펙트·믹스를 하나로. 저장한 그대로 다시 엽니다.</p></div>
+      </div>
+    </div>
+  </section>
 
-      <div class="demo-player">
-        <button class="demo-play" id="demo-play" aria-label="Play">
-          <svg viewBox="0 0 16 16"><path d="M4 3v10l9-5-9-5z"/></svg>
+  <section class="band">
+  <div class="wrap sec">
+    <div class="sec-head reveal" style="text-align:center;margin-left:auto;margin-right:auto">
+      <p class="eyebrow" style="display:inline-block">Try it</p>
+      <h2>각 악기를 마음대로 켜고 끄세요</h2>
+      <p>"Sound of Morning" · AI 생성 데모 · 6스템이 한 박자로 재생됩니다.</p>
+    </div>
+    <div class="demo-card reveal">
+      <div class="demo-transport">
+        <button id="demoPlay" class="demo-play" aria-label="재생/일시정지">
+          <svg class="ic-play" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 3v10L13 8z"/></svg>
+          <svg class="ic-pause" viewBox="0 0 16 16" fill="currentColor" hidden><path d="M4 3h3v10H4zM9 3h3v10H9z"/></svg>
         </button>
-        <div class="demo-track">
-          <div class="demo-track-head">
-            <span class="demo-track-title">Sound of Morning</span>
-            <span class="demo-track-attr" data-i18n="demo.attr">AI 생성 데모</span>
-          </div>
-          <div class="demo-progress" id="demo-progress"><div class="demo-progress-fill" id="demo-progress-fill"></div></div>
+        <div class="demo-meta">
+          <div class="demo-track-name">Sound of Morning</div>
+          <div class="demo-track-sub">AI 생성 데모</div>
         </div>
-        <span class="demo-time" id="demo-time">0:00 / 0:26</span>
+        <div class="demo-time"><span id="demoCur">0:00</span> / <span id="demoDur">0:26</span></div>
       </div>
-
-      <div class="stem-toggle-row" id="stem-toggle-row">
-        <button class="stem-chip on" data-stem="vocals"><span class="swatch"></span><span data-i18n="stem.vocals">보컬</span></button>
-        <button class="stem-chip on" data-stem="drums"><span class="swatch"></span><span data-i18n="stem.drums">드럼</span></button>
-        <button class="stem-chip on" data-stem="bass"><span class="swatch"></span><span data-i18n="stem.bass">베이스</span></button>
-        <button class="stem-chip on" data-stem="guitar"><span class="swatch"></span><span data-i18n="stem.guitar">기타</span></button>
-        <button class="stem-chip on" data-stem="piano"><span class="swatch"></span><span data-i18n="stem.piano">피아노</span></button>
-        <button class="stem-chip on" data-stem="other"><span class="swatch"></span><span data-i18n="stem.other">그외</span></button>
+      <div class="demo-bar"><div id="demoFill" class="demo-fill"></div></div>
+      <div class="demo-stems" id="demoStems">
+        <button class="stem" data-n="vocals" style="--sc:#d9756a"><span class="sdot"></span><span class="snm">보컬</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="drums" style="--sc:#cfa24d"><span class="sdot"></span><span class="snm">드럼</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="bass" style="--sc:#5f8fce"><span class="sdot"></span><span class="snm">베이스</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="guitar" style="--sc:#b078c2"><span class="sdot"></span><span class="snm">기타</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="piano" style="--sc:#4fbf9b"><span class="sdot"></span><span class="snm">피아노</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
+<button class="stem" data-n="other" style="--sc:#8a93a0"><span class="sdot"></span><span class="snm">그외</span><span class="sbars"><i></i><i></i><i></i><i></i><i></i></span><span class="son">ON</span></button>
       </div>
-      <div class="demo-hint" id="demo-hint" data-i18n="demo.hint.default">6개 트랙 모두 재생 중</div>
+      <div class="demo-status" id="demoStatus">재생 버튼을 눌러 시작하세요</div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="features">
-    <div class="container">
-      <h2 data-i18n="feat.head">기능</h2>
-      <p class="features-sub" data-i18n="feat.sub">연습 · 커버 · 감상 모두에 맞춰 설계</p>
-      <div class="feat-grid" id="feat-grid">
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><path d="M8 1L2 4v5c0 3.5 2.7 6 6 6s6-2.5 6-6V4L8 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            <span data-i18n="feat.local.title">로컬 처리</span>
-          </div>
-          <p data-i18n="feat.local.desc">영상·오디오가 서버로 전송되지 않고 사용자 컴퓨터에서 처리됩니다.</p>
-        </div>
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><rect x="3" y="6" width="2" height="8" rx="1" fill="currentColor"/><rect x="7" y="3" width="2" height="11" rx="1" fill="currentColor"/><rect x="11" y="8" width="2" height="6" rx="1" fill="currentColor"/></svg>
-            <span data-i18n="feat.stems.title">4-stem · 6-stem</span>
-          </div>
-          <p data-i18n="feat.stems.desc">htdemucs · htdemucs_6s 두 모델. 6-stem 은 기타 · 피아노를 추가 분리합니다.</p>
-        </div>
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><path d="M8 1v3M8 12v3M1 8h3M12 8h3M3 3l2 2M11 11l2 2M3 13l2-2M11 5l2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <span data-i18n="feat.gpu.title">WebGPU 가속</span>
-          </div>
-          <p data-i18n="feat.gpu.desc">가능하면 GPU 로 처리해 CPU 대비 훨씬 빠릅니다. 실패 시 CPU 자동 폴백.</p>
-        </div>
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><path d="M8 2L2.5 5v4c0 3.3 2.4 5.7 5.5 6.5 3.1-.8 5.5-3.2 5.5-6.5V5L8 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M6 8l1.5 1.5L10 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span data-i18n="feat.sync.title">영상 sync 재생</span>
-          </div>
-          <p data-i18n="feat.sync.desc">영상과 스템 오디오가 정확히 sync 되어 재생. seek · pause · 배속 모두 대응.</p>
-        </div>
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><path d="M4 13V3l8 5-8 5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-            <span data-i18n="feat.practice.title">연습 도구</span>
-          </div>
-          <p data-i18n="feat.practice.desc">키 변경 ±6 반음, 배속(피치 보존), A-B 구간 반복, Solo 로 원하는 악기만 감상.</p>
-        </div>
-        <div class="feat reveal">
-          <div class="feat-title">
-            <svg viewBox="0 0 16 16" fill="none"><path d="M2 4h5l1 1.5h6V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-            <span data-i18n="feat.lib.title">라이브러리</span>
-          </div>
-          <p data-i18n="feat.lib.desc">처리한 영상을 저장 · 재사용. 즐겨찾기, 그룹, 4↔6-stem 재분리, 스템 저장 지원.</p>
+  <section id="get" class="band">
+    <div class="wrap sec">
+      <div class="final reveal">
+        <p class="eyebrow" style="display:inline-block">Get started</p>
+        <h2>지금 바로 시작해 보세요</h2>
+        <p>설치판이나 무설치 포터블 중에서 선택하세요.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg>설치판 다운로드</a>
+          <a class="btn btn-ghost" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest" target="_blank" rel="noopener">포터블 버전</a>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="faq">
-    <div class="container">
-      <h2 data-i18n="faq.head">자주 묻는 질문</h2>
-      <div class="faq-list" id="faq-list">
-        <div class="faq-item">
-          <button class="faq-q" type="button">
-            <span data-i18n="faq.q1">인터넷 없이 사용 가능한가요?</span>
-            <svg class="chev" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq.a1">모델을 한 번 다운로드하면 이후 로컬 파일은 완전 오프라인으로 처리됩니다. YouTube 링크 다운로드는 인터넷이 필요합니다.</p></div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-q" type="button">
-            <span data-i18n="faq.q2">Mac이나 Linux 지원은요?</span>
-            <svg class="chev" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq.a2">현재 Windows 만 지원합니다. macOS · Linux 는 향후 검토 예정.</p></div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-q" type="button">
-            <span data-i18n="faq.q3">얼마나 빠른가요?</span>
-            <svg class="chev" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq.a3">GPU (WebGPU) 지원 시스템에서는 3분 곡을 30초~2분 정도에 처리합니다. CPU 는 시스템에 따라 3~10분.</p></div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-q" type="button">
-            <span data-i18n="faq.q4">유료인가요?</span>
-            <svg class="chev" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq.a4">개인 · 비상업적 사용은 무료입니다. 상업적 재배포 · 통합은 별도 문의.</p></div>
-        </div>
-        <div class="faq-item">
-          <button class="faq-q" type="button">
-            <span data-i18n="faq.q5">SmartScreen 경고는 안전한가요?</span>
-            <svg class="chev" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <div class="faq-a"><p data-i18n="faq.a5">코드 서명 인증 절차가 진행 중이라 SmartScreen 이 경고를 표시할 수 있습니다. 자체 서명된 인증서는 사용 중이며, "추가 정보" → "실행" 으로 진행하시면 됩니다.</p></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
+<style>
+.demo-card{background:linear-gradient(180deg,var(--surface),var(--surface-2));border:1px solid var(--line);border-radius:16px;padding:22px;max-width:620px;margin:0 auto}
+.demo-transport{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.demo-play{width:52px;height:52px;flex:none;border:0;border-radius:50%;background:var(--accent);color:var(--accent-fg);cursor:pointer;display:grid;place-items:center}
+.demo-play svg{width:20px;height:20px}
+.demo-meta{flex:1;min-width:0}
+.demo-track-name{font-weight:650;font-size:14px}
+.demo-track-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+.demo-time{font-family:var(--mono);font-size:12px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+.demo-bar{height:5px;border-radius:3px;background:var(--line);margin-top:12px;overflow:hidden}
+.demo-fill{height:100%;width:0;background:var(--accent);transition:width .08s linear}
+.demo-stems{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+@media(max-width:520px){.demo-stems{grid-template-columns:1fr}}
+.stem{display:flex;align-items:center;gap:10px;padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;transition:border-color .12s,opacity .12s;font:inherit}
+.stem:hover{border-color:color-mix(in srgb,var(--sc) 55%,var(--line))}
+.stem .sdot{width:10px;height:10px;border-radius:50%;background:var(--sc);flex:none;transition:opacity .12s}
+.stem .snm{font-size:13.5px;font-weight:600}
+.stem .sbars{margin-left:auto;display:flex;align-items:flex-end;gap:2px;height:16px}
+.stem .sbars i{width:3px;border-radius:1px;background:var(--sc);height:5px}
+.stem.on .sbars i{animation:eq 900ms ease-in-out infinite}
+.stem .sbars i:nth-child(2){animation-delay:.12s}.stem .sbars i:nth-child(3){animation-delay:.24s}.stem .sbars i:nth-child(4){animation-delay:.36s}.stem .sbars i:nth-child(5){animation-delay:.48s}
+@keyframes eq{0%,100%{height:4px}50%{height:15px}}
+.stem .son{margin-left:8px;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--sc)}
+.stem.off{opacity:.42}
+.stem.off .sdot{opacity:.3}
+.stem.off .son{color:var(--muted)}
+.stem.off .sbars i{background:var(--muted);height:4px!important;animation:none}
+.demo-status{text-align:center;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:16px}
+@media(prefers-reduced-motion:reduce){.stem .sbars i{animation:none!important}}
+</style>
+
+<script>
+(function(){
+  const STEMS = {"vocals":"./samples/vocals.mp3","drums":"./samples/drums.mp3","bass":"./samples/bass.mp3","guitar":"./samples/guitar.mp3","piano":"./samples/piano.mp3","other":"./samples/other.mp3"};
+  const order = ["vocals", "drums", "bass", "guitar", "piano", "other"];
+  const on = {}; order.forEach(n=>on[n]=true);
+  let ctx=null, buffers={}, sources={}, gains={}, startAt=0, dur=26, playing=false, loaded=false, raf=0;
+  const $ = id => document.getElementById(id);
+  const fmt = s => Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+
+  async function ensure(){
+    if(loaded) return;
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    $('demoStatus').textContent='로딩 중…';
+    await Promise.all(order.map(async n=>{
+      const r = await fetch(STEMS[n]); const ab = await r.arrayBuffer();
+      buffers[n] = await ctx.decodeAudioData(ab);
+    }));
+    dur = buffers[order[0]].duration; $('demoDur').textContent = fmt(dur);
+    loaded=true;
+  }
+  function startAll(offset){
+    const t = ctx.currentTime + 0.06; startAt = t - offset;
+    order.forEach(n=>{
+      const s = ctx.createBufferSource(); s.buffer=buffers[n]; s.loop=true;
+      const g = ctx.createGain(); g.gain.value = on[n]?1:0;
+      s.connect(g).connect(ctx.destination); s.start(t, offset % dur);
+      sources[n]=s; gains[n]=g;
+    });
+  }
+  function tick(){
+    if(!playing) return;
+    const el = (ctx.currentTime - startAt) % dur;
+    $('demoCur').textContent = fmt(el);
+    $('demoFill').style.width = (el/dur*100).toFixed(1)+'%';
+    raf = requestAnimationFrame(tick);
+  }
+  function status(){
+    const c = order.filter(n=>on[n]).length;
+    $('demoStatus').textContent = playing ? (c===order.length?'6개 트랙 모두 재생 중':c+'개 트랙 재생 중') : '일시정지';
+  }
+  async function toggle(){
+    const p=$('demoPlay');
+    if(playing){ await ctx.suspend(); playing=false; cancelAnimationFrame(raf);
+      p.querySelector('.ic-play').hidden=false; p.querySelector('.ic-pause').hidden=true; status(); return; }
+    await ensure();
+    if(ctx.state==='suspended') await ctx.resume();
+    if(!Object.keys(sources).length) startAll(0);
+    playing=true; p.querySelector('.ic-play').hidden=true; p.querySelector('.ic-pause').hidden=false;
+    status(); tick();
+  }
+  $('demoPlay').addEventListener('click', ()=>toggle().catch(e=>{$('demoStatus').textContent='오디오 재생 불가: '+e.message}));
+  $('demoStems').querySelectorAll('.stem').forEach(btn=>{
+    btn.classList.add('on');
+    btn.addEventListener('click', ()=>{
+      const n = btn.dataset.n; on[n] = !on[n];
+      btn.classList.toggle('off', !on[n]); btn.classList.toggle('on', on[n]);
+      btn.querySelector('.son').textContent = on[n]?'ON':'OFF';
+      if(gains[n]) gains[n].gain.setTargetAtTime(on[n]?1:0, ctx.currentTime, 0.015);
+      if(playing) status();
+    });
+  });
+})();
+</script>
   <footer>
-    <div class="container">
-      <div class="links">
-        <a href="./community/" data-i18n="footer.community">Cover Share</a>
-        <a href="https://github.com/whalemindbass/yt-separator-releases" rel="noopener">GitHub</a>
-        <a href="https://github.com/whalemindbass/yt-separator-releases/releases" rel="noopener" data-i18n="footer.releases">모든 릴리즈</a>
-        <a href="./privacy.html" data-i18n="footer.privacy">개인정보 처리방침</a>
-        <a href="mailto:whalemindbass@gmail.com" data-i18n="footer.contact">문의</a>
-      </div>
-      <div class="cw">© 2026 Whale Mind · All rights reserved</div>
+    <div class="wrap foot-in">
+      <span class="brand" style="font-size:15px">
+        <svg class="mono-logo" style="width:26px;height:26px" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="1" y="1" width="30" height="30" rx="8" fill="#33cfa3"/>
+          
+          <g fill="#0a1712"><rect x="6.8" y="11.2" width="2.9" height="9.6" rx="1.45"/><rect x="11.4" y="7.3" width="2.9" height="17.4" rx="1.45"/><rect x="16" y="13.6" width="2.9" height="4.8" rx="1.45"/><rect x="20.6" y="9.4" width="2.9" height="13.2" rx="1.45"/></g>
+        </svg><span class="wm">Dr<span class="dot">.</span>studio</span></span>
+      <span class="mono">YT Separator 기반 · Windows 10 / 11 · © 2026</span>
     </div>
   </footer>
+</div>
 
-  <script>
-    // ── i18n ────────────────────────────────
-    // 한국어: <br /> 는 어절 사이에서만. 조사가 앞 단어에 붙도록 유의.
-    // English: 자연스러운 리듬으로 <br /> 배치.
-    const DICT = {
-      ko: {
-        'title':          'YT Separator — 데스크톱 스템 분리 도구',
-        'hero.eyebrow':   'Windows · 로컬 처리',
-        'hero.title':     '영상에서 <span class="hl">스템</span>을<br />분리해서 재생하세요',
-        'hero.sub':       'YouTube 링크나 로컬 파일에서 보컬 · 베이스 · 드럼 · 기타 · 피아노를 분리합니다. 완전히 오프라인.',
-        'dl.setup':       'Windows 설치 파일 다운로드',
-        'dl.portable':    '설치 없이 실행 (Portable)',
-        'dl.warn.strong': 'Windows Defender SmartScreen',
-        'dl.warn.msg':    '경고가 표시될 수 있습니다. "추가 정보" → "실행" 으로 진행하세요.',
-        'demo.title':     '각 악기를 마음대로 켜고 끄세요',
-        'demo.sub':       '아래 칩을 눌러 실제로 들어보세요 — 실제 앱에서도 이렇게 작동합니다.',
-        'demo.attr':      'AI 생성 데모',
-        'demo.hint.default':'6개 트랙 모두 재생 중',
-        'demo.hint.some': '{n}개 트랙 재생 중',
-        'demo.hint.none': '모든 트랙 꺼짐',
-        'demo.hint.solo': '{name} 만 재생 중 (Solo)',
-        'demo.aria.play': '재생',
-        'demo.aria.pause':'일시정지',
-        'stem.vocals':    '보컬',
-        'stem.drums':     '드럼',
-        'stem.bass':      '베이스',
-        'stem.guitar':    '기타',
-        'stem.piano':     '피아노',
-        'stem.other':     '그외',
-        'feat.head':      '기능',
-        'feat.sub':       '연습 · 커버 · 감상 모두에 맞춰 설계',
-        'feat.local.title':'로컬 처리',
-        'feat.local.desc': '영상·오디오가 서버로 전송되지 않고 사용자 컴퓨터에서 처리됩니다.',
-        'feat.stems.title':'4-stem · 6-stem',
-        'feat.stems.desc': 'htdemucs · htdemucs_6s 두 모델. 6-stem 은 기타 · 피아노를 추가 분리합니다.',
-        'feat.gpu.title':  'WebGPU 가속',
-        'feat.gpu.desc':   '가능하면 GPU 로 처리해 CPU 대비 훨씬 빠릅니다. 실패 시 CPU 자동 폴백.',
-        'feat.sync.title': '영상 sync 재생',
-        'feat.sync.desc':  '영상과 스템 오디오가 정확히 sync 되어 재생. seek · pause · 배속 모두 대응.',
-        'feat.practice.title':'연습 도구',
-        'feat.practice.desc': '키 변경 ±6 반음, 배속(피치 보존), A-B 구간 반복, Solo 로 원하는 악기만 감상.',
-        'feat.lib.title':  '라이브러리',
-        'feat.lib.desc':   '처리한 영상을 저장 · 재사용. 즐겨찾기, 그룹, 4↔6-stem 재분리, 스템 저장 지원.',
-        'faq.head':       '자주 묻는 질문',
-        'faq.q1':         '인터넷 없이 사용 가능한가요?',
-        'faq.a1':         '모델을 한 번 다운로드하면 이후 로컬 파일은 완전 오프라인으로 처리됩니다. YouTube 링크 다운로드는 인터넷이 필요합니다.',
-        'faq.q2':         'Mac 이나 Linux 지원은요?',
-        'faq.a2':         '현재 Windows 만 지원합니다. macOS · Linux 는 향후 검토 예정.',
-        'faq.q3':         '얼마나 빠른가요?',
-        'faq.a3':         'GPU (WebGPU) 지원 시스템에서는 3분 곡을 30초~2분 정도에 처리합니다. CPU 는 시스템에 따라 3~10분.',
-        'faq.q4':         '유료인가요?',
-        'faq.a4':         '개인 · 비상업적 사용은 무료입니다. 상업적 재배포 · 통합은 별도 문의.',
-        'faq.q5':         'SmartScreen 경고는 안전한가요?',
-        'faq.a5':         '코드 서명 인증 절차가 진행 중이라 SmartScreen 이 경고를 표시할 수 있습니다. 자체 서명된 인증서는 사용 중이며, "추가 정보" → "실행" 으로 진행하시면 됩니다.',
-        'footer.community':'Cover Share',
-        'footer.releases':'모든 릴리즈',
-        'footer.privacy': '개인정보 처리방침',
-        'footer.contact': '문의',
-        'ver.prefix':     '버전 ',
-        'ver.latest':     '최신 버전',
-        'dl.count':       '{n} 다운로드',
-      },
-      en: {
-        'title':          'YT Separator — Desktop stem separator',
-        'hero.eyebrow':   'Windows · Local processing',
-        'hero.title':     'Separate <span class="hl">stems</span> from<br />any video, play them locally',
-        'hero.sub':       'Split vocals, bass, drums, guitar, and piano from YouTube links or local files. Fully offline.',
-        'dl.setup':       'Download for Windows',
-        'dl.portable':    'Run without install (Portable)',
-        'dl.warn.strong': 'Windows Defender SmartScreen',
-        'dl.warn.msg':    'may show a warning. Click "More info" → "Run anyway".',
-        'demo.title':     'Toggle instruments freely',
-        'demo.sub':       'Tap the chips and actually hear each track — this is how the app works.',
-        'demo.attr':      'AI-generated demo',
-        'demo.hint.default':'All 6 tracks playing',
-        'demo.hint.some': '{n} tracks playing',
-        'demo.hint.none': 'All tracks muted',
-        'demo.hint.solo': 'Only {name} playing (Solo)',
-        'demo.aria.play': 'Play',
-        'demo.aria.pause':'Pause',
-        'stem.vocals':    'Vocals',
-        'stem.drums':     'Drums',
-        'stem.bass':      'Bass',
-        'stem.guitar':    'Guitar',
-        'stem.piano':     'Piano',
-        'stem.other':     'Other',
-        'feat.head':      'Features',
-        'feat.sub':       'Built for practice, covers, and casual listening',
-        'feat.local.title':'Local processing',
-        'feat.local.desc': 'Video and audio never leave your computer.',
-        'feat.stems.title':'4-stem · 6-stem',
-        'feat.stems.desc': 'Two models: htdemucs and htdemucs_6s. 6-stem also extracts guitar and piano.',
-        'feat.gpu.title':  'WebGPU acceleration',
-        'feat.gpu.desc':   'Uses the GPU when available — much faster than CPU. Falls back automatically.',
-        'feat.sync.title': 'Video-synced playback',
-        'feat.sync.desc':  'Stems play perfectly in sync with the video. Seek, pause, and speed change all supported.',
-        'feat.practice.title':'Practice tools',
-        'feat.practice.desc': 'Key change ±6 semitones, pitch-preserving speed, A-B loop, Solo — hear one instrument at a time.',
-        'feat.lib.title':  'Library',
-        'feat.lib.desc':   'Save and reuse processed videos. Favorites, groups, 4↔6-stem reseparation, stem export.',
-        'faq.head':       'Frequently asked questions',
-        'faq.q1':         'Does it work offline?',
-        'faq.a1':         'Once the model is downloaded, processing local files works fully offline. Downloading YouTube links still requires internet.',
-        'faq.q2':         'Any Mac or Linux support?',
-        'faq.a2':         'Windows only for now. macOS and Linux are under consideration.',
-        'faq.q3':         'How fast is it?',
-        'faq.a3':         'On systems with WebGPU support, a 3-minute song takes 30 seconds to 2 minutes. CPU-only runs in 3–10 minutes depending on hardware.',
-        'faq.q4':         'Is it paid?',
-        'faq.a4':         'Personal and non-commercial use is free. Contact us for commercial redistribution or integration.',
-        'faq.q5':         'Is the SmartScreen warning safe?',
-        'faq.a5':         'Full code-signing certification is in progress; SmartScreen may show a warning in the meantime. A self-signed certificate is applied. Click "More info" → "Run anyway".',
-        'footer.releases':'All releases',
-        'footer.privacy': 'Privacy',
-        'footer.contact': 'Contact',
-        'ver.prefix':     'Version ',
-        'ver.latest':     'Latest',
-        'dl.count':       '{n} downloads',
-      },
-    };
+<script>
+  const root=document.documentElement;
+  document.getElementById('theme').addEventListener('click',()=>{
+    const cur=root.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+    root.setAttribute('data-theme',cur==='dark'?'light':'dark');
+  });
+  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 
-    const LS_KEY = 'yss:site-lang';
-    let lang = (() => {
-      // 1) URL param `?lang=en` 우선 (hreflang · SEO 대응)
-      try {
-        const p = new URLSearchParams(location.search).get('lang');
-        if (p === 'ko' || p === 'en') return p;
-      } catch {}
-      // 2) 저장된 사용자 선택
-      try {
-        const saved = localStorage.getItem(LS_KEY);
-        if (saved === 'ko' || saved === 'en') return saved;
-      } catch {}
-      // 3) 브라우저 언어 (ko fallback)
-      const nav = (navigator.language || '').toLowerCase();
-      return nav.startsWith('en') ? 'en' : 'ko';
-    })();
-
-    const nameCache = { versionTag: '', dlCount: null, setupUrl: '', portableUrl: '', setupSize: '' };
-
-    function fmt(str, params) {
-      return str.replace(/\{(\w+)\}/g, (_, k) => (params && params[k] !== undefined ? params[k] : `{${k}}`));
+  // studio timeline mock with soft waveforms
+  (function(){
+    const host=document.getElementById('lanes'); if(!host) return;
+    function wave(color){
+      const N=120;let d='M0 18';
+      for(let i=0;i<=N;i++){const x=i/N*100;const a=(Math.sin(i*0.5)*0.5+Math.sin(i*0.17)*0.3+Math.sin(i*0.9)*0.2);const h=Math.abs(a)*13+1;d+=' L'+x.toFixed(1)+' '+(18-h).toFixed(1);}
+      for(let i=N;i>=0;i--){const x=i/N*100;const a=(Math.sin(i*0.5)*0.5+Math.sin(i*0.17)*0.3+Math.sin(i*0.9)*0.2);const h=Math.abs(a)*13+1;d+=' L'+x.toFixed(1)+' '+(18+h).toFixed(1);}
+      return '<svg viewBox="0 0 100 36" preserveAspectRatio="none"><path d="'+d+'Z" fill="'+color+'"/></svg>';
     }
-    function t(key, params) {
-      const s = (DICT[lang] && DICT[lang][key]) ?? DICT.ko[key] ?? key;
-      return params ? fmt(s, params) : s;
-    }
-    function applyI18n() {
-      document.documentElement.setAttribute('lang', lang);
-      document.title = t('title');
-      document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
-      document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
-      document.querySelectorAll('.lang-switch button').forEach(b => b.classList.toggle('on', b.dataset.lang === lang));
-      refreshDynamicLabels();
-      updateDemoHint();
-    }
-
-    function refreshDynamicLabels() {
-      const vt = document.getElementById('version-text');
-      if (nameCache.versionTag) vt.textContent = t('ver.prefix') + nameCache.versionTag;
-      else if (vt.textContent === 'Loading…') { /* keep */ }
-      else vt.textContent = t('ver.latest');
-
-      const dl = document.getElementById('download-count');
-      const dlNum = document.getElementById('download-count-num');
-      if (typeof nameCache.dlCount === 'number' && nameCache.dlCount > 0) {
-        dl.hidden = false;
-        dlNum.textContent = t('dl.count', { n: nameCache.dlCount.toLocaleString() });
-      } else {
-        dl.hidden = true;
-      }
-
-      // 파일 크기 라벨은 언어와 무관하지만 언어 전환 시 유지되도록
-      const ss = document.getElementById('setup-size');
-      if (nameCache.setupSize) ss.textContent = nameCache.setupSize;
-    }
-
-    document.querySelectorAll('.lang-switch button').forEach(b => {
-      b.addEventListener('click', () => {
-        lang = b.dataset.lang;
-        try { localStorage.setItem(LS_KEY, lang); } catch {}
-        applyI18n();
-      });
+    const rows=[['보컬','#d9756a',3,60],['드럼','#cfa24d',6,50],['베이스','#5f8fce',12,42],['기타','#b078c2',2,64],['내 녹음','#e0655f',26,38]];
+    rows.forEach(([nm,c,l,w])=>{
+      const lane=document.createElement('div');lane.className='lane';
+      lane.innerHTML='<div class="lhead"><i style="background:'+c+'"></i>'+nm+'</div>';
+      const area=document.createElement('div');area.className='larea';
+      const clip=document.createElement('div');clip.className='clip';
+      clip.style.left=l+'%';clip.style.width=w+'%';
+      clip.style.background='color-mix(in srgb,'+c+' 20%, var(--surface))';
+      clip.style.boxShadow='inset 0 0 0 1px color-mix(in srgb,'+c+' 40%, transparent)';
+      clip.style.color=c;clip.innerHTML=wave(c);
+      area.appendChild(clip);lane.appendChild(area);host.appendChild(lane);
     });
+  })();
+</script>
 
-    // ── Interactive stem demo (Web Audio sync playback) ─────────────
-    const stemNames = { vocals: 'stem.vocals', drums: 'stem.drums', bass: 'stem.bass', guitar: 'stem.guitar', piano: 'stem.piano', other: 'stem.other' };
-    const STEM_LIST = ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'];
-    const stemRow = document.getElementById('stem-toggle-row');
-    const playBtn = document.getElementById('demo-play');
-    const progressEl = document.getElementById('demo-progress');
-    const progressFill = document.getElementById('demo-progress-fill');
-    const timeEl = document.getElementById('demo-time');
-
-    const PLAY_SVG  = '<svg viewBox="0 0 16 16"><path d="M4 3v10l9-5-9-5z"/></svg>';
-    const PAUSE_SVG = '<svg viewBox="0 0 16 16"><path d="M4 3h3v10H4V3zm5 0h3v10H9V3z"/></svg>';
-    const LOAD_SVG  = '<svg viewBox="0 0 16 16"><path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
-
-    let audioCtx = null;
-    let stemBuffers = null;
-    let stemGains   = null;
-    let stemSources = null;
-    let isPlaying = false;
-    let startCtxTime = 0;
-    let pausedOffset = 0;
-    let duration = 26.16;
-    let loadPromise = null;
-
-    function fmtTime(s) {
-      s = Math.max(0, s || 0);
-      const m = Math.floor(s / 60);
-      const sec = Math.floor(s % 60);
-      return `${m}:${String(sec).padStart(2, '0')}`;
-    }
-
-    function isStemOn(name) {
-      const chip = stemRow.querySelector(`.stem-chip[data-stem="${name}"]`);
-      return chip && chip.classList.contains('on');
-    }
-
-    async function ensureLoaded() {
-      if (audioCtx && stemBuffers) return;
-      if (loadPromise) return loadPromise;
-      playBtn.classList.add('loading');
-      playBtn.innerHTML = LOAD_SVG;
-      loadPromise = (async () => {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        stemBuffers = new Map();
-        stemGains   = new Map();
-        // 병렬 fetch + decode
-        await Promise.all(STEM_LIST.map(async n => {
-          const res = await fetch(`./samples/${n}.mp3`);
-          if (!res.ok) throw new Error(`fetch ${n}.mp3 failed`);
-          const arr = await res.arrayBuffer();
-          const buf = await audioCtx.decodeAudioData(arr);
-          stemBuffers.set(n, buf);
-          const g = audioCtx.createGain();
-          g.gain.value = isStemOn(n) ? 1 : 0;
-          g.connect(audioCtx.destination);
-          stemGains.set(n, g);
-        }));
-        duration = stemBuffers.get(STEM_LIST[0]).duration;
-      })();
-      try {
-        await loadPromise;
-      } finally {
-        playBtn.classList.remove('loading');
-      }
-    }
-
-    async function playDemo() {
-      try {
-        await ensureLoaded();
-      } catch (e) {
-        console.error(e);
-        playBtn.innerHTML = PLAY_SVG;
-        return;
-      }
-      if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch {} }
-      stemSources = new Map();
-      const startAt = pausedOffset % duration;
-      for (const name of STEM_LIST) {
-        const src = audioCtx.createBufferSource();
-        src.buffer = stemBuffers.get(name);
-        src.loop = true;
-        src.connect(stemGains.get(name));
-        src.start(0, startAt);
-        stemSources.set(name, src);
-      }
-      startCtxTime = audioCtx.currentTime - startAt;
-      isPlaying = true;
-      playBtn.innerHTML = PAUSE_SVG;
-      playBtn.setAttribute('aria-label', t('demo.aria.pause'));
-      tickProgress();
-    }
-
-    function pauseDemo() {
-      if (!isPlaying) return;
-      pausedOffset = (audioCtx.currentTime - startCtxTime) % duration;
-      for (const src of stemSources.values()) {
-        try { src.stop(); } catch {}
-      }
-      stemSources = null;
-      isPlaying = false;
-      playBtn.innerHTML = PLAY_SVG;
-      playBtn.setAttribute('aria-label', t('demo.aria.play'));
-    }
-
-    function tickProgress() {
-      if (!isPlaying) return;
-      const elapsed = (audioCtx.currentTime - startCtxTime) % duration;
-      progressFill.style.width = (elapsed / duration * 100) + '%';
-      timeEl.textContent = fmtTime(elapsed) + ' / ' + fmtTime(duration);
-      requestAnimationFrame(tickProgress);
-    }
-
-    playBtn.addEventListener('click', () => {
-      if (isPlaying) pauseDemo(); else playDemo();
-    });
-
-    progressEl.addEventListener('click', (e) => {
-      if (!audioCtx || !stemBuffers) return;
-      const r = progressEl.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-      pausedOffset = ratio * duration;
-      if (isPlaying) {
-        for (const src of stemSources.values()) { try { src.stop(); } catch {} }
-        stemSources = null; isPlaying = false;
-        playDemo();
-      } else {
-        progressFill.style.width = (ratio * 100) + '%';
-        timeEl.textContent = fmtTime(pausedOffset) + ' / ' + fmtTime(duration);
-      }
-    });
-
-    stemRow.addEventListener('click', (e) => {
-      const btn = e.target.closest('.stem-chip');
-      if (!btn) return;
-      btn.classList.toggle('on');
-      const stem = btn.dataset.stem;
-      // 로드 상태라면 gain 즉시 반영 (짧은 fade 로 클릭 노이즈 방지)
-      if (stemGains && stemGains.has(stem)) {
-        const g = stemGains.get(stem);
-        const target = btn.classList.contains('on') ? 1 : 0;
-        g.gain.setTargetAtTime(target, audioCtx.currentTime, 0.015);
-      }
-      updateDemoHint();
-    });
-    function updateDemoHint() {
-      const hint = document.getElementById('demo-hint');
-      const on = [...stemRow.querySelectorAll('.stem-chip.on')];
-      if (on.length === 0) hint.textContent = t('demo.hint.none');
-      else if (on.length === 6) hint.textContent = t('demo.hint.default');
-      else if (on.length === 1) {
-        const key = on[0].dataset.stem;
-        hint.textContent = t('demo.hint.solo', { name: t(stemNames[key]) });
-      } else {
-        hint.textContent = t('demo.hint.some', { n: on.length });
-      }
-    }
-
-    // ── FAQ accordion ─────────────────────────
-    document.getElementById('faq-list').addEventListener('click', (e) => {
-      const q = e.target.closest('.faq-q');
-      if (!q) return;
-      q.closest('.faq-item').classList.toggle('open');
-    });
-
-    // ── Reveal on scroll ──────────────────────
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(en => {
-        if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); }
-      });
-    }, { rootMargin: '0px 0px -80px 0px', threshold: 0.1 });
-    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-    applyI18n();
-
-    // ── Live GitHub release info ──────────────
-    (async () => {
-      const REPO = 'whalemindbass/yt-separator-releases';
-      const versionText = document.getElementById('version-text');
-      const setupBtn    = document.getElementById('setup-btn');
-      const setupSize   = document.getElementById('setup-size');
-      const portableBtn = document.getElementById('portable-btn');
-
-      try {
-        // 한 번의 요청으로 모든 릴리즈 얻기 (models-v1 포함, 최신 앱 릴리즈도 여기서 뽑음)
-        const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`);
-        if (!res.ok) throw new Error('releases not found');
-        const releases = await res.json();
-        if (!Array.isArray(releases) || releases.length === 0) throw new Error('empty releases');
-
-        // 최신 앱 릴리즈: tag 가 v로 시작 (models-v1 등은 제외)
-        const appReleases = releases.filter(r => /^v\d/i.test(r.tag_name || ''));
-        const rel = appReleases[0] || releases[0];   // 신순 정렬 (GitHub 기본)
-        const tag = rel.tag_name || '';
-        nameCache.versionTag = tag;
-        versionText.textContent = t('ver.prefix') + tag;
-
-        const assets = rel.assets || [];
-        const setup    = assets.find(a => /Setup\.exe$/i.test(a.name));
-        const portable = assets.find(a => /Portable\.exe$/i.test(a.name));
-
-        // 총 다운로드 = 모든 릴리즈의 Setup+Portable(.exe) + 모델(.onnx)
-        // latest.yml · blockmap 은 자동 업데이터 트래픽이라 제외 (허수 방지)
-        let totalDl = 0;
-        for (const r of releases) {
-          for (const a of (r.assets || [])) {
-            if (/\.exe$/i.test(a.name) || /\.onnx$/i.test(a.name)) {
-              totalDl += (a.download_count || 0);
-            }
-          }
-        }
-        nameCache.dlCount = totalDl;
-
-        if (setup) {
-          setupBtn.href = setup.browser_download_url;
-          nameCache.setupSize = `${setup.name} · ${(setup.size / 1024 / 1024).toFixed(0)} MB`;
-          setupSize.textContent = nameCache.setupSize;
-          nameCache.setupUrl = setup.browser_download_url;
-        } else {
-          setupBtn.href = `https://github.com/${REPO}/releases/latest`;
-        }
-        if (portable) {
-          portableBtn.href = portable.browser_download_url;
-          nameCache.portableUrl = portable.browser_download_url;
-        } else {
-          portableBtn.href = `https://github.com/${REPO}/releases/latest`;
-        }
-        refreshDynamicLabels();
-      } catch (e) {
-        versionText.textContent = t('ver.latest');
-        setupBtn.href    = `https://github.com/${REPO}/releases/latest`;
-        portableBtn.href = `https://github.com/${REPO}/releases/latest`;
-      }
-    })();
-  </script>
 </body>
 </html>
