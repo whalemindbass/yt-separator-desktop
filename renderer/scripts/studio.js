@@ -89,6 +89,14 @@ let _songKey = null;
 const HEAD_W = 140;
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
 const BPM = 120, BEATS_PER_BAR = 4, SEC_PER_BAR = BEATS_PER_BAR * 60 / BPM;
+const SEC_PER_BEAT = SEC_PER_BAR / BEATS_PER_BAR;
+// 그리드 스냅 — 가장 가까운 박에 8px 이내면 스냅. Alt 누르면 해제
+function snapSec(sec, disable) {
+  if (disable) return Math.max(0, sec);
+  const g = SEC_PER_BEAT;
+  const near = Math.round(sec / g) * g;
+  return Math.abs(near - sec) * _pxPerSec <= 8 ? Math.max(0, near) : Math.max(0, sec);
+}
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
@@ -611,6 +619,7 @@ async function renderTake(file, startSamples, engineId, trackId) {
       trackId: tid,
       start: (startSamples || 0) / (_sr || 44100),
       inOff: 0, srcDur, dur: srcDur,   // 트림: inOff(소스 내 시작)·dur(가시 길이)·srcDur(전체)
+      fadeIn: 0, fadeOut: 0,           // 페이드(초)
       svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
     });
     renderTakes();
@@ -638,6 +647,20 @@ function renderTakes() {
     wave.style.width = Math.max(3, tk.srcDur * _pxPerSec) + 'px';
     wave.innerHTML = tk.svg;
     el.appendChild(wave);
+    // 페이드 오버레이(대각선) + 상단 코너 페이드 핸들
+    const fgL = document.createElement('div'); fgL.className = 'daw-fade l';
+    const fgR = document.createElement('div'); fgR.className = 'daw-fade r';
+    const fhL = document.createElement('div'); fhL.className = 'daw-fadeh l';
+    const fhR = document.createElement('div'); fhR.className = 'daw-fadeh r';
+    el.appendChild(fgL); el.appendChild(fgR); el.appendChild(fhL); el.appendChild(fhR);
+    const paintFades = () => {
+      const wi = tk.fadeIn * _pxPerSec, wo = tk.fadeOut * _pxPerSec;
+      fgL.style.width = wi + 'px'; fhL.style.left = wi + 'px';
+      fgR.style.width = wo + 'px'; fhR.style.right = wo + 'px';
+    };
+    paintFades();
+    wireFade(fhL, tk, paintFades, -1);
+    wireFade(fhR, tk, paintFades, +1);
     // 좌·우 트림 핸들
     const hL = document.createElement('div'); hL.className = 'daw-trim l';
     const hR = document.createElement('div'); hR.className = 'daw-trim r';
@@ -647,7 +670,7 @@ function renderTakes() {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
-      if (e.target.classList.contains('daw-trim')) return;   // 핸들은 트림
+      if (e.target.classList.contains('daw-trim') || e.target.classList.contains('daw-fadeh')) return;   // 핸들은 트림·페이드
       selectTrack(tk.trackId); _selClipId = tk.id;
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX, base = tk.start;
@@ -656,7 +679,7 @@ function renderTakes() {
       const move = (ev) => {
         if (!dragging && Math.abs(ev.clientX - startX) < 4) return;   // 임계값 전엔 클릭으로 취급
         dragging = true;
-        tk.start = Math.max(0, base + (ev.clientX - startX) / _pxPerSec);   // 좌우 = 시간
+        tk.start = snapSec(base + (ev.clientX - startX) / _pxPerSec, ev.altKey);   // 좌우 = 시간(그리드 스냅)
         el.style.left = (tk.start * _pxPerSec) + 'px';
         // 상하 = 대상 내 트랙 감지 (다른 내 트랙으로 이동)
         const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
@@ -717,6 +740,43 @@ function commitTrim(tk) {
   const sr = _sr || 44100;
   api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round(tk.inOff * sr), Math.round(tk.dur * sr));
 }
+// 페이드 핸들: dir -1=인, +1=아웃. 코너 드래그로 길이 갱신, up 시 커밋
+function wireFade(handle, tk, paint, dir) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    selectTrack(tk.trackId); _selClipId = tk.id;
+    const startX = e.clientX, bIn = tk.fadeIn, bOut = tk.fadeOut;
+    const move = (ev) => {
+      const d = (ev.clientX - startX) / _pxPerSec;
+      if (dir < 0) tk.fadeIn  = Math.max(0, Math.min(tk.dur, bIn + d));
+      else         tk.fadeOut = Math.max(0, Math.min(tk.dur, bOut - d));
+      paint();
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      commitFade(tk);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  });
+}
+function commitFade(tk) {
+  const sr = _sr || 44100;
+  api.engine.takeFade(tk.id, Math.round(tk.fadeIn * sr), Math.round(tk.fadeOut * sr));
+}
+// 클립 복제 — 뒤로 dur 만큼 이어붙임
+function duplicateClip(tk) {
+  const sr = _sr || 44100;
+  const id = Date.now();
+  const copy = { ...tk, id, start: tk.start + tk.dur };
+  _takes.push(copy);
+  api.engine.takeLoad(tk.file, Math.round(copy.start * sr), tk.trackId, id);
+  // 원본과 동일한 트림·페이드 적용
+  if (copy.inOff || copy.dur < copy.srcDur - 1e-4) api.engine.takeTrim(id, Math.round(copy.start * sr), Math.round(copy.inOff * sr), Math.round(copy.dur * sr));
+  if (copy.fadeIn || copy.fadeOut) api.engine.takeFade(id, Math.round(copy.fadeIn * sr), Math.round(copy.fadeOut * sr));
+  renderTakes(); layout();
+}
 // 재생선 위치에서 선택 클립 분할
 function splitSelectedAtPlayhead() {
   const tk = _takes.find(t => t.id === _selClipId); if (!tk) { flashTake('분할할 클립을 선택하세요.'); return; }
@@ -739,9 +799,12 @@ function showTakeMenu(x, y, id) {
   const menu = document.createElement('div');
   menu.className = 'daw-ctx';
   menu.style.left = x + 'px'; menu.style.top = y + 'px';
-  menu.innerHTML = `<button class="split">재생선에서 분할</button><button class="del">삭제</button>`;
+  menu.innerHTML = `<button class="split">재생선에서 분할</button><button class="dup">복제</button><button class="del">삭제</button>`;
   menu.querySelector('.split').addEventListener('click', () => {
     const tk = _takes.find(t => t.id === id); if (tk) splitClip(tk, _lastSec); menu.remove();
+  });
+  menu.querySelector('.dup').addEventListener('click', () => {
+    const tk = _takes.find(t => t.id === id); if (tk) duplicateClip(tk); menu.remove();
   });
   menu.querySelector('.del').addEventListener('click', () => {
     api.engine.takeRemove(id);   // 엔진 재생 소스도 제거
@@ -812,7 +875,7 @@ function saveTakeSet(name) {
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
-  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, trackId: t.trackId }));
+  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId }));
   const need = [];
   tracks.forEach(t => t.fxOrder.forEach(s => need.push({ track: t.id, id: s.id })));
   if (!need.length) { persistTakeSet(name, stripFxOrder(tracks), takes); return; }   // FX 없으면 바로 저장
@@ -877,10 +940,11 @@ async function loadTakeSet(ts) {
       const id = t.id != null ? t.id : t.start;   // 고유 id (구버전은 start 폴백)
       api.engine.takeLoad(t.file, t.start, tid, id);
       await renderTake(t.file, t.start, id, tid);
-      // 트림 복원 (구버전 세트는 inOff 없음)
-      if (t.inOff || (t.srcDur && t.dur < t.srcDur - 1e-4)) {
-        const tk = _takes.find(x => x.id === id);
-        if (tk) { tk.inOff = t.inOff || 0; tk.dur = t.dur; commitTrim(tk); }
+      // 트림·페이드 복원 (구버전 세트는 inOff/fade 없음)
+      const tk = _takes.find(x => x.id === id);
+      if (tk) {
+        if (t.inOff || (t.srcDur && t.dur < t.srcDur - 1e-4)) { tk.inOff = t.inOff || 0; tk.dur = t.dur; commitTrim(tk); }
+        if (t.fadeIn || t.fadeOut) { tk.fadeIn = t.fadeIn || 0; tk.fadeOut = t.fadeOut || 0; commitFade(tk); }
       }
     }
     renderTakes();

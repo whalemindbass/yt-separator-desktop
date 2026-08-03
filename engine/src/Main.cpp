@@ -67,9 +67,28 @@ struct TakePlay
     int64 start = 0;   // 타임라인 위치 (이동 가능)
     int64 inOffset = 0;// 버퍼 내 시작(트림 좌측)
     int64 len = 0;     // 재생 길이(트림 반영)
+    int64 fadeIn = 0;  // 페이드 인 길이(샘플)
+    int64 fadeOut = 0; // 페이드 아웃 길이(샘플)
     int   trackId = 0; // 소속 녹음 트랙
     String path;       // export(오프라인 렌더)용
 };
+
+// 클립 페이드 엔벨로프 적용 — buf[0..n) 는 클립 내 pos 위치부터의 슬라이스
+static void applyClipFades (AudioBuffer<float>& buf, int64 pos, int64 len, int64 fadeIn, int64 fadeOut, int n)
+{
+    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+    {
+        float* d = buf.getWritePointer (ch);
+        for (int j = 0; j < n; ++j)
+        {
+            const int64 p = pos + j;
+            float g = 1.0f;
+            if (fadeIn > 0 && p < fadeIn)              g *= (float) p / (float) fadeIn;
+            if (fadeOut > 0 && p >= len - fadeOut)     g *= (float) (len - p) / (float) fadeOut;
+            d[j] *= g;
+        }
+    }
+}
 
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
 struct FxSlot
@@ -498,6 +517,19 @@ public:
             int64 io = jlimit<int64> (0, jmax<int64> (0, total - 1), inOffset);
             int64 ln = jlimit<int64> (1, total - io, len);
             t->start = jmax<int64> (0, start); t->inOffset = io; t->len = ln;
+            t->fadeIn  = jmin (t->fadeIn, ln);   // 길이보다 긴 페이드 클램프
+            t->fadeOut = jmin (t->fadeOut, ln);
+            break;
+        }
+    }
+    // 클립 페이드 인/아웃 설정(샘플)
+    void setFade (int64 id, int64 fadeIn, int64 fadeOut)
+    {
+        const ScopedLock sl (takesLock);
+        for (auto& t : takesPlay) if (t->id == id)
+        {
+            t->fadeIn  = jlimit<int64> (0, t->len, fadeIn);
+            t->fadeOut = jlimit<int64> (0, t->len, fadeOut);
             break;
         }
     }
@@ -520,7 +552,11 @@ public:
             nt->len     = t->len - rel;
             nt->trackId = t->trackId;
             nt->path    = t->path;
+            nt->fadeOut = jmin (t->fadeOut, nt->len);   // 페이드아웃은 뒷조각으로
+            nt->fadeIn  = 0;
             t->len = rel;                               // 원본은 앞부분
+            t->fadeIn  = jmin (t->fadeIn, t->len);      // 페이드인은 앞조각 유지
+            t->fadeOut = 0;
             takesPlay.push_back (std::move (nt));
             return;
         }
@@ -673,7 +709,7 @@ public:
             }
 
         // 트랙: 테이크 버퍼 스냅샷 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
-        struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; };
+        struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; int64 fadeIn; int64 fadeOut; };
         struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
         std::vector<TRK> trks;
         {
@@ -701,7 +737,7 @@ public:
                 for (auto& t : takesPlay)
                 {
                     if (t->trackId != rt->id) continue;
-                    TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len; tr.inOffset = t->inOffset;   // 스냅샷
+                    TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len; tr.inOffset = t->inOffset; tr.fadeIn = t->fadeIn; tr.fadeOut = t->fadeOut;   // 스냅샷
                     total = jmax (total, t->start + t->len);
                     tk.takes.push_back (std::move (tr));
                 }
@@ -762,7 +798,15 @@ public:
                     const int64 rp = pos - t.start;
                     if (rp < 0 || rp >= t.len) continue;
                     const int nn = (int) jmin<int64> ((int64) n, t.len - rp);
-                    for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) (t.inOffset + rp), nn);
+                    if (t.fadeIn <= 0 && t.fadeOut <= 0)
+                        for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) (t.inOffset + rp), nn);
+                    else
+                    {
+                        AudioBuffer<float> ct (2, nn);
+                        for (int c = 0; c < 2; ++c) ct.copyFrom (c, 0, t.buf, jmin (c, t.buf.getNumChannels() - 1), (int) (t.inOffset + rp), nn);
+                        applyClipFades (ct, rp, t.len, t.fadeIn, t.fadeOut, nn);
+                        for (int c = 0; c < 2; ++c) tbuf.addFrom (c, 0, ct, c, 0, nn);
+                    }
                     any = true;
                 }
                 if (! any && tk.fx.empty()) continue;
@@ -899,8 +943,18 @@ public:
                             const int64 pos = phStart - t->start;
                             if (pos < 0 || pos >= t->len) continue;
                             const int n2 = (int) jmin<int64> ((int64) numSamples, t->len - pos);
-                            for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                                fxBuf.addFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) (t->inOffset + pos), n2);
+                            if (t->fadeIn <= 0 && t->fadeOut <= 0)   // 페이드 없음 — 직접 add
+                                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                                    fxBuf.addFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) (t->inOffset + pos), n2);
+                            else   // 페이드 반영: 임시로 복사 후 엔벨로프 적용, 합산
+                            {
+                                clipTmp.setSize (fxBuf.getNumChannels(), n2, false, false, true);
+                                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                                    clipTmp.copyFrom (c, 0, t->buf, jmin (c, t->buf.getNumChannels() - 1), (int) (t->inOffset + pos), n2);
+                                applyClipFades (clipTmp, pos, t->len, t->fadeIn, t->fadeOut, n2);
+                                for (int c = 0; c < fxBuf.getNumChannels(); ++c)
+                                    fxBuf.addFrom (c, 0, clipTmp, c, 0, n2);
+                            }
                         }
 
                     if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
@@ -1025,6 +1079,7 @@ private:
     Array<PluginDescription> scanned;
     int nextSlotId = 1;       // 슬롯 id 는 트랙 간 전역 유일 (에디터 매핑용)
     AudioBuffer<float> fxBuf;  // 트랙별 처리용 스크래치
+    AudioBuffer<float> clipTmp;// 페이드 적용용 클립 스크래치
 
     std::atomic<bool>  playing { false };
     std::atomic<int64> playhead { 0 };
@@ -1111,6 +1166,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "takeMove")    engine.moveTake ((int64) (double) c["id"], (int64) (double) c["start"], (int) c["trackId"]);
     else if (cmd == "takeTrim")    engine.trimTake ((int64) (double) c["id"], (int64) (double) c["start"], (int64) (double) c["inOffset"], (int64) (double) c["len"]);
     else if (cmd == "takeSplit")   engine.splitTake ((int64) (double) c["id"], (int64) (double) c["at"], (int64) (double) c["newId"]);
+    else if (cmd == "takeFade")    engine.setFade ((int64) (double) c["id"], (int64) (double) c["fadeIn"], (int64) (double) c["fadeOut"]);
     else if (cmd == "stemOffset")  engine.setStemOffset ((int64) (double) c["samples"]);
     else if (cmd == "recTrackAdd") engine.addRecTrack ((int) c["type"]);
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
