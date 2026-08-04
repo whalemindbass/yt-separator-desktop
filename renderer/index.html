@@ -436,12 +436,18 @@
         <div class="daw-mixer">
           <div class="mx-strip">
             <div class="mx-val" id="mx-master-val">100</div>
-            <input id="mx-master" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="마스터 볼륨">
+            <div class="mx-fader-wrap">
+              <input id="mx-master" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="마스터 볼륨">
+              <div class="mx-meter" data-mid="0"><i class="l"></i><i class="r"></i></div>
+            </div>
             <div class="mx-lbl">MASTER</div>
           </div>
           <div class="mx-strip">
             <div class="mx-val" id="mx-track-val">—</div>
-            <input id="mx-track" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="선택 트랙 볼륨">
+            <div class="mx-fader-wrap">
+              <input id="mx-track" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="선택 트랙 볼륨">
+              <div id="mx-meter-track" class="mx-meter"><i class="l"></i><i class="r"></i></div>
+            </div>
             <div class="mx-lbl" id="mx-track-lbl">트랙</div>
           </div>
         </div>
@@ -449,8 +455,10 @@
       <div class="daw-content">
 
       <!-- 히어로: 대형 영상 + FX 드로어 -->
-      <div class="daw-hero">
+      <div class="daw-hero" id="daw-hero">
+        <button id="daw-hero-expand" class="daw-hero-expand" title="영상 펴기">▼ 영상 펴기</button>
         <div class="daw-video" id="daw-video-wrap">
+          <button id="daw-video-collapse" class="daw-video-collapse" title="영상 접기">▲</button>
           <video id="daw-video" muted playsinline preload="auto" crossorigin="anonymous"></video>
           <div id="daw-video-empty" class="daw-video-empty" data-i18n="studio.video.none">곡을 불러오면 영상이 표시됩니다</div>
           <div id="daw-vplay" class="daw-vplay" hidden></div>

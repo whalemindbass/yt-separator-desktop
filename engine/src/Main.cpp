@@ -48,10 +48,10 @@ struct Stem
     String path;   // export(오프라인 렌더)용 프레시 리더 생성
     int id = 0;    // FX 주소용 id (스템은 90001+ 범위 — 녹음 트랙 id와 충돌 방지)
     std::atomic<float> gain { 1.0f };
-    std::atomic<float> pan  { 0.0f };   // -1(L) .. 0(C) .. +1(R), equal-power
+    std::atomic<float> pan  { 0.0f };   // -1(L)..0(C)..+1(R), equal-power
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
-    std::atomic<float> pkL { 0.0f }, pkR { 0.0f };   // post-fader peak (tick 사이 누적, 소비=exchange 0)
+    std::atomic<float> pkL { 0.0f }, pkR { 0.0f };   // post-fader peak (누적, exchange 로 소비)
     std::vector<std::unique_ptr<FxSlot>> chain;   // 스템별 독립 FX
     CriticalSection fxLock;
     float curGainL = 1.0f, curGainR = 1.0f;   // 오디오 스레드 전용 — L/R 각각 램프(pan+gain 결합)
@@ -131,16 +131,15 @@ static inline void addRamped (float* dst, const float* src, int n, float g0, flo
     for (int i = 0; i < n; ++i) { dst[i] += src[i] * g; g += step; }
 }
 
-// equal-power pan: pan -1..0..+1 → (gL, gR). 중앙에서 ~-3dB 가감으로 자연스러운 좌우 이동
+// equal-power pan: -1..0..+1 → (gL, gR)
 static inline void panGains (float pan, float& gL, float& gR)
 {
     const float p = jlimit (-1.0f, 1.0f, pan);
-    const float theta = (p + 1.0f) * 0.25f * MathConstants<float>::pi;   // 0..π/2
-    gL = std::cos (theta);
-    gR = std::sin (theta);
+    const float theta = (p + 1.0f) * 0.25f * MathConstants<float>::pi;
+    gL = std::cos (theta); gR = std::sin (theta);
 }
 
-// post-fader block peak: 원본 abs max × 게인 max endpoint(램프 감안). 정확한 파형 피크 근사, 오버헤드 최소
+// post-fader block peak = 원본 abs max × 게인 max endpoint
 static inline float blockPeak (const float* src, int n, float g0, float g1)
 {
     float m = 0.0f;
@@ -148,7 +147,7 @@ static inline float blockPeak (const float* src, int n, float g0, float g1)
     return m * jmax (std::abs (g0), std::abs (g1));
 }
 
-// atomic peak 갱신 — max 유지(락 없음)
+// atomic peak: max 유지(락 없음)
 static inline void updatePeak (std::atomic<float>& p, float v)
 {
     float cur = p.load (std::memory_order_relaxed);
@@ -388,6 +387,7 @@ public:
     }
 
     bool  isPlaying()   const { return playing.load(); }
+    bool  isMonitorOn() const { return monitorInputOn.load(); }
     int64 getPlayhead() const { return playhead.load(); }
 
     // ---- 오디오 디바이스 설정 ----
@@ -446,9 +446,16 @@ public:
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
-    // 트랙 미터 수집 — 각 스템/녹음 트랙의 pkL/pkR 을 exchange 로 소비. 렌더러가 시각적 감쇠 담당
+    // 트랙 미터 수집 — 스템·녹음 트랙 + 마스터. 각 pkL/pkR exchange 로 소비
     void collectMeters (Array<var>& out)
     {
+        {   // master (id = 0 예약)
+            auto* o = new DynamicObject();
+            o->setProperty ("id", 0);
+            o->setProperty ("l",  mstPkL.exchange (0.0f, std::memory_order_relaxed));
+            o->setProperty ("r",  mstPkR.exchange (0.0f, std::memory_order_relaxed));
+            out.add (var (o));
+        }
         for (auto& s : stems)
         {
             auto* o = new DynamicObject();
@@ -1044,7 +1051,6 @@ public:
                         if (sl && sl->plugin && ! sl->bypass.load()) { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
                     srcBuf = &stemFxBuf;
                 }
-                // 스테레오 2ch 라우팅: L=0, R=1 (numOut<2 폴백은 L만)
                 const float* srcL = srcBuf->getReadPointer (0);
                 const float* srcR = srcBuf->getReadPointer (jmin (1, srcBuf->getNumChannels() - 1));
                 if (numOut >= 2)
@@ -1089,7 +1095,7 @@ public:
                     const float g = (audible ? rt->gain.load() : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
                     float pL, pR; panGains (rt->pan.load(), pL, pR);
                     const float tgtL = g * pL, tgtR = g * pR;
-                    if (rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;   // 무음 지속 → 처리 스킵
+                    if (rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;
 
                     fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
                     fxBuf.clear();
@@ -1132,7 +1138,7 @@ public:
                                 }
                     }
 
-                    // post-FX 페이더 + 팬(L/R 결합 램프)
+                    // post-FX 페이더 + 팬(L/R 결합 램프) + peak
                     const float* rtL = fxBuf.getReadPointer (0);
                     const float* rtR = fxBuf.getReadPointer (jmin (1, fxBuf.getNumChannels() - 1));
                     if (numOut >= 2)
@@ -1187,6 +1193,9 @@ public:
                 FloatVectorOperations::max (outputs[c], outputs[c], -1.0f, numSamples);
                 FloatVectorOperations::min (outputs[c], outputs[c],  1.0f, numSamples);
             }
+            // 마스터 peak — 최종 출력 기준(마스터 게인·클리퍼 이후)
+            updatePeak (mstPkL, blockPeak (outputs[0], numSamples, 1.0f, 1.0f));
+            updatePeak (mstPkR, blockPeak (outputs[jmin (1, numOut - 1)], numSamples, 1.0f, 1.0f));
         }
         lastMasterGain = master;
 
@@ -1283,6 +1292,7 @@ private:
 
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
+    std::atomic<float> mstPkL { 0.0f }, mstPkR { 0.0f };   // master post-sum peak
     std::vector<float> pitchRing = std::vector<float> (4096, 0.0f);
     int pitchW = 0;
     SpinLock pitchLock;
@@ -1316,7 +1326,8 @@ public:
         }
         // 입력 레벨 (매 틱)
         { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel()); emit (var (o)); }
-        // 트랙 미터 (매 틱, 20Hz)
+        // 트랙 미터 — 재생 중 or 모니터링 중 + 2틱=10Hz. JSON 스팸이 pos 이벤트 정체시켜 영상 싱크 반복 스냅 방지
+        if ((engine.isPlaying() || engine.isMonitorOn()) && (tick % 2 == 0))
         {
             Array<var> list; engine.collectMeters (list);
             if (! list.isEmpty())

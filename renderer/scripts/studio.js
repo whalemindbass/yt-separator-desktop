@@ -94,7 +94,7 @@ let _songName = '';        // 현재 곡/프로젝트 이름
 let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
 
 const HEAD_W = 140;
-const DEFAULT_LANE_H = 64;   // CSS .daw-lane 기본 높이 — 이보다 작게는 못 줄임(뷰 깨짐 방지)
+const DEFAULT_LANE_H = 82;   // CSS .daw-lane 기본 높이 — pan/meter 2번째 줄 수용
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
 const BEATS_PER_BAR = 4;
 let _bpm = 120;         // 조절 가능(그리드·스냅·룰러에 반영). 곡 로드 시 자동 감지
@@ -206,12 +206,17 @@ function renderTracks() {
       <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
         <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
-          <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
-          <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
-          <input class="daw-pan${p100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${p100}" title="팬 (더블클릭=센터)">
+          <div class="daw-btn-grp">
+            <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
+            <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
+          </div>
           <input class="daw-vol" type="range" min="0" max="150" value="${g100}" title="볼륨">
         </div>
-        <div class="daw-meter" data-mid="${stemIdOf(t.engineIndex)}"><i class="l"></i><i class="r"></i></div>
+        <div class="daw-pan-row">
+          <span class="lbl">PAN</span>
+          <input class="daw-pan${p100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${p100}" title="팬 (더블클릭=센터)">
+          <div class="daw-meter" data-mid="${stemIdOf(t.engineIndex)}"><i class="l"></i><i class="r"></i></div>
+        </div>
       </div>
       <div class="daw-area"><div class="daw-clip"></div></div>`;
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(stemIdOf(t.engineIndex)));
@@ -225,12 +230,8 @@ function renderTracks() {
       t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
       if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
     });
-    pan.addEventListener('input', () => {
-      const v = Number(pan.value); t.pan = v / 100;
-      pan.classList.toggle('off', v === 0);
-      api.engine.track(t.engineIndex, { pan: t.pan }); markDirty();
-    });
-    pan.addEventListener('dblclick', () => { pan.value = 0; pan.classList.add('off'); t.pan = 0; api.engine.track(t.engineIndex, { pan: 0 }); markDirty(); });
+    pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); t.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.track(t.engineIndex, { pan: t.pan }); markDirty(); });
+    pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); t.pan = 0; api.engine.track(t.engineIndex, { pan: 0 }); markDirty(); });
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
     clip.addEventListener('click', (e) => e.stopPropagation());
@@ -273,14 +274,19 @@ function renderRecLanes() {
       <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
         <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span></div>
         <div class="ctrls">
-          ${rBtnHtml}
-          <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
-          <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
-          <input class="daw-pan${rp100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${rp100}" title="팬 (더블클릭=센터)">
+          <div class="daw-btn-grp">
+            ${rBtnHtml}
+            <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
+            <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
+          </div>
           <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
           <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
         </div>
-        <div class="daw-meter" data-mid="${rt.id}"><i class="l"></i><i class="r"></i></div>
+        <div class="daw-pan-row">
+          <span class="lbl">PAN</span>
+          <input class="daw-pan${rp100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${rp100}" title="팬 (더블클릭=센터)">
+          <div class="daw-meter" data-mid="${rt.id}"><i class="l"></i><i class="r"></i></div>
+        </div>
       </div>
       <div class="daw-area"></div>
       <div class="daw-lane-resize" title="드래그해 높이 조절"></div>`;
@@ -303,12 +309,7 @@ function renderRecLanes() {
       rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain });
       if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
     });
-    pan.addEventListener('input', (e) => {
-      e.stopPropagation();
-      const v = Number(pan.value); rt.pan = v / 100;
-      pan.classList.toggle('off', v === 0);
-      api.engine.recTrack(rt.id, { pan: rt.pan }); markDirty();
-    });
+    pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); rt.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.recTrack(rt.id, { pan: rt.pan }); markDirty(); });
     pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); rt.pan = 0; api.engine.recTrack(rt.id, { pan: 0 }); markDirty(); });
     // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
     del.addEventListener('click', (e) => {
@@ -423,7 +424,7 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
-// ── 트랙 미터 (엔진 20Hz emit + 렌더러 rAF 감쇠) ──
+// ── 트랙 미터 (엔진 10Hz emit + 렌더러 rAF 감쇠) ──
 const _meters = new Map();   // id → {curL, curR, holdL, holdR, holdLTs, holdRTs}
 function onTrackMeter(list) {
   const now = performance.now();
@@ -437,12 +438,24 @@ function onTrackMeter(list) {
   }
   if (!_metersRafOn) { _metersRafOn = true; requestAnimationFrame(_metersTick); }
 }
+function syncHeroState() {   // hero 클래스에 도구 오픈 여부 반영 — 접힘 + 도구 열림 = 도구가 hero 전체 폭 채움
+  const hero = document.getElementById('daw-hero'); if (!hero) return;
+  const toolsOpen = !document.getElementById('daw-tools')?.hidden;
+  hero.classList.toggle('tools-open', toolsOpen);
+}
+function applyMeter(el, st) {
+  const l100 = Math.min(100, st.curL * 100), r100 = Math.min(100, st.curR * 100);
+  const iL = el.children[0], iR = el.children[1];
+  iL.style.setProperty('--v', l100 + '%');
+  iR.style.setProperty('--v', r100 + '%');
+  el.classList.toggle('clip', st.holdL >= 1.0 || st.holdR >= 1.0);   // 잠깐 클립 유지용으로 holdL/R 는 계속 씀
+}
 let _metersRafOn = false, _metersLast = 0;
 function _metersTick(ts) {
   const dt = Math.min(0.05, (ts - _metersLast) / 1000 || 0.016);
   _metersLast = ts;
-  const decay = Math.exp(-dt * 5);        // curr peak: ~200ms 감쇠상수
-  const holdMs = 800;                     // peak-hold 유지
+  const decay = Math.exp(-dt * 5);
+  const holdMs = 800;
   const holdDecay = Math.exp(-dt * 3);
   let anyLive = false;
   _meters.forEach((st, id) => {
@@ -450,19 +463,16 @@ function _metersTick(ts) {
     if (ts - st.holdLTs > holdMs) st.holdL *= holdDecay;
     if (ts - st.holdRTs > holdMs) st.holdR *= holdDecay;
     if (st.curL > 0.001 || st.curR > 0.001 || st.holdL > 0.001 || st.holdR > 0.001) anyLive = true;
-    const el = document.querySelector(`.daw-meter[data-mid="${id}"]`);
-    if (!el) return;
-    const l100 = Math.min(100, st.curL * 100), r100 = Math.min(100, st.curR * 100);
-    const hlL = Math.min(100, st.holdL * 100), hlR = Math.min(100, st.holdR * 100);
-    const iL = el.children[0], iR = el.children[1];
-    iL.style.setProperty('--v', l100 + '%');
-    iR.style.setProperty('--v', r100 + '%');
-    iL.style.setProperty('--hold', hlL + '%');
-    iR.style.setProperty('--hold', hlR + '%');
-    iL.style.setProperty('--holdOp', hlL > 1 ? '1' : '0');
-    iR.style.setProperty('--holdOp', hlR > 1 ? '1' : '0');
-    el.classList.toggle('clip', st.holdL >= 1.0 || st.holdR >= 1.0);
+    const els = document.querySelectorAll(`[data-mid="${id}"]`);   // .daw-meter (헤드) + .mx-meter (사이드바 마스터)
+    els.forEach(el => applyMeter(el, st));
   });
+  // 사이드바 트랙 미터 — 선택 트랙 상태 표시
+  const trackMx = document.getElementById('mx-meter-track');
+  if (trackMx) {
+    const st = _selTrack != null ? _meters.get(_selTrack) : null;
+    if (st) { applyMeter(trackMx, st); if (st.curL > 0.001 || st.curR > 0.001) anyLive = true; }
+    else { applyMeter(trackMx, { curL: 0, curR: 0, holdL: 0, holdR: 0 }); }
+  }
   if (anyLive) requestAnimationFrame(_metersTick);
   else _metersRafOn = false;
 }
@@ -634,18 +644,31 @@ let _lastSec = 0;
 // 트랙 영역 높이 — 하단 여유 스페이서 제외(재생선·범위밴드가 빈칸으로 안 나가게)
 function tracksHeight() {
   const lanes = $('daw-lanes'); if (!lanes) return 0;
-  const sp = lanes.querySelector('.daw-lanes-spacer');
-  return (lanes.offsetHeight || 0) - (sp ? sp.offsetHeight : 0);
+  return lanes.offsetHeight || 0;   // spacer 포함 — 재생선·범위선이 아래 여백까지 자연스럽게 이어짐
 }
 function updatePlayhead(sec) {
-  _lastSec = sec;
+  _lastSec = sec; _phEmitTs = performance.now(); _phEmitSec = sec;
   const ph = $('daw-playhead');
   if (!ph) return;
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
-  ph.style.left = (HEAD_W + sec * _pxPerSec) + 'px';
+  const x = Math.round(HEAD_W + sec * _pxPerSec);   // 정수화 → 서브픽셀 스냅 튐 방지
+  ph.style.transform = `translate3d(${x}px, 0, 0)`;
   ph.style.height = tracksHeight() + 'px';
   const pos = $('st-pos'); if (pos) pos.textContent = fmtTC(sec);
   $('daw-ruler').style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
+  if (_playing && !_phRafOn) { _phRafOn = true; requestAnimationFrame(_phTick); }
+}
+// 재생 중 20Hz pos 사이를 rAF 로 부드럽게 진행 — 마지막 emit 시각·값 기준으로 초당 1초씩 앞으로
+let _phEmitTs = 0, _phEmitSec = 0, _phRafOn = false;
+function _phTick(ts) {
+  if (!_playing) { _phRafOn = false; return; }
+  const sec = _phEmitSec + (ts - _phEmitTs) / 1000;
+  const ph = $('daw-playhead'); if (ph) {
+    const x = Math.round(HEAD_W + sec * _pxPerSec);
+    ph.style.transform = `translate3d(${x}px, 0, 0)`;
+    const p = $('st-pos'); if (p) p.textContent = fmtTC(sec);
+  }
+  requestAnimationFrame(_phTick);
 }
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
@@ -881,8 +904,7 @@ async function detectSongBpm(stems, sampleRate) {
     _beatInterval = (res.beatInterval > 0) ? res.beatInterval : (60 / res.tempo);   // 정밀 박 간격
     const b = $('st-bpm'); if (b) b.value = _bpm;
     _beats = Array.isArray(res.beats) ? res.beats.slice() : [];
-    const phase = (res.downbeat != null ? res.downbeat : (_beats.length ? _beats[0] : 0)) || 0;
-    _gridOffset = Math.max(0, phase) + _stemOffset;   // 첫 다운비트에 마디 정렬
+    _gridOffset = 0;   // Bar 1 = time 0. 다운비트 자동 정렬은 룰러 앞쪽 빈 공간 만들어서 뺌
     layout();
     flashTake(`BPM ${_bpm} · 박자 자동 정렬`);
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
@@ -1802,8 +1824,15 @@ function onEngineEvent(m) {
     case 'take':
       clearRecLive();
       flashTake(`녹음 저장: ${m.file}`);
-      renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
-      markDirty();
+      (async () => {
+        await renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
+        const tk = _takes.find(t => t.id === m.id);
+        if (tk) {
+          const snap = { ...tk };   // undo용 스냅샷 (파형·start·트림·페이드 유지)
+          pushUndo(() => removeClipById(m.id), () => reAddClip(snap), '녹음');
+        }
+        markDirty();
+      })();
       break;
     case 'exit':
       _started = false; _playing = false;
@@ -1962,8 +1991,8 @@ function wire() {
       _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
       layout();
       sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
-    } else if (e.target.closest('.daw-head, .daw-addrec-head')) {
-      return;   // 트랙 컨트롤부 위 = 위아래 스크롤(native 세로)
+    } else if (e.target.closest('.daw-head, .daw-addrec-head, .sp-head')) {
+      return;   // 트랙 컨트롤부(하단 spacer 컨트롤 영역 포함) = 위아래 스크롤(native 세로)
     } else {                               // 타임라인 위 = 가로 스크롤(촘촘하게)
       e.preventDefault();
       sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX) * 0.4;
@@ -2104,8 +2133,12 @@ function wire() {
   const refBox = $('st-tuner-ref');
   if (refBox) { refBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setTunerRef(Number(b.dataset.hz)))); setTunerRef(_tunerRef); }
   // 도구 드로어 — 열면 도구 선택 탭. 하나씩 사용.
-  $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; });
-  $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; });
+  $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; syncHeroState(); });
+  $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; syncHeroState(); });
+  // 영상 접기/펴기
+  $('daw-video-collapse').addEventListener('click', () => { $('daw-hero').classList.add('video-collapsed'); syncHeroState(); });
+  $('daw-hero-expand').addEventListener('click', () => { $('daw-hero').classList.remove('video-collapsed'); syncHeroState(); layout(); });
+  syncHeroState();
   const selectTool = (name) => {
     document.querySelectorAll('.daw-tool-tab').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
     document.querySelectorAll('.daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });

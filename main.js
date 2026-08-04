@@ -106,6 +106,7 @@ function createMainWindow() {
     show: false,
     frame: false,                    // 자체 titlebar 사용
     titleBarStyle: 'hidden',
+    icon: path.join(__dirname, 'renderer/assets/app-icon.png'),   // 작업표시줄·창 아이콘 명시
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
