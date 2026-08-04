@@ -2344,7 +2344,28 @@ body { display: flex; flex-direction: column; }
 .daw-vol:hover::-webkit-slider-runnable-track { background: color-mix(in srgb, var(--c, var(--accent)) 35%, rgba(255,255,255,.15)); }
 .daw-vol:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .daw-vol:disabled { opacity: .4; }
-.daw-area { position: relative; overflow: hidden; }
+/* Pan: -100..0..+100 (센터=0). 트랙에 센터 마커, 센터일 땐 회색 썸 */
+.daw-pan { -webkit-appearance: none; appearance: none; width: 44px; min-width: 44px; height: 14px; background: transparent; cursor: pointer; }
+.daw-pan::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background:
+  linear-gradient(to right, rgba(255,255,255,.15) 0 calc(50% - 1px), rgba(255,255,255,.55) calc(50% - 1px) calc(50% + 1px), rgba(255,255,255,.15) calc(50% + 1px) 100%); }
+.daw-pan::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 2px; background: var(--c, var(--accent)); transition: box-shadow .12s, background .12s; }
+.daw-pan:hover::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
+.daw-pan.off::-webkit-slider-thumb { background: var(--tx-3); }
+.daw-lane-rec .daw-pan { width: 34px; min-width: 34px; }
+/* Meter: 트랙 헤드 하단 얇은 L/R 스테레오 바. green→yellow→red, 클립 시 빨강 유지 */
+.daw-meter { display: grid; grid-template-rows: 2px 2px; gap: 1px; margin-top: 3px; }
+.daw-meter i { display: block; background: rgba(255,255,255,.08); border-radius: 1px; overflow: hidden; position: relative; }
+.daw-meter i::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: var(--v, 0%);
+  background: linear-gradient(to right, #4a9d5a 0 60%, #d1a13f 60% 85%, #d84a4a 85% 100%);
+  background-size: 44px 100%; background-repeat: no-repeat;
+  transition: width .05s linear;
+}
+.daw-meter i::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: var(--hold, 0%); width: 1px;
+  background: rgba(255,255,255,.85); opacity: var(--holdOp, 0);
+}
+.daw-meter.clip i::before { background: #d84a4a; }
 .daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .daw-ph { position: absolute; top: 0; width: 1.5px; background: var(--accent); z-index: 4; pointer-events: none; }

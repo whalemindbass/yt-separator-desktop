@@ -48,11 +48,13 @@ struct Stem
     String path;   // export(오프라인 렌더)용 프레시 리더 생성
     int id = 0;    // FX 주소용 id (스템은 90001+ 범위 — 녹음 트랙 id와 충돌 방지)
     std::atomic<float> gain { 1.0f };
+    std::atomic<float> pan  { 0.0f };   // -1(L) .. 0(C) .. +1(R), equal-power
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
+    std::atomic<float> pkL { 0.0f }, pkR { 0.0f };   // post-fader peak (tick 사이 누적, 소비=exchange 0)
     std::vector<std::unique_ptr<FxSlot>> chain;   // 스템별 독립 FX
     CriticalSection fxLock;
-    float curGain = 1.0f;   // 오디오 스레드 전용 — 게인/뮤트/솔로 램프(클릭/지퍼 방지)
+    float curGainL = 1.0f, curGainR = 1.0f;   // 오디오 스레드 전용 — L/R 각각 램프(pan+gain 결합)
 };
 
 // 플러그인 에디터를 담는 네이티브 창
@@ -111,11 +113,13 @@ struct RecTrack
     int id = 0;
     int type = 0;   // 0=rec(내 악기 녹음), 1=audio(임포트, 녹음 대상 불가)
     std::atomic<float> gain { 1.0f };
+    std::atomic<float> pan  { 0.0f };              // -1..0..+1 equal-power
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
+    std::atomic<float> pkL { 0.0f }, pkR { 0.0f }; // post-fader peak(누적, exchange로 소비)
     std::vector<std::unique_ptr<FxSlot>> chain;   // 트랙별 독립 이펙트
     CriticalSection fxLock;                        // processBlock 과 체인 변경 상호배제
-    float curGain = 1.0f;                          // 오디오 스레드 전용 — 게인/뮤트/솔로 램프
+    float curGainL = 1.0f, curGainR = 1.0f;        // 오디오 스레드 전용 — L/R 결합 램프(게인·팬·뮤트·솔로)
 };
 
 // 원본 → 목적지에 게인 램프(g0→g1) 걸어 합산 (블록 경계 클릭·지퍼 방지)
@@ -125,6 +129,30 @@ static inline void addRamped (float* dst, const float* src, int n, float g0, flo
     const float step = (g1 - g0) / (float) jmax (1, n);
     float g = g0;
     for (int i = 0; i < n; ++i) { dst[i] += src[i] * g; g += step; }
+}
+
+// equal-power pan: pan -1..0..+1 → (gL, gR). 중앙에서 ~-3dB 가감으로 자연스러운 좌우 이동
+static inline void panGains (float pan, float& gL, float& gR)
+{
+    const float p = jlimit (-1.0f, 1.0f, pan);
+    const float theta = (p + 1.0f) * 0.25f * MathConstants<float>::pi;   // 0..π/2
+    gL = std::cos (theta);
+    gR = std::sin (theta);
+}
+
+// post-fader block peak: 원본 abs max × 게인 max endpoint(램프 감안). 정확한 파형 피크 근사, 오버헤드 최소
+static inline float blockPeak (const float* src, int n, float g0, float g1)
+{
+    float m = 0.0f;
+    for (int i = 0; i < n; ++i) { const float a = std::abs (src[i]); if (a > m) m = a; }
+    return m * jmax (std::abs (g0), std::abs (g1));
+}
+
+// atomic peak 갱신 — max 유지(락 없음)
+static inline void updatePeak (std::atomic<float>& p, float v)
+{
+    float cur = p.load (std::memory_order_relaxed);
+    while (v > cur && ! p.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
 }
 
 class Engine : public AudioIODeviceCallback
@@ -418,6 +446,28 @@ public:
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
+    // 트랙 미터 수집 — 각 스템/녹음 트랙의 pkL/pkR 을 exchange 로 소비. 렌더러가 시각적 감쇠 담당
+    void collectMeters (Array<var>& out)
+    {
+        for (auto& s : stems)
+        {
+            auto* o = new DynamicObject();
+            o->setProperty ("id", s->id);
+            o->setProperty ("l",  s->pkL.exchange (0.0f, std::memory_order_relaxed));
+            o->setProperty ("r",  s->pkR.exchange (0.0f, std::memory_order_relaxed));
+            out.add (var (o));
+        }
+        const ScopedTryLock sl (takesLock);
+        if (sl.isLocked())
+            for (auto& rt : recTracks)
+            {
+                auto* o = new DynamicObject();
+                o->setProperty ("id", rt->id);
+                o->setProperty ("l",  rt->pkL.exchange (0.0f, std::memory_order_relaxed));
+                o->setProperty ("r",  rt->pkR.exchange (0.0f, std::memory_order_relaxed));
+                out.add (var (o));
+            }
+    }
     // YIN 피치 검출 (De Cheveigné & Kawahara) — 옥타브 안정 + 포물선 보간으로 정밀.
     double detectPitch()
     {
@@ -480,13 +530,14 @@ public:
     }
 
     // 트랙 제어 (index = 스템 순서)
-    void setTrack (int index, const var& gain, const var& mute, const var& solo)
+    void setTrack (int index, const var& gain, const var& mute, const var& solo, const var& pan)
     {
         if (index < 0 || index >= (int) stems.size()) return;
         auto& s = *stems[(size_t) index];
         if (! gain.isVoid()) s.gain = (float) (double) gain;
         if (! mute.isVoid()) s.mute = (bool) mute;
         if (! solo.isVoid()) s.solo = (bool) solo;
+        if (! pan.isVoid())  s.pan  = jlimit (-1.0f, 1.0f, (float) (double) pan);
         recomputeSolos();
     }
     void setMaster (float g)   { masterGain = g; }
@@ -510,6 +561,7 @@ public:
             auto* o = new DynamicObject();
             o->setProperty ("id", t->id);
             o->setProperty ("gain", t->gain.load());
+            o->setProperty ("pan",  t->pan.load());
             o->setProperty ("mute", t->mute.load());
             o->setProperty ("solo", t->solo.load());
             o->setProperty ("type", t->type);
@@ -560,6 +612,7 @@ public:
                 t->id = nextRecId++;
                 if (! v["type"].isVoid()) t->type = (int) v["type"];
                 if (! v["gain"].isVoid()) t->gain = (float) (double) v["gain"];
+                if (! v["pan"].isVoid())  t->pan  = jlimit (-1.0f, 1.0f, (float) (double) v["pan"]);
                 if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
                 if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
                 const ScopedLock sl (takesLock);
@@ -570,13 +623,14 @@ public:
         recomputeSolos();
         emitRecTracks();
     }
-    void setRecTrack (int id, const var& gain, const var& mute, const var& solo)
+    void setRecTrack (int id, const var& gain, const var& mute, const var& solo, const var& pan)
     {
         auto* t = findRec (id);
         if (t == nullptr) return;
         if (! gain.isVoid()) t->gain = (float) (double) gain;
         if (! mute.isVoid()) t->mute = (bool) mute;
         if (! solo.isVoid()) t->solo = (bool) solo;
+        if (! pan.isVoid())  t->pan  = jlimit (-1.0f, 1.0f, (float) (double) pan);
         recomputeSolos();
     }
     void moveTake (int64 id, int64 newStart, int trackId)   // trackId>0 이면 트랙 이동
@@ -973,10 +1027,13 @@ public:
                 s->src->getNextAudioBlock (info);
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
-                const float target = audible ? s->gain.load() : 0.0f;   // 뮤트/솔로도 램프로 declick
+                const float g = audible ? s->gain.load() : 0.0f;   // 뮤트/솔로도 램프로 declick
+                float pL, pR; panGains (s->pan.load(), pL, pR);
+                const float tgtL = g * pL, tgtR = g * pR;
 
                 // 스템별 독립 FX 체인 (있으면 별도 버퍼에서 처리 후 합산)
                 const ScopedTryLock fl (s->fxLock);
+                const AudioBuffer<float>* srcBuf = &scratch;
                 if (fl.isLocked() && ! s->chain.empty())
                 {
                     stemFxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
@@ -985,17 +1042,21 @@ public:
                         stemFxBuf.copyFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
                     for (auto& sl : s->chain)
                         if (sl && sl->plugin && ! sl->bypass.load()) { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
-                    for (int c = 0; c < numOut; ++c)
-                        addRamped (outputs[c], stemFxBuf.getReadPointer (jmin (c, stemFxBuf.getNumChannels() - 1)),
-                                   numSamples, s->curGain, target);
+                    srcBuf = &stemFxBuf;
+                }
+                // 스테레오 2ch 라우팅: L=0, R=1 (numOut<2 폴백은 L만)
+                const float* srcL = srcBuf->getReadPointer (0);
+                const float* srcR = srcBuf->getReadPointer (jmin (1, srcBuf->getNumChannels() - 1));
+                if (numOut >= 2)
+                {
+                    addRamped (outputs[0], srcL, numSamples, s->curGainL, tgtL);
+                    addRamped (outputs[1], srcR, numSamples, s->curGainR, tgtR);
                 }
                 else
-                {
-                    for (int c = 0; c < numOut; ++c)
-                        addRamped (outputs[c], scratch.getReadPointer (jmin (c, scratch.getNumChannels() - 1)),
-                                   numSamples, s->curGain, target);
-                }
-                s->curGain = target;
+                    addRamped (outputs[0], srcL, numSamples, s->curGainL, tgtL);
+                updatePeak (s->pkL, blockPeak (srcL, numSamples, s->curGainL, tgtL));
+                updatePeak (s->pkR, blockPeak (srcR, numSamples, s->curGainR, tgtR));
+                s->curGainL = tgtL; s->curGainR = tgtR;
             }
             playhead.fetch_add (numSamples);
         }
@@ -1025,8 +1086,10 @@ public:
                 for (auto& rt : recTracks)
                 {
                     const bool audible = anySolo ? rt->solo.load() : ! rt->mute.load();
-                    const float target = (audible ? rt->gain.load() : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
-                    if (rt->curGain == 0.0f && target == 0.0f) continue;             // 무음 지속 → 처리 스킵
+                    const float g = (audible ? rt->gain.load() : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
+                    float pL, pR; panGains (rt->pan.load(), pL, pR);
+                    const float tgtL = g * pL, tgtR = g * pR;
+                    if (rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;   // 무음 지속 → 처리 스킵
 
                     fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
                     fxBuf.clear();
@@ -1069,10 +1132,19 @@ public:
                                 }
                     }
 
-                    for (int c = 0; c < numOut; ++c)   // post-FX 페이더 + 램프
-                        addRamped (outputs[c], fxBuf.getReadPointer (jmin (c, fxBuf.getNumChannels() - 1)),
-                                   numSamples, rt->curGain, target);
-                    rt->curGain = target;
+                    // post-FX 페이더 + 팬(L/R 결합 램프)
+                    const float* rtL = fxBuf.getReadPointer (0);
+                    const float* rtR = fxBuf.getReadPointer (jmin (1, fxBuf.getNumChannels() - 1));
+                    if (numOut >= 2)
+                    {
+                        addRamped (outputs[0], rtL, numSamples, rt->curGainL, tgtL);
+                        addRamped (outputs[1], rtR, numSamples, rt->curGainR, tgtR);
+                    }
+                    else
+                        addRamped (outputs[0], rtL, numSamples, rt->curGainL, tgtL);
+                    updatePeak (rt->pkL, blockPeak (rtL, numSamples, rt->curGainL, tgtL));
+                    updatePeak (rt->pkR, blockPeak (rtR, numSamples, rt->curGainR, tgtR));
+                    rt->curGainL = tgtL; rt->curGainR = tgtR;
                 }
             }
         }
@@ -1244,6 +1316,16 @@ public:
         }
         // 입력 레벨 (매 틱)
         { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel()); emit (var (o)); }
+        // 트랙 미터 (매 틱, 20Hz)
+        {
+            Array<var> list; engine.collectMeters (list);
+            if (! list.isEmpty())
+            {
+                auto* o = ev ("trackMeter");
+                o->setProperty ("list", var (list));
+                emit (var (o));
+            }
+        }
         // 튜너 피치 (2틱=10Hz. rAF 보간과 함께 부드럽게)
         if (++tick % 2 == 0)
         {
@@ -1278,10 +1360,10 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recTrackAdd") engine.addRecTrack ((int) c["type"]);
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
     else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
-    else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"]);
+    else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"], c["pan"]);
     else if (cmd == "recTracks")   engine.emitRecTracks();
     else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"], (int) c["gen"]);
-    else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"]);
+    else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"], c["pan"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);

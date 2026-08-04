@@ -201,26 +201,36 @@ function renderTracks() {
     lane.dataset.key = t.key;
     lane.dataset.selid = stemIdOf(t.engineIndex);   // 스템도 선택 가능(FX·볼륨 대상)
     const g100 = Math.round((t.gain != null ? t.gain : 1) * 100);
+    const p100 = Math.round((t.pan != null ? t.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
         <div class="nm"><i></i>${t.label}</div>
         <div class="ctrls">
           <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
           <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
+          <input class="daw-pan${p100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${p100}" title="팬 (더블클릭=센터)">
           <input class="daw-vol" type="range" min="0" max="150" value="${g100}" title="볼륨">
         </div>
+        <div class="daw-meter" data-mid="${stemIdOf(t.engineIndex)}"><i class="l"></i><i class="r"></i></div>
       </div>
       <div class="daw-area"><div class="daw-clip"></div></div>`;
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(stemIdOf(t.engineIndex)));
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
+    const pan = lane.querySelector('.daw-pan');
     mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); t.mute = on; api.engine.track(t.engineIndex, { mute: on }); markDirty(); });
     sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); t.solo = on; api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); markDirty(); });
     vol.addEventListener('input', () => {
       t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
       if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
     });
+    pan.addEventListener('input', () => {
+      const v = Number(pan.value); t.pan = v / 100;
+      pan.classList.toggle('off', v === 0);
+      api.engine.track(t.engineIndex, { pan: t.pan }); markDirty();
+    });
+    pan.addEventListener('dblclick', () => { pan.value = 0; pan.classList.add('off'); t.pan = 0; api.engine.track(t.engineIndex, { pan: 0 }); markDirty(); });
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
     clip.addEventListener('click', (e) => e.stopPropagation());
@@ -258,6 +268,7 @@ function renderRecLanes() {
     lane.dataset.selid = rt.id;
     lane.dataset.type = isAudio ? 'audio' : 'rec';
     const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>`;
+    const rp100 = Math.round((rt.pan != null ? rt.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
         <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span></div>
@@ -265,9 +276,11 @@ function renderRecLanes() {
           ${rBtnHtml}
           <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
           <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
+          <input class="daw-pan${rp100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${rp100}" title="팬 (더블클릭=센터)">
           <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
           <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
         </div>
+        <div class="daw-meter" data-mid="${rt.id}"><i class="l"></i><i class="r"></i></div>
       </div>
       <div class="daw-area"></div>
       <div class="daw-lane-resize" title="드래그해 높이 조절"></div>`;
@@ -275,6 +288,7 @@ function renderRecLanes() {
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
+    const pan = lane.querySelector('.daw-pan');
     const del = lane.querySelector('[data-m="del"]');
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
@@ -289,6 +303,13 @@ function renderRecLanes() {
       rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain });
       if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
     });
+    pan.addEventListener('input', (e) => {
+      e.stopPropagation();
+      const v = Number(pan.value); rt.pan = v / 100;
+      pan.classList.toggle('off', v === 0);
+      api.engine.recTrack(rt.id, { pan: rt.pan }); markDirty();
+    });
+    pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); rt.pan = 0; api.engine.recTrack(rt.id, { pan: 0 }); markDirty(); });
     // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
     del.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -400,6 +421,50 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
     f.disabled = false; f.value = v; val.textContent = v;
     lbl.textContent = selTrackLabel(_selTrack);
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
+}
+
+// ── 트랙 미터 (엔진 20Hz emit + 렌더러 rAF 감쇠) ──
+const _meters = new Map();   // id → {curL, curR, holdL, holdR, holdLTs, holdRTs}
+function onTrackMeter(list) {
+  const now = performance.now();
+  for (const m of list) {
+    const st = _meters.get(m.id) || { curL: 0, curR: 0, holdL: 0, holdR: 0, holdLTs: 0, holdRTs: 0 };
+    if (m.l > st.curL)  st.curL  = m.l;
+    if (m.r > st.curR)  st.curR  = m.r;
+    if (m.l > st.holdL) { st.holdL = m.l; st.holdLTs = now; }
+    if (m.r > st.holdR) { st.holdR = m.r; st.holdRTs = now; }
+    _meters.set(m.id, st);
+  }
+  if (!_metersRafOn) { _metersRafOn = true; requestAnimationFrame(_metersTick); }
+}
+let _metersRafOn = false, _metersLast = 0;
+function _metersTick(ts) {
+  const dt = Math.min(0.05, (ts - _metersLast) / 1000 || 0.016);
+  _metersLast = ts;
+  const decay = Math.exp(-dt * 5);        // curr peak: ~200ms 감쇠상수
+  const holdMs = 800;                     // peak-hold 유지
+  const holdDecay = Math.exp(-dt * 3);
+  let anyLive = false;
+  _meters.forEach((st, id) => {
+    st.curL *= decay; st.curR *= decay;
+    if (ts - st.holdLTs > holdMs) st.holdL *= holdDecay;
+    if (ts - st.holdRTs > holdMs) st.holdR *= holdDecay;
+    if (st.curL > 0.001 || st.curR > 0.001 || st.holdL > 0.001 || st.holdR > 0.001) anyLive = true;
+    const el = document.querySelector(`.daw-meter[data-mid="${id}"]`);
+    if (!el) return;
+    const l100 = Math.min(100, st.curL * 100), r100 = Math.min(100, st.curR * 100);
+    const hlL = Math.min(100, st.holdL * 100), hlR = Math.min(100, st.holdR * 100);
+    const iL = el.children[0], iR = el.children[1];
+    iL.style.setProperty('--v', l100 + '%');
+    iR.style.setProperty('--v', r100 + '%');
+    iL.style.setProperty('--hold', hlL + '%');
+    iR.style.setProperty('--hold', hlR + '%');
+    iL.style.setProperty('--holdOp', hlL > 1 ? '1' : '0');
+    iR.style.setProperty('--holdOp', hlR > 1 ? '1' : '0');
+    el.classList.toggle('clip', st.holdL >= 1.0 || st.holdR >= 1.0);
+  });
+  if (anyLive) requestAnimationFrame(_metersTick);
+  else _metersRafOn = false;
 }
 
 // ── 드래그 이동량 배지 (+0:07) ──
@@ -1283,7 +1348,7 @@ async function buildProjectObject() {
   stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
   const states = await gatherFx(pairs);
   const tracks = _recTracks.map(r => ({
-    id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
+    id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, pan: r.pan != null ? r.pan : 0, mute: !!r.mute, solo: !!r.solo,
     name: r.name || '', color: r.color || '', height: r.height || 0,
     fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
   }));
@@ -1294,7 +1359,7 @@ async function buildProjectObject() {
   // 스템 트랙 믹스(볼륨·뮤트·솔로 + FX)까지 기록
   const stemMix = _tracks.map(t => {
     const sid = stemIdOf(t.engineIndex);
-    return { key: t.key, gain: t.gain != null ? t.gain : 1, mute: !!t.mute, solo: !!t.solo,
+    return { key: t.key, gain: t.gain != null ? t.gain : 1, pan: t.pan != null ? t.pan : 0, mute: !!t.mute, solo: !!t.solo,
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
@@ -1350,10 +1415,11 @@ async function applyProject(p) {
     if (Array.isArray(p.stems.mix)) {
       p.stems.mix.forEach(m => {
         const t = _tracks.find(x => x.key === m.key); if (!t) return;
-        t.gain = m.gain != null ? m.gain : 1; t.mute = !!m.mute; t.solo = !!m.solo;
-        api.engine.track(t.engineIndex, { gain: t.gain, mute: t.mute, solo: t.solo });
+        t.gain = m.gain != null ? m.gain : 1; t.pan = m.pan != null ? m.pan : 0; t.mute = !!m.mute; t.solo = !!m.solo;
+        api.engine.track(t.engineIndex, { gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo });
         const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`); if (!lane) return;
         const v = lane.querySelector('.daw-vol'); if (v) v.value = Math.round(t.gain * 100);
+        const pn = lane.querySelector('.daw-pan'); if (pn) { const pv = Math.round(t.pan * 100); pn.value = pv; pn.classList.toggle('off', pv === 0); }
         const mb = lane.querySelector('[data-m="mute"]'); if (mb) { mb.classList.toggle('on', t.mute); mb.setAttribute('aria-pressed', String(t.mute)); }
         const sb = lane.querySelector('[data-m="solo"]'); if (sb) { sb.classList.toggle('on', t.solo); sb.setAttribute('aria-pressed', String(t.solo)); }
         if (Array.isArray(m.fx) && m.fx.length)   // 스템 FX 체인 복원
@@ -1374,7 +1440,7 @@ async function applyProject(p) {
   if (Array.isArray(p.tracks) && p.tracks.length) {
     _recTracks = [];
     const gen = ++_recTracksGenReq;
-    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo })), gen);
+    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo })), gen);
     const ok = await waitRecTracks(gen);
     if (!ok) { _suppressDirty = false; flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
     idMap = {};
@@ -1719,6 +1785,7 @@ function onEngineEvent(m) {
     case 'pos': onPos(m.samples); break;
     case 'level': updateVU(m.peak); break;
     case 'pitch': updateTuner(m.freq); break;
+    case 'trackMeter': onTrackMeter(m.list || []); break;
     case 'recTracks': {
       const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
       _recTracks = (m.list || []).map(r => { const p = prevMeta.get(r.id); return p ? { ...r, ...p } : r; });   // 렌더러 전용 메타(이름·색·높이) id로 보존
