@@ -336,6 +336,9 @@ body { display: flex; flex-direction: column; }
   width: 100%;
   margin: 0 auto;
 }
+/* flex column 컨테이너에서 자식이 기본 shrink 되면 내용이 넘쳐도 scrollHeight 가 안 커져
+   스크롤이 죽는다 → 분리 뷰 자식은 shrink 금지 (진행/완료 카드가 늘어나도 스크롤 가능) */
+.body[data-view="separate"] > * { flex-shrink: 0; }
 
 /* Hero */
 .hero h2 {
@@ -393,8 +396,8 @@ body { display: flex; flex-direction: column; }
   font-weight: 600;
 }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-fg); }
-/* 비활성 프라이머리 = 죽은 초록 블록 대신 중립(명확히 비활성) */
-.btn.primary:disabled { background: var(--elev); color: var(--tx-3); border-color: var(--border); opacity: 1; }
+/* 비활성 프라이머리 — 살짝 어두운 accent tint + 밝은 텍스트로 가독성 확보 */
+.btn.primary:disabled { background: color-mix(in srgb, var(--accent) 20%, var(--elev)); color: color-mix(in srgb, var(--accent-fg) 55%, var(--tx-1)); border-color: color-mix(in srgb, var(--accent) 25%, transparent); opacity: 1; }
 
 .link-btn {
   background: none; border: 0;
@@ -2612,11 +2615,11 @@ body { background: var(--bg) !important; }
 
 /* 버튼 — 플랫 + hover/포커스 */
 .btn, .mini, .daw .btn { transition: background .14s var(--ease), border-color .14s var(--ease), transform .08s var(--ease), box-shadow .14s var(--ease); }
-.btn:not(.pri):not(.icon) { background: var(--elev); border: 1px solid var(--border-mid); }
-.btn:not(.pri):hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-mid)); background: var(--elev-2); }
+.btn:not(.pri):not(.primary):not(.icon) { background: var(--elev); border: 1px solid var(--border-mid); }
+.btn:not(.pri):not(.primary):hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-mid)); background: var(--elev-2); }
 .btn:active:not(:disabled) { transform: translateY(.5px); }
-.btn.pri { background: var(--accent); box-shadow: none; }
-.btn.pri:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.pri, .btn.primary { background: var(--accent); color: var(--accent-fg); box-shadow: none; }
+.btn.pri:hover:not(:disabled), .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn:focus-visible, .pill:focus-visible, .tab:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent); }
 
 /* 입력 — 파인 면 + accent 포커스 글로우 */

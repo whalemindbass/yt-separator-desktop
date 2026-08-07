@@ -531,6 +531,8 @@ let lastRegisteredId = null;
 function setError(msg) {
   if (!msg) { errBox.hidden = true; errBox.textContent = ''; return; }
   errBox.hidden = false; errBox.textContent = msg;
+  // 화면 밖(하단)에 떠서 못 보는 일 방지 — 항상 보이게 스크롤
+  try { errBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
 }
 function isValidUrl(s) { return /^https?:\/\/[^\s]+$/.test(s.trim()); }
 function fmtDuration(sec) {
@@ -551,6 +553,8 @@ const existingSub    = $('existing-banner-sub');
 const existingOpen   = $('existing-open-btn');
 let existingLibItemId = null;
 
+// probe 성공한 URL — 동일 값 input 이벤트로 상태 날리지 않기 위한 기준
+let probedUrl = '';
 function resetSeparateView(alsoClearUrl = false) {
   if (alsoClearUrl) { urlInput.value = ''; lastClipboardSeen = ''; }
   probeBtn.disabled = !isValidUrl(urlInput.value);
@@ -567,10 +571,19 @@ function resetSeparateView(alsoClearUrl = false) {
   currentBaseName = null;
   existingLibItemId = null;
   lastRegisteredId = null;
+  probedUrl = '';
 }
 
-urlInput.addEventListener('input', () => resetSeparateView(false));
-$('reset-btn').addEventListener('click', () => { resetSeparateView(true); urlInput.focus(); });
+// URL 이 실제로 바뀐 경우에만 초기화 — 클립보드 자동감지가 dispatch 하는 합성 input 이벤트나
+// 값이 그대로인 input 으로 currentProbe 가 날아가서 "다운로드 눌러도 무반응" 되던 문제 방지
+urlInput.addEventListener('input', () => {
+  if (urlInput.value.trim() === probedUrl && probedUrl) { probeBtn.disabled = false; return; }
+  resetSeparateView(false);
+});
+$('reset-btn').addEventListener('click', async () => {
+  try { await api.ytdlp.cancel(); } catch {}   // 백엔드 프로세스 잔재 청소 (activeDownload 스테일 방지)
+  resetSeparateView(true); urlInput.focus();
+});
 
 // ── 로컬 파일로 분리 ─────────────────────────────
 $('local-btn').addEventListener('click', async () => {
@@ -639,6 +652,7 @@ probeBtn.addEventListener('click', async () => {
     return;
   }
   currentProbe = res.info;
+  probedUrl = url;              // 이 URL 로 probe 성공 — 동일 값 input 이벤트로는 리셋 안 함
   renderProbe(res.info);
   dlBtn.disabled = false;
 
@@ -688,7 +702,15 @@ const phaseLabelsDl = () => ({
 let unsubProgress = null;
 
 dlBtn.addEventListener('click', async () => {
-  if (!currentProbe) return;
+  // 무반응 금지 — 상태 없으면 이유를 알려주고, URL 있으면 probe 부터 자동 수행
+  if (!currentProbe) {
+    const u = urlInput.value.trim();
+    if (isValidUrl(u)) { setError(''); probeBtn.click(); return; }
+    setError(getLocale() === 'en'
+      ? 'Paste a YouTube URL and press 확인 (Check) first.'
+      : '먼저 YouTube 주소를 붙여넣고 “확인”을 눌러 주세요.');
+    return;
+  }
   setError('');
   doneCard.hidden = true; stemsDone.hidden = true;
   progWrap.hidden = false;
@@ -715,18 +737,28 @@ dlBtn.addEventListener('click', async () => {
     if (p.speed) progSpeed.textContent = fmtBytes(p.speed) + '/s';
   });
 
-  const res = await api.ytdlp.download(urlInput.value.trim(), {
-    title: currentProbe?.title, id: currentProbe?.id, quality: currentQuality,
-  });
+  const opts = { title: currentProbe?.title, id: currentProbe?.id, quality: currentQuality };
+  let res;
+  try {
+    res = await api.ytdlp.download(urlInput.value.trim(), opts);
+    // 백엔드가 "이미 다운로드 중" 이면 잔재 프로세스 정리 후 1회 자동 재시도
+    if (res && !res.ok && /이미 다운로드 중/.test(res.error || '')) {
+      try { await api.ytdlp.cancel(); } catch {}
+      res = await api.ytdlp.download(urlInput.value.trim(), opts);
+    }
+  } catch (e) {
+    res = { ok: false, error: 'IPC 실패: ' + (e && e.message || e) };
+  }
   unsubProgress?.(); unsubProgress = null;
   cancelBtn.hidden = true;
   dlBtn.disabled = false; probeBtn.disabled = false; urlInput.disabled = false;
 
-  if (!res.ok) { setError(t('err.dlpFailed') + ': ' + res.error); progWrap.hidden = true; return; }
+  if (!res || !res.ok) { setError(t('err.dlpFailed') + ': ' + (res?.error || 'unknown')); progWrap.hidden = true; return; }
   currentVideoPath = res.filePath;
   currentBaseName = res.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
   donePath.textContent = res.filePath;
   doneCard.hidden = false;
+  try { doneCard.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
   progWrap.hidden = true;   // 다운로드 progress 는 완료됐으니 감춤 — done-card 만 남겨 흐름 명확화
 });
 

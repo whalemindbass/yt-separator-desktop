@@ -59,6 +59,9 @@ const YTDLP_BIN  = vendorPath('yt-dlp', 'yt-dlp.exe');
 const FFMPEG_BIN = vendorPath('ffmpeg', 'ffmpeg.exe');
 const FFMPEG_DIR = vendorPath('ffmpeg');
 
+// 진단 로그 — main 프로세스 콘솔에만. 파일 기록·렌더러 전달 없음
+function dlog(...args) { console.log(...args); }
+
 // ── 사용자 설정 (userData/settings.json) ────────────────
 function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
 function readSettings() {
@@ -619,7 +622,14 @@ ipcMain.handle('ytdlp:probe', async (_ev, url) => {
 let activeDownload = null;
 
 ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
-  if (activeDownload) return { ok: false, error: '이미 다운로드 중입니다' };
+  // 스테일 참조 정리 — 이전 proc 이 이미 죽었지만 close 이벤트가 lost 된 경우 방어
+  if (activeDownload && (activeDownload.exitCode !== null || activeDownload.killed || !activeDownload.pid)) {
+    activeDownload = null;
+  }
+  if (activeDownload) {
+    dlog('[yt-dlp] busy — pid=' + activeDownload.pid + ' exitCode=' + activeDownload.exitCode);
+    return { ok: false, error: '이미 다운로드 중입니다 (진행 취소 후 재시도)' };
+  }
   if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
     return { ok: false, error: '올바른 URL이 아닙니다' };
   }
@@ -653,6 +663,7 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
     let phase = 'video'; // yt-dlp는 video 다음에 audio 처리
     const send = (data) => { try { mainWindow?.webContents?.send('ytdlp:progress', data); } catch {} };
 
+    let mergedFile = null;   // [Merger] 가 알려주는 최종 결과 경로 (가장 신뢰도 높음)
     proc.stdout.on('data', (chunk) => {
       String(chunk).split(/\r?\n/).forEach((line) => {
         if (!line) return;
@@ -672,6 +683,9 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
           } catch {}
         } else if (/^\[Merger\]/.test(line)) {
           phase = 'merge';
+          // [Merger] Merging formats into "C:\path\file.mp4"
+          const m = line.match(/into\s+"([^"]+)"/);
+          if (m) mergedFile = m[1];
           send({ phase: 'merge', ratio: 0.98 });
         } else if (/^\[download\] Destination: /.test(line)) {
           // "video"→"audio" 전환 감지
@@ -680,29 +694,76 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
         }
       });
     });
+    let stderrBuf = '', stdoutTail = '';   // 실패 시 원인 파악용
     proc.stderr.on('data', (d) => {
       const s = String(d);
-      // yt-dlp의 안내/에러 로그
+      stderrBuf += s; if (stderrBuf.length > 4000) stderrBuf = stderrBuf.slice(-4000);
       if (/ERROR|error/i.test(s)) send({ phase: 'error', message: s.slice(0, 500) });
     });
-    proc.on('close', (code) => {
-      activeDownload = null;
-      if (code !== 0) return resolve({ ok: false, error: `yt-dlp exit ${code}` });
-      // 우리가 지정한 base로 시작하는 파일 찾기
+    proc.stdout.on('data', (d) => {
+      const s = String(d);
+      stdoutTail += s; if (stdoutTail.length > 4000) stdoutTail = stdoutTail.slice(-4000);
+      // 진행률 라인 아닌 실제 로그만 콘솔 (PROG spam 방지)
+    });
+    // 결과 파일 확정 — [Merger] 경로 > [download] Destination > outDir 스캔 순으로 신뢰
+    const resolveOutputFile = () => {
+      for (const cand of [mergedFile, lastFile]) {
+        if (!cand) continue;
+        const p = path.isAbsolute(cand) ? cand : path.join(outDir, cand);
+        if (fs.existsSync(p) && /\.(mp4|mkv|webm|m4a|mp3|wav)$/i.test(p)) return p;
+      }
+      // 폴백 1: base 로 시작하는 파일. 폴백 2: outDir 에서 가장 최근 미디어 파일
       try {
-        const files = fs.readdirSync(outDir)
-          .filter((f) => f.startsWith(base) && /\.(mp4|mkv|webm)$/i.test(f))
+        const media = fs.readdirSync(outDir)
+          .filter((f) => /\.(mp4|mkv|webm)$/i.test(f))
           .map((f) => ({ f, m: fs.statSync(path.join(outDir, f)).mtimeMs }))
           .sort((a, b) => b.m - a.m);
-        const filePath = files[0] ? path.join(outDir, files[0].f) : null;
+        const byBase = media.find((x) => x.f.startsWith(base));
+        const pick = byBase || media[0];
+        // 폴백 2는 방금(2분 이내) 생성된 것만 채택 — 엉뚱한 옛 파일 반환 방지
+        if (pick && (byBase || Date.now() - pick.m < 120000)) return path.join(outDir, pick.f);
+      } catch {}
+      return null;
+    };
+
+    // close 는 자식(ffmpeg)이 파이프를 물고 있으면 영영 안 올 수 있음 → exit 로 확정하고 grace 만 줌
+    let settled = false;
+    const finalize = (code, why) => {
+      if (settled) return;
+      settled = true;
+      activeDownload = null;
+      if (code !== 0) {
+        const errTail = (stderrBuf || stdoutTail || '').split(/\r?\n/).filter(l => l.trim()).slice(-8).join(' | ');
+        const msg = `yt-dlp exit ${code}${errTail ? ' — ' + errTail : ''}`;
+        dlog('[yt-dlp] FAILED:', msg);
+        send({ phase: 'error', message: msg.slice(0, 800) });
+        return resolve({ ok: false, error: msg.slice(0, 800) });
+      }
+      try {
+        const filePath = resolveOutputFile();
+        if (!filePath) {
+          const msg = `다운로드는 끝났지만 결과 파일을 찾지 못함 (base="${base}", dir="${outDir}")`;
+          dlog('[yt-dlp]', msg);
+          send({ phase: 'error', message: msg });
+          return resolve({ ok: false, error: msg });
+        }
         send({ phase: 'done', ratio: 1, filePath });
         resolve({ ok: true, filePath });
       } catch (err) {
+        dlog('[yt-dlp] finalize error:', String(err));
         resolve({ ok: false, error: err.message });
       }
-    });
+    };
+
+    // exit = 프로세스 종료 즉시. stdout 잔여 flush 위해 250ms 만 기다렸다 확정
+    proc.on('exit', (code) => setTimeout(() => finalize(code ?? 0, 'exit'), 250));
+    // close 가 먼저 오면 그걸로 확정 (정상 케이스)
+    proc.on('close', (code) => finalize(code ?? 0, 'close'));
     proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
       activeDownload = null;
+      dlog('[yt-dlp] spawn error:', String(err));
       resolve({ ok: false, error: err.message });
     });
   });
