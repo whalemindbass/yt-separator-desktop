@@ -134,6 +134,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     seek:        (pos)    => ipcRenderer.invoke('engine:cmd', { cmd: 'seek', pos }),
     scanPlugins: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'scanPlugins' }),
     track:       (index, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'track', index, ...(opts || {}) }),
+    automation:  (track, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'automation', track, ...(opts || {}) }),
+    pdc:         (on)   => ipcRenderer.invoke('engine:cmd', { cmd: 'pdc', on }),
     master:      (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'master', gain }),
     monitor:     (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'monitor', gain }),
     inputMonitor:(on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'inputMonitor', on }),

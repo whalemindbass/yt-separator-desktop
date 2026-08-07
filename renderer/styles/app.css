@@ -225,8 +225,8 @@ body { display: flex; flex-direction: column; }
 .tab.on {
   background: transparent;
   color: var(--tx-1);
-  font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--accent);
+  font-weight: 700;
+  box-shadow: none;
 }
 
 .logo {
@@ -2279,17 +2279,17 @@ body { display: flex; flex-direction: column; }
 
 .daw-tracks { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
 /* 맨 아래 트랙 리사이즈 여유 빈칸 (컨트롤 컬럼 이어짐) */
-.daw-lanes-spacer { display: grid; grid-template-columns: 140px 1fr; flex: 1 0 auto; min-height: 120px; }
+.daw-lanes-spacer { display: grid; grid-template-columns: 172px 1fr; flex: 1 0 auto; min-height: 120px; }
 .daw-lanes-spacer .sp-head { position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); }
 /* spacer 배경에도 마디 그리드 계속 이어지도록 (자연스럽게 아래까지) */
 .daw-lanes-spacer .sp-area { background-image: linear-gradient(90deg, color-mix(in srgb, var(--tx-1) 8%, transparent) 0 1px, transparent 1px); background-size: var(--grid, 60px) 100%; background-position: var(--grid-off, 0) 0; }
-.daw-ruler-wrap { height: 24px; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; padding-left: 140px; position: relative; }
+.daw-ruler-wrap { height: 24px; background: var(--surface); border-bottom: 1px solid var(--border); overflow: hidden; padding-left: 172px; position: relative; }
 .daw-ruler { height: 24px; position: relative; will-change: transform; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border-mid); font: 600 9.5px/24px var(--mono); color: var(--tx-3); padding-left: 5px; }
 .daw-ruler .tk.minor { height: 7px; top: 17px; border-left-color: var(--border); }   /* 라벨 없는 마디 = 짧은 눈금 */
 .daw-ruler-wrap { cursor: ew-resize; }
 /* 룰러 좌측 코너 — 토글 영역(트랙 컨트롤 위, 룰러 안 보임) */
-.daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 140px; height: 24px; z-index: 6; display: flex; align-items: stretch; gap: 0; padding: 0; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
+.daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 172px; height: 24px; z-index: 6; display: flex; align-items: stretch; gap: 0; padding: 0; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
 .daw-rtog { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: var(--tx-3); cursor: pointer; padding: 0; }
 .daw-rtog svg { width: 20px; height: 20px; }
 .daw-rtog:hover:not(:disabled) { color: var(--tx-1); background: var(--elev); }
@@ -2324,13 +2324,13 @@ body { display: flex; flex-direction: column; }
 .daw-tscroll.drop-hi { box-shadow: inset 0 0 0 2px var(--accent); }
 .daw-tscroll.drop-hi::after { content: "여기에 놓아 임포트"; position: absolute; inset: 0; display: grid; place-items: center; font: 700 13px var(--sans); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 20; }
 .daw-lanes { position: relative; display: flex; flex-direction: column; min-height: 100%; }
-.daw-lane { display: grid; grid-template-columns: 140px 1fr; height: 82px; border-bottom: 1px solid var(--border); position: relative; }
+.daw-lane { display: grid; grid-template-columns: 172px 1fr; height: 82px; border-bottom: 1px solid var(--border); position: relative; }
 /* Phase4 트랙 편집 — 리오더 그립·색점·이름편집·높이조절 */
 .daw-reorder { cursor: grab; color: var(--tx-3); font-size: 11px; line-height: 1; letter-spacing: -1px; user-select: none; }
 .daw-reorder:active { cursor: grabbing; }
 .daw-head .nm i { cursor: pointer; }
 .daw-nm-edit { font: 700 11.5px var(--sans); color: var(--tx-1); background: var(--input); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; width: 84px; outline: none; }
-.daw-lane-resize { position: absolute; left: 140px; right: 0; bottom: 0; height: 5px; cursor: ns-resize; z-index: 6; }
+.daw-lane-resize { position: absolute; left: 172px; right: 0; bottom: 0; height: 5px; cursor: ns-resize; z-index: 6; }
 .daw-lane-resize:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); }
 .daw-lane-rec.reordering { opacity: .5; }
 .daw-lane-rec.reorder-target { box-shadow: inset 0 3px 0 var(--accent); }
@@ -2375,8 +2375,8 @@ body { display: flex; flex-direction: column; }
 .daw-pan::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 2px; background: var(--c, var(--accent)); transition: box-shadow .12s, background .12s; }
 .daw-pan:hover::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .daw-pan.off::-webkit-slider-thumb { background: var(--tx-3); }
-.daw-meter { display: grid; grid-template-rows: 3px 3px; gap: 1px; width: 46px; min-width: 46px; }
-.daw-meter i { display: block; background: rgba(255,255,255,.05); border-radius: 0; overflow: hidden; position: relative; }
+.daw-meter { display: grid; grid-template-rows: 5px 5px; gap: 2px; width: 46px; min-width: 46px; }
+.daw-meter i { display: block; background: var(--sunken); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; position: relative; }
 .daw-meter i::before {
   content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: var(--v, 0%);
   background:
@@ -2389,6 +2389,62 @@ body { display: flex; flex-direction: column; }
   background-repeat: no-repeat, no-repeat;
   transition: width .05s linear;
 }
+/* PDC 지연 보정 표시 */
+.daw-pdc { font: 600 9px/1 var(--mono); color: var(--accent); padding: 3px 6px; border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
+
+/* 자동화 토글 버튼 (이름 줄 우측 끝) */
+.daw-autotog { width: 19px; height: 16px; flex: none; margin-left: auto; border-radius: 3.5px;
+  border: 1px solid var(--border); color: var(--tx-3); display: grid; place-items: center;
+  background: transparent; cursor: pointer; transition: .12s; }
+.daw-autotog svg { width: 11px; height: 11px; display: block; }
+/* 이름 줄 — 라벨이 남는 폭을 먹고 자동화 버튼은 오른쪽 끝에 고정 */
+.daw-head .nm .lbl, .daw-head .nm .lbl-t { flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+/* 팬 줄 — 미터가 잘리지 않도록 최소 폭 보장 */
+.daw-pan-row .daw-meter { flex: none; }
+.daw-pan-row .daw-pan { min-width: 34px; }
+.daw-autotog:hover { color: var(--tx-2); border-color: var(--border-mid); }
+.daw-autotog.on { color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+/* 볼륨 자동화 레인 */
+/* 행 자체엔 테두리를 두지 않는다 — --border 가 반투명이라 그 1px 틈으로 재생선이 비친다.
+   헤드는 불투명 색으로, 영역은 반투명으로 각자 그린다. */
+.daw-auto-row { display: grid; grid-template-columns: 172px 1fr; height: 46px; position: relative; }
+.daw-auto-head { position: sticky; left: 0; z-index: 6; background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface) 82%, #000);
+  padding: 0 9px; display: flex; align-items: center; gap: 6px; }
+.daw-auto-head .lb { font: 600 9px/1 var(--mono); letter-spacing: .04em; color: var(--tx-3);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daw-auto-on { font: 700 8px/1 var(--mono); padding: 3px 5px; border-radius: 3.5px;
+  border: 1px solid var(--border); color: var(--tx-3); background: transparent; cursor: pointer; transition: .12s; }
+.daw-auto-on:hover { color: var(--tx-2); border-color: var(--border-mid); }
+.daw-auto-on.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.daw-auto-clr { height: 15px; padding: 0 5px; border-radius: 3.5px; border: 1px solid var(--border);
+  color: var(--tx-3); font: 600 9px/1 var(--sans); display: grid; place-items: center;
+  background: transparent; cursor: pointer; transition: .12s; white-space: nowrap; }
+.daw-auto-clr:hover { color: var(--tx-1); border-color: var(--border-mid); }
+.daw-auto-close { width: 16px; height: 15px; border-radius: 3.5px; border: 1px solid var(--border);
+  color: var(--tx-3); font-size: 9px; line-height: 1; display: grid; place-items: center;
+  background: transparent; cursor: pointer; transition: .12s; }
+.daw-auto-close:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.daw-auto-area { position: relative; overflow: hidden; cursor: crosshair;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 3%, var(--timeline)); }
+.daw-auto-svg { position: absolute; left: 0; top: 1px; height: 44px; display: block; overflow: visible; }
+.daw-auto-svg .au-unity { stroke: var(--hair-hi); stroke-width: 1; stroke-dasharray: 3 3; }
+.daw-auto-svg .au-line { fill: none; stroke: var(--c, var(--accent)); stroke-width: 1.6;
+  stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.daw-auto-svg .au-fill { fill: var(--c, var(--accent)); opacity: .09; }
+.daw-auto-svg .ap { fill: var(--surface); stroke: var(--c, var(--accent)); stroke-width: 1.8;
+  vector-effect: non-scaling-stroke; cursor: grab; }
+.daw-auto-svg .ap:hover { fill: var(--c, var(--accent)); }
+.daw-auto-svg .au-hint { fill: var(--tx-3); font: 10px var(--sans); }
+.daw-auto-row.off .daw-auto-svg .au-line,
+.daw-auto-row.off .daw-auto-svg .au-fill { opacity: .28; }
+.daw-auto-row.off .daw-auto-area { background: var(--timeline); }
 .daw-area { position: relative; overflow: hidden; }
 .daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 15%, var(--elev)); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
@@ -2447,7 +2503,7 @@ body { display: flex; flex-direction: column; }
 .daw-rec-del.confirm { color: #fff; background: var(--danger); border-color: var(--danger); }
 .daw-rec-del { color: var(--tx-4); border-color: transparent; }
 .daw-rec-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.daw-addrec-row { display: grid; grid-template-columns: 140px 1fr; }
+.daw-addrec-row { display: grid; grid-template-columns: 172px 1fr; }
 .daw-addrec-head { grid-column: 1; position: sticky; left: 0; z-index: 5; background: var(--surface); border-right: 1px solid var(--border); padding: 6px 9px; }
 .daw-addrec { width: 100%; padding: 6px 8px; border: 1px dashed var(--border-mid); border-radius: 6px; background: transparent; color: var(--tx-3); font: 700 10.5px/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .daw-addrec:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
@@ -2476,14 +2532,16 @@ body { display: flex; flex-direction: column; }
 .daw-mixer { margin-top: auto; display: flex; gap: 10px; padding: 12px 6px 4px; border-top: 1px solid var(--border); }
 .mx-strip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 4px 8px; }
 .mx-val { font: 700 10px/1 var(--mono); color: var(--tx-2); min-height: 10px; }
-.mx-fader { writing-mode: vertical-lr; direction: rtl; width: 32px; height: 130px; cursor: pointer; accent-color: var(--accent); position: relative; z-index: 2; }
-/* 세로 미터 — fader 트랙 배경에 내장 (L·R 두꺼운 바, 페이더 썸이 위에 얹혀 슬라이드) */
-.mx-fader-wrap { position: relative; width: 32px; height: 130px; }
-.mx-fader-wrap .mx-fader { position: absolute; inset: 0; width: 100%; height: 100%; }
-.mx-meter { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0; align-items: end; background: var(--sunken); border-radius: 4px; box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; z-index: 1; }
-.mx-meter i { display: block; height: 100%; background: rgba(255,255,255,.03); position: relative; border-radius: 0; }
-.mx-meter i.l { border-right: 1px solid rgba(0,0,0,.5); }
-/* LED — 30블록 단색 녹색, 블록 사이 1px 골. 내부 radius 없음 (컨테이너 outer만 라운드) */
+/* 컨셉 방식 — 페이더(좌)와 스테레오 미터(우)를 나란히 분리 */
+.mx-fader-wrap { display: flex; align-items: stretch; gap: 7px; height: 130px; }
+.mx-fader { writing-mode: vertical-lr; direction: rtl; width: 26px; height: 130px; flex: none;
+  cursor: pointer; accent-color: var(--accent); }
+.mx-meter { display: grid; grid-template-columns: 8px 8px; gap: 2px; width: 18px; flex: none;
+  align-items: stretch; }
+/* 테두리를 box-shadow(inset) 대신 실제 border 로 — 서브픽셀에서 한쪽만 얇아지는 현상 방지 */
+.mx-meter i { display: block; position: relative; border-radius: 2px; overflow: hidden;
+  background: var(--sunken); border: 1px solid var(--border); }
+/* LED — 30블록 단색, 아래에서 위로 차오름 */
 .mx-meter i::before {
   content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--v, 0%);
   background:
@@ -2495,9 +2553,8 @@ body { display: flex; flex-direction: column; }
   background-position: 0 100%, 0 0;
   transition: height .05s linear;
 }
-/* 페이더 트랙 투명하게 — 뒤 미터 보이도록 */
-.mx-fader::-webkit-slider-runnable-track { background: transparent !important; box-shadow: none !important; }
 .mx-fader:disabled { opacity: .35; cursor: default; }
+.mx-fader:disabled + .mx-meter { opacity: .4; }
 .mx-lbl { font: 700 9px/1.1 var(--sans); letter-spacing: .04em; color: var(--tx-3); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 테이크를 다른 내 트랙으로 드래그 중인 대상 레인 */
@@ -2582,10 +2639,21 @@ body { display: flex; flex-direction: column; }
 .mx-strip { background: var(--elev); box-shadow: none; }
 .mx-val { font-variant-numeric: tabular-nums; }
 .mx-fader { -webkit-appearance: none; appearance: none; background: transparent; }
-.mx-fader::-webkit-slider-runnable-track { width: 6px; border-radius: 3px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border); }
-.mx-fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 14px; border-radius: 3px; background: var(--elev-2); border: 1px solid var(--border-mid); box-shadow: 0 1px 2px rgba(0,0,0,.5); margin-left: -9px; }
+.mx-fader::-webkit-slider-runnable-track { width: 8px; border-radius: 4px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border); }
+/* 캡 — 컨셉 스타일: 입체 바디 + 가운데 강조선 */
+.mx-fader::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 24px; height: 13px; border-radius: 3px;
+  background:
+    linear-gradient(var(--accent), var(--accent)) center / 14px 1.5px no-repeat,
+    linear-gradient(180deg, var(--elev-2), var(--elev));
+  border: 1px solid var(--border-mid);
+  box-shadow: 0 2px 5px rgba(0,0,0,.6);
+  margin-left: -10px;
+}
 .mx-fader:hover::-webkit-slider-thumb { border-color: var(--accent-soft-border); }
-.mx-fader:disabled::-webkit-slider-thumb { background: var(--elev); }
+.mx-fader:disabled::-webkit-slider-thumb {
+  background: linear-gradient(var(--tx-3), var(--tx-3)) center / 14px 1.5px no-repeat,
+    linear-gradient(180deg, var(--elev), var(--elev)); }
 
 /* ════════════════════════════════════════════════════════════
    PRO 리스타일 — 전 화면 공통 컴포넌트 (다크 우선)
@@ -2602,8 +2670,8 @@ body { background: var(--bg) !important; }
 /* 탭 — 활성 시 소프트 필 + 언더라인 글로우 */
 .tab { padding: 0 13px; height: 30px; border-radius: 8px; transition: color .14s var(--ease), background .14s var(--ease); }
 .tab:hover:not(.on) { color: var(--tx-1); background: color-mix(in srgb, var(--tx-1) 6%, transparent); }
-.tab.on { color: var(--tx-1); background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: none; }
-.tab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -7px; height: 2px; border-radius: 2px; background: var(--accent); }
+.tab.on { color: var(--tx-1); background: transparent; box-shadow: none; font-weight: 700; }
+.tab.on::after { content: none; }
 
 /* 세그먼트(pill-row) — 파인 트랙 위에 올라온 활성 세그먼트 */
 .pill-row { background: var(--sunken); border-color: var(--border); border-radius: 9px; padding: 3px; gap: 2px; box-shadow: inset 0 1px 2px rgba(0,0,0,.35); }

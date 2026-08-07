@@ -32,13 +32,31 @@ static var strArr (const StringArray& a) { Array<var> v; for (auto& s : a) v.add
 template <typename T> static var numArr (const Array<T>& a) { Array<var> v; for (auto x : a) v.add ((double) x); return var (v); }
 
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
+// ── 볼륨 자동화 ──────────────────────────────────────────────
+// 시간축 브레이크포인트. 점 사이는 선형 보간, 양 끝은 첫/끝 값 유지.
+struct AutoPoint { int64 s; float v; };
+
+static float autoValueAt (const std::vector<AutoPoint>& p, int64 pos)
+{
+    if (p.empty()) return 1.0f;
+    if (pos <= p.front().s) return p.front().v;
+    if (pos >= p.back().s)  return p.back().v;
+    size_t lo = 0, hi = p.size() - 1;
+    while (hi - lo > 1) { const size_t mid = (lo + hi) / 2; if (p[mid].s <= pos) lo = mid; else hi = mid; }
+    const auto& a = p[lo]; const auto& b = p[hi];
+    if (b.s <= a.s) return b.v;
+    const double t = (double) (pos - a.s) / (double) (b.s - a.s);
+    return (float) (a.v + (b.v - a.v) * t);
+}
+
 struct FxSlot
 {
     std::unique_ptr<AudioPluginInstance> plugin;
     std::unique_ptr<DocumentWindow> editor;
     std::atomic<bool> bypass { false };
     int id = 0;
-    int descIndex = -1;
+    int descIndex = -1;          // scanned 내 위치 (재스캔 시 흔들릴 수 있음)
+    PluginDescription desc;      // 안정 식별자 — export 는 이걸로 재생성
 };
 
 struct Stem
@@ -54,7 +72,15 @@ struct Stem
     std::atomic<float> pkL { 0.0f }, pkR { 0.0f };   // post-fader peak (누적, exchange 로 소비)
     std::vector<std::unique_ptr<FxSlot>> chain;   // 스템별 독립 FX
     CriticalSection fxLock;
+    std::vector<AutoPoint> autoPts;           // 볼륨 자동화 — 켜져 있으면 페이더 대신 이 값을 씀
+    CriticalSection autoLock;
+    std::atomic<bool> autoOn { false };
+    float curAutoGain = 1.0f;                 // 오디오 스레드 전용 — 락 실패 시 직전 값 유지
     float curGainL = 1.0f, curGainR = 1.0f;   // 오디오 스레드 전용 — L/R 각각 램프(pan+gain 결합)
+    // PDC — 다른 트랙의 플러그인 지연에 맞추기 위한 보정 지연
+    AudioBuffer<float> pdcBuf;                // 링버퍼 (message 스레드에서만 할당)
+    std::atomic<int> pdcDelay { 0 };          // 목표 지연(샘플)
+    int pdcActive = 0, pdcWrite = 0;          // 오디오 스레드 전용
 };
 
 // 플러그인 에디터를 담는 네이티브 창
@@ -119,7 +145,15 @@ struct RecTrack
     std::atomic<float> pkL { 0.0f }, pkR { 0.0f }; // post-fader peak(누적, exchange로 소비)
     std::vector<std::unique_ptr<FxSlot>> chain;   // 트랙별 독립 이펙트
     CriticalSection fxLock;                        // processBlock 과 체인 변경 상호배제
+    std::vector<AutoPoint> autoPts;                // 볼륨 자동화
+    CriticalSection autoLock;
+    std::atomic<bool> autoOn { false };
+    float curAutoGain = 1.0f;
     float curGainL = 1.0f, curGainR = 1.0f;        // 오디오 스레드 전용 — L/R 결합 램프(게인·팬·뮤트·솔로)
+    // PDC
+    AudioBuffer<float> pdcBuf;
+    std::atomic<int> pdcDelay { 0 };
+    int pdcActive = 0, pdcWrite = 0;
 };
 
 // 원본 → 목적지에 게인 램프(g0→g1) 걸어 합산 (블록 경계 클릭·지퍼 방지)
@@ -148,8 +182,41 @@ static inline float blockPeak (const float* src, int n, float g0, float g1)
 }
 
 // atomic peak: max 유지(락 없음)
+// ── PDC 지연 라인 ────────────────────────────────────────────
+// buf 를 delay 샘플만큼 늦춘다(in-place). ring 은 트랙 전용 링버퍼.
+static inline void applyDelayLine (AudioBuffer<float>& buf, int n,
+                                   AudioBuffer<float>& ring, int& writePos, int delay)
+{
+    const int cap = ring.getNumSamples();
+    if (delay <= 0 || cap <= 0) return;
+    const int chans = jmin (buf.getNumChannels(), ring.getNumChannels());
+    int endPos = writePos;
+    for (int c = 0; c < chans; ++c)
+    {
+        float* d = buf.getWritePointer (c);
+        float* r = ring.getWritePointer (c);
+        int w = writePos;
+        for (int i = 0; i < n; ++i)
+        {
+            int rd = w - delay;
+            if (rd < 0) rd += cap;
+            const float out = r[rd];
+            r[w] = d[i];
+            d[i] = out;
+            if (++w >= cap) w = 0;
+        }
+        endPos = w;
+    }
+    writePos = endPos;
+}
+
+// 미터 노이즈 게이트 — 인터페이스 입력 노이즈 플로어가 미터를 계속 튀게 하므로
+// 이 값 아래는 아예 0 으로 본다 (≈ -45 dBFS)
+static constexpr float METER_GATE = 0.0056f;
+
 static inline void updatePeak (std::atomic<float>& p, float v)
 {
+    if (v < METER_GATE) return;
     float cur = p.load (std::memory_order_relaxed);
     while (v > cur && ! p.compare_exchange_weak (cur, v, std::memory_order_relaxed)) {}
 }
@@ -176,12 +243,15 @@ public:
     }
 
     // ---- 트랜스포트 ----
-    void play()  { playing = true;  std::cerr << "[engine] play @" << playhead.load() << "\n"; }
-    void stop()  { playing = false; std::cerr << "[engine] stop @" << playhead.load() << "\n"; }
+    // 시크·재생/정지 전환은 파형이 순간적으로 튀어 '틱' 소리가 난다.
+    // 다음 블록에서 직전 출력 값과 매끄럽게 이어붙이도록 디클릭을 예약한다.
+    void play()  { declickPending = true; playing = true;  std::cerr << "[engine] play @" << playhead.load() << "\n"; }
+    void stop()  { declickPending = true; playing = false; std::cerr << "[engine] stop @" << playhead.load() << "\n"; }
     void seek0() { setPos (0); std::cerr << "[engine] seek 0\n"; }
 
     void setPos (int64 p)
     {
+        declickPending = true;
         playhead = p;
         for (auto& s : stems) s->src->setNextReadPosition (p);
     }
@@ -205,7 +275,9 @@ public:
         if (w == nullptr) { std::cerr << "[engine] writer create failed\n"; return; }
         os.release();
 
-        threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 32768));
+        writerChans = jmax (1, numInputChans);
+        // FIFO 를 넉넉히 — 디스크가 잠깐 밀려도 샘플이 드롭돼 '틱' 이 남지 않도록
+        threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 17));
         activeWriter.store (threadedWriter.get());
         recordArmed = true;
         recordedStart = -1;
@@ -364,8 +436,10 @@ public:
         auto slot = std::make_unique<FxSlot>();
         slot->id = nextSlotId++;
         slot->descIndex = index;
+        slot->desc = scanned[index];
         slot->plugin = std::move (inst);
         { const ScopedLock sl (*lk); chain->push_back (std::move (slot)); }
+        recomputePdc();
         emitChainId (trackId, *chain);
     }
 
@@ -446,34 +520,28 @@ public:
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
-    // 트랙 미터 수집 — 스템·녹음 트랙 + 마스터. 각 pkL/pkR exchange 로 소비
-    void collectMeters (Array<var>& out)
+    // 트랙 미터 수집 — 스템·녹음 트랙 + 마스터. 각 pkL/pkR exchange 로 소비.
+    // 반환값: 하나라도 소리가 있었는지 (전부 0 이면 emit 생략)
+    bool collectMeters (Array<var>& out)
     {
-        {   // master (id = 0 예약)
-            auto* o = new DynamicObject();
-            o->setProperty ("id", 0);
-            o->setProperty ("l",  mstPkL.exchange (0.0f, std::memory_order_relaxed));
-            o->setProperty ("r",  mstPkR.exchange (0.0f, std::memory_order_relaxed));
-            out.add (var (o));
-        }
-        for (auto& s : stems)
+        bool any = false;
+        auto add = [&] (int id, std::atomic<float>& pl, std::atomic<float>& pr)
         {
+            const float l = pl.exchange (0.0f, std::memory_order_relaxed);
+            const float r = pr.exchange (0.0f, std::memory_order_relaxed);
+            if (l > 0.0f || r > 0.0f) any = true;
             auto* o = new DynamicObject();
-            o->setProperty ("id", s->id);
-            o->setProperty ("l",  s->pkL.exchange (0.0f, std::memory_order_relaxed));
-            o->setProperty ("r",  s->pkR.exchange (0.0f, std::memory_order_relaxed));
+            o->setProperty ("id", id);
+            o->setProperty ("l", l);
+            o->setProperty ("r", r);
             out.add (var (o));
-        }
+        };
+        add (0, mstPkL, mstPkR);                       // master (id = 0 예약)
+        for (auto& s : stems) add (s->id, s->pkL, s->pkR);
         const ScopedTryLock sl (takesLock);
         if (sl.isLocked())
-            for (auto& rt : recTracks)
-            {
-                auto* o = new DynamicObject();
-                o->setProperty ("id", rt->id);
-                o->setProperty ("l",  rt->pkL.exchange (0.0f, std::memory_order_relaxed));
-                o->setProperty ("r",  rt->pkR.exchange (0.0f, std::memory_order_relaxed));
-                out.add (var (o));
-            }
+            for (auto& rt : recTracks) add (rt->id, rt->pkL, rt->pkR);
+        return any;
     }
     // YIN 피치 검출 (De Cheveigné & Kawahara) — 옥타브 안정 + 포물선 보간으로 정밀.
     double detectPitch()
@@ -547,10 +615,94 @@ public:
         if (! pan.isVoid())  s.pan  = jlimit (-1.0f, 1.0f, (float) (double) pan);
         recomputeSolos();
     }
+    // ---- 볼륨 자동화 ----
+    // id: 스템(90001+) 또는 녹음 트랙 id. points 는 {s:샘플, v:게인} 배열(샘플 오름차순)
+    void setAutomation (int id, const var& points, const var& on)
+    {
+        std::vector<AutoPoint>* dst = nullptr;
+        CriticalSection* lk = nullptr;
+        std::atomic<bool>* flag = nullptr;
+        for (auto& s : stems)     if (s->id == id) { dst = &s->autoPts; lk = &s->autoLock; flag = &s->autoOn; break; }
+        if (dst == nullptr)
+            for (auto& t : recTracks) if (t->id == id) { dst = &t->autoPts; lk = &t->autoLock; flag = &t->autoOn; break; }
+        if (dst == nullptr) return;
+
+        if (! points.isVoid())
+        {
+            std::vector<AutoPoint> np;
+            if (auto* a = points.getArray())
+                for (auto& v : *a)
+                    np.push_back ({ (int64) (double) v["s"], jlimit (0.0f, 4.0f, (float) (double) v["v"]) });
+            std::sort (np.begin(), np.end(), [] (const AutoPoint& a, const AutoPoint& b) { return a.s < b.s; });
+            const ScopedLock sl (*lk);
+            *dst = std::move (np);
+        }
+        if (! on.isVoid()) flag->store ((bool) on);
+    }
+
+    // ---- PDC (Plugin Delay Compensation) ----
+    // 지연 있는 플러그인(linear-phase EQ, look-ahead 리미터 등)을 쓰면 그 트랙만 늦게 나온다.
+    // 전 트랙 중 최대 지연에 맞춰 나머지 트랙을 그만큼 늦춰 박자를 다시 맞춘다.
+    static int chainLatency (const FxChainVec& c)
+    {
+        int sum = 0;
+        for (auto& sl : c)
+            if (sl && sl->plugin && ! sl->bypass.load())
+                sum += jmax (0, sl->plugin->getLatencySamples());
+        return sum;
+    }
+    void recomputePdc (bool announce = true)
+    {
+        if (! pdcEnabled.load())
+        {
+            for (auto& s : stems)      s->pdcDelay.store (0);
+            for (auto& rt : recTracks) rt->pdcDelay.store (0);
+            if (announce && pdcMaxReported != 0) { pdcMaxReported = 0; emitPdc (0); }
+            return;
+        }
+        const int cap = jmax (0, pdcCapacity - 1);
+        std::vector<int> stemLat, recLat;
+        int maxLat = 0;
+        // 락은 전부 tryLock — 실패하면 이번 회차는 건너뛴다.
+        // (블로킹 락을 쓰면 오디오 스레드가 FX 를 건너뛰어 드라이 신호가 튀어나온다)
+        for (auto& s : stems)
+        {
+            const ScopedTryLock sl (s->fxLock);
+            if (! sl.isLocked()) return;
+            const int l = jmin (cap, chainLatency (s->chain));
+            stemLat.push_back (l); maxLat = jmax (maxLat, l);
+        }
+        {
+            const ScopedTryLock tl (takesLock);
+            if (! tl.isLocked()) return;
+            for (auto& rt : recTracks)
+            {
+                const ScopedTryLock sl (rt->fxLock);
+                if (! sl.isLocked()) return;
+                const int l = jmin (cap, chainLatency (rt->chain));
+                recLat.push_back (l); maxLat = jmax (maxLat, l);
+            }
+            size_t i = 0;
+            for (auto& rt : recTracks) rt->pdcDelay.store (jmax (0, maxLat - recLat[i++]));
+        }
+        size_t i = 0;
+        for (auto& s : stems) s->pdcDelay.store (jmax (0, maxLat - stemLat[i++]));
+        if (announce && maxLat != pdcMaxReported) { pdcMaxReported = maxLat; emitPdc (maxLat); }
+    }
+    void emitPdc (int samples)
+    {
+        auto* o = ev ("pdc");
+        o->setProperty ("samples", samples);
+        o->setProperty ("ms", deviceSampleRate > 0 ? samples * 1000.0 / deviceSampleRate : 0.0);
+        o->setProperty ("on", pdcEnabled.load());
+        emit (var (o));
+    }
+    void setPdcEnabled (bool on) { pdcEnabled = on; recomputePdc(); }
+
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
-    void setStemOffset (int64 samples) { stemOffset = samples; }
+    void setStemOffset (int64 samples) { declickPending = true; stemOffset = samples; }
 
     // ---- 녹음 트랙 (여러 개) ----
     RecTrack* findRec (int id) { for (auto& t : recTracks) if (t->id == id) return t.get(); return nullptr; }
@@ -702,23 +854,27 @@ public:
     void setBypass (int trackId, int id, bool on)
     {
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
-        if (auto* s = findSlotIn (*chain, id)) { s->bypass = on; emitChainId (trackId, *chain); }
+        if (auto* s = findSlotIn (*chain, id)) { s->bypass = on; recomputePdc(); emitChainId (trackId, *chain); }
     }
     void setBypassAll (int trackId, bool on)   // 일괄 끄기/켜기
     {
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         for (auto& s : *chain) if (s) s->bypass = on;
+        recomputePdc();
         emitChainId (trackId, *chain);
     }
     void removeFx (int trackId, int id)
     {
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         if (auto* s = findSlotIn (*chain, id)) s->editor.reset();   // message 스레드
+        std::unique_ptr<FxSlot> dead;   // 플러그인 소멸은 락 밖에서 — 소멸이 길면 오디오가 끊긴다
         {
             const ScopedLock sl (*lk);
-            chain->erase (std::remove_if (chain->begin(), chain->end(),
-                          [id] (auto& x) { return x->id == id; }), chain->end());
+            auto it = std::find_if (chain->begin(), chain->end(), [id] (auto& x) { return x && x->id == id; });
+            if (it != chain->end()) { dead = std::move (*it); chain->erase (it); }
         }
+        dead.reset();
+        recomputePdc();
         emitChainId (trackId, *chain);
     }
     void reorderFx (int trackId, const Array<int>& order)
@@ -735,6 +891,7 @@ public:
             for (auto& x : *chain) if (x) next.push_back (std::move (x));   // 누락분 보존
             *chain = std::move (next);
         }
+        recomputePdc();
         emitChainId (trackId, *chain);
     }
     // VST 세부 설정(노브값) 직렬화 — 슬롯 단위 base64
@@ -743,6 +900,7 @@ public:
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         auto* s = findSlotIn (*chain, id); if (s == nullptr) return;
         MemoryBlock mb;
+        if (s->plugin == nullptr) return;
         s->plugin->getStateInformation (mb);
         auto* o = ev ("fxState");
         o->setProperty ("trackId", trackId);
@@ -754,7 +912,7 @@ public:
     {
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         auto* s = findSlotIn (*chain, id);
-        if (s == nullptr || b64.isEmpty()) return;
+        if (s == nullptr || s->plugin == nullptr || b64.isEmpty()) return;
         MemoryOutputStream mo;
         if (Base64::convertFromBase64 (mo, b64))
         {
@@ -766,7 +924,7 @@ public:
     {
         CriticalSection* lk = nullptr; auto* chain = fxChainOf (trackId, lk); if (chain == nullptr) return;
         auto* s = findSlotIn (*chain, id);
-        if (s == nullptr || ! s->plugin->hasEditor()) return;
+        if (s == nullptr || s->plugin == nullptr || ! s->plugin->hasEditor()) return;
         if (s->editor != nullptr) { s->editor->setVisible (true); s->editor->toFront (true); return; }
         s->editor.reset (new PluginWindow (s->plugin->createEditorIfNeeded(), s->plugin->getName()));
         s->editor->toFront (true);
@@ -777,7 +935,7 @@ public:
         const ScopedLock sl (lock);
         chain.clear();
     }
-    void clearChain (RecTrack& rt) { clearChainVec (rt.chain, rt.fxLock); }
+    void clearChain (RecTrack& rt) { clearChainVec (rt.chain, rt.fxLock); recomputePdc (false); }
     void clearAllChains() { for (auto& rt : recTracks) clearChain (*rt); for (auto& s : stems) clearChainVec (s->chain, s->fxLock); }
     // 프리셋 로드 — 체인 전체를 한 번에 재구성(원자적). churn 없이 안전.
     void setChain (int trackId, const var& list)
@@ -803,6 +961,7 @@ public:
                 auto slot = std::make_unique<FxSlot>();
                 slot->id = nextSlotId++;
                 slot->descIndex = index;
+                slot->desc = scanned[index];
                 slot->bypass = (bool) v["bypass"];
                 slot->plugin = std::move (inst);
                 next.push_back (std::move (slot));
@@ -816,6 +975,7 @@ public:
         }
         for (auto& s : old) if (s) s->editor.reset();   // message 스레드에서 정리
         old.clear();
+        recomputePdc();
         if (failed > 0) { auto* e = ev ("fxError"); e->setProperty ("trackId", trackId); e->setProperty ("failed", failed); emit (var (e)); }
         emitChainId (trackId, *chain);
     }
@@ -833,7 +993,10 @@ public:
         int64 total = 0;
 
         // 스템: 프레시 리더(실시간 소스와 공유 안 함). "내 녹음만" 이면 스킵
-        struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible; };
+        struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible;
+                    bool autoOn; std::vector<AutoPoint> autoPts;
+                    std::vector<std::unique_ptr<AudioPluginInstance>> fx; int latency = 0;
+                    AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; };
         std::vector<SR> srs;
         if (! mineOnly)
             for (auto& s : stems)
@@ -843,12 +1006,38 @@ public:
                 auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
                 src->prepareToPlay (block, sr);
                 total = jmax (total, soff + rd->lengthInSamples);
-                srs.push_back ({ std::move (src), s->gain.load(), anySolo ? s->solo.load() : ! s->mute.load() });
+                std::vector<AutoPoint> ap;
+                { const ScopedLock al (s->autoLock); ap = s->autoPts; }   // 스냅샷
+                SR sr2;
+                sr2.src = std::move (src);
+                sr2.gain = s->gain.load();
+                sr2.audible = anySolo ? s->solo.load() : ! s->mute.load();
+                sr2.autoOn = s->autoOn.load();
+                sr2.autoPts = std::move (ap);
+                {   // 스템 FX 체인도 오프라인 인스턴스로 복제 (실시간과 결과가 같아야 함)
+                    const ScopedLock fl (s->fxLock);
+                    for (auto& slot : s->chain)
+                    {
+                        if (! slot || ! slot->plugin || slot->bypass.load()) continue;
+                        String err;
+                        auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
+                        if (inst == nullptr) continue;
+                        MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                        inst->setPlayConfigDetails (2, 2, sr, block);
+                        inst->prepareToPlay (sr, block);
+                        inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                        sr2.latency += jmax (0, inst->getLatencySamples());
+                        sr2.fx.push_back (std::move (inst));
+                    }
+                }
+                srs.push_back (std::move (sr2));
             }
 
         // 트랙: 테이크 버퍼 스냅샷 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
         struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; int64 fadeIn; int64 fadeOut; };
-        struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes; };
+        struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes;
+                     bool autoOn; std::vector<AutoPoint> autoPts; int latency = 0;
+                     AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; };
         std::vector<TRK> trks;
         {
             const bool trackSolo = mineOnly ? anyRecSolo.load() : anySolo;   // 내 녹음만이면 스템 솔로 무시
@@ -856,19 +1045,21 @@ public:
             for (auto& rt : recTracks)
             {
                 TRK tk; tk.gain = rt->gain.load(); tk.audible = trackSolo ? rt->solo.load() : ! rt->mute.load();
+                tk.autoOn = rt->autoOn.load();
+                { const ScopedLock al (rt->autoLock); tk.autoPts = rt->autoPts; }   // 스냅샷
                 {
                     const ScopedLock fl (rt->fxLock);
                     for (auto& slot : rt->chain)
                     {
                         if (! slot || ! slot->plugin || slot->bypass.load()) continue;
-                        if (slot->descIndex < 0 || slot->descIndex >= scanned.size()) continue;
                         String err;
-                        auto inst = pluginFmt.createPluginInstance (scanned[slot->descIndex], sr, block, err);
+                        auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
                         if (inst == nullptr) continue;
                         MemoryBlock mb; slot->plugin->getStateInformation (mb);
                         inst->setPlayConfigDetails (2, 2, sr, block);
                         inst->prepareToPlay (sr, block);
                         inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                        tk.latency += jmax (0, inst->getLatencySamples());
                         tk.fx.push_back (std::move (inst));
                     }
                 }
@@ -908,13 +1099,37 @@ public:
         s1 = jlimit<int64> (s0 + 1, total, s1);
         const int64 span = s1 - s0;
 
+        // ── PDC — 실시간과 동일하게 트랙 간 정렬을 맞춘다 ──
+        // 스템은 FX 를 오프라인에서 재적용하지 않으므로 지연 0. 트랙만 지연을 가진다.
+        int maxLat = 0;
+        for (auto& r : srs)   maxLat = jmax (maxLat, r.latency);
+        for (auto& tk : trks) maxLat = jmax (maxLat, tk.latency);
+        if (! pdcEnabled.load()) maxLat = 0;
+        if (maxLat > 0)
+        {
+            const int cap = maxLat + block + 8;
+            for (auto& r : srs)
+            {
+                r.pdcD = jmax (0, maxLat - r.latency);
+                if (r.pdcD > 0) { r.pdc.setSize (2, cap); r.pdc.clear(); r.pdcW = 0; }
+            }
+            for (auto& tk : trks)
+            {
+                tk.pdcD = jmax (0, maxLat - tk.latency);
+                if (tk.pdcD > 0) { tk.pdc.setSize (2, cap); tk.pdc.clear(); tk.pdcW = 0; }
+            }
+        }
+
         AudioBuffer<float> mix (2, block), sbuf (2, block), tbuf (2, block), tmp (2, block);
         const float mg = monitorGain.load();
         const float master = masterGain.load();
-        int64 pos = s0; int blk = 0;
+        // 전체가 maxLat 만큼 늦게 나오므로 그만큼 앞에서부터 렌더해 버리고(프리롤) 파일에는 안 쓴다
+        int64 pos = s0 - maxLat; int blk = 0;
+        int64 skip = maxLat;
         while (pos < s1)
         {
             const int n = (int) jmin<int64> ((int64) block, s1 - pos);
+            if (n <= 0) break;
             mix.clear();
 
             for (auto& r : srs)   // 스템
@@ -922,8 +1137,25 @@ public:
                 sbuf.clear();
                 r.src->setNextReadPosition (jmax<int64> (0, pos - soff));
                 AudioSourceChannelInfo info (&sbuf, 0, n); r.src->getNextAudioBlock (info);
+                if (! r.fx.empty())   // 스템 FX 체인 (실시간과 동일하게 적용)
+                {
+                    AudioBuffer<float> pb (sbuf.getArrayOfWritePointers(), 2, n);
+                    MidiBuffer mm;
+                    for (auto& fxp : r.fx) fxp->processBlock (pb, mm);
+                }
+                if (r.pdcD > 0) applyDelayLine (sbuf, n, r.pdc, r.pdcW, r.pdcD);
                 if (r.audible)
-                    for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, sbuf, jmin (c, sbuf.getNumChannels() - 1), 0, n, r.gain);
+                {
+                    // 자동화 ON 이면 블록 시작→끝 값으로 램프 (오프라인에서도 곡선 그대로)
+                    const float g0 = r.autoOn ? autoValueAt (r.autoPts, pos)     : r.gain;
+                    const float g1 = r.autoOn ? autoValueAt (r.autoPts, pos + n) : r.gain;
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        const int sc = jmin (c, sbuf.getNumChannels() - 1);
+                        if (g0 == g1) mix.addFrom (c, 0, sbuf, sc, 0, n, g0);
+                        else          mix.addFromWithRamp (c, 0, sbuf.getReadPointer (sc), n, g0, g1);
+                    }
+                }
             }
 
             for (auto& tk : trks)   // 트랙(테이크 → FX → post-fx 게인)
@@ -949,7 +1181,16 @@ public:
                 }
                 if (! any && tk.fx.empty()) continue;
                 { AudioBuffer<float> pb (tbuf.getArrayOfWritePointers(), 2, n); MidiBuffer mm; for (auto& f : tk.fx) f->processBlock (pb, mm); }
-                for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, tbuf, c, 0, n, tk.gain * mg);
+                if (tk.pdcD > 0) applyDelayLine (tbuf, n, tk.pdc, tk.pdcW, tk.pdcD);
+                {
+                    const float g0 = (tk.autoOn ? autoValueAt (tk.autoPts, pos)     : tk.gain) * mg;
+                    const float g1 = (tk.autoOn ? autoValueAt (tk.autoPts, pos + n) : tk.gain) * mg;
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        if (g0 == g1) mix.addFrom (c, 0, tbuf, c, 0, n, g0);
+                        else          mix.addFromWithRamp (c, 0, tbuf.getReadPointer (c), n, g0, g1);
+                    }
+                }
             }
 
             mix.applyGain (0, n, master);   // 마스터 (+ 정수 포맷은 세이프 클리퍼, float 은 헤드룸 보존)
@@ -959,9 +1200,16 @@ public:
                     FloatVectorOperations::max (mix.getWritePointer (c), mix.getReadPointer (c), -1.0f, n);
                     FloatVectorOperations::min (mix.getWritePointer (c), mix.getReadPointer (c),  1.0f, n);
                 }
-            writer->writeFromAudioSampleBuffer (mix, 0, n);
+            if (skip > 0)   // 프리롤 — PDC 로 밀린 앞부분은 버린다
+            {
+                const int64 drop = jmin<int64> (skip, n);
+                skip -= drop;
+                if (drop < n) writer->writeFromAudioSampleBuffer (mix, (int) drop, n - (int) drop);
+            }
+            else writer->writeFromAudioSampleBuffer (mix, 0, n);
             pos += n;
-            if ((++blk % 40) == 0) { auto* p = ev ("exportProgress"); p->setProperty ("pct", (double) (pos - s0) / (double) span * 100.0); emit (var (p)); }
+            if ((++blk % 40) == 0) { auto* p = ev ("exportProgress");
+                p->setProperty ("pct", jlimit (0.0, 100.0, (double) (pos - s0) / (double) span * 100.0)); emit (var (p)); }
         }
         writer.reset();   // flush + close
         auto* d = ev ("exportDone"); d->setProperty ("file", outPath); emit (var (d));
@@ -982,7 +1230,16 @@ public:
         for (auto& s : stems) s->src->prepareToPlay (block, deviceSampleRate);
         for (auto& rt : recTracks) { const ScopedLock sl (rt->fxLock); for (auto& s : rt->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         for (auto& st : stems) { const ScopedLock sl (st->fxLock); for (auto& s : st->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
+        // PDC 링버퍼 — 최대 1초까지 보정. 오디오 스레드에서 절대 재할당하지 않도록 여기서 확보
+        pdcCapacity = (int) (deviceSampleRate * 1.0) + block + 8;
+        for (auto& st : stems)     { st->pdcBuf.setSize (2, pdcCapacity); st->pdcBuf.clear(); st->pdcWrite = 0; st->pdcActive = 0; }
+        for (auto& rt : recTracks) { rt->pdcBuf.setSize (2, pdcCapacity); rt->pdcBuf.clear(); rt->pdcWrite = 0; rt->pdcActive = 0; }
+        pdcMaxReported = -1;
+        recomputePdc();
         scratch.setSize (2, block);
+        stemFxBuf.setSize (2, block);   // 오디오 스레드에서 재할당되지 않도록 미리 확보
+        fxBuf.setSize (2, block);
+        clipTmp.setSize (2, block);
         pitchRing.assign (4096, 0.0f); pitchW = 0;
         if (! writerThread.isThreadRunning()) writerThread.startThread();
 
@@ -1034,22 +1291,33 @@ public:
                 s->src->getNextAudioBlock (info);
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
-                const float g = audible ? s->gain.load() : 0.0f;   // 뮤트/솔로도 램프로 declick
+                if (s->autoOn.load())   // 자동화 ON — 페이더 대신 곡선 값(read 모드)
+                {
+                    const ScopedTryLock al (s->autoLock);
+                    if (al.isLocked()) s->curAutoGain = autoValueAt (s->autoPts, phStart);
+                }
+                const float fader = s->autoOn.load() ? s->curAutoGain : s->gain.load();
+                const float g = audible ? fader : 0.0f;   // 뮤트/솔로도 램프로 declick
                 float pL, pR; panGains (s->pan.load(), pL, pR);
                 const float tgtL = g * pL, tgtR = g * pR;
 
                 // 스템별 독립 FX 체인 (있으면 별도 버퍼에서 처리 후 합산)
                 const ScopedTryLock fl (s->fxLock);
-                const AudioBuffer<float>* srcBuf = &scratch;
+                AudioBuffer<float>* srcBuf = &scratch;
                 if (fl.isLocked() && ! s->chain.empty())
                 {
-                    stemFxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
+                    stemFxBuf.setSize (2, numSamples, false, false, true);   // 플러그인 구성(2in/2out)과 일치
                     stemFxBuf.clear();
                     for (int c = 0; c < stemFxBuf.getNumChannels(); ++c)
                         stemFxBuf.copyFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
                     for (auto& sl : s->chain)
                         if (sl && sl->plugin && ! sl->bypass.load()) { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
                     srcBuf = &stemFxBuf;
+                }
+                {   // PDC — 다른 트랙의 플러그인 지연에 맞춰 이 트랙을 늦춤
+                    const int want = s->pdcDelay.load();
+                    if (want != s->pdcActive) { s->pdcBuf.clear(); s->pdcWrite = 0; s->pdcActive = want; }
+                    applyDelayLine (*srcBuf, numSamples, s->pdcBuf, s->pdcWrite, s->pdcActive);
                 }
                 const float* srcL = srcBuf->getReadPointer (0);
                 const float* srcR = srcBuf->getReadPointer (jmin (1, srcBuf->getNumChannels() - 1));
@@ -1092,12 +1360,18 @@ public:
                 for (auto& rt : recTracks)
                 {
                     const bool audible = anySolo ? rt->solo.load() : ! rt->mute.load();
-                    const float g = (audible ? rt->gain.load() : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
+                    if (rt->autoOn.load())   // 자동화 ON — 페이더 대신 곡선 값(read 모드)
+                    {
+                        const ScopedTryLock al (rt->autoLock);
+                        if (al.isLocked()) rt->curAutoGain = autoValueAt (rt->autoPts, phStart);
+                    }
+                    const float fader = rt->autoOn.load() ? rt->curAutoGain : rt->gain.load();
+                    const float g = (audible ? fader : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
                     float pL, pR; panGains (rt->pan.load(), pL, pR);
                     const float tgtL = g * pL, tgtR = g * pR;
                     if (rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;
 
-                    fxBuf.setSize (jmax (2, numOutputChans), numSamples, false, false, true);
+                    fxBuf.setSize (2, numSamples, false, false, true);   // 플러그인 구성(2in/2out)과 일치
                     fxBuf.clear();
 
                     // 테이크·입력은 유니티로 버스에 모음 (게인은 FX 뒤에 적용). 메모리 버퍼에서 직접(디스크 I/O 없음)
@@ -1138,6 +1412,11 @@ public:
                                 }
                     }
 
+                    {   // PDC
+                        const int want = rt->pdcDelay.load();
+                        if (want != rt->pdcActive) { rt->pdcBuf.clear(); rt->pdcWrite = 0; rt->pdcActive = want; }
+                        applyDelayLine (fxBuf, numSamples, rt->pdcBuf, rt->pdcWrite, rt->pdcActive);
+                    }
                     // post-FX 페이더 + 팬(L/R 결합 램프) + peak
                     const float* rtL = fxBuf.getReadPointer (0);
                     const float* rtR = fxBuf.getReadPointer (jmin (1, fxBuf.getNumChannels() - 1));
@@ -1188,11 +1467,42 @@ public:
         {
             AudioBuffer<float> out (outputs, numOut, numSamples);   // 기존 포인터 래핑(무복사)
             out.applyGainRamp (0, numSamples, lastMasterGain, master);
+
+            // ── 디클릭 ──
+            // 시크/재생·정지 직후 첫 블록은 파형이 뚝 끊겨 '틱' 이 난다.
+            // out[i] += (직전 마지막 샘플 - 이번 첫 샘플) * w(i)  →  i=0 에서 연속, w 가 0 이 되면 원본 그대로.
+            if (declickPending.exchange (false))
+            {
+                declickLen = jmax (16, (int) (deviceSampleRate * 0.006));   // 6 ms
+                declickPos = 0;
+                for (int c = 0; c < 2; ++c)
+                {
+                    const int sc = jmin (c, numOut - 1);
+                    declickDelta[c] = declickPrev[c] - outputs[sc][0];
+                }
+            }
+            if (declickPos < declickLen)
+            {
+                const int n2 = jmin (numSamples, declickLen - declickPos);
+                for (int c = 0; c < numOut; ++c)
+                {
+                    float* d = outputs[c];
+                    const float delta = declickDelta[jmin (c, 1)];
+                    if (delta == 0.0f) continue;
+                    for (int i = 0; i < n2; ++i)
+                        d[i] += delta * (1.0f - (float) (declickPos + i) / (float) declickLen);
+                }
+                declickPos += n2;
+            }
+
             for (int c = 0; c < numOut; ++c)
             {
                 FloatVectorOperations::max (outputs[c], outputs[c], -1.0f, numSamples);
                 FloatVectorOperations::min (outputs[c], outputs[c],  1.0f, numSamples);
             }
+            for (int c = 0; c < 2; ++c)   // 다음 블록 디클릭 기준값
+                declickPrev[c] = outputs[jmin (c, numOut - 1)][numSamples - 1];
+
             // 마스터 peak — 최종 출력 기준(마스터 게인·클리퍼 이후)
             updatePeak (mstPkL, blockPeak (outputs[0], numSamples, 1.0f, 1.0f));
             updatePeak (mstPkR, blockPeak (outputs[jmin (1, numOut - 1)], numSamples, 1.0f, 1.0f));
@@ -1205,9 +1515,11 @@ public:
             if (recordedStart.load() < 0 && playing.load())
                 recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart). playhead 는 이미 +numSamples 됨
 
-            if (recordedStart.load() >= 0 && numIn > 0)   // 입력 채널 없으면 write 안 함(크래시 방지)
+            // writer 가 기대하는 채널 수보다 입력이 적으면 범위 밖을 읽어 잡음이 섞인다 → 방어
+            if (recordedStart.load() >= 0 && numIn >= writerChans)
                 if (auto* w = activeWriter.load())
-                    w->write (inputs, numSamples);
+                    if (! w->write (inputs, numSamples))
+                        ++recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
         }
     }
 
@@ -1217,6 +1529,12 @@ private:
         if (! recordArmed.exchange (false) && threadedWriter == nullptr) return;
         activeWriter.store (nullptr);
         threadedWriter.reset();   // flush + close
+        {
+            const int dropped = recDropBlocks.exchange (0);
+            if (dropped > 0)
+                std::cerr << "[engine] WARN 녹음 중 " << dropped
+                          << " 블록 쓰기 실패 — 파일에 끊김이 있을 수 있음" << std::endl;
+        }
         const int64 start = recordedStart.exchange (-1);
         if (start >= 0)
         {
@@ -1272,6 +1590,15 @@ private:
     std::atomic<float> monitorGain { 1.0f };
     std::atomic<float> masterGain { 1.0f };
     float lastMasterGain = 1.0f;   // 마스터 게인 램프용 (오디오 스레드 전용)
+    // ── 디클릭 — 시크·재생/정지 시 파형 불연속 제거 ──
+    // 다음 블록 첫 샘플이 직전 출력 마지막 샘플과 이어지도록 오프셋을 넣고 서서히 없앤다.
+    std::atomic<bool> pdcEnabled { true };   // 녹음 중 모니터 지연이 싫으면 끌 수 있음
+    int pdcCapacity = 0;                     // 링버퍼 용량(샘플) — aboutToStart 에서 할당
+    int pdcMaxReported = -1;                 // 마지막으로 통지한 최대 지연
+    std::atomic<bool> declickPending { false };
+    float declickPrev[2]  = { 0.0f, 0.0f };   // 직전 블록의 마지막 출력 샘플
+    float declickDelta[2] = { 0.0f, 0.0f };   // 이어붙일 오프셋
+    int   declickPos = 0, declickLen = 0;     // 진행 위치 / 전체 길이(샘플)
     std::atomic<bool>  monitorInputOn { true };
     std::atomic<int64> stemOffset { 0 };
     AudioDeviceManager* devmgr = nullptr;
@@ -1307,6 +1634,8 @@ private:
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
     std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
     std::atomic<bool>  recordArmed { false };
+    int writerChans = 1;                  // 녹음 writer 채널 수 (입력과 불일치 시 write 스킵)
+    std::atomic<int> recDropBlocks { 0 }; // 쓰기 실패(FIFO 오버런) 블록 수
     std::atomic<int64> recordedStart { -1 };
     File outFile;
 };
@@ -1329,14 +1658,17 @@ public:
         // 트랙 미터 — 재생 중 or 모니터링 중 + 2틱=10Hz. JSON 스팸이 pos 이벤트 정체시켜 영상 싱크 반복 스냅 방지
         if ((engine.isPlaying() || engine.isMonitorOn()) && (tick % 2 == 0))
         {
-            Array<var> list; engine.collectMeters (list);
-            if (! list.isEmpty())
+            Array<var> list;
+            const bool anyLevel = engine.collectMeters (list);
+            if (anyLevel && ! list.isEmpty())
             {
                 auto* o = ev ("trackMeter");
                 o->setProperty ("list", var (list));
                 emit (var (o));
             }
         }
+        // 플러그인 지연 변화 추적 (1초 주기) — 오버샘플링 토글 등으로 런타임에 바뀔 수 있음
+        if (tick % 20 == 0) engine.recomputePdc();
         // 튜너 피치 (2틱=10Hz. rAF 보간과 함께 부드럽게)
         if (++tick % 2 == 0)
         {
@@ -1375,6 +1707,8 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recTracks")   engine.emitRecTracks();
     else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"], (int) c["gen"]);
     else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"], c["pan"]);
+    else if (cmd == "automation")  engine.setAutomation ((int) c["track"], c["points"], c["on"]);
+    else if (cmd == "pdc")         engine.setPdcEnabled ((bool) c["on"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);

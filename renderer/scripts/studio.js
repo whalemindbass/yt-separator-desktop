@@ -93,7 +93,7 @@ let _stemPaths = null;     // 현재 스템 경로맵 {key:path} — 프로젝�
 let _songName = '';        // 현재 곡/프로젝트 이름
 let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
 
-const HEAD_W = 140;
+const HEAD_W = 172;
 const DEFAULT_LANE_H = 82;   // CSS .daw-lane 기본 높이 — pan/meter 2번째 줄 수용
 // 마디(bar) 기준 눈금 — 템포 가정(추후 감지/조절 가능). 120BPM·4/4 → 1마디 2초
 const BEATS_PER_BAR = 4;
@@ -111,6 +111,56 @@ function snapSec(sec, disable) {
   const g = secPerBeat() / 4;   // 16분음표 격자(촘촘)
   const near = _gridOffset + Math.round((sec - _gridOffset) / g) * g;
   return Math.abs(near - sec) * _pxPerSec <= 5 ? Math.max(0, near) : Math.max(0, sec);
+}
+// ── 볼륨 자동화 ───────────────────────────────────────────
+// selId(스템 90001+ / 녹음 트랙 id) → { on, open, pts:[{t:초, v:게인 0~1.5}] }
+const AUTO_MAX = 1.5;          // 트랙 페이더 상한(150%)과 동일
+const AUTO_LANE_H = 46;        // 자동화 레인 높이(px)
+let _auto = new Map();
+function autoOf(id) {
+  let a = _auto.get(id);
+  if (!a) { a = { on: false, open: false, pts: [] }; _auto.set(id, a); }
+  return a;
+}
+function autoPush(id) {   // 엔진에 현재 곡선·on 상태 전송
+  const a = autoOf(id), sr = _sr || 44100;
+  api.engine.automation(id, { on: !!a.on, points: a.pts.map(p => ({ s: Math.round(p.t * sr), v: p.v })) });
+}
+// ── 스템 자동화 ↔ 스템 오프셋 연동 ────────────────────────
+// 스템 클립을 가로로 옮기면 볼륨 곡선도 같은 만큼 따라 움직여야 한다.
+function snapshotStemAuto() {
+  const snap = new Map();
+  _tracks.forEach(t => {
+    const id = stemIdOf(t.engineIndex);
+    snap.set(id, autoOf(id).pts.map(p => ({ t: p.t, v: p.v })));
+  });
+  return snap;
+}
+function shiftStemAuto(baseSnap, delta) {
+  baseSnap.forEach((pts, id) => {
+    if (!pts.length) return;
+    autoOf(id).pts = pts.map(p => ({ t: Math.max(0, p.t + delta), v: p.v }));
+    renderAutoLane(id);
+  });
+}
+function restoreStemAuto(snap) {
+  snap.forEach((pts, id) => {
+    autoOf(id).pts = pts.map(p => ({ t: p.t, v: p.v }));
+    autoPush(id); renderAutoLane(id);
+  });
+}
+function pushStemAuto() {
+  _tracks.forEach(t => autoPush(stemIdOf(t.engineIndex)));
+}
+
+function autoValueAt(pts, t) {
+  if (!pts.length) return 1;
+  if (t <= pts[0].t) return pts[0].v;
+  if (t >= pts[pts.length - 1].t) return pts[pts.length - 1].v;
+  let lo = 0, hi = pts.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (pts[m].t <= t) lo = m; else hi = m; }
+  const a = pts[lo], b = pts[hi];
+  return b.t <= a.t ? b.v : a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t));
 }
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
@@ -148,6 +198,7 @@ function seekToClientX(cx) {
 }
 // 룰러/트랙 빈 곳 클릭·드래그 = 재생선 따라오기(스크럽). 좌우 스크롤은 휠
 function grabPan(e) {
+  if (e.button !== 0) return;   // 우클릭·가운데클릭은 재생선 이동 안 함 (컨텍스트 메뉴용)
   if (_recArmed) return;   // 녹음 중 재생위치 이동 금지
   clearClipSelection();    // 빈 곳 클릭 = 클립 선택 해제
   seekToClientX(e.clientX);
@@ -204,7 +255,11 @@ function renderTracks() {
     const p100 = Math.round((t.pan != null ? t.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
-        <div class="nm"><i></i>${t.label}</div>
+        <div class="nm"><i></i><span class="lbl-t">${t.label}</span>
+          <button class="daw-autotog${autoOf(stemIdOf(t.engineIndex)).open ? ' on' : ''}" title="볼륨 자동화 레인 열기/닫기">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11.5 5.5 7l3 2.5L14 4"/></svg>
+          </button>
+        </div>
         <div class="ctrls">
           <div class="daw-btn-grp">
             <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
@@ -232,20 +287,36 @@ function renderTracks() {
     });
     pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); t.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.track(t.engineIndex, { pan: t.pan }); markDirty(); });
     pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); t.pan = 0; api.engine.track(t.engineIndex, { pan: 0 }); markDirty(); });
+    const atog = lane.querySelector('.daw-autotog');
+    atog.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAutoLane(stemIdOf(t.engineIndex), t.label, t.color, lane, atog);
+    });
     // 스템 클립 드래그 = 스템 전체 오프셋 (묶음 이동)
     const clip = lane.querySelector('.daw-clip');
     clip.addEventListener('click', (e) => e.stopPropagation());
     clip.addEventListener('pointerdown', (e) => {
       const base = _stemOffset;
+      const autoBase = snapshotStemAuto();   // 자동화 곡선도 스템과 같이 움직인다
       dragClip(e, (dSec, cx, cy) => {
         _stemOffset = snapSec(base + dSec, e.altKey); repositionStems();   // 0:00 뒤로 못 감 + 그리드 스냅
+        shiftStemAuto(autoBase, _stemOffset - base);
         showDragBadge(_stemOffset - base, cx, cy);
       }, (moved) => {
         hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100)));
-        if (moved && _stemOffset !== base) { const nw = _stemOffset; pushUndo(() => setStemOffset(base), () => setStemOffset(nw), '스템 이동'); markDirty(); }
+        if (moved && _stemOffset !== base) {
+          const nw = _stemOffset;
+          pushStemAuto();   // 이동 끝난 곡선을 엔진에 반영
+          const autoAfter = snapshotStemAuto();
+          pushUndo(() => { setStemOffset(base); restoreStemAuto(autoBase); },
+                   () => { setStemOffset(nw);   restoreStemAuto(autoAfter); }, '스템 이동');
+          markDirty();
+        }
       });
     });
     lanes.appendChild(lane);
+    const sid = stemIdOf(t.engineIndex);
+    if (autoOf(sid).open) lanes.appendChild(buildAutoLane(sid, t.label, t.color));
   });
   renderRecLanes();
 }
@@ -254,6 +325,11 @@ function renderTracks() {
 function renderRecLanes() {
   const lanes = $('daw-lanes');
   lanes.querySelectorAll('.daw-lane-rec, .daw-addrec-row, .daw-lanes-spacer').forEach(el => el.remove());
+  // 녹음 트랙에 붙은 자동화 레인도 함께 제거(스템 레인의 것은 보존)
+  lanes.querySelectorAll('.daw-auto-row').forEach(el => {
+    const id = Number(el.dataset.autoid);
+    if (!isStemId(id)) el.remove();
+  });
   let recN = 0, audN = 0;
   _recTracks.forEach((rt, idx) => {
     const isAudio = rt.type === 1;
@@ -272,7 +348,11 @@ function renderRecLanes() {
     const rp100 = Math.round((rt.pan != null ? rt.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
-        <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span></div>
+        <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span>
+          <button class="daw-autotog${autoOf(rt.id).open ? ' on' : ''}" title="볼륨 자동화 레인 열기/닫기">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11.5 5.5 7l3 2.5L14 4"/></svg>
+          </button>
+        </div>
         <div class="ctrls">
           <div class="daw-btn-grp">
             ${rBtnHtml}
@@ -311,6 +391,11 @@ function renderRecLanes() {
     });
     pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); rt.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.recTrack(rt.id, { pan: rt.pan }); markDirty(); });
     pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); rt.pan = 0; api.engine.recTrack(rt.id, { pan: 0 }); markDirty(); });
+    const atogR = lane.querySelector('.daw-autotog');
+    atogR.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAutoLane(rt.id, label, rt.color || defColor, lane, atogR);
+    });
     // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
     del.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -363,6 +448,7 @@ function renderRecLanes() {
     const reorder = lane.querySelector('.daw-reorder');
     reorder.addEventListener('pointerdown', (e) => wireReorder(e, rt, lane));
     lanes.appendChild(lane);
+    if (autoOf(rt.id).open) lanes.appendChild(buildAutoLane(rt.id, label, rt.color || defColor));
   });
   // 하단 추가버튼 제거(재생선 침범 방지). 추가는 좌상단 ＋ 버튼·트랙 우클릭으로.
   // 맨 아래 트랙 높이 조절 시 여유용 빈칸
@@ -424,6 +510,165 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
+// ── 자동화 레인 렌더 ──────────────────────────────────────
+// 헤더(HEAD_W) + 그래프. 클릭=점 추가, 드래그=이동, 우클릭=삭제, 더블클릭(빈 곳)=점 추가
+// 레인 열기/닫기 — 전체 재렌더 대신 DOM 직접 삽입·제거.
+// (재렌더하면 스템 파형이 날아가고 스크롤이 맨 위로 튐)
+function toggleAutoLane(selId, label, color, laneEl, btn) {
+  const a = autoOf(selId);
+  a.open = !a.open;
+  if (btn) btn.classList.toggle('on', a.open);
+  const existing = document.querySelector(`.daw-auto-row[data-autoid="${selId}"]`);
+  if (a.open) {
+    if (!existing) laneEl.insertAdjacentElement('afterend', buildAutoLane(selId, label, color));
+  } else if (existing) {
+    existing.remove();
+  }
+  layout();   // 폭·재생선·범위밴드만 갱신 (스크롤·파형 보존)
+}
+
+function buildAutoLane(selId, label, color) {
+  const a = autoOf(selId);
+  const row = document.createElement('div');
+  row.className = 'daw-auto-row';
+  row.dataset.autoid = selId;
+  row.style.setProperty('--c', color);
+  row.innerHTML = `
+    <div class="daw-auto-head">
+      <span class="lb">볼륨 자동화</span>
+      <button class="daw-auto-on${a.on ? ' on' : ''}" title="자동화 켜기/끄기 — 켜면 페이더 대신 곡선이 볼륨을 결정합니다">${a.on ? 'ON' : 'OFF'}</button>
+      <button class="daw-auto-clr" title="곡선 초기화 — 찍은 점을 모두 지웁니다">초기화</button>
+      <button class="daw-auto-close" title="레인 닫기">✕</button>
+    </div>
+    <div class="daw-auto-area"><svg class="daw-auto-svg" preserveAspectRatio="none"></svg></div>`;
+  const area = row.querySelector('.daw-auto-area');
+  const svg = row.querySelector('.daw-auto-svg');
+
+  row.querySelector('.daw-auto-on').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const before = a.on;
+    a.on = !a.on;
+    autoPush(selId); renderAutoLane(selId);
+    pushUndo(() => { autoOf(selId).on = before; autoPush(selId); renderAutoLane(selId); },
+             () => { autoOf(selId).on = !before; autoPush(selId); renderAutoLane(selId); }, '자동화 on/off');
+  });
+  row.querySelector('.daw-auto-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    a.open = false;
+    // 해당 트랙 헤드의 자동화 토글 버튼도 꺼진 상태로
+    document.querySelectorAll('.daw-lane').forEach(l => {
+      if (Number(l.dataset.selid) === selId) l.querySelector('.daw-autotog')?.classList.remove('on');
+    });
+    row.remove();
+    layout();
+  });
+  row.querySelector('.daw-auto-clr').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const before = a.pts.map(p => ({ ...p }));
+    if (!before.length) return;
+    a.pts = []; autoPush(selId); renderAutoLane(selId); markDirty();
+    pushUndo(() => { autoOf(selId).pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
+             () => { autoOf(selId).pts = []; autoPush(selId); renderAutoLane(selId); }, '자동화 지우기');
+  });
+
+  // 빈 곳 클릭 = 점 추가
+  area.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.classList.contains('ap')) return;   // 점은 아래 핸들러가 처리
+    e.stopPropagation();
+    const r = area.getBoundingClientRect();
+    const t = Math.max(0, (e.clientX - r.left) / _pxPerSec);
+    const v = valFromY(e.clientY - r.top, r.height);
+    const before = a.pts.map(p => ({ ...p }));
+    a.pts.push({ t: snapSec(t, e.altKey), v });
+    a.pts.sort((x, y) => x.t - y.t);
+    if (!a.on) { a.on = true; }   // 첫 점을 찍으면 자동으로 켬
+    autoPush(selId); renderAutoLane(selId); markDirty();
+    const after = a.pts.map(p => ({ ...p }));
+    pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
+             () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 추가');
+  });
+  area.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  renderAutoLaneInto(row, selId);
+  return row;
+}
+const valFromY = (y, h) => Math.max(0, Math.min(AUTO_MAX, (1 - y / Math.max(1, h)) * AUTO_MAX));
+const yFromVal = (v, h) => (1 - Math.max(0, Math.min(AUTO_MAX, v)) / AUTO_MAX) * h;
+
+function renderAutoLane(selId) {
+  const row = document.querySelector(`.daw-auto-row[data-autoid="${selId}"]`);
+  if (row) renderAutoLaneInto(row, selId);
+}
+function renderAutoLaneInto(row, selId) {
+  const a = autoOf(selId);
+  const svg = row.querySelector('.daw-auto-svg');
+  const area = row.querySelector('.daw-auto-area');
+  const onBtn = row.querySelector('.daw-auto-on');
+  if (onBtn) { onBtn.classList.toggle('on', !!a.on); onBtn.textContent = a.on ? 'ON' : 'OFF'; }
+  row.classList.toggle('off', !a.on);
+
+  const W = Math.max(1, timelineW()), H = AUTO_LANE_H - 2;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.width = W + 'px';
+  const pts = a.pts;
+  // 유니티(1.0) 기준선
+  const unityY = yFromVal(1, H).toFixed(1);
+  let g = `<line x1="0" y1="${unityY}" x2="${W}" y2="${unityY}" class="au-unity"/>`;
+  if (pts.length) {
+    const xs = pts.map(p => (p.t * _pxPerSec));
+    const ys = pts.map(p => yFromVal(p.v, H));
+    let d = `M0 ${ys[0].toFixed(1)}`;
+    xs.forEach((x, i) => { d += ` L${x.toFixed(1)} ${ys[i].toFixed(1)}`; });
+    d += ` L${W} ${ys[ys.length - 1].toFixed(1)}`;
+    g += `<path class="au-fill" d="${d} L${W} ${H} L0 ${H} Z"/><path class="au-line" d="${d}"/>`;
+    xs.forEach((x, i) => {
+      g += `<circle class="ap" cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="4.5" data-i="${i}"/>`;
+    });
+  } else {
+    g += `<text x="8" y="${(H / 2 + 3).toFixed(0)}" class="au-hint">클릭해 점을 찍으면 볼륨 곡선이 만들어집니다</text>`;
+  }
+  svg.innerHTML = g;
+
+  // 점 드래그 / 우클릭 삭제
+  svg.querySelectorAll('.ap').forEach((c) => {
+    c.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const i = Number(c.dataset.i);
+      const before = a.pts.map(p => ({ ...p }));
+      const r = area.getBoundingClientRect();
+      const move = (ev) => {
+        const t = Math.max(0, (ev.clientX - r.left) / _pxPerSec);
+        a.pts[i].t = snapSec(t, ev.altKey);
+        a.pts[i].v = valFromY(ev.clientY - r.top, r.height);
+        a.pts.sort((x, y) => x.t - y.t);
+        renderAutoLane(selId);
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        autoPush(selId); markDirty();
+        const after = a.pts.map(p => ({ ...p }));
+        pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
+                 () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 이동');
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+    c.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const i = Number(c.dataset.i);
+      const before = a.pts.map(p => ({ ...p }));
+      a.pts.splice(i, 1);
+      autoPush(selId); renderAutoLane(selId); markDirty();
+      const after = a.pts.map(p => ({ ...p }));
+      pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
+               () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 삭제');
+    });
+  });
+}
+
 // ── 트랙 미터 (엔진 10Hz emit + 렌더러 rAF 감쇠) ──
 const _meters = new Map();   // id → {curL, curR, holdL, holdR, holdLTs, holdRTs}
 function onTrackMeter(list) {
@@ -443,11 +688,23 @@ function syncHeroState() {   // hero 클래스에 도구 오픈 여부 반영 �
   const toolsOpen = !document.getElementById('daw-tools')?.hidden;
   hero.classList.toggle('tools-open', toolsOpen);
 }
+// 미터 스케일 — 선형 진폭을 그대로 쓰면 노이즈 플로어(-60dB 수준)도 첫 LED를 켜서
+// 무음일 때 깜빡이는 것처럼 보인다. dB 로 매핑하고 게이트 + 블록 단위 양자화로 고정.
+const METER_BLOCKS = 30;          // CSS 의 LED 분할 수와 동일
+const METER_FLOOR_DB = -54;       // 이 아래는 완전히 꺼짐
+const METER_GATE = 0.0056;        // ≈ -45 dB — 엔진 게이트와 동일. 입력 노이즈 플로어 차단
+function meterPct(v) {
+  if (!(v > METER_GATE)) return 0;
+  const db = 20 * Math.log10(Math.min(1, v));
+  const p = (db - METER_FLOOR_DB) / -METER_FLOOR_DB;
+  if (p <= 0) return 0;
+  // 블록 경계로 내림 — 블록 사이에서 값이 흔들려도 표시가 떨리지 않음
+  return Math.min(1, Math.floor(p * METER_BLOCKS) / METER_BLOCKS) * 100;
+}
 function applyMeter(el, st) {
-  const l100 = Math.min(100, st.curL * 100), r100 = Math.min(100, st.curR * 100);
   const iL = el.children[0], iR = el.children[1];
-  iL.style.setProperty('--v', l100 + '%');
-  iR.style.setProperty('--v', r100 + '%');
+  iL.style.setProperty('--v', meterPct(st.curL) + '%');
+  iR.style.setProperty('--v', meterPct(st.curR) + '%');
   el.classList.toggle('clip', st.holdL >= 1.0 || st.holdR >= 1.0);   // 잠깐 클립 유지용으로 holdL/R 는 계속 씀
 }
 let _metersRafOn = false, _metersLast = 0;
@@ -460,9 +717,11 @@ function _metersTick(ts) {
   let anyLive = false;
   _meters.forEach((st, id) => {
     st.curL *= decay; st.curR *= decay;
+    if (st.curL < METER_GATE) st.curL = 0;   // 게이트 이하는 0 으로 스냅 — 잔여값이 계속 깜빡이는 것 방지
+    if (st.curR < METER_GATE) st.curR = 0;
     if (ts - st.holdLTs > holdMs) st.holdL *= holdDecay;
     if (ts - st.holdRTs > holdMs) st.holdR *= holdDecay;
-    if (st.curL > 0.001 || st.curR > 0.001 || st.holdL > 0.001 || st.holdR > 0.001) anyLive = true;
+    if (st.curL > 0 || st.curR > 0 || st.holdL > 0.001 || st.holdR > 0.001) anyLive = true;
     const els = document.querySelectorAll(`[data-mid="${id}"]`);   // .daw-meter (헤드) + .mx-meter (사이드바 마스터)
     els.forEach(el => applyMeter(el, st));
   });
@@ -613,6 +872,10 @@ function layout() {
   const w = timelineW();   // 타임라인 전체 폭 (오른쪽 회색 여백 제거)
   $('daw-lanes').style.width = (HEAD_W + w) + 'px';
   document.querySelectorAll('.daw-lane').forEach(l => { l.style.width = (HEAD_W + w) + 'px'; });
+  document.querySelectorAll('.daw-auto-row').forEach(r => {
+    r.style.width = (HEAD_W + w) + 'px';
+    renderAutoLaneInto(r, Number(r.dataset.autoid));   // 배율 변경 시 곡선 다시 그림
+  });
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
   const spb = secPerBar();
@@ -844,7 +1107,7 @@ async function pickImportAudio() {
 // 불러온 스템 곡 닫기(되돌리기) — 스템·영상 비움, 내 녹음/임포트 트랙은 유지
 function closeSong() {
   api.engine.loadStems([]);
-  _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null;
+  _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null; _auto = new Map();
   _stemPaths = null; _videoPath = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
@@ -865,7 +1128,7 @@ async function loadSong(item, opts) {
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
-  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; clearUndo();
+  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
@@ -982,6 +1245,7 @@ function renderTakes() {
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
       if (e.target.classList.contains('daw-trim') || e.target.classList.contains('daw-fadeh')) return;   // 핸들은 트림·페이드
+      if (e.button !== 0) return;   // 우클릭은 컨텍스트 메뉴만 — 재생선·선택 건드리지 않음
       e.preventDefault(); e.stopPropagation();
       // 선택 관리 — Ctrl/Cmd = 토글(멀티), 그 외 = 미선택이면 단독 선택
       if (e.ctrlKey || e.metaKey) {
@@ -1369,9 +1633,12 @@ async function buildProjectObject() {
   _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
   stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
   const states = await gatherFx(pairs);
+  const autoOut = (id) => { const a = _auto.get(id); return a && (a.pts.length || a.on)
+    ? { on: !!a.on, open: !!a.open, pts: a.pts.map(p => ({ t: p.t, v: p.v })) } : null; };
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, pan: r.pan != null ? r.pan : 0, mute: !!r.mute, solo: !!r.solo,
     name: r.name || '', color: r.color || '', height: r.height || 0,
+    auto: autoOut(r.id),
     fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
   }));
   const takes = _takes.map(t => ({
@@ -1382,6 +1649,7 @@ async function buildProjectObject() {
   const stemMix = _tracks.map(t => {
     const sid = stemIdOf(t.engineIndex);
     return { key: t.key, gain: t.gain != null ? t.gain : 1, pan: t.pan != null ? t.pan : 0, mute: !!t.mute, solo: !!t.solo,
+      auto: autoOut(sid),
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
@@ -1444,6 +1712,13 @@ async function applyProject(p) {
         const pn = lane.querySelector('.daw-pan'); if (pn) { const pv = Math.round(t.pan * 100); pn.value = pv; pn.classList.toggle('off', pv === 0); }
         const mb = lane.querySelector('[data-m="mute"]'); if (mb) { mb.classList.toggle('on', t.mute); mb.setAttribute('aria-pressed', String(t.mute)); }
         const sb = lane.querySelector('[data-m="solo"]'); if (sb) { sb.classList.toggle('on', t.solo); sb.setAttribute('aria-pressed', String(t.solo)); }
+        if (m.auto) {   // 스템 볼륨 자동화 복원
+          const sid = stemIdOf(t.engineIndex);
+          const a = autoOf(sid);
+          a.on = !!m.auto.on; a.open = !!m.auto.open;
+          a.pts = (m.auto.pts || []).map(p => ({ t: p.t, v: p.v }));
+          autoPush(sid);
+        }
         if (Array.isArray(m.fx) && m.fx.length)   // 스템 FX 체인 복원
           api.engine.fxSetChain(stemIdOf(t.engineIndex), m.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
       });
@@ -1469,7 +1744,14 @@ async function applyProject(p) {
     p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
     applyTrackMeta(p.tracks);   // 이름·색·높이
     p.tracks.forEach((t, i) => {
-      if (_recTracks[i] && Array.isArray(t.fx) && t.fx.length)
+      if (!_recTracks[i]) return;
+      if (t.auto) {   // 녹음 트랙 볼륨 자동화 복원 (새 id 기준)
+        const a = autoOf(_recTracks[i].id);
+        a.on = !!t.auto.on; a.open = !!t.auto.open;
+        a.pts = (t.auto.pts || []).map(x => ({ t: x.t, v: x.v }));
+        autoPush(_recTracks[i].id);
+      }
+      if (Array.isArray(t.fx) && t.fx.length)
         api.engine.fxSetChain(_recTracks[i].id, t.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
     });
   }
@@ -1808,6 +2090,16 @@ function onEngineEvent(m) {
     case 'level': updateVU(m.peak); break;
     case 'pitch': updateTuner(m.freq); break;
     case 'trackMeter': onTrackMeter(m.list || []); break;
+    case 'pdc': {   // 플러그인 지연 보정량 표시 — 0 이면 숨김
+      const el = document.getElementById('daw-pdc');
+      if (el) {
+        const on = m.on !== false, ms = Number(m.ms || 0);
+        el.hidden = !(on && ms >= 0.5);
+        el.textContent = `지연 보정 ${ms.toFixed(1)}ms`;
+        el.title = `플러그인 지연 ${Math.round(m.samples || 0)}샘플을 전 트랙에 맞춰 보정 중`;
+      }
+      break;
+    }
     case 'recTracks': {
       const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
       _recTracks = (m.list || []).map(r => { const p = prevMeta.get(r.id); return p ? { ...r, ...p } : r; });   // 렌더러 전용 메타(이름·색·높이) id로 보존
@@ -1991,7 +2283,7 @@ function wire() {
       _pxPerSec = Math.max(2, Math.min(200, _pxPerSec * factor));
       layout();
       sc.scrollLeft = Math.max(0, tAt * _pxPerSec - (e.clientX - rect.left - HEAD_W));
-    } else if (e.target.closest('.daw-head, .daw-addrec-head, .sp-head')) {
+    } else if (e.target.closest('.daw-head, .daw-addrec-head, .sp-head, .daw-auto-head')) {
       return;   // 트랙 컨트롤부(하단 spacer 컨트롤 영역 포함) = 위아래 스크롤(native 세로)
     } else {                               // 타임라인 위 = 가로 스크롤(촘촘하게)
       e.preventDefault();
