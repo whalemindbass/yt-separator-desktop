@@ -653,13 +653,9 @@ public:
     }
     void recomputePdc (bool announce = true)
     {
-        if (! pdcEnabled.load())
-        {
-            for (auto& s : stems)      s->pdcDelay.store (0);
-            for (auto& rt : recTracks) rt->pdcDelay.store (0);
-            if (announce && pdcMaxReported != 0) { pdcMaxReported = 0; emitPdc (0); }
-            return;
-        }
+        // 꺼져 있어도 "보정 가능량"은 계속 계산해 통지한다 —
+        // 그래야 UI 에서 꺼진 상태를 보여주고 다시 켤 수 있다.
+        const bool on = pdcEnabled.load();
         const int cap = jmax (0, pdcCapacity - 1);
         std::vector<int> stemLat, recLat;
         int maxLat = 0;
@@ -683,11 +679,12 @@ public:
                 recLat.push_back (l); maxLat = jmax (maxLat, l);
             }
             size_t i = 0;
-            for (auto& rt : recTracks) rt->pdcDelay.store (jmax (0, maxLat - recLat[i++]));
+            for (auto& rt : recTracks) { rt->pdcDelay.store (on ? jmax (0, maxLat - recLat[i]) : 0); ++i; }
         }
         size_t i = 0;
-        for (auto& s : stems) s->pdcDelay.store (jmax (0, maxLat - stemLat[i++]));
-        if (announce && maxLat != pdcMaxReported) { pdcMaxReported = maxLat; emitPdc (maxLat); }
+        for (auto& s : stems) { s->pdcDelay.store (on ? jmax (0, maxLat - stemLat[i]) : 0); ++i; }
+        if (announce && (maxLat != pdcMaxReported || on != pdcOnReported))
+        { pdcMaxReported = maxLat; pdcOnReported = on; emitPdc (maxLat); }
     }
     void emitPdc (int samples)
     {
@@ -1595,6 +1592,7 @@ private:
     std::atomic<bool> pdcEnabled { true };   // 녹음 중 모니터 지연이 싫으면 끌 수 있음
     int pdcCapacity = 0;                     // 링버퍼 용량(샘플) — aboutToStart 에서 할당
     int pdcMaxReported = -1;                 // 마지막으로 통지한 최대 지연
+    bool pdcOnReported = true;               // 마지막으로 통지한 on/off
     std::atomic<bool> declickPending { false };
     float declickPrev[2]  = { 0.0f, 0.0f };   // 직전 블록의 마지막 출력 샘플
     float declickDelta[2] = { 0.0f, 0.0f };   // 이어붙일 오프셋

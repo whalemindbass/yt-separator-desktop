@@ -162,6 +162,7 @@ function autoValueAt(pts, t) {
   const a = pts[lo], b = pts[hi];
   return b.t <= a.t ? b.v : a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t));
 }
+let _pdcOn = true;     // 플러그인 지연 보정 on/off (엔진 통지로 동기)
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
@@ -2090,13 +2091,17 @@ function onEngineEvent(m) {
     case 'level': updateVU(m.peak); break;
     case 'pitch': updateTuner(m.freq); break;
     case 'trackMeter': onTrackMeter(m.list || []); break;
-    case 'pdc': {   // 플러그인 지연 보정량 표시 — 0 이면 숨김
+    case 'pdc': {   // 플러그인 지연 보정 — 보정할 지연이 있을 때만 표시. 클릭으로 on/off
       const el = document.getElementById('daw-pdc');
       if (el) {
-        const on = m.on !== false, ms = Number(m.ms || 0);
-        el.hidden = !(on && ms >= 0.5);
-        el.textContent = `지연 보정 ${ms.toFixed(1)}ms`;
-        el.title = `플러그인 지연 ${Math.round(m.samples || 0)}샘플을 전 트랙에 맞춰 보정 중`;
+        _pdcOn = m.on !== false;
+        const ms = Number(m.ms || 0);
+        el.hidden = ms < 0.5;                       // 보정할 지연 자체가 없으면 숨김
+        el.classList.toggle('on', _pdcOn);
+        el.textContent = _pdcOn ? `지연 보정 ${ms.toFixed(1)}ms` : `지연 보정 꺼짐 (${ms.toFixed(1)}ms)`;
+        el.title = _pdcOn
+          ? `플러그인 지연 ${Math.round(m.samples || 0)}샘플을 전 트랙에 맞춰 보정 중 — 클릭하면 끔`
+          : '지연 보정이 꺼져 있어 플러그인이 있는 트랙이 늦게 들립니다 — 클릭하면 켬';
       }
       break;
     }
@@ -2425,6 +2430,7 @@ function wire() {
   const refBox = $('st-tuner-ref');
   if (refBox) { refBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setTunerRef(Number(b.dataset.hz)))); setTunerRef(_tunerRef); }
   // 도구 드로어 — 열면 도구 선택 탭. 하나씩 사용.
+  $('daw-pdc').addEventListener('click', () => { _pdcOn = !_pdcOn; api.engine.pdc(_pdcOn); });
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; syncHeroState(); });
   $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; syncHeroState(); });
   // 영상 접기/펴기

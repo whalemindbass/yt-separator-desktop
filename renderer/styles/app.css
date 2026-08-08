@@ -2118,7 +2118,8 @@ body { display: flex; flex-direction: column; }
 
 .daw-midrow { flex: 1; min-height: 0; display: flex; }
 .daw-left { position: relative; flex: none; width: 230px; border-right: 1px solid var(--border); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-.daw-left-h { font-size: 12px; font-weight: 700; color: var(--tx-2); }
+.daw-left-h { font-size: 12px; font-weight: 700; color: var(--tx-2);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daw-left-h b { color: var(--accent); }
 .daw-left .daw-fx-overlay { border-radius: 8px; }
 .daw-left-title { font-size: 12px; font-weight: 700; color: var(--tx-2); letter-spacing: .02em; }
@@ -2389,9 +2390,19 @@ body { display: flex; flex-direction: column; }
   background-repeat: no-repeat, no-repeat;
   transition: width .05s linear;
 }
-/* PDC 지연 보정 표시 */
-.daw-pdc { font: 600 9px/1 var(--mono); color: var(--accent); padding: 3px 6px; border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
+/* PDC 지연 보정 — 헤더 아래 자체 줄. 클릭으로 on/off */
+/* 이펙트 이름 아랫줄 — 전체 / 지연 보정 나란히 */
+.daw-left-toggles { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.daw-left-toggles .daw-fx-power { flex: none; }
+.daw-pdc { display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 4px 9px; border-radius: 20px; border: 1px solid var(--border);
+  font: 700 10px/1 var(--sans); color: var(--tx-3); background: var(--elev);
+  cursor: pointer; transition: .12s; white-space: nowrap; overflow: hidden; }
+.daw-pdc:hover { border-color: var(--border-mid); color: var(--tx-2); }
+.daw-pdc::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tx-4); flex: none; }
+.daw-pdc.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.daw-pdc.on::before { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent); }
 
 /* 자동화 토글 버튼 (이름 줄 우측 끝) */
 .daw-autotog { width: 19px; height: 16px; flex: none; margin-left: auto; border-radius: 3.5px;
@@ -2520,16 +2531,16 @@ body { display: flex; flex-direction: column; }
 .daw-left.empty .daw-fx-empty { display: block; }
 
 /* FX 헤더 + 전원(일괄 켜기/끄기) 토글 */
-.daw-left-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.daw-left-head { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .daw-fx-power { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-3); border-radius: 20px; font: 700 10px/1 var(--sans); cursor: pointer; transition: color .12s, border-color .12s; }
 .daw-fx-power:disabled { opacity: .4; cursor: default; }
 .daw-fx-power .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--tx-4); box-shadow: none; transition: background .12s, box-shadow .12s; }
 .daw-fx-power.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .daw-fx-power.active .pdot { background: var(--accent); }
-.daw-left.empty .daw-fx-power { display: none; }
+.daw-left.empty .daw-left-toggles { display: none; }
 
 /* 하단 믹서 — 마스터 / 선택 트랙 페이더 */
-.daw-mixer { margin-top: auto; display: flex; gap: 10px; padding: 12px 6px 4px; border-top: 1px solid var(--border); }
+.daw-mixer { margin-top: auto; display: flex; gap: 10px; padding: 12px 0 0 0; border-top: 1px solid var(--border); }
 .mx-strip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 4px 8px; }
 .mx-val { font: 700 10px/1 var(--mono); color: var(--tx-2); min-height: 10px; }
 /* 컨셉 방식 — 페이더(좌)와 스테레오 미터(우)를 나란히 분리 */
