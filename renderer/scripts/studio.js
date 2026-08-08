@@ -3,6 +3,7 @@
 import { Library } from './library.js';
 import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
+import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -131,8 +132,8 @@ export function studioDiagnostics() {
 }
 
 // ── 볼륨 자동화 ───────────────────────────────────────────
-// selId(스템 90001+ / 녹음 트랙 id) → { on, open, pts:[{t:초, v:게인 0~1.5}] }
-const AUTO_MAX = 1.5;          // 트랙 페이더 상한(150%)과 동일
+// selId(스템 90001+ / 녹음 트랙 id) → { on, open, pts:[{t:초, v:게인}] }
+// 레인의 상·하한과 세로 배치는 페이더 테이퍼(faderToGain/gainToFader)가 그대로 정한다.
 const AUTO_LANE_H = 46;        // 자동화 레인 높이(px)
 let _auto = new Map();
 function autoOf(id) {
@@ -272,7 +273,7 @@ function renderTracks() {
     lane.style.setProperty('--c', t.color);
     lane.dataset.key = t.key;
     lane.dataset.selid = stemIdOf(t.engineIndex);   // 스템도 선택 가능(FX·볼륨 대상)
-    const g100 = Math.round((t.gain != null ? t.gain : 1) * 100);
+    const gPos = gainToFader(t.gain != null ? t.gain : 1);
     const p100 = Math.round((t.pan != null ? t.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
@@ -286,7 +287,7 @@ function renderTracks() {
             <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
             <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
           </div>
-          <input class="daw-vol" type="range" min="0" max="150" value="${g100}" title="볼륨">
+          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gPos}" title="볼륨 (더블클릭=100%)">
         </div>
         <div class="daw-pan-row">
           <span class="lbl">PAN</span>
@@ -303,9 +304,10 @@ function renderTracks() {
     mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); t.mute = on; api.engine.track(t.engineIndex, { mute: on }); markDirty(); });
     sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); t.solo = on; api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); markDirty(); });
     vol.addEventListener('input', () => {
-      t.gain = Number(vol.value) / 100; api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
-      if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
+      t.gain = faderToGain(vol.value); api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
+      if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = dbText(t.gain); }   // 믹서 동기화
     });
+    vol.addEventListener('dblclick', (e) => { e.stopPropagation(); vol.value = FADER_UNITY_POS; vol.dispatchEvent(new Event('input')); });
     pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); t.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.track(t.engineIndex, { pan: t.pan }); markDirty(); });
     pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); t.pan = 0; api.engine.track(t.engineIndex, { pan: 0 }); markDirty(); });
     const atog = lane.querySelector('.daw-autotog');
@@ -380,7 +382,7 @@ function renderRecLanes() {
             <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
             <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
           </div>
-          <input class="daw-vol" type="range" min="0" max="150" value="${Math.round((rt.gain != null ? rt.gain : 1) * 100)}" title="볼륨">
+          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gainToFader(rt.gain != null ? rt.gain : 1)}" title="볼륨 (더블클릭=100%)">
           <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
         </div>
         <div class="daw-pan-row">
@@ -407,9 +409,10 @@ function renderRecLanes() {
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
     vol.addEventListener('input', () => {
-      rt.gain = Number(vol.value) / 100; api.engine.recTrack(rt.id, { gain: rt.gain });
-      if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = vol.value; }   // 믹서 동기화
+      rt.gain = faderToGain(vol.value); api.engine.recTrack(rt.id, { gain: rt.gain });
+      if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = dbText(rt.gain); }   // 믹서 동기화
     });
+    vol.addEventListener('dblclick', (e) => { e.stopPropagation(); vol.value = FADER_UNITY_POS; vol.dispatchEvent(new Event('input')); });
     pan.addEventListener('input', (e) => { e.stopPropagation(); const v = Number(pan.value); rt.pan = v / 100; pan.classList.toggle('off', v === 0); api.engine.recTrack(rt.id, { pan: rt.pan }); markDirty(); });
     pan.addEventListener('dblclick', (e) => { e.stopPropagation(); pan.value = 0; pan.classList.add('off'); rt.pan = 0; api.engine.recTrack(rt.id, { pan: 0 }); markDirty(); });
     const atogR = lane.querySelector('.daw-autotog');
@@ -522,13 +525,26 @@ function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   if (h) h.textContent = has ? `${selTrackLabel(_selTrack)} 이펙트` : '입력 이펙트';
   updateTrackFader();
 }
+// 믹서 페이더 왼쪽 dB 눈금자. 눈금 위치는 CSS 가 아니라 테이퍼가 정한다 —
+// 상수를 바꾸면 눈금도 같이 따라오도록 gainToFader 로 계산해서 --at(0~1) 로 넘긴다.
+const FADER_SCALE_DB = [10, 0, -6, -12, -24, -40];
+function buildFaderScales() {
+  for (const sc of document.querySelectorAll('.mx-scale')) {
+    if (sc.childElementCount) continue;
+    sc.innerHTML = FADER_SCALE_DB.map(db => {
+      const at = gainToFader(Math.pow(10, db / 20)) / FADER_POS;
+      const label = db === 0 ? '0' : (db > 0 ? `+${db}` : String(db));
+      return `<i class="${db === 0 ? 'unity' : ''}" style="--at:${at.toFixed(4)}"><b>${label}</b></i>`;
+    }).join('');
+  }
+}
 function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
   const f = $('mx-track'), val = $('mx-track-val'), lbl = $('mx-track-lbl'); if (!f) return;
   if (selValid(_selTrack)) {
-    const v = Math.round(selTrackGain(_selTrack) * 100);
-    f.disabled = false; f.value = v; val.textContent = v;
+    const g = selTrackGain(_selTrack);
+    f.disabled = false; f.value = gainToFader(g); val.textContent = dbText(g);
     lbl.textContent = selTrackLabel(_selTrack);
-  } else { f.disabled = true; f.value = 100; val.textContent = '—'; lbl.textContent = '트랙'; }
+  } else { f.disabled = true; f.value = FADER_UNITY_POS; val.textContent = '—'; lbl.textContent = '트랙'; }
 }
 
 // ── 자동화 레인 렌더 ──────────────────────────────────────
@@ -614,8 +630,10 @@ function buildAutoLane(selId, label, color) {
   renderAutoLaneInto(row, selId);
   return row;
 }
-const valFromY = (y, h) => Math.max(0, Math.min(AUTO_MAX, (1 - y / Math.max(1, h)) * AUTO_MAX));
-const yFromVal = (v, h) => (1 - Math.max(0, Math.min(AUTO_MAX, v)) / AUTO_MAX) * h;
+// 레인 세로축도 페이더와 같은 dB 테이퍼. 선형이면 유니티가 바닥 근처(1/3.16 높이)로
+// 내려앉아 대부분의 편집이 아래쪽에 뭉친다. 같은 함수를 쓰면 유니티가 항상 72% 높이.
+const valFromY = (y, h) => faderToGain((1 - y / Math.max(1, h)) * FADER_POS);
+const yFromVal = (v, h) => (1 - gainToFader(v) / FADER_POS) * h;
 
 function renderAutoLane(selId) {
   const row = document.querySelector(`.daw-auto-row[data-autoid="${selId}"]`);
@@ -1647,7 +1665,7 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
 }
 async function buildProjectObject() {
   const sr = _sr || 44100;
-  const master = Number($('mx-master')?.value ?? 100) / 100;
+  const master = faderToGain($('mx-master')?.value ?? FADER_UNITY_POS);
   const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
   await gatherChains([..._recTracks.map(r => r.id), ...stemIds]);   // 녹음+스템 FX 체인 확보(선택 안 된 것 포함)
   const pairs = [];
@@ -1729,7 +1747,7 @@ async function applyProject(p) {
         t.gain = m.gain != null ? m.gain : 1; t.pan = m.pan != null ? m.pan : 0; t.mute = !!m.mute; t.solo = !!m.solo;
         api.engine.track(t.engineIndex, { gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo });
         const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`); if (!lane) return;
-        const v = lane.querySelector('.daw-vol'); if (v) v.value = Math.round(t.gain * 100);
+        const v = lane.querySelector('.daw-vol'); if (v) v.value = gainToFader(t.gain);
         const pn = lane.querySelector('.daw-pan'); if (pn) { const pv = Math.round(t.pan * 100); pn.value = pv; pn.classList.toggle('off', pv === 0); }
         const mb = lane.querySelector('[data-m="mute"]'); if (mb) { mb.classList.toggle('on', t.mute); mb.setAttribute('aria-pressed', String(t.mute)); }
         const sb = lane.querySelector('[data-m="solo"]'); if (sb) { sb.classList.toggle('on', t.solo); sb.setAttribute('aria-pressed', String(t.solo)); }
@@ -1794,9 +1812,8 @@ async function applyProject(p) {
   // 4) 마스터
   if (p.master != null) {
     api.engine.master(p.master);
-    const v = Math.round(p.master * 100);
-    const s = $('mx-master'); if (s) s.value = v;
-    const mv = $('mx-master-val'); if (mv) mv.textContent = v;
+    const s = $('mx-master'); if (s) s.value = gainToFader(p.master);
+    const mv = $('mx-master-val'); if (mv) mv.textContent = dbText(p.master);
   }
   layout();
   clearUndo();   // 새 상태 로드 → 히스토리 초기화
@@ -2274,19 +2291,24 @@ function wire() {
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
+  buildFaderScales();
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
-  const applyMaster = (v) => { api.engine.master(v / 100); $('mx-master').value = v; $('mx-master-val').textContent = v; markDirty(); };
+  const applyMaster = (pos) => {
+    const g = faderToGain(pos);
+    api.engine.master(g); $('mx-master').value = pos; $('mx-master-val').textContent = dbText(g); markDirty();
+  };
   $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
-  $('mx-master').addEventListener('dblclick', () => applyMaster(100));   // 더블클릭 = 100 (유니티)
+  $('mx-master').addEventListener('dblclick', () => applyMaster(FADER_UNITY_POS));   // 더블클릭 = 100% (유니티)
   // 선택 트랙 볼륨 페이더 (믹서 우측)
-  const applyTrackVol = (v) => {
+  const applyTrackVol = (pos) => {
     if (!selValid(_selTrack)) return;
-    applySelTrackGain(_selTrack, v / 100);   // 스템=track(index)·녹음=recTrack(id) 라우팅
-    $('mx-track').value = v; $('mx-track-val').textContent = v;
-    const lv = document.querySelector(`.daw-lane[data-selid="${_selTrack}"] .daw-vol`); if (lv) lv.value = v;
+    const g = faderToGain(pos);
+    applySelTrackGain(_selTrack, g);   // 스템=track(index)·녹음=recTrack(id) 라우팅
+    $('mx-track').value = pos; $('mx-track-val').textContent = dbText(g);
+    const lv = document.querySelector(`.daw-lane[data-selid="${_selTrack}"] .daw-vol`); if (lv) lv.value = pos;
   };
   $('mx-track').addEventListener('input', (e) => applyTrackVol(Number(e.target.value)));
-  $('mx-track').addEventListener('dblclick', () => applyTrackVol(100));   // 더블클릭 = 100
+  $('mx-track').addEventListener('dblclick', () => applyTrackVol(FADER_UNITY_POS));   // 더블클릭 = 100%
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }

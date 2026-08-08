@@ -4,6 +4,7 @@
 import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
 import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
+import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -555,23 +556,25 @@ async function mountPlayer(item) {
         </div>
         <button class="mixer-solo" data-stem="${name}" title="Solo — 이 트랙만 재생">S</button>
         <button class="mixer-mute" data-stem="${name}" title="Mute">M</button>
-        <input class="mixer-slider" type="range" min="0" max="150" value="100" data-stem="${name}" />
+        <input class="mixer-slider" type="range" min="0" max="${FADER_POS}" value="${FADER_UNITY_POS}" data-stem="${name}" />
         <span class="mixer-val" data-val="${name}">100%</span>
       `;
       mixerTracks.appendChild(row);
     }
     mixerTracks.querySelectorAll('.mixer-slider').forEach(sl => {
-      const applyVol = (val) => {
+      // pos = 슬라이더 위치, pct = 저장·표시용 퍼센트 (설정 파일 호환을 위해 퍼센트로 남긴다)
+      const applyVol = (pos) => {
         const stem = sl.dataset.stem;
-        sl.value = val;
-        currentPlayer.setStemVolume(stem, Number(val) / 100);
+        const pct = faderToPct(pos);
+        sl.value = pos;
+        currentPlayer.setStemVolume(stem, pct / 100);
         const valEl = mixerTracks.querySelector(`[data-val="${stem}"]`);
-        if (valEl) valEl.textContent = val + '%';
-        saveTrackVol(stem, Number(val));
+        if (valEl) valEl.textContent = dbText(pct / 100);
+        saveTrackVol(stem, pct);
       };
       sl.addEventListener('input', () => applyVol(Number(sl.value)));
       // 더블클릭 → 기본값(100%) 리셋
-      sl.addEventListener('dblclick', () => applyVol(100));
+      sl.addEventListener('dblclick', () => applyVol(FADER_UNITY_POS));
     });
     mixerTracks.querySelectorAll('.mixer-mute').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -596,7 +599,7 @@ async function mountPlayer(item) {
     });
 
     // master / source / speed / loop / key / group / reseparate 초기화
-    masterVol.value = 100; masterVal.textContent = '100%';
+    masterVol.value = FADER_UNITY_POS; masterVal.textContent = dbText(1);
     resetSourceToggle();
     resetSpeedUI();
     resetLoopUI();
@@ -625,8 +628,8 @@ async function restoreSongSettings(item) {
   try {
     // Master
     if (typeof s.masterVol === 'number') {
-      masterVol.value = s.masterVol;
-      masterVal.textContent = s.masterVol + '%';
+      masterVol.value = pctToFader(s.masterVol);
+      masterVal.textContent = dbText(Number(s.masterVol) / 100);
       currentPlayer?.setMasterVolume(s.masterVol / 100);
     }
     // 트랙 볼륨
@@ -634,8 +637,8 @@ async function restoreSongSettings(item) {
       for (const [stem, vol] of Object.entries(s.trackVols)) {
         const sl = mixerTracks.querySelector(`.mixer-slider[data-stem="${stem}"]`);
         const valEl = mixerTracks.querySelector(`[data-val="${stem}"]`);
-        if (sl) sl.value = vol;
-        if (valEl) valEl.textContent = vol + '%';
+        if (sl) sl.value = pctToFader(vol);
+        if (valEl) valEl.textContent = dbText(Number(vol) / 100);
         currentPlayer?.setStemVolume(stem, Number(vol) / 100);
       }
     }
@@ -727,14 +730,15 @@ async function restoreSongSettings(item) {
   }
 }
 
-function applyMasterVol(val) {
-  masterVol.value = val;
-  masterVal.textContent = val + '%';
-  currentPlayer?.setMasterVolume(Number(val) / 100);
-  saveMaster(Number(val));
+function applyMasterVol(pos) {
+  const pct = faderToPct(pos);
+  masterVol.value = pos;
+  masterVal.textContent = dbText(pct / 100);
+  currentPlayer?.setMasterVolume(pct / 100);
+  saveMaster(pct);
 }
 masterVol.addEventListener('input', () => applyMasterVol(Number(masterVol.value)));
-masterVol.addEventListener('dblclick', () => applyMasterVol(100));
+masterVol.addEventListener('dblclick', () => applyMasterVol(FADER_UNITY_POS));
 
 // ── 재분리 (같은/다른 모델) + 모델 토글 ─────────────
 const reseparateBtn      = $('player-reseparate');

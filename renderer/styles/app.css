@@ -36,9 +36,23 @@
   --rail: rgba(255,255,255,.15);       /* 볼륨·팬 레일 바닥 */
   --rail-mark: rgba(255,255,255,.55);  /* 팬 센터 눈금 */
   --knob-hi: #ffffff;                  /* 노브 hover 강조 */
+  /* 믹서 페이더 캡 손잡이 */
+  --knob-top: #4a5058;
+  --knob-bot: #32373e;
+  --knob-edge: rgba(255,255,255,.16);
+  --knob-line: rgba(255,255,255,.92);
   --meter: #48deb4;                    /* 미터 LED */
   --mute: #e2a03f;
   --solo: #4a90d9;
+  /* 페이더 유니티(0.0 dB) 눈금. 비율은 fader.js 의 FADER_UNITY(0.72) 와 맞춰야 한다.
+     손잡이 중심은 (손잡이폭/2 + 비율 × (전체폭 - 손잡이폭)) 에 오므로 그 위치에 찍는다.
+     단순히 72% 로 두면 손잡이와 눈에 띄게 어긋난다. --thumb-w 는 각 슬라이더가 덮어쓴다. */
+  --unity: .72;
+  --thumb-w: 12px;
+  --unity-at: calc(var(--thumb-w) / 2 + var(--unity) * (100% - var(--thumb-w)));
+  --unity-tick: linear-gradient(to right, transparent 0 calc(var(--unity-at) - 1px),
+    var(--rail-mark) calc(var(--unity-at) - 1px) calc(var(--unity-at) + 1px),
+    transparent calc(var(--unity-at) + 1px));
   --stem-vocals: #d9756a;
   --stem-drums:  #cfa24d;
   --stem-bass:   #5f8fce;
@@ -94,6 +108,10 @@
   --rail: rgba(15,20,30,.20);
   --rail-mark: rgba(15,20,30,.60);
   --knob-hi: #0b0f16;
+  --knob-top: #ffffff;
+  --knob-bot: #dde1e7;
+  --knob-edge: rgba(15,20,30,.24);
+  --knob-line: rgba(15,20,30,.62);
   --meter: #10a077;                    /* 흰 배경에서도 읽히도록 진한 초록 */
   --mute: #96610f;                     /* 흰 글자와 4.5:1 확보 */
   --solo: #2a63b0;
@@ -1873,18 +1891,20 @@ body { display: flex; flex-direction: column; }
   width: 100%;
   height: 14px;
   background:
+    var(--unity-tick),
     repeating-linear-gradient(to right,
       var(--border-mid) 0, var(--border-mid) 1px,
       transparent 1px, transparent calc(100% / 15)),
     var(--input);
   background-position: center;
   background-repeat: no-repeat;
-  background-size: calc(100% - 1px) 3px, 100% 3px;
+  background-size: calc(100% - 1px) 9px, calc(100% - 1px) 3px, 100% 3px;
   border-radius: 2px;
   outline: none;
   cursor: pointer;
   transition: background-color .12s;
 }
+.mixer-slider { --thumb-w: 11px; }
 .mixer-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 11px; height: 20px;
@@ -2412,9 +2432,9 @@ body { display: flex; flex-direction: column; }
 .daw-btn-grp .daw-ms.on { background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); }
 .daw-ms.on { color: var(--c, var(--accent)); border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); }
 .daw-vol { -webkit-appearance: none; appearance: none; flex: 1; min-width: 40px; height: 14px; background: transparent; cursor: pointer; }
-.daw-vol::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--rail); transition: background .12s; }
+.daw-vol::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--unity-tick), var(--rail); transition: background .12s; }
 .daw-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: var(--c, var(--accent)); transition: box-shadow .12s; }
-.daw-vol:hover::-webkit-slider-runnable-track { background: color-mix(in srgb, var(--c, var(--accent)) 35%, var(--rail)); }
+.daw-vol:hover::-webkit-slider-runnable-track { background: var(--unity-tick), color-mix(in srgb, var(--c, var(--accent)) 35%, var(--rail)); }
 .daw-vol:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .daw-vol:disabled { opacity: .4; }
 /* Pan slider (2번째 줄) + 미터 — 트랙 헤드가 세로로 조금 더 커짐 */
@@ -2593,10 +2613,41 @@ body { display: flex; flex-direction: column; }
 .daw-mixer { margin-top: auto; display: flex; gap: 10px; padding: 12px 0 0 0; border-top: 1px solid var(--border); }
 .mx-strip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; background: var(--elev); border: 1px solid var(--border); border-radius: 8px; padding: 10px 4px 8px; }
 .mx-val { font: 700 10px/1 var(--mono); color: var(--tx-2); min-height: 10px; }
-/* 컨셉 방식 — 페이더(좌)와 스테레오 미터(우)를 나란히 분리 */
-.mx-fader-wrap { display: flex; align-items: stretch; gap: 7px; height: 130px; }
-.mx-fader { writing-mode: vertical-lr; direction: rtl; width: 26px; height: 130px; flex: none;
-  cursor: pointer; accent-color: var(--accent); }
+/* 컨셉 방식 — 눈금자(좌) · 페이더(중) · 스테레오 미터(우) */
+.mx-fader-wrap { display: flex; align-items: stretch; gap: 5px; height: var(--mx-h); position: relative; }
+
+/* 손잡이는 트랙 전체가 아니라 (높이 - 손잡이높이) 만큼만 움직인다.
+   눈금을 전체 높이의 %로 찍으면 손잡이와 어긋나므로, 아래 계산으로 실제 이동 범위에 맞춘다. */
+.daw-mixer { --mx-h: 130px; --mx-thumb: 22px; --mx-travel: calc(var(--mx-h) - var(--mx-thumb)); }
+.mx-fader { -webkit-appearance: none; appearance: none; writing-mode: vertical-lr; direction: rtl;
+  width: 22px; height: var(--mx-h); flex: none; background: transparent; cursor: pointer; }
+/* 테두리는 border 가 아니라 inset shadow 로. border-box 라 진짜 테두리를 주면
+   손잡이 이동 거리가 2px 줄어들어 눈금과 어긋난다. */
+.mx-fader::-webkit-slider-runnable-track { width: 5px; height: 100%; border-radius: 3px;
+  background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border-mid); }
+/* 컨셉의 캡형 손잡이 — 어두운 입체 바디에 가운데 인덱스 선 하나.
+   height 는 반드시 --mx-thumb 와 같아야 한다. 눈금자가 이 값으로 이동 범위를 계산한다. */
+.mx-fader::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 22px; height: var(--mx-thumb); border-radius: 4px;
+  background:
+    linear-gradient(var(--knob-line), var(--knob-line)) center / 12px 1px no-repeat,
+    linear-gradient(180deg, var(--knob-top), var(--knob-bot));
+  border: 1px solid var(--knob-edge); box-shadow: 0 1px 2px rgba(0,0,0,.22);
+  margin-left: -9px;   /* 5px 트랙 기준으로 가운데 정렬 */
+  transition: border-color .12s; }
+.mx-fader:hover::-webkit-slider-thumb { border-color: var(--accent); }
+
+/* dB 눈금자 — 눈금 위치는 studio.js 가 테이퍼로 계산해 --at(0~1) 로 넣는다 */
+.mx-scale { position: relative; width: 20px; flex: none; }
+/* 1px 눈금. 손잡이 인덱스 선도 1px 로 맞춰야 반 픽셀이 남지 않고 정확히 겹친다. */
+.mx-scale i { position: absolute; right: 0; width: 5px; height: 1px; background: var(--tx-4);
+  bottom: calc(var(--mx-thumb) / 2 + var(--at) * var(--mx-travel) - 0.5px); }
+/* 폭은 다른 눈금과 같게. 길게 빼면 라벨(right: 7px)과 겹친다. 색으로만 구분. */
+.mx-scale i.unity { background: var(--tx-3); }
+.mx-scale i b { position: absolute; right: 7px; top: -3px; font: 500 7px/1 var(--mono);
+  color: var(--tx-4); white-space: nowrap; }
+.mx-scale i.unity b { color: var(--tx-3); font-weight: 700; }
+.mx-fader:disabled ~ .mx-scale, .mx-strip:has(.mx-fader:disabled) .mx-scale { opacity: .45; }
 .mx-meter { display: grid; grid-template-columns: 8px 8px; gap: 2px; width: 18px; flex: none;
   align-items: stretch; }
 /* 테두리를 box-shadow(inset) 대신 실제 border 로 — 서브픽셀에서 한쪽만 얇아지는 현상 방지 */
@@ -2696,25 +2747,11 @@ body { display: flex; flex-direction: column; }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); box-shadow: inset 2px 0 0 var(--accent); }
 .daw-lane.selected:hover .daw-head { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
 
-/* 믹서 페이더 — 채널 스트립 (플랫) */
+/* 믹서 페이더 — 채널 스트립 (플랫).
+   페이더/캡 모양은 위쪽 "하단 믹서" 절에 한 곳으로 모아 뒀다. 여기서 또 정의하면
+   뒤에 온 규칙이 이기면서 눈금 정렬 상수(--mx-thumb)와 어긋난다. */
 .mx-strip { background: var(--elev); box-shadow: none; }
 .mx-val { font-variant-numeric: tabular-nums; }
-.mx-fader { -webkit-appearance: none; appearance: none; background: transparent; }
-.mx-fader::-webkit-slider-runnable-track { width: 8px; border-radius: 4px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--border); }
-/* 캡 — 컨셉 스타일: 입체 바디 + 가운데 강조선 */
-.mx-fader::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 24px; height: 13px; border-radius: 3px;
-  background:
-    linear-gradient(var(--accent), var(--accent)) center / 14px 1.5px no-repeat,
-    linear-gradient(180deg, var(--elev-2), var(--elev));
-  border: 1px solid var(--border-mid);
-  box-shadow: 0 2px 5px rgba(0,0,0,.6);
-  margin-left: -10px;
-}
-.mx-fader:hover::-webkit-slider-thumb { border-color: var(--accent-soft-border); }
-.mx-fader:disabled::-webkit-slider-thumb {
-  background: linear-gradient(var(--tx-3), var(--tx-3)) center / 14px 1.5px no-repeat,
-    linear-gradient(180deg, var(--elev), var(--elev)); }
 
 /* ════════════════════════════════════════════════════════════
    PRO 리스타일 — 전 화면 공통 컴포넌트 (다크 우선)

@@ -362,8 +362,8 @@
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.master">MASTER</label>
             <div class="master-controls">
-              <input id="master-vol" class="mixer-slider master-slider" type="range" min="0" max="150" value="100" />
-              <span id="master-val" class="mixer-val">100%</span>
+              <input id="master-vol" class="mixer-slider master-slider" type="range" min="0" max="1000" value="720" />
+              <span id="master-val" class="mixer-val">0.0 dB</span>
             </div>
           </div>
           <div class="mixer-master mixer-master-inline">
@@ -473,9 +473,10 @@
         <div class="daw-fx-empty">녹음 트랙을 선택하면<br>해당 트랙의 입력 이펙트가 표시됩니다</div>
         <div class="daw-mixer">
           <div class="mx-strip">
-            <div class="mx-val" id="mx-master-val">100</div>
+            <div class="mx-val" id="mx-master-val">0.0 dB</div>
             <div class="mx-fader-wrap">
-              <input id="mx-master" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="마스터 볼륨">
+              <div class="mx-scale"></div>
+              <input id="mx-master" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="마스터 볼륨 (더블클릭=0.0 dB)">
               <div class="mx-meter" data-mid="0"><i class="l"></i><i class="r"></i></div>
             </div>
             <div class="mx-lbl">MASTER</div>
@@ -483,7 +484,8 @@
           <div class="mx-strip">
             <div class="mx-val" id="mx-track-val">—</div>
             <div class="mx-fader-wrap">
-              <input id="mx-track" class="mx-fader" type="range" min="0" max="150" value="100" orient="vertical" disabled title="선택 트랙 볼륨">
+              <div class="mx-scale"></div>
+              <input id="mx-track" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="선택 트랙 볼륨 (더블클릭=0.0 dB)">
               <div id="mx-meter-track" class="mx-meter"><i class="l"></i><i class="r"></i></div>
             </div>
             <div class="mx-lbl" id="mx-track-lbl">트랙</div>
