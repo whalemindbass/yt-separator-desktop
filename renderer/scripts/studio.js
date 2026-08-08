@@ -112,6 +112,24 @@ function snapSec(sec, disable) {
   const near = _gridOffset + Math.round((sec - _gridOffset) / g) * g;
   return Math.abs(near - sec) * _pxPerSec <= 5 ? Math.max(0, near) : Math.max(0, sec);
 }
+// 오류 제보에 붙일 스튜디오 상태 — 파일 경로·곡 제목 같은 개인 정보는 담지 않는다
+export function studioDiagnostics() {
+  return {
+    engineRunning: !!_started,
+    device: _deviceInfo,
+    pdc: { on: _pdcOn, ms: Number(_pdcMs.toFixed(1)) },
+    stemTracks: _tracks.length,
+    recTracks: _recTracks.length,
+    clips: _takes.length,
+    fxSlots: Object.values(_chainByTrack || {}).reduce((n, a) => n + (a ? a.length : 0), 0),
+    automationLanes: [..._auto.values()].filter(a => a.pts.length).length,
+    bpm: _bpm,
+    playing: _playing,
+    recArmed: _recArmed,
+    zoomPxPerSec: Math.round(_pxPerSec),
+  };
+}
+
 // ── 볼륨 자동화 ───────────────────────────────────────────
 // selId(스템 90001+ / 녹음 트랙 id) → { on, open, pts:[{t:초, v:게인 0~1.5}] }
 const AUTO_MAX = 1.5;          // 트랙 페이더 상한(150%)과 동일
@@ -163,6 +181,8 @@ function autoValueAt(pts, t) {
   return b.t <= a.t ? b.v : a.v + (b.v - a.v) * ((t - a.t) / (b.t - a.t));
 }
 let _pdcOn = true;     // 플러그인 지연 보정 on/off (엔진 통지로 동기)
+let _deviceInfo = null;  // 오류 제보용 오디오 장치 정보
+let _pdcMs = 0;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
@@ -2022,6 +2042,8 @@ function onEngineEvent(m) {
       break;
     case 'device':
       _sr = m.sr || 44100;
+      _deviceInfo = { name: m.name, sr: m.sr, block: m.block, in: m.in, out: m.out,
+                      roundtripMs: m.roundtripMs, srMismatch: !!m.srMismatch };
       $('st-engine-status').textContent = `${m.name} · ${Number(m.roundtripMs).toFixed(2)}ms`;
       if (m.srMismatch) flashTake(`⚠ 샘플레이트 불일치: 스템 ${Math.round(m.stemSr)}Hz ≠ 장치 ${Math.round(m.sr)}Hz — 피치/템포 어긋남. 장치 SR을 맞추세요.`);
       break;
@@ -2096,6 +2118,7 @@ function onEngineEvent(m) {
       if (el) {
         _pdcOn = m.on !== false;
         const ms = Number(m.ms || 0);
+        _pdcMs = ms;
         el.hidden = ms < 0.5;                       // 보정할 지연 자체가 없으면 숨김
         el.classList.toggle('on', _pdcOn);
         el.textContent = _pdcOn ? `지연 보정 ${ms.toFixed(1)}ms` : `지연 보정 꺼짐 (${ms.toFixed(1)}ms)`;

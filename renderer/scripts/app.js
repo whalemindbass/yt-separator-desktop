@@ -9,6 +9,7 @@ import { Library } from './library.js';
 import { initCommunity } from './community.js';
 import { initStudio } from './studio.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
+import { initReport, noteError } from './report.js';
 
 // 최초 로드 즉시 i18n 적용
 applyI18n(document);
@@ -81,6 +82,8 @@ function switchView(name) {
   if (name === 'studio') initStudio().catch(console.error);
 }
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+
+initReport();   // 오류 제보 (상단바 · 설정)
 
 // ── 초기 뷰: 라이브러리에 항목이 있으면 라이브러리로, 없으면 새 분리 ──
 (async () => {
@@ -530,6 +533,7 @@ let lastRegisteredId = null;
 // ── 유틸 ───────────────────────────────────────
 function setError(msg) {
   if (!msg) { errBox.hidden = true; errBox.textContent = ''; return; }
+  noteError('app', msg);   // 제보 시 첨부할 최근 오류로 기록 (메모리에만)
   errBox.hidden = false; errBox.textContent = msg;
   // 화면 밖(하단)에 떠서 못 보는 일 방지 — 항상 보이게 스크롤
   try { errBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
