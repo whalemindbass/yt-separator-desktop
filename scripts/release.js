@@ -96,8 +96,45 @@ function uploadAsset(releaseId, name, filePath) {
       });
     });
     req.on('error', reject);
+    req.setTimeout(15 * 60 * 1000, () => req.destroy(new Error('upload timeout')));
     fs.createReadStream(filePath).pipe(req);
   });
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * 180MB 업로드는 중간에 끊긴다 ('socket hang up'). 끊기면 릴리즈에 옛 파일이 남거나
+ * 아무것도 없는 채로 latest.yml 만 올라가 자동 업데이트가 죽는다. 그래서 매 시도마다
+ * 같은 이름의 에셋을 지우고 새로 올린 뒤, 크기가 로컬과 같은지 확인될 때까지 반복한다.
+ */
+async function putAsset(releaseId, name, filePath) {
+  if (!fs.existsSync(filePath)) { warn(`${name} — 로컬 파일 없음, 건너뜀`); return false; }
+  const want = fs.statSync(filePath).size;
+  const delays = [3000, 8000, 20000, 45000];
+
+  for (let attempt = 1; attempt <= delays.length + 1; attempt++) {
+    try {
+      // 이전 시도의 잔재를 먼저 치운다 (같은 이름이 남아 있으면 업로드가 422 로 거절된다)
+      const rel = await ghApi(`/repos/${REPO}/releases/${releaseId}`);
+      for (const a of rel.assets || []) {
+        if (a.name === name) await ghApi(`/repos/${REPO}/releases/assets/${a.id}`, 'DELETE');
+      }
+      await uploadAsset(releaseId, name, filePath);
+
+      // 업로드가 성공을 반환해도 크기를 다시 확인한다 — 잘린 채 올라가는 경우가 있다
+      const after = await ghApi(`/repos/${REPO}/releases/${releaseId}`);
+      const got = (after.assets || []).find(a => a.name === name);
+      if (got && got.size === want) { done(`${name} 업로드 완료 (${(want / 1048576).toFixed(1)}MB)`); return true; }
+      throw new Error(`크기 불일치 (GitHub ${got ? got.size : '없음'} vs 로컬 ${want})`);
+    } catch (e) {
+      const last = attempt > delays.length;
+      if (last) throw new Error(`${name} 업로드 ${attempt}회 모두 실패: ${e.message}`);
+      warn(`${name} 업로드 실패 (${attempt}/${delays.length + 1}): ${e.message} — ${delays[attempt - 1] / 1000}초 후 재시도`);
+      await sleep(delays[attempt - 1]);
+    }
+  }
+  return false;
 }
 
 // ── 환경 확인 ───────────────────────────────────
@@ -193,41 +230,42 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   const assets = release.assets || [];
   const findAsset = (name) => assets.find(a => a.name === name);
 
-  // Setup.exe 정합성
+  // Setup.exe — 없거나 latest.yml 과 크기가 다르면 올린다
   const setupAsset = findAsset(expectedSetup);
-  if (setupAsset && latestSize && setupAsset.size !== latestSize) {
-    warn(`Setup.exe 크기 불일치 (GitHub ${setupAsset.size} vs latest.yml ${latestSize}) — 교체`);
-    await ghApi(`/repos/${REPO}/releases/assets/${setupAsset.id}`, 'DELETE');
-    await uploadAsset(release.id, expectedSetup, localSetup);
-    done(`${expectedSetup} 교체 완료`);
-  } else if (!setupAsset && fs.existsSync(localSetup)) {
+  if (!setupAsset) {
     log(`${expectedSetup} 업로드...`);
-    await uploadAsset(release.id, expectedSetup, localSetup);
-    done(`${expectedSetup} 업로드 완료`);
+    await putAsset(release.id, expectedSetup, localSetup);
+  } else if (latestSize && setupAsset.size !== latestSize) {
+    warn(`Setup.exe 크기 불일치 (GitHub ${setupAsset.size} vs latest.yml ${latestSize}) — 교체`);
+    await putAsset(release.id, expectedSetup, localSetup);
   }
 
-  // Blockmap
-  if (!findAsset(expectedBlockmap) && fs.existsSync(localBlockmap)) {
-    log(`${expectedBlockmap} 업로드...`);
-    await uploadAsset(release.id, expectedBlockmap, localBlockmap);
-    done(`${expectedBlockmap} 업로드 완료`);
-  }
+  // Blockmap (차등 다운로드용)
+  if (!findAsset(expectedBlockmap)) await putAsset(release.id, expectedBlockmap, localBlockmap);
 
-  // Portable.exe (있으면 참고용)
-  if (!findAsset(expectedPortable) && fs.existsSync(localPortable)) {
-    log(`${expectedPortable} 업로드...`);
-    await uploadAsset(release.id, expectedPortable, localPortable);
-    done(`${expectedPortable} 업로드 완료`);
-  }
+  // Portable
+  if (!findAsset(expectedPortable)) await putAsset(release.id, expectedPortable, localPortable);
 
-  // latest.yml
-  const latestAsset = findAsset('latest.yml');
-  if (latestAsset) {
-    // 갱신 위해 삭제 후 재업로드
-    await ghApi(`/repos/${REPO}/releases/assets/${latestAsset.id}`, 'DELETE');
+  // latest.yml — 항상 최신으로 덮어쓴다. 이게 자동 업데이트의 기준점이라 마지막에 올린다.
+  await putAsset(release.id, 'latest.yml', localLatest);
+
+  // 최종 점검 — 여기서 통과해야 사용자 자동 업데이트가 실제로 동작한다
+  log('최종 점검...');
+  const final = await ghApi(`/repos/${REPO}/releases/${release.id}`);
+  const finalAssets = final.assets || [];
+  const problems = [];
+  for (const [name, local] of [[expectedSetup, localSetup], [expectedBlockmap, localBlockmap], ['latest.yml', localLatest]]) {
+    const a = finalAssets.find(x => x.name === name);
+    if (!a) { problems.push(`${name} 없음`); continue; }
+    if (fs.existsSync(local) && a.size !== fs.statSync(local).size) problems.push(`${name} 크기 불일치 (GitHub ${a.size} vs 로컬 ${fs.statSync(local).size})`);
   }
-  await uploadAsset(release.id, 'latest.yml', localLatest);
-  done('latest.yml 업로드 완료');
+  const setupFinal = finalAssets.find(x => x.name === expectedSetup);
+  if (setupFinal && latestSize && setupFinal.size !== latestSize) problems.push(`${expectedSetup} 가 latest.yml 의 size 와 다름 — 자동 업데이트가 해시 검증에서 실패한다`);
+  if (problems.length) {
+    for (const p of problems) warn(p);
+    die(`릴리즈 ${tag} 가 온전하지 않다. 위 항목을 고치기 전에는 배포된 것으로 보지 말 것.`);
+  }
+  done('에셋 정합성 확인');
 
   console.log();
   done(`릴리즈 ${tag} 완료`);
