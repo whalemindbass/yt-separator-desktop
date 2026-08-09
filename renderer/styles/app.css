@@ -128,39 +128,6 @@
   --shadow-titlebar: 0 1px 0 rgba(15,20,30,.04);
 }
 
-/* 스튜디오 그레이 — 다크와 라이트 사이.
-   순검정 대신 실물 오디오 장비의 회색 전면판 톤. 다크보다 대비가 부드러워 오래 봐도 덜 피로하고,
-   바탕이 여전히 어두워서 파형·미터·스템 색이 그대로 산다.
-   :root 가 다크 값을 전부 정의하므로 여기서는 달라지는 토큰만 덮어쓴다. */
-:root[data-theme="mid"] {
-  --bg: #23292c;
-  --surface: #2c3336;
-  --elev: #343c40;
-  --elev-2: #3e474b;      /* 올라온 세그먼트/칩 */
-  --sunken: #1e2426;
-  --hair-hi: rgba(255,255,255,.06);
-  --timeline: #1b2123;
-  --video-bg: #171c1e;
-  --input: #3a4347;
-  --border: rgba(255,255,255,.09);
-  --border-mid: rgba(255,255,255,.16);
-  --tx-1: #e8edec;
-  --tx-2: #a8b3b3;
-  --tx-3: #7d8a8a;
-  --tx-4: #5c6767;
-  --rail: rgba(255,255,255,.16);
-  --rail-mark: rgba(255,255,255,.52);
-  --knob-top: #596166;
-  --knob-bot: #3f4750;
-  --knob-edge: rgba(255,255,255,.18);
-  --scrollbar-thumb: rgba(255,255,255,.12);
-  --scrollbar-thumb-hover: rgba(255,255,255,.22);
-  /* 바탕이 밝아진 만큼 그림자는 옅게 — 다크의 그림자를 그대로 쓰면 때가 낀 것처럼 보인다 */
-  --shadow-card: 0 1px 2px rgba(0,0,0,.18), 0 8px 24px -12px rgba(0,0,0,.32);
-  --shadow-titlebar: 0 1px 0 rgba(0,0,0,.14);
-  --shadow-pop: 0 4px 12px -2px rgba(0,0,0,.28), 0 12px 32px -8px rgba(0,0,0,.4);
-}
-
 /* 스크롤바 통일 */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -251,23 +218,18 @@ body { display: flex; flex-direction: column; }
 .icon-btn:hover { color: var(--tx-1); border-color: var(--border-mid); background: var(--elev); }
 .icon-btn svg { width: 14px; height: 14px; display: block; }
 
-/* 테마 아이콘 crossfade — 세 svg 가 항상 렌더링되고 opacity+회전으로 전환.
-   아이콘은 '다음 테마'를 가리킨다: 다크 → 반달(스튜디오 그레이) → 해(라이트) → 달(다크) */
+/* Sun/moon crossfade — 두 svg가 항상 렌더링되고 opacity+회전으로 전환 */
 #theme-toggle .theme-sun,
-#theme-toggle .theme-moon,
-#theme-toggle .theme-half {
+#theme-toggle .theme-moon {
   display: block;
   position: absolute;
   inset: 0; margin: auto;
-  opacity: 0; transform: rotate(-60deg) scale(.6);
   transition: opacity .32s ease, transform .32s ease;
 }
-/* 다크(기본, data-theme 없을 때 포함) → 다음은 스튜디오 그레이 */
-:root:not([data-theme="light"]):not([data-theme="mid"]) #theme-toggle .theme-half { opacity: 1; transform: rotate(0) scale(1); }
-/* 스튜디오 그레이 → 다음은 라이트 */
-:root[data-theme="mid"]   #theme-toggle .theme-sun  { opacity: 1; transform: rotate(0) scale(1); }
-/* 라이트 → 다음은 다크 */
-:root[data-theme="light"] #theme-toggle .theme-moon { opacity: 1; transform: rotate(0) scale(1); }
+:root:not([data-theme="light"]) #theme-toggle .theme-sun  { opacity: 1; transform: rotate(0)      scale(1); }
+:root:not([data-theme="light"]) #theme-toggle .theme-moon { opacity: 0; transform: rotate(-60deg) scale(.6); }
+:root[data-theme="light"]       #theme-toggle .theme-sun  { opacity: 0; transform: rotate(60deg)  scale(.6); }
+:root[data-theme="light"]       #theme-toggle .theme-moon { opacity: 1; transform: rotate(0)      scale(1); }
 
 .brand { display: flex; align-items: center; gap: 12px; -webkit-app-region: drag; }
 .tabs, .brand, .titlebar-drag { -webkit-app-region: drag; }
