@@ -13,6 +13,12 @@ models/*.onnx
 # Editor
 .vscode/
 .idea/
+.claude/
+
+# 디자인 참고 이미지 (로컬 전용)
+concept.png
+symbol.png
+daw스크린샷.png
 
 # Release GUI 빌드 산출물
 scripts/release-build/
