@@ -440,10 +440,21 @@
 
   <!-- View: 스튜디오 (실시간 녹음 엔진) -->
   <main class="body view daw-body" data-view="studio" hidden>
+    <!-- 스튜디오 진입 시 오디오 엔진을 자동으로 여는 동안 덮는 막.
+         엔진이 준비되면 사라지고, 실패하면 안내와 재시도 버튼으로 바뀐다. -->
+    <div id="daw-boot" class="daw-boot" hidden>
+      <div class="daw-boot-card">
+        <div class="pl-spinner" id="daw-boot-spin"></div>
+        <div class="daw-boot-t" id="daw-boot-title" data-i18n="studio.boot.title">스튜디오를 준비하는 중…</div>
+        <div class="daw-boot-s" id="daw-boot-sub" data-i18n="studio.boot.sub">오디오 장치를 여는 중입니다. 잠시만 기다려 주세요.</div>
+        <button id="daw-boot-retry" class="btn pri" hidden data-i18n="studio.boot.retry">오디오 다시 시작</button>
+      </div>
+    </div>
     <div class="daw">
       <!-- 상단: 엔진/곡 -->
       <div class="daw-tbar">
-        <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><span id="st-engine-status" data-i18n="studio.engine.off2">엔진 꺼짐</span></span>
+        <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><!-- data-i18n 을 쓰지 않는다: 장치명·지연이 들어가는 자리라 applyI18n 이 덮으면 상태가 지워진다 -->
+        <span id="st-engine-status">오디오 꺼짐</span></span>
         <button id="st-engine-start" class="btn" data-i18n="studio.engine.start">오디오 시작</button>
         <button id="st-engine-stop" class="btn" hidden data-i18n="studio.engine.stop">오디오 종료</button>
         <button id="st-load-song" class="btn pri" disabled title="오디오 시작 후 사용 가능" data-i18n-title="studio.h.needAudio" data-i18n="studio.loadSong">곡 불러오기</button>

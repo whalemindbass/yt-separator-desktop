@@ -515,6 +515,11 @@ const LOCALES = {
     'studio.h.bpmDouble': 'BPM ×2 (감지 배수 보정)',
     'studio.h.zoomOut': '축소',
     'studio.h.zoomIn': '확대',
+    'studio.boot.title': '스튜디오를 준비하는 중…',
+    'studio.boot.sub': '오디오 장치를 여는 중입니다. 잠시만 기다려 주세요.',
+    'studio.boot.failTitle': '오디오 장치를 열지 못했습니다',
+    'studio.boot.failSub': '다른 프로그램이 장치를 쓰고 있는지 확인한 뒤 다시 시도해 주세요. 오디오 설정에서 다른 장치를 고를 수도 있습니다.',
+    'studio.boot.retry': '오디오 다시 시작',
   },
   en: {
     'common.confirm':   'OK',
@@ -1008,6 +1013,11 @@ const LOCALES = {
     'studio.h.bpmDouble': 'BPM ×2 (fix detected multiple)',
     'studio.h.zoomOut': 'Zoom out',
     'studio.h.zoomIn': 'Zoom in',
+    'studio.boot.title': 'Getting the studio ready…',
+    'studio.boot.sub': 'Opening the audio device. This takes a moment.',
+    'studio.boot.failTitle': 'Could not open the audio device',
+    'studio.boot.failSub': 'Check whether another program is using the device, then try again. You can also pick a different device in Audio settings.',
+    'studio.boot.retry': 'Restart audio',
   },
 };
 
