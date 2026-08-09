@@ -580,11 +580,17 @@ public:
             for (auto& rt : recTracks) add (rt->id, rt->pkL, rt->pkR);
         return any;
     }
+    // 검출 음역. 하한은 5현 베이스 로우 B(30.87Hz)와 드롭 A(27.5Hz)를 포함해야 한다.
+    static constexpr double kFreqMin = 25.0;
+    static constexpr double kFreqMax = 2000.0;
+
     // YIN 피치 검출 (De Cheveigné & Kawahara) — 옥타브 안정 + 포물선 보간으로 정밀.
     double detectPitch()
     {
-        const int N = 4096;               // 저음(베이스)까지 커버
-        const int W = N / 2;              // 최대 lag
+        // 5현 베이스 로우 B(30.87Hz)까지 잡으려면 한 주기가 44.1kHz 기준 1429 샘플이다.
+        // 창이 짧으면 비교 구간에 주기가 한 번 반쯤만 들어가 CMND 가 흔들리고 옥타브·5도 오검출이 난다.
+        const int N = 8192;               // 약 186ms @44.1k
+        const int W = N / 2;              // 비교 창 길이
         std::vector<float> buf (N);
         {
             const SpinLock::ScopedLockType sl (pitchLock);
@@ -596,18 +602,23 @@ public:
         rms = std::sqrt (rms / N);
         if (rms < 0.004) return 0.0;      // 너무 조용
 
+        // 관심 음역(kFreqMin..kFreqMax)에 해당하는 lag 만 훑는다 — 창을 늘린 만큼 비용을 되돌린다.
+        const int minLag = jmax (2,        (int) std::floor (deviceSampleRate / kFreqMax));
+        const int maxLag = jmin (W - 1,    (int) std::ceil  (deviceSampleRate / kFreqMin));
+        if (maxLag <= minLag + 2) return 0.0;
+
         // 1) 차분 함수 d(tau)
-        std::vector<double> d ((size_t) W, 0.0);
-        for (int tau = 1; tau < W; ++tau)
+        std::vector<double> d ((size_t) maxLag + 1, 0.0);
+        for (int tau = 1; tau <= maxLag; ++tau)
         {
             double sum = 0;
             for (int i = 0; i < W; ++i) { const double diff = buf[i] - (double) buf[i + tau]; sum += diff * diff; }
             d[(size_t) tau] = sum;
         }
         // 2) 누적평균 정규화 차분 (CMND)
-        std::vector<double> cmnd ((size_t) W, 1.0);
+        std::vector<double> cmnd ((size_t) maxLag + 1, 1.0);
         double run = 0.0;
-        for (int tau = 1; tau < W; ++tau)
+        for (int tau = 1; tau <= maxLag; ++tau)
         {
             run += d[(size_t) tau];
             cmnd[(size_t) tau] = run > 1e-12 ? d[(size_t) tau] * tau / run : 1.0;
@@ -615,30 +626,41 @@ public:
         // 3) 절대 임계 이하 첫 국소최소
         const double thresh = 0.15;
         int tau = -1;
-        for (int t = 2; t < W - 1; ++t)
+        for (int t = minLag; t < maxLag; ++t)
         {
             if (cmnd[(size_t) t] < thresh)
             {
-                while (t + 1 < W && cmnd[(size_t) (t + 1)] < cmnd[(size_t) t]) ++t;
+                while (t + 1 <= maxLag && cmnd[(size_t) (t + 1)] < cmnd[(size_t) t]) ++t;
                 tau = t; break;
             }
         }
         if (tau < 0)   // 임계 미달 → 전역 최소 (신뢰도 낮으면 버림)
         {
             double m = 1e9;
-            for (int t = 2; t < W; ++t) if (cmnd[(size_t) t] < m) { m = cmnd[(size_t) t]; tau = t; }
+            for (int t = minLag; t <= maxLag; ++t) if (cmnd[(size_t) t] < m) { m = cmnd[(size_t) t]; tau = t; }
             if (tau < 0 || m > 0.5) return 0.0;
+        }
+        // 3-b) 5도 오검출 보정.
+        //   기본파가 약한 저음은 실제 주기의 2/3 지점이 먼저 임계를 통과해 5도 위로 잡힌다
+        //   (B0 30.87Hz → F#1 46.25Hz). 1.5배 지점이 더 좋으면 그쪽이 진짜 주기다.
+        //   정수배(2·3배)는 주기 신호라면 언제나 낮게 나오므로 후보로 삼지 않는다 — 옥타브를 끌어내린다.
+        {
+            const int cand = (int) std::lround (tau * 1.5);
+            if (cand <= maxLag - 1
+                && cmnd[(size_t) cand] < thresh
+                && cmnd[(size_t) cand] <= cmnd[(size_t) tau])
+                tau = cand;
         }
         // 4) 포물선 보간으로 tau 정밀화
         double betterTau = tau;
-        if (tau > 0 && tau < W - 1)
+        if (tau > 1 && tau < maxLag)
         {
             const double s0 = cmnd[(size_t) (tau - 1)], s1 = cmnd[(size_t) tau], s2 = cmnd[(size_t) (tau + 1)];
             const double denom = 2.0 * (2.0 * s1 - s2 - s0);
             if (std::abs (denom) > 1e-12) betterTau = tau + (s2 - s0) / denom;
         }
         const double f = deviceSampleRate / betterTau;
-        return (f >= 40.0 && f <= 2000.0) ? f : 0.0;
+        return (f >= kFreqMin && f <= kFreqMax) ? f : 0.0;
     }
 
     // 트랙 제어 (index = 스템 순서)
@@ -756,6 +778,8 @@ public:
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
+    void setTuner (bool on)        { tunerOn = on; }
+    bool isTunerOn() const         { return tunerOn.load(); }
     void setStemOffset (int64 samples) { declickPending = true; stemOffset = samples; }
 
     // ---- 녹음 트랙 (여러 개) ----
@@ -1372,7 +1396,7 @@ public:
         stemFxBuf.setSize (2, block);   // 오디오 스레드에서 재할당되지 않도록 미리 확보
         fxBuf.setSize (2, block);
         clipTmp.setSize (2, block);
-        pitchRing.assign (4096, 0.0f); pitchW = 0;
+        pitchRing.assign (8192, 0.0f); pitchW = 0;
         if (! writerThread.isThreadRunning()) writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
@@ -1868,9 +1892,10 @@ private:
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
     std::atomic<float> mstPkL { 0.0f }, mstPkR { 0.0f };   // master post-sum peak
-    std::vector<float> pitchRing = std::vector<float> (4096, 0.0f);
+    std::vector<float> pitchRing = std::vector<float> (8192, 0.0f);
     int pitchW = 0;
     SpinLock pitchLock;
+    std::atomic<bool> tunerOn { false };   // 튜너 패널이 열려 있을 때만 피치 검출
     std::atomic<bool> metroOn { false };
     std::atomic<double> metroBpm { 120.0 };
     std::atomic<int64> metroPhase { 0 };        // 다운비트 위상(샘플, 타임라인)
@@ -1919,7 +1944,9 @@ public:
         // 플러그인 지연 변화 추적 (1초 주기) — 오버샘플링 토글 등으로 런타임에 바뀔 수 있음
         if (tick % 20 == 0) engine.recomputePdc();
         // 튜너 피치 (2틱=10Hz. rAF 보간과 함께 부드럽게)
-        if (++tick % 2 == 0)
+        // message 스레드에서 도는 무거운 계산이라 튜너가 열려 있을 때만 돌린다.
+        ++tick;
+        if (tick % 2 == 0 && engine.isTunerOn())
         {
             const double f = engine.detectPitch();
             auto* o = ev ("pitch"); o->setProperty ("freq", f); emit (var (o));
@@ -1962,6 +1989,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
+    else if (cmd == "tuner")       engine.setTuner ((bool) c["on"]);
     else if (cmd == "inputConfig") engine.setInputConfig (c["mode"], c["chL"], c["chR"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
     else if (cmd == "listDevices") engine.listDevices();

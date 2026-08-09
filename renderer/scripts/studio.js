@@ -2738,6 +2738,8 @@ function wire() {
     document.querySelectorAll('.daw-tool-tab').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
     document.querySelectorAll('.daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
     const empty = $('tool-empty'); if (empty) empty.hidden = !!name;
+    // 피치 검출은 무거우므로 튜너가 열려 있을 때만 돌린다
+    api.engine.tuner(name === 'tuner');
   };
   document.querySelectorAll('.daw-tool-tab').forEach(b =>
     b.addEventListener('click', () => selectTool(b.classList.contains('on') ? null : b.dataset.tool)));   // 다시 누르면 닫기

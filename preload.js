@@ -140,6 +140,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     bus:         (index, opts) => ipcRenderer.invoke('engine:cmd', { cmd: 'bus', index, ...(opts || {}) }),
     monitor:     (gain)   => ipcRenderer.invoke('engine:cmd', { cmd: 'monitor', gain }),
     inputMonitor:(on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'inputMonitor', on }),
+    tuner:       (on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'tuner', on }),
     inputConfig: (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'inputConfig', ...(opts || {}) }),
     metro:       (on, bpm, phase, interval)=> ipcRenderer.invoke('engine:cmd', { cmd: 'metro', on, bpm, phase: phase || 0, interval: interval || 0 }),
     listDevices: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'listDevices' }),
