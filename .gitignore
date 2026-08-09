@@ -20,6 +20,9 @@ concept.png
 symbol.png
 daw스크린샷.png
 
+# 테스트용 녹음 (로컬 전용)
+low_B_sample.wav
+
 # Release GUI 빌드 산출물
 scripts/release-build/
 scripts/release-dist/

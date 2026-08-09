@@ -584,28 +584,43 @@ public:
     static constexpr double kFreqMin = 25.0;
     static constexpr double kFreqMax = 2000.0;
 
-    // YIN 피치 검출 (De Cheveigné & Kawahara) — 옥타브 안정 + 포물선 보간으로 정밀.
+    // YIN 피치 검출 (De Cheveigné & Kawahara).
+    //   로우 B(30.87Hz)는 한 주기가 44.1kHz 에서 1429 샘플이라 186ms 창이 필요하다.
+    //   그 길이를 원 레이트로 훑으면 message 스레드가 오래 잡히므로 2단계로 나눈다:
+    //     1) 2배 데시메이션한 신호에서 주기를 찾고 (연산 1/4)
+    //     2) 원 레이트에서 그 주변 랙만 다시 재어 정밀도를 되찾는다 (고음의 랙 해상도 손실 보정)
     double detectPitch()
     {
-        // 5현 베이스 로우 B(30.87Hz)까지 잡으려면 한 주기가 44.1kHz 기준 1429 샘플이다.
-        // 창이 짧으면 비교 구간에 주기가 한 번 반쯤만 들어가 CMND 가 흔들리고 옥타브·5도 오검출이 난다.
-        const int N = 8192;               // 약 186ms @44.1k
-        const int W = N / 2;              // 비교 창 길이
-        std::vector<float> buf (N);
+        const int N2    = 4096;                 // 데시메이션 후 프레임 (186ms @22.05k)
+        const int W2    = N2 / 2;               // 비교 창
+        const int NFULL = N2 * 2 + 4;           // 데시메이션 필터가 보는 원 레이트 샘플 수
+        const double SR2 = deviceSampleRate * 0.5;
+
+        std::vector<float> full ((size_t) NFULL);
         {
             const SpinLock::ScopedLockType sl (pitchLock);
             const int R = (int) pitchRing.size();
-            for (int i = 0; i < N; ++i) buf[i] = pitchRing[(pitchW + i) % R];
+            if (R < NFULL) return 0.0;
+            const int start = ((pitchW - NFULL) % R + R) % R;   // 가장 최근 NFULL 샘플
+            for (int i = 0; i < NFULL; ++i) full[(size_t) i] = pitchRing[(size_t) ((start + i) % R)];
         }
-        double mean = 0; for (float v : buf) mean += v; mean /= N;
-        double rms = 0; for (int i = 0; i < N; ++i) { buf[i] -= (float) mean; rms += buf[i] * (double) buf[i]; }
-        rms = std::sqrt (rms / N);
-        if (rms < 0.004) return 0.0;      // 너무 조용
+        // [1,3,3,1]/8 저역통과 후 2배 데시메이션
+        std::vector<double> buf ((size_t) N2);
+        for (int i = 0; i < N2; ++i)
+        {
+            const int j = i * 2;
+            buf[(size_t) i] = (full[(size_t) j] + 3.0 * full[(size_t) (j + 1)]
+                             + 3.0 * full[(size_t) (j + 2)] + full[(size_t) (j + 3)]) / 8.0;
+        }
+        double mean = 0; for (double v : buf) mean += v; mean /= N2;
+        double rms = 0; for (int i = 0; i < N2; ++i) { buf[(size_t) i] -= mean; rms += buf[(size_t) i] * buf[(size_t) i]; }
+        rms = std::sqrt (rms / N2);
+        if (rms < 0.001) return 0.0;      // 너무 조용 (약하게 튕긴 로우 B 가 rms 0.0017 근처)
 
-        // 관심 음역(kFreqMin..kFreqMax)에 해당하는 lag 만 훑는다 — 창을 늘린 만큼 비용을 되돌린다.
-        const int minLag = jmax (2,        (int) std::floor (deviceSampleRate / kFreqMax));
-        const int maxLag = jmin (W - 1,    (int) std::ceil  (deviceSampleRate / kFreqMin));
+        const int minLag = jmax (2,     (int) std::floor (SR2 / kFreqMax));
+        const int maxLag = jmin (W2 - 1,(int) std::ceil  (SR2 / kFreqMin));
         if (maxLag <= minLag + 2) return 0.0;
+        const int W = W2;
 
         // 1) 차분 함수 d(tau)
         std::vector<double> d ((size_t) maxLag + 1, 0.0);
@@ -651,13 +666,36 @@ public:
                 && cmnd[(size_t) cand] <= cmnd[(size_t) tau])
                 tau = cand;
         }
-        // 4) 포물선 보간으로 tau 정밀화
-        double betterTau = tau;
-        if (tau > 1 && tau < maxLag)
+        // 4) 원 레이트에서 정밀화.
+        //    데시메이션 랙은 고음에서 해상도가 거칠다(1318Hz 에서 약 2.7 cent 오차).
+        //    원 레이트 랙 2*tau 주변 ±4 만 다시 재면 그 손실이 사라진다 — 비용은 무시할 수준.
+        const int    Wf     = N2;                                   // 원 레이트 비교 창
+        const int    fullLo = jmax (2,  tau * 2 - 4);
+        const int    fullHi = jmin ((int) std::ceil (deviceSampleRate / kFreqMin), tau * 2 + 4);
+        double betterTau = tau * 2.0;
+        if (fullLo + 2 <= fullHi && fullHi + Wf < NFULL)
         {
-            const double s0 = cmnd[(size_t) (tau - 1)], s1 = cmnd[(size_t) tau], s2 = cmnd[(size_t) (tau + 1)];
-            const double denom = 2.0 * (2.0 * s1 - s2 - s0);
-            if (std::abs (denom) > 1e-12) betterTau = tau + (s2 - s0) / denom;
+            std::vector<double> dv ((size_t) (fullHi - fullLo + 1), 0.0);
+            int best = -1; double bestV = std::numeric_limits<double>::max();
+            for (int t = fullLo; t <= fullHi; ++t)
+            {
+                double sum = 0;
+                for (int i = 0; i < Wf; ++i)
+                {
+                    const double diff = full[(size_t) i] - (double) full[(size_t) (i + t)];
+                    sum += diff * diff;
+                }
+                dv[(size_t) (t - fullLo)] = sum;
+                if (sum < bestV) { bestV = sum; best = t; }
+            }
+            betterTau = best;
+            if (best > fullLo && best < fullHi)
+            {
+                const double s0 = dv[(size_t) (best - fullLo - 1)], s1 = dv[(size_t) (best - fullLo)],
+                             s2 = dv[(size_t) (best - fullLo + 1)];
+                const double denom = 2.0 * (2.0 * s1 - s2 - s0);
+                if (std::abs (denom) > 1e-12) betterTau = best + (s2 - s0) / denom;
+            }
         }
         const double f = deviceSampleRate / betterTau;
         return (f >= kFreqMin && f <= kFreqMax) ? f : 0.0;
@@ -1396,7 +1434,7 @@ public:
         stemFxBuf.setSize (2, block);   // 오디오 스레드에서 재할당되지 않도록 미리 확보
         fxBuf.setSize (2, block);
         clipTmp.setSize (2, block);
-        pitchRing.assign (8192, 0.0f); pitchW = 0;
+        pitchRing.assign (16384, 0.0f); pitchW = 0;   // 2단계 검출이 보는 원 레이트 구간보다 넉넉히
         if (! writerThread.isThreadRunning()) writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
@@ -1892,7 +1930,7 @@ private:
     // 부가: 레벨/튜너/메트로놈
     std::atomic<float> inPeak { 0.0f };
     std::atomic<float> mstPkL { 0.0f }, mstPkR { 0.0f };   // master post-sum peak
-    std::vector<float> pitchRing = std::vector<float> (8192, 0.0f);
+    std::vector<float> pitchRing = std::vector<float> (16384, 0.0f);
     int pitchW = 0;
     SpinLock pitchLock;
     std::atomic<bool> tunerOn { false };   // 튜너 패널이 열려 있을 때만 피치 검출
@@ -1943,10 +1981,10 @@ public:
         }
         // 플러그인 지연 변화 추적 (1초 주기) — 오버샘플링 토글 등으로 런타임에 바뀔 수 있음
         if (tick % 20 == 0) engine.recomputePdc();
-        // 튜너 피치 (2틱=10Hz. rAF 보간과 함께 부드럽게)
-        // message 스레드에서 도는 무거운 계산이라 튜너가 열려 있을 때만 돌린다.
+        // 튜너 피치 (매 틱 = 20Hz. 2단계 검출로 가벼워져 반응이 두 배 빨라졌다)
+        // message 스레드에서 도는 계산이라 튜너가 열려 있을 때만 돌린다.
         ++tick;
-        if (tick % 2 == 0 && engine.isTunerOn())
+        if (engine.isTunerOn())
         {
             const double f = engine.detectPitch();
             auto* o = ev ("pitch"); o->setProperty ("freq", f); emit (var (o));

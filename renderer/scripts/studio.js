@@ -1145,7 +1145,7 @@ function updateTuner(freq) {
   if (!_tunerRAFon) { _tunerRAFon = true; requestAnimationFrame(tunerRAF); }   // 최초 1회 시작
   const octEl = $('st-tuner-oct'), freqEl = $('st-tuner-freq'), flat = $('st-tuner-flat'), sharp = $('st-tuner-sharp');
   const wrap = $('tool-tuner');
-  if (!freq || freq < 40) {
+  if (!freq || freq < 25) {   // 엔진과 같은 하한 — 5현 로우 B(30.87Hz)가 여기서 잘리면 안 된다
     _tunerBuf.length = 0;
     if (Date.now() - _tunerHold > 900) {
       noteEl.textContent = '—'; if (octEl) octEl.textContent = ''; centsEl.textContent = '—'; if (freqEl) freqEl.textContent = '';
@@ -1157,8 +1157,8 @@ function updateTuner(freq) {
     return;
   }
   _tunerHold = Date.now();
-  // 스무딩: 최근 프레임 중앙값(스파이크 제거)
-  _tunerBuf.push(freq); if (_tunerBuf.length > 7) _tunerBuf.shift();
+  // 스무딩: 최근 프레임 중앙값(스파이크 제거). 엔진이 20Hz 로 올리므로 5프레임이면 250ms.
+  _tunerBuf.push(freq); if (_tunerBuf.length > 5) _tunerBuf.shift();
   const sorted = [..._tunerBuf].sort((a, b) => a - b);
   const f = sorted[sorted.length >> 1];
 
