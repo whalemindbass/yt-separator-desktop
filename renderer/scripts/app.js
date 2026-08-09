@@ -58,16 +58,29 @@ $('win-close').addEventListener('click', () => api.window.close());
 api.window.isMaximized().then(m => titlebarEl.classList.toggle('maximized', m));
 api.window.onState(({ maximized }) => titlebarEl.classList.toggle('maximized', maximized));
 
-// ── Theme toggle (dark/light) ───────────────────
+// ── Theme (dark → mid → light 순환) ─────────────
+// mid = 스튜디오 그레이. 다크가 눈에 세다는 쪽과 라이트가 눈부시다는 쪽 사이.
+const THEMES = ['dark', 'mid', 'light'];
+function applyTheme(name) {
+  const cur = THEMES.includes(name) ? name : 'dark';
+  document.documentElement.dataset.theme = cur;
+  // 버튼은 '지금 무엇인지'가 아니라 '누르면 무엇이 되는지'를 알린다.
+  // 로케일이 바뀌면 applyI18n 이 data-i18n-title 을 덮어쓰므로 이 버튼은 title 을 직접 관리한다.
+  const btn = $('theme-toggle');
+  if (btn) {
+    const next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+    btn.title = t(next === 'mid' ? 'title.themeToMid' : next === 'light' ? 'title.themeToLight' : 'title.themeToDark');
+  }
+  return cur;
+}
 (function initTheme() {
-  const saved = localStorage.getItem('theme');
-  const initial = saved || 'dark';   // 프로 툴 정체성 — 기본 다크 (저장된 선택은 존중)
-  document.documentElement.dataset.theme = initial;
+  applyTheme(localStorage.getItem('theme') || 'dark');   // 프로 툴 정체성 — 기본 다크 (저장된 선택은 존중)
 })();
+onLocaleChange(() => applyTheme(document.documentElement.dataset.theme));
 $('theme-toggle').addEventListener('click', () => {
   const cur = document.documentElement.dataset.theme || 'dark';
-  const next = cur === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
+  const next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+  applyTheme(next);
   localStorage.setItem('theme', next);
 });
 

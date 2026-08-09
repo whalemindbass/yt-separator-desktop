@@ -1071,7 +1071,7 @@ function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
   if (!armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
   if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
   if (!_playing) playStudio();
-  flashTake(tr('studio.lbl.startRecording'));
+  // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
 
 // ── 동기 ──────────────────────────────────────────
@@ -2310,7 +2310,7 @@ function onEngineEvent(m) {
     }
     case 'take':
       clearRecLive();
-      flashTake(tr('studio.p.takeSaved', { file: m.file }));
+      // 녹음된 클립이 타임라인에 나타나는 것이 곧 확인이다. 파일 경로는 알림으로 띄울 정보가 아니다.
       (async () => {
         await renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
         const tk = _takes.find(t => t.id === m.id);
@@ -2333,11 +2333,11 @@ function onEngineEvent(m) {
       setEnabled(false);
       break;
     case 'error': setEngineStatus('error'); break;
-    case 'log': {
-      const s = String(m.msg || '');
-      if (/fail|cannot|error|armed|writer|no device/i.test(s)) flashTake(tr('studio.lbl.enginePrefix') + s.trim());
+    case 'log':
+      // 엔진 로그는 개발자용 영문이라 사용자에게 띄우지 않는다.
+      // (녹음 준비·파일 쓰기 같은 정상 동작까지 걸려 알림으로 새어 나왔다)
+      // 실제 실패는 'error' 이벤트와 각 동작의 자체 안내로 전달된다.
       break;
-    }
   }
 }
 

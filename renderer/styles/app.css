@@ -77,22 +77,25 @@
   --dur-1: .12s; --dur-2: .2s; --dur-3: .32s;
 }
 
+/* 라이트 테마.
+   순백(#fff)을 넓은 면에 쓰면 오래 보기 힘들다는 제보가 있어 바탕을 한 단계 낮췄다.
+   중성색은 accent(청록) 쪽으로 아주 살짝 기울여, 회색이 탁해 보이지 않게 한다. */
 :root[data-theme="light"] {
-  --bg: #fafbfc;
-  --surface: #ffffff;
-  --elev: #f4f5f7;
-  --elev-2: #ffffff;
-  --sunken: #eef0f3;
-  --hair-hi: rgba(255,255,255,.7);
-  --timeline: #ffffff;    /* 라이트 테마: 트랙 배경 화이트 */
-  --video-bg: #ffffff;    /* 라이트 테마: 영상 레터박스 화이트 */
-  --input: #eef0f3;
-  --border: rgba(15,20,30,.08);
-  --border-mid: rgba(15,20,30,.16);
+  --bg: #e9edf0;
+  --surface: #f5f7f9;
+  --elev: #e6eaee;
+  --elev-2: #fafbfc;      /* 가장 위로 뜬 면만 밝게 남긴다 */
+  --sunken: #dfe4e9;
+  --hair-hi: rgba(255,255,255,.55);
+  --timeline: #eff2f5;    /* 화면에서 가장 넓은 면 — 눈부심의 주범이었다 */
+  --video-bg: #e2e7eb;    /* 어두운 영상 옆의 순백 레터박스가 특히 셌다 */
+  --input: #e6eaee;
+  --border: rgba(15,20,30,.10);
+  --border-mid: rgba(15,20,30,.18);
   --tx-1: #14181f;
-  --tx-2: #4b5361;
-  --tx-3: #7b8391;
-  --tx-4: #a8afba;
+  --tx-2: #495260;
+  --tx-3: #6f7784;
+  --tx-4: #99a1ad;
   /* 흰 글자를 얹는 채움 요소가 많아 accent 는 흰색과 5:1 이 나오는 톤으로 잡는다.
      (#14a37a 는 3.2:1 이라 버튼 라벨이 뭉개졌음) */
   --accent: #0d7d5c;
@@ -108,8 +111,8 @@
   --rail: rgba(15,20,30,.20);
   --rail-mark: rgba(15,20,30,.60);
   --knob-hi: #0b0f16;
-  --knob-top: #ffffff;
-  --knob-bot: #dde1e7;
+  --knob-top: #fbfcfd;
+  --knob-bot: #d6dbe1;
   --knob-edge: rgba(15,20,30,.24);
   --knob-line: rgba(15,20,30,.62);
   --meter: #10a077;                    /* 흰 배경에서도 읽히도록 진한 초록 */
@@ -119,10 +122,43 @@
   --stem-drums:  #b8871f;
   --stem-bass:   #3563e0;
   --stem-other:  #c94a86;
-  --scrollbar-thumb: rgba(15,20,30,.14);
-  --scrollbar-thumb-hover: rgba(15,20,30,.24);
+  --scrollbar-thumb: rgba(15,20,30,.16);
+  --scrollbar-thumb-hover: rgba(15,20,30,.28);
   --shadow-card: 0 1px 2px rgba(15,20,30,.05), 0 12px 32px -14px rgba(15,20,30,.18);
   --shadow-titlebar: 0 1px 0 rgba(15,20,30,.04);
+}
+
+/* 스튜디오 그레이 — 다크와 라이트 사이.
+   순검정 대신 실물 오디오 장비의 회색 전면판 톤. 다크보다 대비가 부드러워 오래 봐도 덜 피로하고,
+   바탕이 여전히 어두워서 파형·미터·스템 색이 그대로 산다.
+   :root 가 다크 값을 전부 정의하므로 여기서는 달라지는 토큰만 덮어쓴다. */
+:root[data-theme="mid"] {
+  --bg: #23292c;
+  --surface: #2c3336;
+  --elev: #343c40;
+  --elev-2: #3e474b;      /* 올라온 세그먼트/칩 */
+  --sunken: #1e2426;
+  --hair-hi: rgba(255,255,255,.06);
+  --timeline: #1b2123;
+  --video-bg: #171c1e;
+  --input: #3a4347;
+  --border: rgba(255,255,255,.09);
+  --border-mid: rgba(255,255,255,.16);
+  --tx-1: #e8edec;
+  --tx-2: #a8b3b3;
+  --tx-3: #7d8a8a;
+  --tx-4: #5c6767;
+  --rail: rgba(255,255,255,.16);
+  --rail-mark: rgba(255,255,255,.52);
+  --knob-top: #596166;
+  --knob-bot: #3f4750;
+  --knob-edge: rgba(255,255,255,.18);
+  --scrollbar-thumb: rgba(255,255,255,.12);
+  --scrollbar-thumb-hover: rgba(255,255,255,.22);
+  /* 바탕이 밝아진 만큼 그림자는 옅게 — 다크의 그림자를 그대로 쓰면 때가 낀 것처럼 보인다 */
+  --shadow-card: 0 1px 2px rgba(0,0,0,.18), 0 8px 24px -12px rgba(0,0,0,.32);
+  --shadow-titlebar: 0 1px 0 rgba(0,0,0,.14);
+  --shadow-pop: 0 4px 12px -2px rgba(0,0,0,.28), 0 12px 32px -8px rgba(0,0,0,.4);
 }
 
 /* 스크롤바 통일 */
@@ -215,18 +251,23 @@ body { display: flex; flex-direction: column; }
 .icon-btn:hover { color: var(--tx-1); border-color: var(--border-mid); background: var(--elev); }
 .icon-btn svg { width: 14px; height: 14px; display: block; }
 
-/* Sun/moon crossfade — 두 svg가 항상 렌더링되고 opacity+회전으로 전환 */
+/* 테마 아이콘 crossfade — 세 svg 가 항상 렌더링되고 opacity+회전으로 전환.
+   아이콘은 '다음 테마'를 가리킨다: 다크 → 반달(스튜디오 그레이) → 해(라이트) → 달(다크) */
 #theme-toggle .theme-sun,
-#theme-toggle .theme-moon {
+#theme-toggle .theme-moon,
+#theme-toggle .theme-half {
   display: block;
   position: absolute;
   inset: 0; margin: auto;
+  opacity: 0; transform: rotate(-60deg) scale(.6);
   transition: opacity .32s ease, transform .32s ease;
 }
-:root:not([data-theme="light"]) #theme-toggle .theme-sun  { opacity: 1; transform: rotate(0)      scale(1); }
-:root:not([data-theme="light"]) #theme-toggle .theme-moon { opacity: 0; transform: rotate(-60deg) scale(.6); }
-:root[data-theme="light"]       #theme-toggle .theme-sun  { opacity: 0; transform: rotate(60deg)  scale(.6); }
-:root[data-theme="light"]       #theme-toggle .theme-moon { opacity: 1; transform: rotate(0)      scale(1); }
+/* 다크(기본, data-theme 없을 때 포함) → 다음은 스튜디오 그레이 */
+:root:not([data-theme="light"]):not([data-theme="mid"]) #theme-toggle .theme-half { opacity: 1; transform: rotate(0) scale(1); }
+/* 스튜디오 그레이 → 다음은 라이트 */
+:root[data-theme="mid"]   #theme-toggle .theme-sun  { opacity: 1; transform: rotate(0) scale(1); }
+/* 라이트 → 다음은 다크 */
+:root[data-theme="light"] #theme-toggle .theme-moon { opacity: 1; transform: rotate(0) scale(1); }
 
 .brand { display: flex; align-items: center; gap: 12px; -webkit-app-region: drag; }
 .tabs, .brand, .titlebar-drag { -webkit-app-region: drag; }
