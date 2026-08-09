@@ -180,12 +180,15 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   //    (electron-builder 크래시로 latest.yml 재생성 후에도 GitHub의 exe는 옛 sha일 수 있음)
   const latestYml = fs.readFileSync(localLatest, 'utf-8');
   const latestSize = parseInt((latestYml.match(/^\s*size:\s*(\d+)/m) || [])[1] || '0', 10);
-  const expectedSetup    = `YT-Separator-${version}-Setup.exe`;
+  // 이름은 package.json 의 build.nsis/portable artifactName 을 따른다.
+  // (여기가 실제 산출물과 어긋나면 정합성 검사가 통째로 스킵된다)
+  const product          = pkg.build?.productName || pkg.name;
+  const expectedSetup    = `${product}-Setup.exe`;
   const expectedBlockmap = `${expectedSetup}.blockmap`;
-  const expectedPortable = `YT-Separator-${version}-Portable.exe`;
-  const localSetup    = path.join('dist', `YT Separator-${version}-Setup.exe`);
-  const localBlockmap = `${localSetup}.blockmap`;
-  const localPortable = path.join('dist', `YT Separator-${version}-Portable.exe`);
+  const expectedPortable = `${product}.exe`;
+  const localSetup    = path.join('dist', expectedSetup);
+  const localBlockmap = path.join('dist', expectedBlockmap);
+  const localPortable = path.join('dist', expectedPortable);
 
   const assets = release.assets || [];
   const findAsset = (name) => assets.find(a => a.name === name);
