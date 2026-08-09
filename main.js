@@ -14,6 +14,12 @@ process.on('unhandledRejection', (e) => { try { console.error('[unhandledRejecti
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
+// 작업표시줄 고정·창 그룹화·알림이 쓰는 앱 식별자.
+// 설치 시 NSIS 바로가기에는 electron-builder 가 package.json 의 build.appId 를 심는데,
+// 앱이 같은 값을 쓰지 않으면 Windows 가 실행 경로 기반의 다른 ID 를 붙인다. 그러면
+// 업데이트로 exe 가 교체될 때마다 고정이 끊긴다. 두 값은 반드시 같아야 한다.
+if (process.platform === 'win32') app.setAppUserModelId('com.whalemindbass.yt-separator');
+
 function mimeFor(p) {
   const ext = path.extname(p).toLowerCase();
   return {

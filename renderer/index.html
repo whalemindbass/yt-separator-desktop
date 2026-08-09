@@ -31,7 +31,7 @@
         <svg class="theme-sun" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
         <svg class="theme-moon" viewBox="0 0 20 20" fill="none"><path d="M15 12.5a6 6 0 1 1-7.5-8 5 5 0 0 0 7.5 8Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
       </button>
-      <button id="report-btn" class="icon-btn" title="오류 제보 — 문제가 생기면 알려 주세요">
+      <button id="report-btn" class="icon-btn" title="오류 제보 — 문제가 생기면 알려 주세요" data-i18n-title="rep.btnTitle">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 3.2 17.2 16H2.8L10 3.2Z"/><path d="M10 8.2v3.1"/><circle cx="10" cy="13.6" r=".9" fill="currentColor" stroke="none"/>
         </svg>
@@ -48,29 +48,29 @@
   <!-- 오류 제보 -->
   <div id="report-dialog" class="update-dialog" hidden>
     <div class="update-dialog-card report-card">
-      <div class="update-dialog-title">오류 제보</div>
-      <p class="report-lede">무엇을 하다가 문제가 생겼는지 알려 주세요. 짧아도 괜찮습니다.</p>
+      <div class="update-dialog-title" data-i18n="rep.title">오류 제보</div>
+      <p class="report-lede" data-i18n="rep.lede">무엇을 하다가 문제가 생겼는지 알려 주세요. 짧아도 괜찮습니다.</p>
 
-      <label class="report-label" for="report-intent">무엇을 하려고 했나요?</label>
-      <input id="report-intent" class="report-input" type="text" maxlength="120" placeholder="예: 유튜브 링크로 곡 불러오기" />
+      <label class="report-label" for="report-intent" data-i18n="rep.intent">무엇을 하려고 했나요?</label>
+      <input id="report-intent" class="report-input" type="text" maxlength="120" placeholder="예: 유튜브 링크로 곡 불러오기" data-i18n-placeholder="rep.intentPh" />
 
-      <label class="report-label" for="report-body">무슨 일이 일어났나요?</label>
-      <textarea id="report-body" class="report-input report-textarea" maxlength="1500" rows="4" placeholder="예: 다운로드는 끝났는데 스템 분리 버튼이 나타나지 않습니다"></textarea>
+      <label class="report-label" for="report-body" data-i18n="rep.body">무슨 일이 일어났나요?</label>
+      <textarea id="report-body" class="report-input report-textarea" maxlength="1500" rows="4" placeholder="예: 다운로드는 끝났는데 스템 분리 버튼이 나타나지 않습니다" data-i18n-placeholder="rep.bodyPh"></textarea>
 
-      <label class="report-label" for="report-contact">답장 받을 이메일 <span class="report-opt">(선택)</span></label>
-      <input id="report-contact" class="report-input" type="email" maxlength="120" placeholder="비워 두셔도 됩니다" />
+      <label class="report-label" for="report-contact"><span data-i18n="rep.contact">답장 받을 이메일</span> <span class="report-opt" data-i18n="rep.optional">(선택)</span></label>
+      <input id="report-contact" class="report-input" type="email" maxlength="120" placeholder="비워 두셔도 됩니다" data-i18n-placeholder="rep.contactPh" />
 
       <label class="report-diag">
         <input id="report-diag-on" type="checkbox" checked />
-        <span>진단 정보 함께 보내기</span>
-        <button id="report-diag-show" type="button" class="report-diaglink">무엇이 포함되나요?</button>
+        <span data-i18n="rep.diag">진단 정보 함께 보내기</span>
+        <button id="report-diag-show" type="button" class="report-diaglink" data-i18n="rep.diagWhat">무엇이 포함되나요?</button>
       </label>
       <pre id="report-diag-view" class="report-diagview" hidden></pre>
 
       <div id="report-err" class="report-err" hidden></div>
       <div class="update-dialog-actions">
-        <button id="report-cancel" class="btn">취소</button>
-        <button id="report-send" class="btn primary">보내기</button>
+        <button id="report-cancel" class="btn" data-i18n="rep.cancel">취소</button>
+        <button id="report-send" class="btn primary" data-i18n="rep.send">보내기</button>
       </div>
     </div>
   </div>
@@ -231,12 +231,12 @@
         <div class="lib-side-actions">
           <button id="lib-cleanup" class="link-btn" data-i18n="lib.cleanup" data-i18n-title="lib.cleanup.title" title="중복/orphan 파일 정리">정리</button>
           <button id="lib-refresh" class="link-btn" data-i18n-title="lib.refresh.title" title="새로고침">↻</button>
-          <button id="lib-collapse" class="lib-collapse-btn" title="접기" aria-label="접기"><span>‹</span></button>
+          <button id="lib-collapse" class="lib-collapse-btn" title="접기" data-i18n-title="lib.collapse" aria-label="접기" data-i18n-aria="lib.collapse"><span>‹</span></button>
         </div>
       </div>
       <div class="lib-side-tools">
         <input id="lib-search" class="lib-search" type="text" placeholder="검색…" data-i18n-placeholder="lib.search.placeholder" spellcheck="false" autocomplete="off" />
-        <select id="lib-sort" class="lib-sort" title="정렬">
+        <select id="lib-sort" class="lib-sort" title="정렬" data-i18n-title="lib.sort">
           <option value="group"  data-i18n="lib.sort.group">그룹</option>
           <option value="date"   data-i18n="lib.sort.date">최근</option>
           <option value="name"   data-i18n="lib.sort.name">이름</option>
@@ -248,7 +248,7 @@
         <span data-i18n="lib.empty">처리한 영상이 없습니다.</span>
       </div>
     </aside>
-    <button id="lib-expand" class="lib-expand" title="펼치기" hidden>›</button>
+    <button id="lib-expand" class="lib-expand" title="펼치기" data-i18n-title="lib.expand" hidden>›</button>
 
     <section class="lib-center">
       <div id="player-empty" class="player-empty muted">
@@ -339,14 +339,14 @@
         <aside id="checkpoint-panel" class="checkpoint-panel" hidden>
           <div class="cp-head">
             <span data-i18n="cp.title">체크포인트</span>
-            <button id="cp-close" class="cp-close" title="닫기" aria-label="close">✕</button>
+            <button id="cp-close" class="cp-close" title="닫기" data-i18n-title="cp.close" aria-label="close">✕</button>
           </div>
           <ul id="cp-list" class="cp-list"></ul>
           <div class="cp-empty" id="cp-empty" data-i18n="cp.empty">현재 위치를 이름과 함께 추가하세요.</div>
           <div class="cp-add">
-            <input id="cp-add-time" class="cp-add-time" type="text" spellcheck="false" title="시간 (예: 1:23)" value="0:00" />
+            <input id="cp-add-time" class="cp-add-time" type="text" spellcheck="false" title="시간 (예: 1:23)" data-i18n-title="cp.timeTitle" value="0:00" />
             <input id="cp-add-name" class="cp-add-name" type="text" maxlength="40" spellcheck="false" data-i18n-placeholder="cp.name.ph" placeholder="이름 (예: 후렴)" />
-            <button id="cp-add-btn" class="cp-add-btn" title="추가">＋</button>
+            <button id="cp-add-btn" class="cp-add-btn" title="추가" data-i18n-title="cp.add">＋</button>
           </div>
         </aside>
         </div>
@@ -443,23 +443,23 @@
     <div class="daw">
       <!-- 상단: 엔진/곡 -->
       <div class="daw-tbar">
-        <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><span id="st-engine-status">엔진 꺼짐</span></span>
+        <span class="daw-eng"><span id="st-engine-dot" class="st-dot"></span><span id="st-engine-status" data-i18n="studio.engine.off2">엔진 꺼짐</span></span>
         <button id="st-engine-start" class="btn" data-i18n="studio.engine.start">오디오 시작</button>
         <button id="st-engine-stop" class="btn" hidden data-i18n="studio.engine.stop">오디오 종료</button>
-        <button id="st-load-song" class="btn pri" disabled title="오디오 시작 후 사용 가능" data-i18n="studio.loadSong">곡 불러오기</button>
-        <button id="st-close-song" class="btn" disabled title="불러온 스템 곡 닫기(내 녹음·임포트는 유지)">곡 닫기</button>
-        <button id="st-file-menu" class="btn" disabled title="오디오 임포트 · 프로젝트 열기/저장">파일 ▾</button>
+        <button id="st-load-song" class="btn pri" disabled title="오디오 시작 후 사용 가능" data-i18n-title="studio.h.needAudio" data-i18n="studio.loadSong">곡 불러오기</button>
+        <button id="st-close-song" class="btn" disabled title="불러온 스템 곡 닫기(내 녹음·임포트는 유지)" data-i18n-title="studio.h.closeSongTitle" data-i18n="studio.h.closeSong">곡 닫기</button>
+        <button id="st-file-menu" class="btn" disabled title="오디오 임포트 · 프로젝트 열기/저장" data-i18n-title="studio.h.fileTitle" data-i18n="studio.h.file">파일 ▾</button>
         <span class="daw-sp"></span>
-        <button id="st-audio-settings" class="btn" disabled title="오디오 시작 후 사용 가능" data-i18n="studio.audioSettings">오디오 설정</button>
+        <button id="st-audio-settings" class="btn" disabled title="오디오 시작 후 사용 가능" data-i18n-title="studio.h.needAudio" data-i18n="studio.audioSettings">오디오 설정</button>
       </div>
 
       <div class="daw-midrow">
       <aside class="daw-left empty">
         <div class="daw-left-head">
-          <span id="daw-left-h" class="daw-left-h">입력 이펙트</span>
+          <span id="daw-left-h" class="daw-left-h" data-i18n="studio.lbl.inputFx">입력 이펙트</span>
         </div>
         <div class="daw-left-toggles">
-          <button id="st-fx-bypassall" class="daw-fx-power" disabled title="이펙트 전체 켜기/끄기"><span class="pdot"></span><span class="ptxt">전체</span></button>
+          <button id="st-fx-bypassall" class="daw-fx-power" disabled title="이펙트 전체 켜기/끄기" data-i18n-title="studio.h.allFxTitle"><span class="pdot"></span><span class="ptxt" data-i18n="studio.h.allFx">전체</span></button>
           <button id="daw-pdc" class="daw-pdc" hidden></button>
         </div>
         <div id="daw-fx-overlay" class="daw-fx-overlay" hidden><div class="pl-spinner"></div><div class="msg"></div></div>
@@ -469,14 +469,14 @@
           <button id="st-fx-load" class="mini" disabled data-i18n="studio.fx.load">불러오기</button>
         </div>
         <div id="st-fx-slots" class="daw-fx-slots"></div>
-        <button id="st-fx-add" class="daw-fx-add" disabled>＋ VST 추가</button>
-        <div class="daw-fx-empty">녹음 트랙을 선택하면<br>해당 트랙의 입력 이펙트가 표시됩니다</div>
+        <button id="st-fx-add" class="daw-fx-add" disabled data-i18n="studio.h.addVst">＋ VST 추가</button>
+        <div class="daw-fx-empty" data-i18n="studio.h.fxEmpty1">녹음 트랙을 선택하면<br>해당 트랙의 입력 이펙트가 표시됩니다</div>
         <div class="daw-mixer">
           <div class="mx-strip">
             <div class="mx-val" id="mx-master-val">0.0 dB</div>
             <div class="mx-fader-wrap">
               <div class="mx-scale"></div>
-              <input id="mx-master" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="마스터 볼륨 (더블클릭=0.0 dB)">
+              <input id="mx-master" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="마스터 볼륨 (더블클릭=0.0 dB)" data-i18n-title="studio.h.masterVol">
               <div class="mx-meter" data-mid="0"><i class="l"></i><i class="r"></i></div>
             </div>
             <div class="mx-lbl">MASTER</div>
@@ -485,37 +485,37 @@
             <div class="mx-val" id="mx-track-val">—</div>
             <div class="mx-fader-wrap">
               <div class="mx-scale"></div>
-              <input id="mx-track" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="선택 트랙 볼륨 (더블클릭=0.0 dB)">
+              <input id="mx-track" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" disabled title="선택 트랙 볼륨 (더블클릭=0.0 dB)" data-i18n-title="studio.h.trackVol">
               <div id="mx-meter-track" class="mx-meter"><i class="l"></i><i class="r"></i></div>
             </div>
-            <div class="mx-lbl" id="mx-track-lbl">트랙</div>
+            <div class="mx-lbl" id="mx-track-lbl" data-i18n="studio.lbl.track">트랙</div>
           </div>
           <div class="mx-strip mx-bus">
             <div class="mx-val" id="mx-busA-val">0.0 dB</div>
             <div class="mx-fader-wrap">
               <div class="mx-scale"></div>
-              <input id="mx-busA" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 A 볼륨 (더블클릭=0.0 dB)">
+              <input id="mx-busA" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 A 볼륨 (더블클릭=0.0 dB)" data-i18n-title="studio.h.busAVol">
               <div class="mx-meter" data-mid="95001"><i class="l"></i><i class="r"></i></div>
             </div>
-            <button class="mx-lbl mx-bus-lbl" id="mx-busA-lbl" data-bus="0" title="클릭하면 이 버스의 이펙트 편집">A</button>
+            <button class="mx-lbl mx-bus-lbl" id="mx-busA-lbl" data-bus="0" title="클릭하면 이 버스의 이펙트 편집" data-i18n-title="studio.h.busEdit">A</button>
           </div>
           <div class="mx-strip mx-bus">
             <div class="mx-val" id="mx-busB-val">0.0 dB</div>
             <div class="mx-fader-wrap">
               <div class="mx-scale"></div>
-              <input id="mx-busB" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 B 볼륨 (더블클릭=0.0 dB)">
+              <input id="mx-busB" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 B 볼륨 (더블클릭=0.0 dB)" data-i18n-title="studio.h.busBVol">
               <div class="mx-meter" data-mid="95002"><i class="l"></i><i class="r"></i></div>
             </div>
-            <button class="mx-lbl mx-bus-lbl" id="mx-busB-lbl" data-bus="1" title="클릭하면 이 버스의 이펙트 편집">B</button>
+            <button class="mx-lbl mx-bus-lbl" id="mx-busB-lbl" data-bus="1" title="클릭하면 이 버스의 이펙트 편집" data-i18n-title="studio.h.busEdit">B</button>
           </div>
         </div>
         <!-- 선택 트랙 → 버스 센드량 (포스페이더) -->
         <div class="mx-sends" id="mx-sends">
           <div class="mx-send-row"><span class="lb">SEND A</span>
-            <input id="mx-send-a" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 A">
+            <input id="mx-send-a" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 A" data-i18n-title="studio.h.sendA">
             <span class="val" id="mx-send-a-val">0</span></div>
           <div class="mx-send-row"><span class="lb">SEND B</span>
-            <input id="mx-send-b" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 B">
+            <input id="mx-send-b" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 B" data-i18n-title="studio.h.sendB">
             <span class="val" id="mx-send-b-val">0</span></div>
         </div>
       </aside>
@@ -523,11 +523,18 @@
 
       <!-- 히어로: 대형 영상 + FX 드로어 -->
       <div class="daw-hero" id="daw-hero">
-        <button id="daw-hero-expand" class="daw-hero-expand" title="영상 펴기">▼ 영상 펴기</button>
+        <button id="daw-hero-expand" class="daw-hero-expand" title="영상 펴기" data-i18n-title="studio.h.showVideoTitle" data-i18n="studio.h.showVideo">▼ 영상 펴기</button>
         <div class="daw-video" id="daw-video-wrap">
-          <button id="daw-video-collapse" class="daw-video-collapse" title="영상 접기">▲</button>
+          <button id="daw-video-collapse" class="daw-video-collapse" title="영상 접기" data-i18n-title="studio.h.hideVideo">▲</button>
           <video id="daw-video" muted playsinline preload="auto" crossorigin="anonymous"></video>
-          <div id="daw-video-empty" class="daw-video-empty" data-i18n="studio.video.none">곡을 불러오면 영상이 표시됩니다</div>
+          <div id="daw-video-empty" class="daw-video-empty">
+            <p class="t" data-i18n="studio.e.noSongTitle">아직 불러온 곡이 없습니다</p>
+            <p class="s" data-i18n="studio.e.noSongSub">분리해 둔 곡을 열면 영상과 스템 트랙이 함께 올라옵니다.</p>
+            <div class="acts">
+              <button id="empty-load-song" class="btn pri" data-i18n="studio.e.loadSong">라이브러리에서 곡 불러오기</button>
+              <button id="empty-open-proj" class="btn" data-i18n="studio.e.openProject">프로젝트 열기</button>
+            </div>
+          </div>
           <div id="daw-vplay" class="daw-vplay" hidden></div>
           <div id="daw-vbar" class="daw-vbar"><i id="daw-vbar-fill"></i></div>
           <span id="daw-device" class="daw-badge" hidden></span>
@@ -535,8 +542,8 @@
         <aside id="daw-tools" class="daw-fx" hidden>
           <div class="daw-fx-h"><span class="t" data-i18n="studio.tools">도구</span><button id="st-tools-close" class="daw-fx-x">✕</button></div>
           <div class="daw-tool-tabs">
-            <button class="daw-tool-tab" data-tool="vu">입력 레벨</button>
-            <button class="daw-tool-tab" data-tool="tuner">튜너</button>
+            <button class="daw-tool-tab" data-tool="vu" data-i18n="studio.h.inputLevel">입력 레벨</button>
+            <button class="daw-tool-tab" data-tool="tuner" data-i18n="studio.h.tuner">튜너</button>
           </div>
           <div class="daw-fx-b">
             <div class="daw-tool" id="tool-vu" data-tool="vu" hidden>
@@ -560,13 +567,13 @@
                 <div id="st-tuner-freq" class="tuner-freq">—</div>
               </div>
               <div class="tuner-ref">
-                <span class="tuner-ref-lab">기준음 A4</span>
+                <span class="tuner-ref-lab" data-i18n="studio.h.refA4">기준음 A4</span>
                 <div class="tuner-ref-chips" id="st-tuner-ref">
                   <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
                 </div>
               </div>
             </div>
-            <div class="daw-tool-empty" id="tool-empty">위에서 도구를 선택하세요</div>
+            <div class="daw-tool-empty" id="tool-empty" data-i18n="studio.h.pickTool">위에서 도구를 선택하세요</div>
           </div>
         </aside>
       </div>
@@ -575,14 +582,22 @@
       <div class="daw-tracks">
         <div id="daw-ruler-wrap" class="daw-ruler-wrap">
           <div class="daw-ruler-ctrl">
-            <button id="st-add-rec" class="daw-rtog" disabled title="녹음 트랙 추가"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
-            <button id="st-range-mode" class="daw-rtog" disabled title="영역 선택 모드 — 룰러를 드래그해 내보내기 구간 지정" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg></button>
+            <button id="st-add-rec" class="daw-rtog" disabled title="녹음 트랙 추가" data-i18n-title="studio.lbl.addRecTrack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+            <button id="st-range-mode" class="daw-rtog" disabled title="영역 선택 모드 — 룰러를 드래그해 내보내기 구간 지정" data-i18n-title="studio.h.rangeModeTitle" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg></button>
           </div>
           <div id="daw-ruler" class="daw-ruler"></div>
         </div>
         <div id="daw-tscroll" class="daw-tscroll">
           <div id="daw-lanes" class="daw-lanes"></div>
-          <div id="daw-tracks-empty" class="daw-tracks-empty">곡을 불러오면 스템 트랙이 표시됩니다.<br>좌측 상단 ＋ 버튼(또는 트랙 우클릭)으로 녹음 트랙을 추가하세요.</div>
+          <div id="daw-tracks-empty" class="daw-tracks-empty">
+            <p class="t" data-i18n="studio.e.noTrackTitle">트랙이 비어 있습니다</p>
+            <p class="s" data-i18n="studio.e.noTrackSub">곡을 불러오면 스템이 트랙으로 올라옵니다. 내 악기를 녹음하려면 녹음 트랙을 추가하세요.</p>
+            <div class="acts">
+              <button id="empty-add-rec" class="btn pri" data-i18n="studio.e.addRecTrack">＋ 녹음 트랙 추가</button>
+              <button id="empty-add-audio" class="btn" data-i18n="studio.e.importAudio">오디오 파일 가져오기</button>
+            </div>
+            <p class="k" data-i18n="studio.e.shortcuts">스페이스 재생·정지 · R 녹음 · S 분할 · Ctrl+Z 되돌리기</p>
+          </div>
         </div>
       </div>
 
@@ -592,35 +607,35 @@
       <!-- 하단: 트랜스포트 -->
       <div class="daw-bottombar">
         <!-- 좌: 현재 프로젝트 이름·저장 상태 · 실행취소 -->
-        <button id="st-proj-name" class="daw-projname" disabled title="현재 프로젝트 — 클릭하면 저장 (Ctrl+S)"><span class="pn-dot"></span><span class="pn-label">새 프로젝트</span></button>
+        <button id="st-proj-name" class="daw-projname" disabled title="현재 프로젝트 — 클릭하면 저장 (Ctrl+S)" data-i18n-title="studio.h.projTitle"><span class="pn-dot"></span><span class="pn-label" data-i18n="studio.lbl.newProject">새 프로젝트</span></button>
         <span class="tp-div"></span>
-        <button id="st-undo" class="btn icon" disabled title="실행취소 (Ctrl+Z)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 5.5 3.5 8l3 2.5"/><path d="M3.5 8h5.5a3.5 3.5 0 0 1 0 7H8"/></svg></button>
-        <button id="st-redo" class="btn icon" disabled title="다시실행 (Ctrl+Y)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 5.5 12.5 8l-3 2.5"/><path d="M12.5 8H7a3.5 3.5 0 0 0 0 7H8"/></svg></button>
+        <button id="st-undo" class="btn icon" disabled title="실행취소 (Ctrl+Z)" data-i18n-title="studio.h.undo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 5.5 3.5 8l3 2.5"/><path d="M3.5 8h5.5a3.5 3.5 0 0 1 0 7H8"/></svg></button>
+        <button id="st-redo" class="btn icon" disabled title="다시실행 (Ctrl+Y)" data-i18n-title="studio.h.redo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 5.5 12.5 8l-3 2.5"/><path d="M12.5 8H7a3.5 3.5 0 0 0 0 7H8"/></svg></button>
         <span class="daw-sp"></span>
         <!-- 가운데: 재생·녹음 트랜스포트 -->
-        <button id="st-seek0" class="btn icon" disabled title="처음으로"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.4" y="3.4" width="1.7" height="9.2" rx=".7"/><path d="M12.6 3.5v9L6.1 8z"/></svg></button>
-        <button id="st-play" class="btn icon tp-play" disabled title="재생"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.6 3.1v9.8L12.4 8z"/></svg></button>
-        <button id="st-stop" class="btn icon" disabled title="정지"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.4"/></svg></button>
-        <button id="st-rec" class="btn icon rec" disabled title="녹음 준비" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="4.3"/></svg></button>
-        <button id="st-monitor" class="btn icon on" disabled title="내 소리 모니터 on/off" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9V8a5 5 0 0 1 10 0v1"/><rect x="2.3" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/><rect x="11" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/></svg></button>
-        <button id="st-return" class="btn icon on" disabled title="정지 시 재생 시작 위치로 복귀" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5 2.5 8 6 11.5"/><path d="M2.5 8h7a4 4 0 0 1 0 8H8"/></svg></button>
+        <button id="st-seek0" class="btn icon" disabled title="처음으로" data-i18n-title="studio.h.toStart"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.4" y="3.4" width="1.7" height="9.2" rx=".7"/><path d="M12.6 3.5v9L6.1 8z"/></svg></button>
+        <button id="st-play" class="btn icon tp-play" disabled title="재생" data-i18n-title="studio.h.play"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.6 3.1v9.8L12.4 8z"/></svg></button>
+        <button id="st-stop" class="btn icon" disabled title="정지" data-i18n-title="studio.h.stop"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.4"/></svg></button>
+        <button id="st-rec" class="btn icon rec" disabled title="녹음 준비" data-i18n-title="studio.h.armRec" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="4.3"/></svg></button>
+        <button id="st-monitor" class="btn icon on" disabled title="내 소리 모니터 on/off" data-i18n-title="studio.h.monitor" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9V8a5 5 0 0 1 10 0v1"/><rect x="2.3" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/><rect x="11" y="8.8" width="2.7" height="4.4" rx="1.1" fill="currentColor" stroke="none"/></svg></button>
+        <button id="st-return" class="btn icon on" disabled title="정지 시 재생 시작 위치로 복귀" data-i18n-title="studio.h.returnStop" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5 2.5 8 6 11.5"/><path d="M2.5 8h7a4 4 0 0 1 0 8H8"/></svg></button>
         <span class="daw-sp"></span>
         <!-- 우: BPM(+보정) · 메트로놈 · 배율 −/+ · 도구 · Export -->
-        <div class="daw-bpm" title="템포(BPM) — 그리드·스냅 기준">
+        <div class="daw-bpm" title="템포(BPM) — 그리드·스냅 기준" data-i18n-title="studio.h.bpm">
           <span class="daw-bpm-lab">BPM</span>
           <input id="st-bpm" type="number" min="20" max="300" step="1" value="120" disabled>
           <div class="daw-bpm-adj">
-            <button id="st-bpm-half" disabled title="BPM ÷2 (감지 배수 보정)">÷2</button>
-            <button id="st-bpm-double" disabled title="BPM ×2 (감지 배수 보정)">×2</button>
+            <button id="st-bpm-half" disabled title="BPM ÷2 (감지 배수 보정)" data-i18n-title="studio.h.bpmHalf">÷2</button>
+            <button id="st-bpm-double" disabled title="BPM ×2 (감지 배수 보정)" data-i18n-title="studio.h.bpmDouble">×2</button>
           </div>
         </div>
         <span class="tp-div"></span>
         <span class="daw-zoom">
-          <button id="st-zoom-out" class="btn icon" disabled title="축소"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg></button>
-          <button id="st-zoom-in" class="btn icon" disabled title="확대"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 4v8M4 8h8"/></svg></button></span>
+          <button id="st-zoom-out" class="btn icon" disabled title="축소" data-i18n-title="studio.h.zoomOut"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg></button>
+          <button id="st-zoom-in" class="btn icon" disabled title="확대" data-i18n-title="studio.h.zoomIn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 4v8M4 8h8"/></svg></button></span>
         <span class="tp-div"></span>
         <button id="st-tools-toggle" class="btn" disabled data-i18n="studio.tools">도구</button>
-        <button id="st-export" class="btn" disabled title="내보내기"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v6.5M5.3 6.3 8 9l2.7-2.7M3 12.5h10"/></svg><span data-i18n="studio.export">Export</span></button>
+        <button id="st-export" class="btn" disabled title="내보내기" data-i18n-title="studio.x.export"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v6.5M5.3 6.3 8 9l2.7-2.7M3 12.5h10"/></svg><span data-i18n="studio.export">Export</span></button>
       </div>
 
       <div id="daw-modal" class="daw-modal" hidden></div>
@@ -769,7 +784,7 @@
       <div class="settings-item">
         <div class="settings-label-col">
           <div class="settings-item-title" data-i18n="set.check.title">지금 확인</div>
-          <div class="settings-item-desc" id="s-update-status">현재 버전 v?</div>
+          <div class="settings-item-desc" id="s-update-status" data-i18n="set.currentVersion">현재 버전 v?</div>
         </div>
         <div class="settings-actions">
           <button id="s-check-update" class="btn" data-i18n="common.confirm">확인</button>
@@ -796,11 +811,11 @@
       </div>
       <div class="settings-item">
         <div class="settings-label-col">
-          <div class="settings-item-title">오류 제보</div>
-          <div class="settings-item-desc">문제가 생기면 알려 주세요. 버전·오디오 설정이 함께 전달되어 원인을 빠르게 찾을 수 있습니다.</div>
+          <div class="settings-item-title" data-i18n="rep.title">오류 제보</div>
+          <div class="settings-item-desc" data-i18n="rep.settingsSub">문제가 생기면 알려 주세요. 버전·오디오 설정이 함께 전달되어 원인을 빠르게 찾을 수 있습니다.</div>
         </div>
         <div class="settings-actions">
-          <button id="s-report" class="btn">제보하기</button>
+          <button id="s-report" class="btn" data-i18n="rep.open">제보하기</button>
         </div>
       </div>
     </section>

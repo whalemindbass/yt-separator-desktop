@@ -4,6 +4,7 @@ import { Library } from './library.js';
 import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
+import { t, onLocaleChange } from './i18n.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -15,7 +16,12 @@ const STEM_COLOR = {
   bass: 'var(--stem-bass)', other: 'var(--stem-other)',
   guitar: 'var(--stem-other)', piano: 'var(--stem-drums)', mine: 'var(--accent)',
 };
-const STEM_LABEL = { vocals: '보컬', drums: '드럼', bass: '베이스', other: '기타', guitar: '기타', piano: '피아노' };
+// 키만 두고 쓰는 곳에서 번역한다. 모듈 로드 시점에 t() 로 굳히면 언어를 바꿔도
+// 이미 만들어진 문자열이 그대로 남는다.
+// other 와 guitar 는 한국어로 둘 다 '기타' 지만 뜻이 달라 키를 나눈다.
+const STEM_LABEL_KEY = { vocals: 'studio.stem.vocals', drums: 'studio.stem.drums', bass: 'studio.stem.bass',
+                         other: 'studio.stem.other', guitar: 'studio.stem.guitar', piano: 'studio.stem.piano' };
+const stemLabel = (k) => (STEM_LABEL_KEY[k] ? t(STEM_LABEL_KEY[k]) : k);
 
 let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
@@ -40,15 +46,15 @@ function setPresets(a) { try { localStorage.setItem('yss:fx-presets', JSON.strin
 function upsertPreset(p) { const a = getPresets(); const i = a.findIndex(x => x.id === p.id); if (i >= 0) a[i] = p; else a.push(p); setPresets(a); }
 
 function startGather(opts) {   // 현재 트랙 체인 상태를 모아 프리셋 생성/갱신
-  if (_selTrack == null) { flashTake('트랙을 선택하세요.'); return; }
-  if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+  if (_selTrack == null) { flashTake(t('studio.m.selectTrack')); return; }
+  if (!_chain.length) { flashTake(t('studio.m.noVst')); return; }
   _presetGather = { ...opts, states: {}, need: _chain.map(s => s.id), meta: _chain.map(s => ({ index: s.index, bypass: s.bypass })), order: _chain.map(s => s.id) };
   for (const s of _chain) api.engine.fxSaveState(_selTrack, s.id);
 }
 function loadPreset(p) {
-  if (_selTrack == null) { flashTake('트랙을 선택하세요.'); return; }
+  if (_selTrack == null) { flashTake(t('studio.m.selectTrack')); return; }
   _activePresetId = p.id;
-  showFxOverlay('톤 불러오는 중…');
+  showFxOverlay(t('studio.m.loadingTone'));
   // 엔진이 선택 트랙 체인을 한 번에 재구성 (원자적) → fxChain 이벤트 오면 overlay 해제
   api.engine.fxSetChain(_selTrack, p.slots.map(s => ({ index: s.index, data: s.data, bypass: s.bypass })));
 }
@@ -62,8 +68,8 @@ function openNameModal(title, def, onOk) {
   const host = $('daw-modal');
   host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${title}</span><button class="x">✕</button></div>
     <div class="daw-modal-list" style="padding:16px">
-      <input id="daw-name-in" class="daw-fx-select" style="margin:0" placeholder="톤 이름" />
-      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="mini" id="daw-name-ok">저장</button></div>
+      <input id="daw-name-in" class="daw-fx-select" style="margin:0" placeholder="${t('studio.x.toneName')}" />
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button class="mini" id="daw-name-ok">${t('studio.x.save')}</button></div>
     </div></div>`;
   host.hidden = false;
   const inp = $('daw-name-in'); inp.value = def || ''; inp.focus(); inp.select();
@@ -75,11 +81,11 @@ function openNameModal(title, def, onOk) {
 function openPresetPicker() {
   const ps = getPresets();
   const host = $('daw-modal');
-  if (!ps.length) { openModal('톤 불러오기', '<div class="daw-modal-empty">저장된 톤이 없습니다.</div>', () => {}); return; }
+  if (!ps.length) { openModal(t('studio.d.loadTone'), '<div class="daw-modal-empty">' + t('studio.m.noTones') + '</div>', () => {}); return; }
   const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
     <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${esc((_plugins[p.index] && _plugins[p.index].name) || ('VST ' + p.index))}</div></div>
-    <button class="daw-preset-del" data-id="${esc(p.id)}" title="삭제">✕</button></div>`).join('');
-  openModal('톤 불러오기', html, (idx) => loadPreset(ps[Number(idx)]));
+    <button class="daw-preset-del" data-id="${esc(p.id)}" title="${t('studio.t.delete')}">✕</button></div>`).join('');
+  openModal(t('studio.d.loadTone'), html, (idx) => loadPreset(ps[Number(idx)]));
   host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
     const id = b.dataset.id;
@@ -276,22 +282,22 @@ function renderTracks() {
     const gPos = gainToFader(t.gain != null ? t.gain : 1);
     const p100 = Math.round((t.pan != null ? t.pan : 0) * 100);
     lane.innerHTML = `
-      <div class="daw-head" title="클릭하면 이 스템의 이펙트·볼륨 편집">
+      <div class="daw-head" title="${t('studio.t.editStem')}">
         <div class="nm"><i></i><span class="lbl-t">${t.label}</span>
-          <button class="daw-autotog${autoOf(stemIdOf(t.engineIndex)).open ? ' on' : ''}" title="볼륨 자동화 레인 열기/닫기">
+          <button class="daw-autotog${autoOf(stemIdOf(t.engineIndex)).open ? ' on' : ''}" title="${t('studio.t.autoLane')}">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11.5 5.5 7l3 2.5L14 4"/></svg>
           </button>
         </div>
         <div class="ctrls">
           <div class="daw-btn-grp">
-            <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!t.mute}">M</button>
-            <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!t.solo}">S</button>
+            <button class="daw-ms${t.mute ? ' on' : ''}" data-m="mute" title="${t('studio.t.mute')}" aria-pressed="${!!t.mute}">M</button>
+            <button class="daw-ms${t.solo ? ' on' : ''}" data-m="solo" title="${t('studio.t.solo')}" aria-pressed="${!!t.solo}">S</button>
           </div>
-          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gPos}" title="볼륨 (더블클릭=100%)">
+          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gPos}" title="${t('studio.t.volume')}">
         </div>
         <div class="daw-pan-row">
           <span class="lbl">PAN</span>
-          <input class="daw-pan${p100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${p100}" title="팬 (더블클릭=센터)">
+          <input class="daw-pan${p100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${p100}" title="${t('studio.t.pan')}">
           <div class="daw-meter" data-mid="${stemIdOf(t.engineIndex)}"><i class="l"></i><i class="r"></i></div>
         </div>
       </div>
@@ -332,7 +338,7 @@ function renderTracks() {
           pushStemAuto();   // 이동 끝난 곡선을 엔진에 반영
           const autoAfter = snapshotStemAuto();
           pushUndo(() => { setStemOffset(base); restoreStemAuto(autoBase); },
-                   () => { setStemOffset(nw);   restoreStemAuto(autoAfter); }, '스템 이동');
+                   () => { setStemOffset(nw);   restoreStemAuto(autoAfter); }, t('studio.u.stemOffset'));
           markDirty();
         }
       });
@@ -356,7 +362,7 @@ function renderRecLanes() {
   let recN = 0, audN = 0;
   _recTracks.forEach((rt, idx) => {
     const isAudio = rt.type === 1;
-    const autoLabel = isAudio ? `오디오 ${++audN}` : `내 녹음 ${++recN}`;
+    const autoLabel = isAudio ? t('studio.p.audioN', { n: ++audN }) : t('studio.p.recN', { n: ++recN });
     const label = rt.name || autoLabel;
     const defColor = isAudio ? 'var(--stem-bass)' : 'var(--accent)';
     const lane = document.createElement('div');
@@ -367,32 +373,32 @@ function renderRecLanes() {
     lane.dataset.recid = rt.id;
     lane.dataset.selid = rt.id;
     lane.dataset.type = isAudio ? 'audio' : 'rec';
-    const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="녹음 대상(arm)" aria-pressed="${!!rt.armed}">R</button>`;
+    const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="${t('studio.t.arm')}" aria-pressed="${!!rt.armed}">R</button>`;
     const rp100 = Math.round((rt.pan != null ? rt.pan : 0) * 100);
     lane.innerHTML = `
-      <div class="daw-head" title="클릭하면 이 트랙의 입력 이펙트 편집">
-        <div class="nm"><span class="daw-reorder" title="드래그해 순서 변경">⠿</span><i title="색 변경"></i><span class="lbl" title="더블클릭해 이름 변경">${esc(label)}</span>
-          <button class="daw-autotog${autoOf(rt.id).open ? ' on' : ''}" title="볼륨 자동화 레인 열기/닫기">
+      <div class="daw-head" title="${t('studio.t.editTrackFx')}">
+        <div class="nm"><span class="daw-reorder" title="${t('studio.t.dragReorder2')}">⠿</span><i title="${t('studio.t.changeColor')}"></i><span class="lbl" title="${t('studio.t.dblRename')}">${esc(label)}</span>
+          <button class="daw-autotog${autoOf(rt.id).open ? ' on' : ''}" title="${t('studio.t.autoLane')}">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 11.5 5.5 7l3 2.5L14 4"/></svg>
           </button>
         </div>
         <div class="ctrls">
           <div class="daw-btn-grp">
             ${rBtnHtml}
-            <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="뮤트" aria-pressed="${!!rt.mute}">M</button>
-            <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="솔로" aria-pressed="${!!rt.solo}">S</button>
+            <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="${t('studio.t.mute')}" aria-pressed="${!!rt.mute}">M</button>
+            <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="${t('studio.t.solo')}" aria-pressed="${!!rt.solo}">S</button>
           </div>
-          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gainToFader(rt.gain != null ? rt.gain : 1)}" title="볼륨 (더블클릭=100%)">
-          <button class="daw-ms daw-rec-del" data-m="del" title="트랙 삭제">✕</button>
+          <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gainToFader(rt.gain != null ? rt.gain : 1)}" title="${t('studio.t.volume')}">
+          <button class="daw-ms daw-rec-del" data-m="del" title="${t('studio.t.deleteTrack')}">✕</button>
         </div>
         <div class="daw-pan-row">
           <span class="lbl">PAN</span>
-          <input class="daw-pan${rp100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${rp100}" title="팬 (더블클릭=센터)">
+          <input class="daw-pan${rp100 === 0 ? ' off' : ''}" type="range" min="-100" max="100" value="${rp100}" title="${t('studio.t.pan')}">
           <div class="daw-meter" data-mid="${rt.id}"><i class="l"></i><i class="r"></i></div>
         </div>
       </div>
       <div class="daw-area"></div>
-      <div class="daw-lane-resize" title="드래그해 높이 조절"></div>`;
+      <div class="daw-lane-resize" title="${t('studio.t.dragResize')}"></div>`;
     const rBtn = lane.querySelector('[data-m="arm"]');
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
@@ -426,7 +432,7 @@ function renderRecLanes() {
       const takesN = _takes.filter(t => t.trackId === rt.id).length;
       if (del.dataset.confirm || takesN === 0) { clearTimeout(del._t); api.engine.recTrackRemove(rt.id); return; }
       del.dataset.confirm = '1'; del.textContent = '‼'; del.classList.add('confirm');
-      flashTake(`이 트랙에 녹음 ${takesN}개 — 다시 누르면 함께 삭제`);
+      flashTake(t('studio.p.delTrackWithTakes', { n: takesN }));
       del._t = setTimeout(() => { del.dataset.confirm = ''; del.textContent = '✕'; del.classList.remove('confirm'); }, 2500);
     });
     // 이름 변경 — 라벨 더블클릭 · 우클릭 메뉴 (autoLabel 기억)
@@ -436,10 +442,10 @@ function renderRecLanes() {
     lane.querySelector('.daw-head').addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation(); selectTrack(rt.id);
       openDropdownAt(e.clientX, e.clientY, [
-        { label: '이름 변경', fn: () => startRenameTrack(rt.id) },
-        { label: '색 변경', fn: () => lane.querySelector('.nm i').click() },
-        { label: '녹음 트랙 추가', fn: () => api.engine.recTrackAdd() },
-        { label: '트랙 삭제', fn: () => del.click() },
+        { label: t('studio.lbl.rename'), fn: () => startRenameTrack(rt.id) },
+        { label: t('studio.lbl.changeColor'), fn: () => lane.querySelector('.nm i').click() },
+        { label: t('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd() },
+        { label: t('studio.lbl.deleteTrack'), fn: () => del.click() },
       ]);
     });
     // 색 변경 — 점 클릭 → 색상 선택기
@@ -452,7 +458,7 @@ function renderRecLanes() {
       document.body.appendChild(ci);
       const oldColor = rt.color || '';
       ci.addEventListener('input', () => { rt.color = ci.value; lane.style.setProperty('--c', ci.value); });
-      ci.addEventListener('change', () => { const nw = rt.color; ci.remove(); if (nw !== oldColor) pushUndo(() => setTrackProp(rt.id, 'color', oldColor), () => setTrackProp(rt.id, 'color', nw), '트랙 색'); });
+      ci.addEventListener('change', () => { const nw = rt.color; ci.remove(); if (nw !== oldColor) pushUndo(() => setTrackProp(rt.id, 'color', oldColor), () => setTrackProp(rt.id, 'color', nw), t('studio.u.trackColor')); });
       ci.click();
     });
     // 높이 조절 — 하단 그립 드래그
@@ -464,7 +470,7 @@ function renderRecLanes() {
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
         const nw = rt.height || 0;
-        if (nw !== oldH) pushUndo(() => setTrackProp(rt.id, 'height', oldH), () => setTrackProp(rt.id, 'height', nw), '트랙 높이');
+        if (nw !== oldH) pushUndo(() => setTrackProp(rt.id, 'height', oldH), () => setTrackProp(rt.id, 'height', nw), t('studio.u.trackHeight'));
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
     });
@@ -491,9 +497,9 @@ const stemIdOf = (engineIndex) => STEM_ID_BASE + engineIndex;
 const stemForId = (id) => (isStemId(id) ? _tracks.find(t => t.engineIndex === id - STEM_ID_BASE) : null);
 function selTrackObj(id) { return isStemId(id) ? stemForId(id) : _recTracks.find(r => r.id === id); }
 function selTrackLabel(id) {
-  if (isBusId(id)) return `버스 ${BUS_NAMES[busIndexOf(id)]}`;
-  if (isStemId(id)) { const t = stemForId(id); return t ? t.label : '트랙'; }
-  return document.querySelector(`.daw-lane-rec[data-recid="${id}"] .lbl`)?.textContent?.trim() || '트랙';
+  if (isBusId(id)) return t('studio.p.busN', { n: BUS_NAMES[busIndexOf(id)] });
+  if (isStemId(id)) { const t = stemForId(id); return t ? t.label : t('studio.lbl.track'); }
+  return document.querySelector(`.daw-lane-rec[data-recid="${id}"] .lbl`)?.textContent?.trim() || t('studio.lbl.track');
 }
 function selTrackGain(id) { const o = selTrackObj(id); return o && o.gain != null ? o.gain : 1; }
 function applySelTrackGain(id, g) {   // 볼륨 라우팅 — 스템=track(index), 녹음=recTrack(id)
@@ -548,13 +554,24 @@ function syncSelection() {   // 재렌더 후 선택 하이라이트 재적용 (
   document.querySelectorAll('.daw-lane').forEach(l =>
     l.classList.toggle('selected', l.dataset.selid != null && Number(l.dataset.selid) === _selTrack));
 }
+// 버스는 트랙과 달리 '선택' 개념이 없다. 대신 보낼 트랙이 하나도 없으면 의미가 없으므로
+// 그때만 잠근다. 트랙이 있으면 어떤 트랙을 선택했든 버스는 항상 만질 수 있다(믹서 채널이므로).
+function updateBusStrips() {
+  const hasTracks = _tracks.length > 0 || _recTracks.length > 0;
+  for (let i = 0; i < BUS_COUNT; i++) {
+    const n = BUS_NAMES[i];
+    const f = $(`mx-bus${n}`); if (f) f.disabled = !hasTracks;
+    const lb = $(`mx-bus${n}-lbl`); if (lb) lb.disabled = !hasTracks;
+  }
+  if (!hasTracks && isBusId(_selTrack)) selectTrack(null);   // 트랙이 사라졌는데 버스 FX 편집 중이면 해제
+}
 function updateFxPanel() {   // 선택된 트랙 있을 때만 이펙트 표시
   const left = document.querySelector('.daw-left');
   if (!left) return;
   const has = _selTrack != null;
   left.classList.toggle('empty', !has);
   const h = $('daw-left-h');
-  if (h) h.textContent = has ? `${selTrackLabel(_selTrack)} 이펙트` : '입력 이펙트';
+  if (h) h.textContent = has ? t('studio.p.trackFx', { name: selTrackLabel(_selTrack) }) : t('studio.lbl.inputFx');
   updateTrackFader();
 }
 // 믹서 페이더 왼쪽 dB 눈금자. 눈금 위치는 CSS 가 아니라 테이퍼가 정한다 —
@@ -599,7 +616,7 @@ function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
     const g = selTrackGain(_selTrack);
     f.disabled = false; f.value = gainToFader(g); val.textContent = dbText(g);
     lbl.textContent = selTrackLabel(_selTrack);
-  } else { f.disabled = true; f.value = FADER_UNITY_POS; val.textContent = '—'; lbl.textContent = '트랙'; }
+  } else { f.disabled = true; f.value = FADER_UNITY_POS; val.textContent = '—'; lbl.textContent = t('studio.lbl.track'); }
 }
 
 // ── 자동화 레인 렌더 ──────────────────────────────────────
@@ -627,10 +644,10 @@ function buildAutoLane(selId, label, color) {
   row.style.setProperty('--c', color);
   row.innerHTML = `
     <div class="daw-auto-head">
-      <span class="lb">볼륨 자동화</span>
-      <button class="daw-auto-on${a.on ? ' on' : ''}" title="자동화 켜기/끄기 — 켜면 페이더 대신 곡선이 볼륨을 결정합니다">${a.on ? 'ON' : 'OFF'}</button>
-      <button class="daw-auto-clr" title="곡선 초기화 — 찍은 점을 모두 지웁니다">초기화</button>
-      <button class="daw-auto-close" title="레인 닫기">✕</button>
+      <span class="lb">${t('studio.x.volAuto')}</span>
+      <button class="daw-auto-on${a.on ? ' on' : ''}" title="${t('studio.t.autoOnOff')}">${a.on ? 'ON' : 'OFF'}</button>
+      <button class="daw-auto-clr" title="${t('studio.t.autoReset')}">${t('studio.x.reset')}</button>
+      <button class="daw-auto-close" title="${t('studio.t.closeLane')}">✕</button>
     </div>
     <div class="daw-auto-area"><svg class="daw-auto-svg" preserveAspectRatio="none"></svg></div>`;
   const area = row.querySelector('.daw-auto-area');
@@ -642,7 +659,7 @@ function buildAutoLane(selId, label, color) {
     a.on = !a.on;
     autoPush(selId); renderAutoLane(selId);
     pushUndo(() => { autoOf(selId).on = before; autoPush(selId); renderAutoLane(selId); },
-             () => { autoOf(selId).on = !before; autoPush(selId); renderAutoLane(selId); }, '자동화 on/off');
+             () => { autoOf(selId).on = !before; autoPush(selId); renderAutoLane(selId); }, t('studio.u.autoToggle'));
   });
   row.querySelector('.daw-auto-close').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -660,7 +677,7 @@ function buildAutoLane(selId, label, color) {
     if (!before.length) return;
     a.pts = []; autoPush(selId); renderAutoLane(selId); markDirty();
     pushUndo(() => { autoOf(selId).pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
-             () => { autoOf(selId).pts = []; autoPush(selId); renderAutoLane(selId); }, '자동화 지우기');
+             () => { autoOf(selId).pts = []; autoPush(selId); renderAutoLane(selId); }, t('studio.u.autoClear'));
   });
 
   // 빈 곳 클릭 = 점 추가
@@ -678,7 +695,7 @@ function buildAutoLane(selId, label, color) {
     autoPush(selId); renderAutoLane(selId); markDirty();
     const after = a.pts.map(p => ({ ...p }));
     pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
-             () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 추가');
+             () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, t('studio.u.autoAdd'));
   });
   area.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -720,7 +737,7 @@ function renderAutoLaneInto(row, selId) {
       g += `<circle class="ap" cx="${x.toFixed(1)}" cy="${ys[i].toFixed(1)}" r="4.5" data-i="${i}"/>`;
     });
   } else {
-    g += `<text x="8" y="${(H / 2 + 3).toFixed(0)}" class="au-hint">클릭해 점을 찍으면 볼륨 곡선이 만들어집니다</text>`;
+    g += `<text x="8" y="${(H / 2 + 3).toFixed(0)}" class="au-hint">${t('studio.x.autoHint')}</text>`;
   }
   svg.innerHTML = g;
 
@@ -745,7 +762,7 @@ function renderAutoLaneInto(row, selId) {
         autoPush(selId); markDirty();
         const after = a.pts.map(p => ({ ...p }));
         pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
-                 () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 이동');
+                 () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, t('studio.u.autoMove'));
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
@@ -758,7 +775,7 @@ function renderAutoLaneInto(row, selId) {
       autoPush(selId); renderAutoLane(selId); markDirty();
       const after = a.pts.map(p => ({ ...p }));
       pushUndo(() => { const o = autoOf(selId); o.pts = before.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); },
-               () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, '자동화 점 삭제');
+               () => { const o = autoOf(selId); o.pts = after.map(p => ({ ...p })); autoPush(selId); renderAutoLane(selId); }, t('studio.u.autoDelete'));
     });
   });
 }
@@ -885,7 +902,7 @@ function wireReorder(e, rt, lane) {
       if (from >= 0 && to >= 0) {
         const [m] = _recTracks.splice(from, 1); _recTracks.splice(to, 0, m); renderRecLanes(); renderTakes();
         const newOrder = _recTracks.map(r => r.id);
-        pushUndo(() => reorderTracks(oldOrder), () => reorderTracks(newOrder), '트랙 순서');
+        pushUndo(() => reorderTracks(oldOrder), () => reorderTracks(newOrder), t('studio.u.trackOrder'));
       }
     }
   };
@@ -918,11 +935,11 @@ function ensureExportEls() {
   const ruler = $('daw-ruler');
   if (ruler && !document.getElementById('daw-erange')) {
     const e = document.createElement('div'); e.id = 'daw-erange'; e.className = 'daw-erange'; e.hidden = true;
-    e.innerHTML = '<div class="daw-eh l" title="시작 조절"></div><div class="daw-eh r" title="끝 조절"></div>';
+    e.innerHTML = `<div class="daw-eh l" title="${t('studio.t.adjustStart')}"></div><div class="daw-eh r" title="${t('studio.t.adjustEnd')}"></div>`;
     ruler.appendChild(e);
     e.querySelector('.daw-eh.l').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'start'));
     e.querySelector('.daw-eh.r').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'end'));
-    e.addEventListener('dblclick', (ev) => { ev.stopPropagation(); _exportRange = null; renderExportRange(); flashTake('내보내기 범위 해제'); });
+    e.addEventListener('dblclick', (ev) => { ev.stopPropagation(); _exportRange = null; renderExportRange(); flashTake(t('studio.m.exportRangeCleared')); });
   }
   const lanes = $('daw-lanes');
   let band = document.getElementById('daw-eband');
@@ -939,7 +956,7 @@ function dragExportEdge(e, which) {
     else _exportRange.end = Math.max(v, _exportRange.start + 0.02);
     renderExportRange();
   };
-  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); flashTake(`내보내기 범위: ${fmtTC(_exportRange.start)}–${fmtTC(_exportRange.end)}`); };
+  const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); flashTake(t('studio.p.exportRange', { a: fmtTC(_exportRange.start), b: fmtTC(_exportRange.end) })); };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function renderExportRange() {
@@ -949,7 +966,7 @@ function renderExportRange() {
   if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
   if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = tracksHeight() + 'px'; }
 }
-const fmtBar = (sec) => '마디 ' + (Math.floor((sec - _gridOffset) / secPerBar()) + 1);
+const fmtBar = (sec) => t('studio.lbl.barPrefix') + (Math.floor((sec - _gridOffset) / secPerBar()) + 1);
 
 // 타임라인 총 길이(초) — 소스 길이 + 여유(뷰포트는 채우되 무한 아님), 마디 단위로 반올림
 function fullSec() {
@@ -995,6 +1012,7 @@ function layout() {
   updatePlayhead(_lastSec);
   const zv = $('st-zoom-val'); if (zv) zv.textContent = Math.round(_pxPerSec) + ' px/s';
   const te = $('daw-tracks-empty'); if (te) te.hidden = _tracks.length > 0 || _recTracks.length > 0;
+  updateBusStrips();
 }
 
 let _lastSec = 0;
@@ -1046,10 +1064,10 @@ function stopStudio() {
   }
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
-  if (!armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하세요.'); return; }
+  if (!armedRecId()) { flashTake(t('studio.m.addRecTrackFirst')); return; }
   if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
   if (!_playing) playStudio();
-  flashTake('● 녹음 시작');
+  flashTake(t('studio.lbl.startRecording'));
 }
 
 // ── 동기 ──────────────────────────────────────────
@@ -1178,11 +1196,11 @@ async function newAudioTrack() {   // 오디오(임포트) 트랙 생성 후 새
   return _recTracks.length ? _recTracks[_recTracks.length - 1].id : null;
 }
 async function importAudio(paths, startSec, trackId) {
-  if (!_started) { flashTake('먼저 상단 “오디오 시작”을 누르세요.'); return; }
+  if (!_started) { flashTake(t('studio.m.startAudioFirst')); return; }
   // 대상: 드롭한 오디오 레인이면 그 트랙, 아니면 새 오디오 트랙
   const dropTrack = _recTracks.find(t => t.id === trackId && t.type === 1);
   const tid = dropTrack ? dropTrack.id : await newAudioTrack();
-  if (tid == null) { flashTake('트랙을 만들 수 없습니다.'); return; }
+  if (tid == null) { flashTake(t('studio.m.trackCreateFail')); return; }
   const startS = Math.round(Math.max(0, startSec || 0) * (_sr || 44100));
   for (const p of paths) {
     const id = nextClipId();
@@ -1191,7 +1209,7 @@ async function importAudio(paths, startSec, trackId) {
   }
   layout();   // 임포트 클립이 범위 밖이면 타임라인 연장
   markDirty();
-  flashTake(`오디오 임포트: ${paths.length}개`);
+  flashTake(t('studio.p.audioImported', { n: paths.length }));
 }
 async function pickImportAudio() {
   const r = await api.dialog.pickAudioFiles();
@@ -1207,7 +1225,7 @@ function closeSong() {
   const em = $('daw-video-empty'); if (em) em.hidden = false;
   renderTracks();
   updateCloseSongBtn();
-  flashTake('곡을 닫았습니다.');
+  flashTake(t('studio.m.songClosed'));
 }
 
 // ── 곡 로드 ────────────────────────────────────────
@@ -1218,7 +1236,7 @@ async function loadSong(item, opts) {
   if (!it) return;
   const autoBpm = !(opts && opts.autoBpm === false);   // 프로젝트 복원 시엔 감지 생략
   const paths = Object.values(it.stemPaths || {}).filter(Boolean);
-  if (!paths.length) { flashTake('이 곡에 스템 파일이 없습니다.'); return; }
+  if (!paths.length) { flashTake(t('studio.m.noStemFiles')); return; }
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
@@ -1226,7 +1244,7 @@ async function loadSong(item, opts) {
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
   const keys = Object.keys(it.stemPaths || {});
-  _tracks = keys.map((k, i) => ({ key: k, label: STEM_LABEL[k] || k, color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
+  _tracks = keys.map((k, i) => ({ key: k, label: stemLabel(k), color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
   renderTracks();
   updateCloseSongBtn();
 
@@ -1236,16 +1254,16 @@ async function loadSong(item, opts) {
 
   api.engine.loadStems(paths);
   api.engine.scanPlugins();
-  flashTake(`불러옴: ${it.name}`);
+  flashTake(t('studio.p.loaded', { name: it.name }));
 
   // 파형 (렌더러에서 디코드)
-  flashTake(`불러옴: ${it.name} · 파형 분석 중…`);
+  flashTake(t('studio.p.loadedAnalyzing', { name: it.name }));
   try {
     const { stems, sampleRate } = await loadStemFilesToBuffers(it.stemPaths);
     renderWaves(stems);
-    flashTake(`불러옴: ${it.name}`);
+    flashTake(t('studio.p.loaded', { name: it.name }));
     if (autoBpm) detectSongBpm(stems, sampleRate || _sr || 44100);   // drums 에서 BPM·박자 감지(비동기)
-  } catch (e) { flashTake(`파형 디코드 실패: ${e && e.message || e}`); }
+  } catch (e) { flashTake(t('studio.p.waveDecodeFail', { err: (e && e.message) || e })); }
   finally { _loadingSong = false; }
 }
 // 곡 로드 후 drums stem 에서 BPM·다운비트 감지 → 그리드·스냅 정렬
@@ -1263,7 +1281,7 @@ async function detectSongBpm(stems, sampleRate) {
     _beats = Array.isArray(res.beats) ? res.beats.slice() : [];
     _gridOffset = 0;   // Bar 1 = time 0. 다운비트 자동 정렬은 룰러 앞쪽 빈 공간 만들어서 뺌
     layout();
-    flashTake(`BPM ${_bpm} · 박자 자동 정렬`);
+    flashTake(t('studio.p.bpmDetected', { bpm: _bpm }));
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
 }
 
@@ -1291,7 +1309,7 @@ async function renderTake(file, startSamples, engineId, trackId) {
       svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
     });
     renderTakes();
-  } catch (e) { flashTake('녹음 파형 실패: ' + (e && e.message || e)); }
+  } catch (e) { flashTake(t('studio.m.takeWaveFail') + (e && e.message || e)); }
 }
 function renderTakes() {
   const areas = {};
@@ -1387,7 +1405,7 @@ function renderTakes() {
         layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
         const afters = group.map(t => ({ id: t.id, st: clipState(t) }));
         pushUndo(() => afters.forEach((a, i) => setClipState(befores[i].id, befores[i].st)),
-                 () => afters.forEach(a => setClipState(a.id, a.st)), multi ? '클립 이동(다중)' : '클립 이동');
+                 () => afters.forEach(a => setClipState(a.id, a.st)), multi ? t('studio.u.clipMoveMulti') : t('studio.u.clipMove'));
       };
       document.addEventListener('pointermove', move);
       document.addEventListener('pointerup', up);
@@ -1423,7 +1441,7 @@ function wireTrim(handle, tk, el, wave, dir) {
       commitTrim(tk); layout();
       const after = clipState(tk), id = tk.id;
       if (after.inOff !== before.inOff || after.dur !== before.dur || after.start !== before.start)
-        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '클립 트림');
+        pushUndo(() => setClipState(id, before), () => setClipState(id, after), t('studio.u.clipTrim'));
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -1452,7 +1470,7 @@ function wireFade(handle, tk, paint, dir) {
       commitFade(tk);
       const after = clipState(tk), id = tk.id;
       if (after.fadeIn !== before.fadeIn || after.fadeOut !== before.fadeOut)
-        pushUndo(() => setClipState(id, before), () => setClipState(id, after), '페이드');
+        pushUndo(() => setClipState(id, before), () => setClipState(id, after), t('studio.u.fade'));
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
@@ -1467,16 +1485,16 @@ function duplicateClip(tk) {
   const id = nextClipId();
   const copy = { ...tk, id, start: tk.start + tk.dur };
   reAddClip(copy);
-  pushUndo(() => removeClipById(id), () => reAddClip(copy), '클립 복제');
+  pushUndo(() => removeClipById(id), () => reAddClip(copy), t('studio.u.clipDuplicate'));
 }
 // 재생선 위치에서 선택 클립 분할
 function splitSelectedAtPlayhead() {
-  const tk = _takes.find(t => t.id === _selClipId); if (!tk) { flashTake('분할할 클립을 선택하세요.'); return; }
+  const tk = _takes.find(t => t.id === _selClipId); if (!tk) { flashTake(t('studio.m.selectClipToSplit')); return; }
   splitClip(tk, _lastSec);
 }
 function splitClip(tk, atSec) {
   const rel = atSec - tk.start;
-  if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake('클립 안쪽에서만 분할됩니다.'); return; }
+  if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake(t('studio.m.splitInsideOnly')); return; }
   const sr = _sr || 44100;
   const newId = nextClipId();
   const origId = tk.id, origDur = tk.dur;
@@ -1493,14 +1511,14 @@ function splitClip(tk, atSec) {
   pushUndo(() => {   // 실행취소: 뒷조각 제거 + 앞조각 원래 길이 복원
     removeClipById(newId);
     const o = _takes.find(t => t.id === origId); if (o) { o.dur = origDur; api.engine.takeTrim(o.id, Math.round(o.start * sr), Math.round(o.inOff * sr), Math.round(origDur * sr)); renderTakes(); layout(); }
-  }, doSplit, '클립 분할');
+  }, doSplit, t('studio.u.clipSplit'));
 }
 function showTakeMenu(x, y, id) {
   document.querySelector('.daw-ctx')?.remove();
   const menu = document.createElement('div');
   menu.className = 'daw-ctx';
   menu.style.left = x + 'px'; menu.style.top = y + 'px';
-  menu.innerHTML = `<button class="split">재생선에서 분할</button><button class="dup">복제</button><button class="del">삭제</button>`;
+  menu.innerHTML = `<button class="split">${t('studio.x.splitAtPlayhead')}</button><button class="dup">${t('studio.x.duplicate')}</button><button class="del">${t('studio.x.delete')}</button>`;
   menu.querySelector('.split').addEventListener('click', () => {
     const tk = _takes.find(t => t.id === id); if (tk) splitClip(tk, _lastSec); menu.remove();
   });
@@ -1511,7 +1529,7 @@ function showTakeMenu(x, y, id) {
     const tk = _takes.find(t => t.id === id);
     const removed = tk ? { ...tk } : null;
     removeClipById(id); menu.remove();
-    if (removed) pushUndo(() => reAddClip(removed), () => removeClipById(id), '클립 삭제');
+    if (removed) pushUndo(() => reAddClip(removed), () => removeClipById(id), t('studio.u.clipDelete'));
   });
   document.body.appendChild(menu);
   const rc = menu.getBoundingClientRect(), mg = 8;
@@ -1565,15 +1583,15 @@ function openSongPicker() {
   for (const it of (Library.getItems() || [])) {
     const k = it.videoPath || it.id; if (seen.has(k)) continue; seen.add(k); items.push(it);
   }
-  if (!items.length) { openModal('곡 선택', `<div class="daw-modal-empty">라이브러리가 비어있습니다.</div>`, () => {}); return; }
+  if (!items.length) { openModal(t('studio.d.pickSong'), `<div class="daw-modal-empty">${t('studio.x.libEmpty')}</div>`, () => {}); return; }
   const groups = [...new Set(items.map(it => it.group).filter(Boolean))];
   const chips = groups.length
-    ? `<div class="daw-modal-tabs"><button class="daw-mtab on" data-g="__all">전체</button>${groups.map(g => `<button class="daw-mtab" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>`
+    ? `<div class="daw-modal-tabs"><button class="daw-mtab on" data-g="__all">${t('studio.x.all')}</button>${groups.map(g => `<button class="daw-mtab" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>`
     : '';
   const row = (it, i) => `<div class="daw-modal-item" data-idx="${i}" data-g="${esc(it.group || '')}"><div class="mt"><div class="n">${esc(it.name)}</div>
-      <div class="m">${Object.keys(it.stemPaths || {}).length} 스템${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`;
+      <div class="m">${t('studio.p.stemCount', { n: Object.keys(it.stemPaths || {}).length })}${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`;
   const host = $('daw-modal');
-  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>곡 선택</span><button class="x">✕</button></div>${chips}<div class="daw-modal-list">${items.map(row).join('')}</div></div>`;
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${t('studio.d.pickSong')}</span><button class="x">✕</button></div>${chips}<div class="daw-modal-list">${items.map(row).join('')}</div></div>`;
   host.hidden = false;
   host.querySelector('.x').addEventListener('click', () => host.hidden = true);
   host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
@@ -1586,12 +1604,12 @@ function openSongPicker() {
 }
 
 function openVstPicker() {
-  if (_selTrack == null) { flashTake('먼저 녹음 트랙을 선택하세요.'); return; }
-  if (!_plugins.length) { openModal('VST 추가', `<div class="daw-modal-empty">감지된 VST 없음. 설정·스캔 필요.</div>`, () => {}); return; }
+  if (_selTrack == null) { flashTake(t('studio.m.selectRecTrack')); return; }
+  if (!_plugins.length) { openModal(t('studio.d.addVst'), `<div class="daw-modal-empty">${t('studio.x.noVstFound')}</div>`, () => {}); return; }
   const html = _plugins.map(p =>
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${esc(p.name)}</div>
       <div class="m">${esc(p.manufacturer)}</div></div></div>`).join('');
-  openModal('VST 추가', html, (idx) => api.engine.fxAdd(_selTrack, Number(idx)));   // 선택 트랙에 추가
+  openModal(t('studio.d.addVst'), html, (idx) => api.engine.fxAdd(_selTrack, Number(idx)));   // 선택 트랙에 추가
 }
 
 // ── 녹음(테이크 세트) 저장/불러오기 — 곡별, 이름 지정 ──
@@ -1600,7 +1618,7 @@ function getTakeSets() { if (!_songKey) return []; try { return JSON.parse(local
 function setTakeSets(a) { if (!_songKey) return; try { localStorage.setItem(takesetKey(_songKey), JSON.stringify(a)); } catch {} }
 let _takeSetGather = null;
 function saveTakeSet(name) {
-  if (!_takes.length) { flashTake('저장할 녹음이 없습니다.'); return; }
+  if (!_takes.length) { flashTake(t('studio.m.noRecordingToSave')); return; }
   // 트랙 레이아웃(개수·게인·뮤트·솔로) + 트랙별 FX 체인까지 통째로 저장
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
@@ -1613,7 +1631,7 @@ function saveTakeSet(name) {
   if (!need.length) { persistTakeSet(name, stripFxOrder(tracks), takes); return; }   // FX 없으면 바로 저장
   // FX 슬롯 상태(노브값)를 비동기로 모은 뒤 저장
   _takeSetGather = { name, tracks, takes, need: need.map(n => n.id), states: {} };
-  flashTake('녹음 + 이펙트 저장 중…');
+  flashTake(t('studio.m.savingTakesFx'));
   need.forEach(n => api.engine.fxSaveState(n.track, n.id));
   _takeSetGather._t = setTimeout(finishTakeSetGather, 2000);   // 일부 못 받아도 저장(타임아웃)
 }
@@ -1631,7 +1649,7 @@ function finishTakeSetGather() {
 }
 function persistTakeSet(name, tracks, takes) {
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
-  flashTake('버전 저장됨: ' + name);
+  flashTake(t('studio.m.takeSetSaved') + name);
 }
 function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
   return new Promise(res => {
@@ -1656,7 +1674,7 @@ async function loadTakeSet(ts) {
       const gen = ++_recTracksGenReq;
       api.engine.recTracksReset(ts.tracks.map(t => ({ type: t.type || 0, gain: t.gain, mute: t.mute, solo: t.solo })), gen);
       const ok = await waitRecTracks(gen);
-      if (!ok) { flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
+      if (!ok) { flashTake(t('studio.m.trackRestoreTimeout')); return; }
       idMap = {};   // 저장된 trackId(순서) → 새 트랙 id
       ts.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
       applyTrackMeta(ts.tracks);   // 이름·색·높이 복원
@@ -1683,7 +1701,7 @@ async function loadTakeSet(ts) {
     }
     renderTakes();
     clearUndo();
-    flashTake('버전 불러옴: ' + ts.name);
+    flashTake(t('studio.m.takeSetLoaded') + ts.name);
   } finally { _loadingTakeSet = false; }
 }
 
@@ -1753,7 +1771,7 @@ async function buildProjectObject() {
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || t('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1764,29 +1782,29 @@ function markClean() { _dirty = false; updateProjectLabel(); }
 function updateProjectLabel() {
   const el = $('st-proj-name'); if (!el) return;
   const lab = el.querySelector('.pn-label'), dot = el.querySelector('.pn-dot');
-  const name = _projectPath ? baseName(_projectPath) : (_songName ? _songName : '새 프로젝트');
+  const name = _projectPath ? baseName(_projectPath) : (_songName ? _songName : t('studio.lbl.newProject'));
   if (lab) lab.textContent = name + (_dirty ? ' •' : '');
   el.classList.toggle('dirty', _dirty);
   el.classList.toggle('unsaved', !_projectPath);
-  el.title = (_projectPath ? name : '아직 저장 안 됨')
-    + (_dirty ? ' — 저장되지 않은 변경 있음' : ' — 저장됨') + ' (Ctrl+S)';
+  el.title = (_projectPath ? name : t('studio.lbl.notSavedYet'))
+    + (_dirty ? t('studio.lbl.hasUnsaved') : t('studio.lbl.savedSuffix')) + ' (Ctrl+S)';
 }
 // 저장: 경로 있으면 덮어쓰기, 없으면 새로 저장(다이얼로그)
 async function saveProjectSmart() {
-  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake('저장할 내용이 없습니다.'); return; }
+  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake(t('studio.m.nothingToSave')); return; }
   const obj = await buildProjectObject();
-  const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || '프로젝트', _projectPath || undefined);
-  if (r && r.ok) { _projectPath = r.path; _songName = baseName(r.path); markClean(); flashTake('저장됨: ' + r.path); }
-  else if (!r || !r.canceled) flashTake('저장 실패');
+  const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || t('studio.lbl.project'), _projectPath || undefined);
+  if (r && r.ok) { _projectPath = r.path; _songName = baseName(r.path); markClean(); flashTake(t('studio.m.savedTo') + r.path); }
+  else if (!r || !r.canceled) flashTake(t('studio.m.saveFail'));
 }
-const saveProject = saveProjectSmart;   // 드롭다운 '프로젝트 저장' 도 동일 로직
+const saveProject = saveProjectSmart;   // 드롭다운 t('studio.d.saveProjectShort') 도 동일 로직
 let _openingProject = false;
 async function openProject() {
   if (_openingProject) return;
   const r = await api.project.open();
-  if (!r || !r.ok) { if (r && r.error) flashTake('열기 실패: ' + r.error); return; }
-  let p; try { p = JSON.parse(r.data); } catch { flashTake('프로젝트 파싱 실패'); return; }
-  if (p.kind !== 'yssproj') { flashTake('올바른 프로젝트 파일이 아닙니다.'); return; }
+  if (!r || !r.ok) { if (r && r.error) flashTake(t('studio.m.openFail') + r.error); return; }
+  let p; try { p = JSON.parse(r.data); } catch { flashTake(t('studio.m.projectParseFail')); return; }
+  if (p.kind !== 'yssproj') { flashTake(t('studio.m.notProjectFile')); return; }
   _openingProject = true;
   try { _songName = baseName(r.path); await applyProject(p); _projectPath = r.path; markClean(); }
   finally { _openingProject = false; }
@@ -1840,7 +1858,7 @@ async function applyProject(p) {
     const gen = ++_recTracksGenReq;
     api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] })), gen);
     const ok = await waitRecTracks(gen);
-    if (!ok) { _suppressDirty = false; flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
+    if (!ok) { _suppressDirty = false; flashTake(t('studio.m.trackRestoreTimeout')); return; }
     idMap = {};
     p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
     applyTrackMeta(p.tracks);   // 이름·색·높이
@@ -1884,7 +1902,7 @@ async function applyProject(p) {
   layout();
   clearUndo();   // 새 상태 로드 → 히스토리 초기화
   _suppressDirty = false;
-  flashTake('프로젝트 열림: ' + (p.name || ''));
+  flashTake(t('studio.m.projectOpened') + (p.name || ''));
 }
 
 // ── 실행취소/다시실행 (커맨드+역커맨드 스택) ──
@@ -1897,8 +1915,8 @@ function pushUndo(undo, redo, label) {
   markDirty();   // 편집 발생 → 저장 필요 표시
   updateUndoUI();
 }
-function doUndo() { const a = _undoStack.pop(); if (!a) return; a.undo(); _redoStack.push(a); updateUndoUI(); markDirty(); flashTake('실행취소: ' + (a.label || '')); }
-function doRedo() { const a = _redoStack.pop(); if (!a) return; a.redo(); _undoStack.push(a); updateUndoUI(); markDirty(); flashTake('다시실행: ' + (a.label || '')); }
+function doUndo() { const a = _undoStack.pop(); if (!a) return; a.undo(); _redoStack.push(a); updateUndoUI(); markDirty(); flashTake(t('studio.m.undid') + (a.label || '')); }
+function doRedo() { const a = _redoStack.pop(); if (!a) return; a.redo(); _undoStack.push(a); updateUndoUI(); markDirty(); flashTake(t('studio.m.redid') + (a.label || '')); }
 function clearUndo() { _undoStack = []; _redoStack = []; updateUndoUI(); }
 function updateUndoUI() {
   const u = $('st-undo'), r = $('st-redo');
@@ -1945,7 +1963,7 @@ function startRenameTrack(id) {
     const nw = (v && v !== autoLabel) ? v : '';
     rt.name = nw;
     renderRecLanes(); updateFxPanel(); updateTrackFader();
-    if (nw !== oldName) pushUndo(() => setTrackProp(rt.id, 'name', oldName), () => setTrackProp(rt.id, 'name', nw), '트랙 이름');
+    if (nw !== oldName) pushUndo(() => setTrackProp(rt.id, 'name', oldName), () => setTrackProp(rt.id, 'name', nw), t('studio.u.trackName'));
   };
   inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') inp.blur(); else if (ev.key === 'Escape') { done = true; renderRecLanes(); } });
   inp.addEventListener('blur', commit);
@@ -1965,9 +1983,9 @@ function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api
 function adjustBpm(factor) {
   const old = _bpm;
   const nw = Math.max(20, Math.min(300, Math.round(_bpm * factor)));
-  if (nw === old) { flashTake('BPM 범위 밖입니다.'); return; }
+  if (nw === old) { flashTake(t('studio.m.bpmOutOfRange')); return; }
   setBpm(nw);
-  pushUndo(() => setBpm(old), () => setBpm(nw), 'BPM 보정');
+  pushUndo(() => setBpm(old), () => setBpm(nw), t('studio.u.bpmAdjust'));
 }
 // ── 다중선택 클립보드 (복사/잘라내기/붙여넣기/삭제) ──
 function selectedTakes() { return _takes.filter(t => _selClips.has(t.id)); }
@@ -1976,7 +1994,7 @@ function copyClips() {
   const sel = selectedTakes(); if (!sel.length) return false;
   const minStart = Math.min(...sel.map(t => t.start));
   _clipboard = sel.map(t => ({ file: t.file, inOff: t.inOff, dur: t.dur, srcDur: t.srcDur, fadeIn: t.fadeIn, fadeOut: t.fadeOut, trackId: t.trackId, relStart: t.start - minStart, svg: t.svg }));
-  flashTake(`복사됨: 클립 ${sel.length}개`);
+  flashTake(t('studio.p.copied', { n: sel.length }));
   return true;
 }
 function cutClips() {
@@ -1985,14 +2003,14 @@ function cutClips() {
   const removed = sel.map(t => ({ ...t }));
   removed.forEach(t => removeClipById(t.id));
   _selClips = new Set();
-  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, '잘라내기');
+  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, t('studio.u.cut'));
 }
 function pasteClips() {
-  if (!_clipboard.length) { flashTake('붙여넣을 클립이 없습니다.'); return; }
+  if (!_clipboard.length) { flashTake(t('studio.m.noClipToPaste')); return; }
   const at = _lastSec;
   // 현재 선택된 트랙에 붙여넣기 (선택 없으면 녹음 대상 트랙)
   const target = (_selTrack != null && _recTracks.some(r => r.id === _selTrack)) ? _selTrack : armedRecId();
-  if (target == null) { flashTake('붙여넣을 트랙을 선택하세요.'); return; }
+  if (target == null) { flashTake(t('studio.m.selectPasteTarget')); return; }
   const made = _clipboard.map((c) => {
     return { file: c.file, id: nextClipId(), trackId: target,
       start: at + c.relStart, inOff: c.inOff, dur: c.dur, srcDur: c.srcDur, fadeIn: c.fadeIn, fadeOut: c.fadeOut,
@@ -2001,15 +2019,15 @@ function pasteClips() {
   made.forEach(reAddClip);
   _selClips = new Set(made.map(m => m.id));
   renderTakes();
-  pushUndo(() => { made.forEach(m => removeClipById(m.id)); }, () => { made.forEach(reAddClip); }, '붙여넣기');
-  flashTake(`붙여넣음: 클립 ${made.length}개`);
+  pushUndo(() => { made.forEach(m => removeClipById(m.id)); }, () => { made.forEach(reAddClip); }, t('studio.u.paste'));
+  flashTake(t('studio.p.pasted', { n: made.length }));
 }
 function deleteSelectedClips() {
   const sel = selectedTakes(); if (!sel.length) return;
   const removed = sel.map(t => ({ ...t }));
   removed.forEach(t => removeClipById(t.id));
   _selClips = new Set();
-  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, '클립 삭제');
+  pushUndo(() => { removed.forEach(reAddClip); }, () => { removed.forEach(t => removeClipById(t.id)); }, t('studio.u.clipDelete'));
 }
 // ── Export: 포맷·품질 선택 ──
 const EXPORT_QUAL = {
@@ -2019,27 +2037,27 @@ const EXPORT_QUAL = {
   mp3:  [['320', '320 kbps'], ['256', '256 kbps'], ['192', '192 kbps'], ['128', '128 kbps']],
 };
 function openExportModal() {
-  if (!_tracks.length && !_recTracks.length) { flashTake('내보낼 내용이 없습니다.'); return; }
-  if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
+  if (!_tracks.length && !_recTracks.length) { flashTake(t('studio.m.nothingToExport')); return; }
+  if (_exporting) { flashTake(t('studio.m.exportBusy')); return; }
   const host = $('daw-modal');
-  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>내보내기</span><button class="x">✕</button></div>
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${t('studio.x.export')}</span><button class="x">✕</button></div>
     <div class="daw-modal-list" style="padding:16px">
-      <div class="dev-field"><span>범위</span><select id="exp-scope">
-        <option value="mix">전체 믹스 (스템 + 내 녹음)</option>
-        <option value="mine">내 녹음 트랙만</option>
+      <div class="dev-field"><span>${t('studio.x.scope')}</span><select id="exp-scope">
+        <option value="mix">${t('studio.x.scopeMix')}</option>
+        <option value="mine">${t('studio.x.scopeMine')}</option>
       </select></div>
-      <div class="dev-field" style="margin-top:10px"><span>포맷</span><select id="exp-fmt">
-        <option value="wav">WAV · 무손실</option>
-        <option value="flac">FLAC · 무손실(압축)</option>
-        <option value="aiff">AIFF · 무손실</option>
-        <option value="mp3">MP3 · 손실(공유용)</option>
+      <div class="dev-field" style="margin-top:10px"><span>${t('studio.x.format')}</span><select id="exp-fmt">
+        <option value="wav">${t('studio.x.fmtWav')}</option>
+        <option value="flac">${t('studio.x.fmtFlac')}</option>
+        <option value="aiff">${t('studio.x.fmtAiff')}</option>
+        <option value="mp3">${t('studio.x.fmtMp3')}</option>
       </select></div>
-      <div class="dev-field" style="margin-top:10px"><span>품질</span><select id="exp-q"></select></div>
-      <div class="dev-field" style="margin-top:10px"><span>구간</span><select id="exp-span">
-        <option value="full">전체</option>
-        <option value="range"${_exportRange ? '' : ' disabled'}>${_exportRange ? '선택 범위 (' + fmtTC(_exportRange.start) + '–' + fmtTC(_exportRange.end) + ')' : '선택 범위 (룰러에서 드래그)'}</option>
+      <div class="dev-field" style="margin-top:10px"><span>${t('studio.x.quality')}</span><select id="exp-q"></select></div>
+      <div class="dev-field" style="margin-top:10px"><span>${t('studio.x.span')}</span><select id="exp-span">
+        <option value="full">${t('studio.x.spanFull')}</option>
+        <option value="range"${_exportRange ? '' : ' disabled'}>${_exportRange ? t('studio.lbl.rangeSel') + ' (' + fmtTC(_exportRange.start) + '–' + fmtTC(_exportRange.end) + ')' : t('studio.lbl.rangeHint')}</option>
       </select></div>
-      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="exp-go">내보내기</button></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="exp-go">${t('studio.x.export')}</button></div>
     </div></div>`;
   host.hidden = false;
   if (_exportRange) $('exp-span').value = 'range';
@@ -2051,13 +2069,13 @@ function openExportModal() {
   $('exp-go').addEventListener('click', () => { host.hidden = true; runExport(fmt.value, q.value, $('exp-scope').value === 'mine', $('exp-span').value === 'range'); });
 }
 async function runExport(format, quality, mineOnly, useRange) {
-  if (_exporting) { flashTake('이미 내보내는 중입니다.'); return; }
+  if (_exporting) { flashTake(t('studio.m.exportBusy')); return; }
   const base = mineOnly ? 'recording' : 'mix';
   const res = await api.dialog.saveAs(base + '.' + format, [format]);
   if (!res || !res.ok || !res.filePath) return;
   const rg = (useRange && _exportRange) ? _exportRange : { start: 0, end: 0 };   // end 0 = 끝까지
   _exporting = true;
-  flashTake('내보내는 중… 0%');
+  flashTake(t('studio.m.exporting0'));
   if (format === 'mp3') {   // 임시 WAV 렌더 → ffmpeg MP3 변환
     _exportTmp = res.filePath.replace(/\.mp3$/i, '') + '.__export_tmp.wav';
     _exportMp3 = { dst: res.filePath, bitrate: quality };
@@ -2070,12 +2088,12 @@ async function runExport(format, quality, mineOnly, useRange) {
 
 function openTakeSetPicker() {
   const ps = getTakeSets();
-  if (!ps.length) { openModal('버전 불러오기 (이 곡)', '<div class="daw-modal-empty">이 곡에 저장된 버전이 없습니다.</div>', () => {}); return; }
+  if (!ps.length) { openModal(t('studio.d.loadTakeSet'), '<div class="daw-modal-empty">' + t('studio.m.noTakeSets') + '</div>', () => {}); return; }
   const host = $('daw-modal');
   const html = ps.map((p, i) => `<div class="daw-modal-item" data-idx="${i}">
-    <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${p.takes.length} 테이크</div></div>
-    <button class="daw-preset-del" data-id="${esc(p.id)}" title="삭제">✕</button></div>`).join('');
-  openModal('버전 불러오기 (이 곡)', html, (idx) => loadTakeSet(ps[Number(idx)]));
+    <div class="mt"><div class="n">${esc(p.name)}</div><div class="m">${t('studio.p.takeCount', { n: p.takes.length })}</div></div>
+    <button class="daw-preset-del" data-id="${esc(p.id)}" title="${t('studio.t.delete')}">✕</button></div>`).join('');
+  openModal(t('studio.d.loadTakeSet'), html, (idx) => loadTakeSet(ps[Number(idx)]));
   host.querySelectorAll('.daw-preset-del').forEach(b => b.addEventListener('click', (e) => {
     e.stopPropagation();
     setTakeSets(getTakeSets().filter(p => p.id !== b.dataset.id));
@@ -2093,27 +2111,27 @@ function openDevModal(d) {
   // 입력 채널 목록 — 엔진이 준 이름(활성 입력만, 콜백 순서와 동일)이 없으면 번호로
   const chNames = (_inCfg.names && _inCfg.names.length)
     ? _inCfg.names
-    : Array.from({ length: Math.max(1, _deviceInfo?.in || 1) }, (_, i) => `입력 ${i + 1}`);
+    : Array.from({ length: Math.max(1, _deviceInfo?.in || 1) }, (_, i) => t('studio.p.inputN', { n: i + 1 }));
   const chOpts = (cur) => chNames.map((n, i) =>
     `<option value="${i}" ${i === cur ? 'selected' : ''}>${i + 1}. ${esc(n)}</option>`).join('');
-  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>오디오 설정</span><button class="x">✕</button></div>
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${t('studio.x.audioSettings')}</span><button class="x">✕</button></div>
     <div class="daw-modal-list" style="padding:16px;display:flex;flex-direction:column;gap:12px">
-      <label class="dev-field"><span>드라이버</span><select id="dv-type">${opts((d.types || []).map(t => t.name), d.currentType)}</select></label>
-      <label class="dev-field"><span>출력 기기</span><select id="dv-out">${opts(curType.outputs, d.output)}</select></label>
-      <label class="dev-field"><span>입력 기기</span><select id="dv-in">${opts(curType.inputs, d.input)}</select></label>
-      <label class="dev-field"><span>샘플레이트</span><select id="dv-sr">${opts(rates, Math.round(d.sampleRate))}</select></label>
-      <label class="dev-field"><span>버퍼 크기</span><select id="dv-buf">${opts(d.buffers && d.buffers.length ? d.buffers : [128, 256, 512], d.bufferSize)}</select></label>
+      <label class="dev-field"><span>${t('studio.x.driver')}</span><select id="dv-type">${opts((d.types || []).map(t => t.name), d.currentType)}</select></label>
+      <label class="dev-field"><span>${t('studio.x.outDevice')}</span><select id="dv-out">${opts(curType.outputs, d.output)}</select></label>
+      <label class="dev-field"><span>${t('studio.x.inDevice')}</span><select id="dv-in">${opts(curType.inputs, d.input)}</select></label>
+      <label class="dev-field"><span>${t('studio.x.sampleRate')}</span><select id="dv-sr">${opts(rates, Math.round(d.sampleRate))}</select></label>
+      <label class="dev-field"><span>${t('studio.x.bufferSize')}</span><select id="dv-buf">${opts(d.buffers && d.buffers.length ? d.buffers : [128, 256, 512], d.bufferSize)}</select></label>
       <div class="dev-sep"></div>
-      <label class="dev-field"><span>입력 형식</span><select id="dv-inmode">
-        <option value="0" ${_inCfg.mode === 1 ? '' : 'selected'}>모노 (악기·마이크 1개)</option>
-        <option value="1" ${_inCfg.mode === 1 ? 'selected' : ''}>스테레오 (입력 2개)</option>
+      <label class="dev-field"><span>${t('studio.x.inputMode')}</span><select id="dv-inmode">
+        <option value="0" ${_inCfg.mode === 1 ? '' : 'selected'}>${t('studio.x.modeMono')}</option>
+        <option value="1" ${_inCfg.mode === 1 ? 'selected' : ''}>${t('studio.x.modeStereo')}</option>
       </select></label>
-      <label class="dev-field"><span id="dv-chl-lb">입력 채널</span><select id="dv-chl">${chOpts(_inCfg.chL)}</select></label>
-      <label class="dev-field" id="dv-chr-row" ${_inCfg.mode === 1 ? '' : 'hidden'}><span>오른쪽 채널</span><select id="dv-chr">${chOpts(_inCfg.chR)}</select></label>
-      <div class="dev-field"><span>입력 신호</span><div class="dev-inmeters" id="dv-inmeters">${
+      <label class="dev-field"><span id="dv-chl-lb">${t('studio.lbl.inputChannel')}</span><select id="dv-chl">${chOpts(_inCfg.chL)}</select></label>
+      <label class="dev-field" id="dv-chr-row" ${_inCfg.mode === 1 ? '' : 'hidden'}><span>${t('studio.x.rightChannel')}</span><select id="dv-chr">${chOpts(_inCfg.chR)}</select></label>
+      <div class="dev-field"><span>${t('studio.x.inputSignal')}</span><div class="dev-inmeters" id="dv-inmeters">${
         chNames.map((n, i) => `<div class="dev-inm"><b>${i + 1}</b><i data-ch="${i}"></i><em>${esc(n)}</em></div>`).join('')
       }</div></div>
-      <div style="display:flex;justify-content:flex-end"><button class="mini" id="dv-apply">적용</button></div>
+      <div style="display:flex;justify-content:flex-end"><button class="mini" id="dv-apply">${t('studio.x.apply')}</button></div>
     </div></div>`;
   host.hidden = false;
   host.querySelector('.x').addEventListener('click', () => host.hidden = true);
@@ -2121,7 +2139,7 @@ function openDevModal(d) {
   $('dv-inmode').addEventListener('change', (e) => {
     const st = e.target.value === '1';
     $('dv-chr-row').hidden = !st;
-    $('dv-chl-lb').textContent = st ? '왼쪽 채널' : '입력 채널';
+    $('dv-chl-lb').textContent = st ? t('studio.lbl.leftChannel') : t('studio.lbl.inputChannel');
   });
   // 드라이버 변경 → 즉시 전환 후 목록 갱신
   $('dv-type').addEventListener('change', (e) => { api.engine.setDevice({ type: e.target.value }); });
@@ -2169,7 +2187,7 @@ function onEngineEvent(m) {
   switch (m.ev) {
     case 'ready':
       _started = true;
-      $('st-engine-status').textContent = '오디오 준비됨';
+      $('st-engine-status').textContent = t('studio.lbl.audioReady');
       $('st-engine-dot').classList.add('on');
       $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
       setEnabled(true);
@@ -2187,33 +2205,33 @@ function onEngineEvent(m) {
       const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
       if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
       $('st-engine-status').textContent = `${m.name} · ${Number(m.roundtripMs).toFixed(2)}ms`;
-      if (m.srMismatch) flashTake(`⚠ 샘플레이트 불일치: 스템 ${Math.round(m.stemSr)}Hz ≠ 장치 ${Math.round(m.sr)}Hz — 피치/템포 어긋남. 장치 SR을 맞추세요.`);
+      if (m.srMismatch) flashTake(t('studio.p.srMismatch', { stem: Math.round(m.stemSr), dev: Math.round(m.sr) }));
       break;
     }
     case 'fxError':
-      flashTake(`⚠ 이펙트 ${m.failed}개 로드 실패 (플러그인 누락/버전)`);
+      flashTake(t('studio.p.fxLoadFail', { n: m.failed }));
       break;
     case 'exportProgress':
-      flashTake(`내보내는 중… ${Math.round(m.pct)}%`);
+      flashTake(t('studio.p.exporting', { pct: Math.round(m.pct) }));
       break;
     case 'exportDone':
       if (_exportMp3) {   // 임시 WAV 렌더 끝 → MP3 변환
         const job = _exportMp3, tmp = _exportTmp; _exportMp3 = null; _exportTmp = null;
-        flashTake('MP3 변환 중…');
+        flashTake(t('studio.m.mp3Converting'));
         api.audio.transcode(tmp, job.dst, { bitrate: job.bitrate }).then((r) => {
           _exporting = false;
-          if (r && r.ok) { flashTake('내보내기 완료: ' + job.dst); api.openPath(job.dst); }
-          else flashTake('MP3 변환 실패: ' + (r && r.error || ''));
+          if (r && r.ok) { flashTake(t('studio.m.exportDone') + job.dst); api.openPath(job.dst); }
+          else flashTake(t('studio.m.mp3Fail') + (r && r.error || ''));
         });
       } else {
         _exporting = false;
-        flashTake('내보내기 완료: ' + (m.file || ''));
+        flashTake(t('studio.m.exportDone') + (m.file || ''));
         if (m.file) api.openPath(m.file);
       }
       break;
     case 'exportError':
       _exporting = false; _exportMp3 = null; _exportTmp = null;
-      flashTake('내보내기 실패: ' + (m.msg || ''));
+      flashTake(t('studio.m.exportFail') + (m.msg || ''));
       break;
     case 'plugins':
       _plugins = m.list || [];
@@ -2244,7 +2262,7 @@ function onEngineEvent(m) {
           const slots = g.order.map((id, i) => ({ index: g.meta[i].index, bypass: g.meta[i].bypass, data: g.states[id] }));
           const preset = { id: g.id || ('p' + Date.now()), name: g.name, slots };
           upsertPreset(preset); _activePresetId = preset.id;
-          if (!g.id) flashTake('톤 저장됨: ' + preset.name);
+          if (!g.id) flashTake(t('studio.m.toneSaved') + preset.name);
         }
       }
       break;
@@ -2264,10 +2282,10 @@ function onEngineEvent(m) {
         _pdcMs = ms;
         el.hidden = ms < 0.5;                       // 보정할 지연 자체가 없으면 숨김
         el.classList.toggle('on', _pdcOn);
-        el.textContent = _pdcOn ? `지연 보정 ${ms.toFixed(1)}ms` : `지연 보정 꺼짐 (${ms.toFixed(1)}ms)`;
+        el.textContent = _pdcOn ? t('studio.p.pdcOn', { ms: ms.toFixed(1) }) : t('studio.p.pdcOff', { ms: ms.toFixed(1) });
         el.title = _pdcOn
-          ? `플러그인 지연 ${Math.round(m.samples || 0)}샘플을 전 트랙에 맞춰 보정 중 — 클릭하면 끔`
-          : '지연 보정이 꺼져 있어 플러그인이 있는 트랙이 늦게 들립니다 — 클릭하면 켬';
+          ? t('studio.p.pdcTitle', { n: Math.round(m.samples || 0) })
+          : t('studio.lbl.pdcOffWarn');
       }
       break;
     }
@@ -2286,20 +2304,20 @@ function onEngineEvent(m) {
     }
     case 'take':
       clearRecLive();
-      flashTake(`녹음 저장: ${m.file}`);
+      flashTake(t('studio.p.takeSaved', { file: m.file }));
       (async () => {
         await renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
         const tk = _takes.find(t => t.id === m.id);
         if (tk) {
           const snap = { ...tk };   // undo용 스냅샷 (파형·start·트림·페이드 유지)
-          pushUndo(() => removeClipById(m.id), () => reAddClip(snap), '녹음');
+          pushUndo(() => removeClipById(m.id), () => reAddClip(snap), t('studio.lbl.record'));
         }
         markDirty();
       })();
       break;
     case 'exit':
       _started = false; _playing = false;
-      $('st-engine-status').textContent = '오디오 꺼짐';
+      $('st-engine-status').textContent = t('studio.lbl.audioOff');
       $('st-engine-dot').classList.remove('on');
       $('st-engine-start').hidden = false; $('st-engine-start').disabled = false;
       $('st-engine-stop').hidden = true;
@@ -2308,10 +2326,10 @@ function onEngineEvent(m) {
       _activePresetId = null; renderFxSlots(); renderRecLanes(); updateFxPanel();
       setEnabled(false);
       break;
-    case 'error': $('st-engine-status').textContent = '오디오 오류'; break;
+    case 'error': $('st-engine-status').textContent = t('studio.lbl.audioError'); break;
     case 'log': {
       const s = String(m.msg || '');
-      if (/fail|cannot|error|armed|writer|no device/i.test(s)) flashTake('엔진: ' + s.trim());
+      if (/fail|cannot|error|armed|writer|no device/i.test(s)) flashTake(t('studio.lbl.enginePrefix') + s.trim());
       break;
     }
   }
@@ -2326,11 +2344,11 @@ function renderFxSlots() {
     const row = document.createElement('div');
     row.className = 'daw-fx-slot' + (s.bypass ? ' bypassed' : '');
     row.draggable = true; row.dataset.id = s.id;
-    row.innerHTML = `<span class="drag" title="드래그로 순서 변경">⠿</span>
-      <span class="pw ${s.bypass ? '' : 'on'}" title="클릭하면 켜기/끄기"></span>
+    row.innerHTML = `<span class="drag" title="${t('studio.t.dragReorder')}">⠿</span>
+      <span class="pw ${s.bypass ? '' : 'on'}" title="${t('studio.t.clickToggle')}"></span>
       <div class="info"><div class="n">${s.name}</div></div>
-      <button class="ed" title="편집" ${s.hasEditor ? '' : 'disabled'}>✎</button>
-      <button class="del" title="삭제">✕</button>`;
+      <button class="ed" title="${t('studio.t.edit')}" ${s.hasEditor ? '' : 'disabled'}>✎</button>
+      <button class="del" title="${t('studio.t.delete')}">✕</button>`;
     const pw = row.querySelector('.pw');
     pw.setAttribute('role', 'button'); pw.setAttribute('aria-pressed', String(!s.bypass));
     pw.addEventListener('click', () => {
@@ -2358,16 +2376,34 @@ function reorderChain(fromId, toId) {
   api.engine.fxReorder(_selTrack, ids);
 }
 
+// ── 오디오 엔진 시작 ───────────────────────────────
+// 스튜디오에 들어오면 자동으로 켠다. 예전엔 수동이라 처음 온 사람이 재생·녹음·Export 가
+// 전부 회색인 화면을 먼저 보게 됐다(setEnabled 가 컨트롤 24개를 막는다).
+// 실패했을 땐 자동 재시도하지 않는다 — 장치를 못 잡는 상황에서 탭을 오갈 때마다
+// 다시 붙잡으려 들면 다른 DAW 와 계속 충돌한다. 그때는 버튼으로 직접 누르게 둔다.
+let _engineTried = false;
+async function startEngine(manual) {
+  if (_started) return true;
+  if (_engineTried && !manual) return false;   // 자동은 한 번만
+  _engineTried = true;
+  const btn = $('st-engine-start');
+  if (btn) btn.disabled = true;
+  $('st-engine-status').textContent = t('studio.lbl.connecting');
+  const r = await api.engine.start([]).catch(() => ({ ok: false }));
+  if (!r || !r.ok) {
+    $('st-engine-status').textContent = t('studio.lbl.audioOpenFail');
+    if (btn) { btn.disabled = false; btn.hidden = false; btn.textContent = t('studio.lbl.audioRetry'); }
+    return false;
+  }
+  return true;
+}
+
 // ── 배선 ───────────────────────────────────────────
 function wire() {
   if (_wired) return; _wired = true;
   api.engine.onEvent(onEngineEvent);
 
-  $('st-engine-start').addEventListener('click', async () => {
-    $('st-engine-start').disabled = true; $('st-engine-status').textContent = '연결 중…';
-    const r = await api.engine.start([]);
-    if (!r.ok) { $('st-engine-status').textContent = '오디오 엔진 없음'; $('st-engine-start').disabled = false; }
-  });
+  $('st-engine-start').addEventListener('click', () => startEngine(true));
 
   $('st-load-song').addEventListener('click', openSongPicker);
   $('st-close-song').addEventListener('click', closeSong);
@@ -2417,8 +2453,14 @@ function wire() {
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
+  // 언어를 바꾸면 이미 그려둔 스템 라벨·패널 문구가 옛 언어로 남는다 → 다시 그린다
+  onLocaleChange(() => {
+    _tracks.forEach(tr => { tr.label = stemLabel(tr.key); });
+    renderTracks(); updateFxPanel(); updateTrackFader();
+  });
   loadInputConfig();   // 저장된 입력 구성 — device 이벤트에서 엔진에 반영된다
   buildFaderScales();
+  updateBusStrips();   // 트랙이 없는 첫 화면에선 버스도 잠금
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
   const applyMaster = (pos) => {
     const g = faderToGain(pos);
@@ -2475,7 +2517,7 @@ function wire() {
   }
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
-    if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }
+    if (!_recArmed && !armedRecId()) { flashTake(t('studio.m.addRecTrackAndArm')); return; }
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
@@ -2512,9 +2554,9 @@ function wire() {
   $('st-file-menu').addEventListener('click', (e) => {
     e.stopPropagation();
     openDropdown(e.currentTarget, [
-      { label: '오디오 임포트…', fn: pickImportAudio },
-      { label: '프로젝트 열기 (.yssproj)…', fn: openProject },
-      { label: '프로젝트 저장 (독립 파일)…', fn: saveProject },
+      { label: t('studio.d.importAudio'), fn: pickImportAudio },
+      { label: t('studio.d.openProject'), fn: openProject },
+      { label: t('studio.d.saveProject'), fn: saveProject },
     ]);
   });
   $('st-undo').addEventListener('click', doUndo);
@@ -2546,19 +2588,19 @@ function wire() {
     else openVstPicker();
   });
   $('st-fx-save').addEventListener('click', () => {
-    if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+    if (!_chain.length) { flashTake(t('studio.m.noVst')); return; }
     const p = _activePresetId && getPresets().find(x => x.id === _activePresetId);
-    if (p) { startGather({ id: p.id, name: p.name }); flashTake('톤 덮어씀: ' + p.name); }   // 활성 톤 덮어쓰기
-    else openNameModal('톤 저장', '', (name) => startGather({ name }));                       // 활성 없으면 새로
+    if (p) { startGather({ id: p.id, name: p.name }); flashTake(t('studio.m.toneOverwritten') + p.name); }   // 활성 톤 덮어쓰기
+    else openNameModal(t('studio.d.saveTone'), '', (name) => startGather({ name }));                       // 활성 없으면 새로
   });
   $('st-fx-saveas').addEventListener('click', () => {
-    if (!_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
-    openNameModal('새 톤으로 저장', '', (name) => startGather({ name }));
+    if (!_chain.length) { flashTake(t('studio.m.noVst')); return; }
+    openNameModal(t('studio.d.saveToneAs'), '', (name) => startGather({ name }));
   });
   $('st-fx-load').addEventListener('click', openPresetPicker);
   // 이펙트 일괄 끄기/켜기 (선택 트랙)
   $('st-fx-bypassall').addEventListener('click', () => {
-    if (_selTrack == null || !_chain.length) { flashTake('추가된 VST가 없습니다.'); return; }
+    if (_selTrack == null || !_chain.length) { flashTake(t('studio.m.noVst')); return; }
     const allOff = _chain.every(s => s.bypass);   // 전부 꺼져있으면 → 켜기, 아니면 → 끄기
     api.engine.fxBypassAll(_selTrack, !allOff);
   });
@@ -2584,7 +2626,7 @@ function wire() {
       const up = () => {
         document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
         if (Math.abs(b - a) < 0.08) { _exportRange = null; renderExportRange(); }
-        else flashTake(`영역: ${fmtTC(_exportRange.start)}–${fmtTC(_exportRange.end)}`);
+        else flashTake(t('studio.p.rangeSet', { a: fmtTC(_exportRange.start), b: fmtTC(_exportRange.end) }));
       };
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
     } else {   // 룰러 클릭·드래그 = 재생선 따라오기(스크럽)
@@ -2596,15 +2638,20 @@ function wire() {
     $('st-range-mode').classList.toggle('on', _rangeMode);
     $('st-range-mode').setAttribute('aria-pressed', String(_rangeMode));
     $('daw-ruler-wrap').classList.toggle('range-mode', _rangeMode);
-    flashTake(_rangeMode ? '영역 선택 모드 — 룰러를 드래그하세요' : '영역 선택 모드 해제');
+    flashTake(_rangeMode ? t('studio.m.rangeModeOn') : t('studio.m.rangeModeOff'));
   });
   $('st-add-rec').addEventListener('click', () => api.engine.recTrackAdd());   // 코너 ＋ = 녹음 트랙 추가
+  // 빈 화면의 행동 버튼 — 기존 메뉴와 같은 동작을 그대로 부른다(동작이 갈라지지 않게)
+  $('empty-load-song')?.addEventListener('click', openSongPicker);
+  $('empty-open-proj')?.addEventListener('click', () => openProject());
+  $('empty-add-rec')?.addEventListener('click', () => api.engine.recTrackAdd());
+  $('empty-add-audio')?.addEventListener('click', pickImportAudio);
   // 트랙 빈 영역(레인 스크롤) 우클릭 = 트랙 추가
   $('daw-tscroll').addEventListener('contextmenu', (e) => {
     if (e.target.closest('.daw-lane-rec, .daw-take-clip, .daw-clip')) return;   // 트랙/클립 위는 각자 메뉴
     if (!_started) return;
     e.preventDefault();
-    openDropdownAt(e.clientX, e.clientY, [{ label: '녹음 트랙 추가', fn: () => api.engine.recTrackAdd() }]);
+    openDropdownAt(e.clientX, e.clientY, [{ label: t('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd() }]);
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
@@ -2623,7 +2670,7 @@ function wire() {
     localStorage.setItem('yss:returnOnStop', _returnOnStop ? '1' : '0');
     $('st-return').classList.toggle('on', _returnOnStop);
     $('st-return').setAttribute('aria-pressed', String(_returnOnStop));
-    flashTake(_returnOnStop ? '정지 시 재생 시작 위치로 복귀 — 켬' : '정지 시 현재 위치 유지');
+    flashTake(_returnOnStop ? t('studio.lbl.returnOn') : t('studio.lbl.returnOff'));
   });
 
   // 내 소리 모니터 on/off
@@ -2656,4 +2703,7 @@ function wire() {
   selectTool(null);   // 처음엔 아무 도구도 안 열림
 }
 
-export async function initStudio() { wire(); }
+export async function initStudio() {
+  wire();
+  startEngine(false).catch(() => {});   // 탭에 들어오면 알아서 연결 (실패 시 버튼으로 재시도)
+}
