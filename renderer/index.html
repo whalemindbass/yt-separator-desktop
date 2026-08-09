@@ -490,6 +490,33 @@
             </div>
             <div class="mx-lbl" id="mx-track-lbl">트랙</div>
           </div>
+          <div class="mx-strip mx-bus">
+            <div class="mx-val" id="mx-busA-val">0.0 dB</div>
+            <div class="mx-fader-wrap">
+              <div class="mx-scale"></div>
+              <input id="mx-busA" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 A 볼륨 (더블클릭=0.0 dB)">
+              <div class="mx-meter" data-mid="95001"><i class="l"></i><i class="r"></i></div>
+            </div>
+            <button class="mx-lbl mx-bus-lbl" id="mx-busA-lbl" data-bus="0" title="클릭하면 이 버스의 이펙트 편집">A</button>
+          </div>
+          <div class="mx-strip mx-bus">
+            <div class="mx-val" id="mx-busB-val">0.0 dB</div>
+            <div class="mx-fader-wrap">
+              <div class="mx-scale"></div>
+              <input id="mx-busB" class="mx-fader" type="range" min="0" max="1000" value="720" orient="vertical" title="센드 버스 B 볼륨 (더블클릭=0.0 dB)">
+              <div class="mx-meter" data-mid="95002"><i class="l"></i><i class="r"></i></div>
+            </div>
+            <button class="mx-lbl mx-bus-lbl" id="mx-busB-lbl" data-bus="1" title="클릭하면 이 버스의 이펙트 편집">B</button>
+          </div>
+        </div>
+        <!-- 선택 트랙 → 버스 센드량 (포스페이더) -->
+        <div class="mx-sends" id="mx-sends">
+          <div class="mx-send-row"><span class="lb">SEND A</span>
+            <input id="mx-send-a" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 A">
+            <span class="val" id="mx-send-a-val">0</span></div>
+          <div class="mx-send-row"><span class="lb">SEND B</span>
+            <input id="mx-send-b" class="mx-send" type="range" min="0" max="100" value="0" disabled title="선택 트랙 → 버스 B">
+            <span class="val" id="mx-send-b-val">0</span></div>
         </div>
       </aside>
       <div class="daw-content">

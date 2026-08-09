@@ -491,6 +491,7 @@ const stemIdOf = (engineIndex) => STEM_ID_BASE + engineIndex;
 const stemForId = (id) => (isStemId(id) ? _tracks.find(t => t.engineIndex === id - STEM_ID_BASE) : null);
 function selTrackObj(id) { return isStemId(id) ? stemForId(id) : _recTracks.find(r => r.id === id); }
 function selTrackLabel(id) {
+  if (isBusId(id)) return `버스 ${BUS_NAMES[busIndexOf(id)]}`;
   if (isStemId(id)) { const t = stemForId(id); return t ? t.label : '트랙'; }
   return document.querySelector(`.daw-lane-rec[data-recid="${id}"] .lbl`)?.textContent?.trim() || '트랙';
 }
@@ -501,7 +502,38 @@ function applySelTrackGain(id, g) {   // 볼륨 라우팅 — 스템=track(index
   else api.engine.recTrack(id, { gain: g });
   markDirty();
 }
-function selValid(id) { return id != null && (_recTracks.some(r => r.id === id) || stemForId(id) != null); }
+// ── 센드 버스 A/B ─────────────────────────────────────────
+// 엔진과 개수·id 를 맞춘다(Main.cpp 의 kNumBuses / kBusIdBase).
+const BUS_ID_BASE = 95001;
+const BUS_COUNT = 2;
+const isBusId = (id) => id != null && id >= BUS_ID_BASE && id < BUS_ID_BASE + BUS_COUNT;
+const busIndexOf = (id) => id - BUS_ID_BASE;
+const BUS_NAMES = ['A', 'B'];
+let _buses = [{ gain: 1, mute: false }, { gain: 1, mute: false }];
+let _prevTrackSel = null;     // 버스를 편집하기 직전에 보고 있던 트랙 — 라벨 재클릭 시 복귀 대상
+// 트랙의 센드량은 트랙 객체(sends:[a,b])에 둔다. 없으면 0.
+const sendsOf = (o) => (o && Array.isArray(o.sends) ? o.sends : [0, 0]);
+function pushSends(id, sends) {
+  if (isStemId(id)) api.engine.track(id - STEM_ID_BASE, { sends });
+  else api.engine.recTrack(id, { sends });
+}
+
+function selValid(id) {
+  return id != null && (isBusId(id) || _recTracks.some(r => r.id === id) || stemForId(id) != null);
+}
+// 프로젝트의 버스 상태를 엔진·UI 에 반영. 항목이 없으면 기본값(0 dB, 뮤트 해제, FX 비움).
+function applyBusState(list) {
+  for (let i = 0; i < BUS_COUNT; i++) {
+    const b = list[i] || {};
+    const gain = b.gain != null ? b.gain : 1;
+    _buses[i] = { gain, mute: !!b.mute };
+    api.engine.bus(i, { gain, mute: !!b.mute });
+    api.engine.fxSetChain(BUS_ID_BASE + i, (Array.isArray(b.fx) ? b.fx : []).map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
+    const n = BUS_NAMES[i];
+    const f = $(`mx-bus${n}`); if (f) f.value = gainToFader(gain);
+    const v = $(`mx-bus${n}-val`); if (v) v.textContent = dbText(gain);
+  }
+}
 function selectTrack(id) {
   if (!selValid(id)) id = null;
   _selTrack = id;
@@ -538,8 +570,31 @@ function buildFaderScales() {
     }).join('');
   }
 }
+// 선택 트랙의 센드 슬라이더 2개 갱신. 트랙이 아닌 대상(버스/없음)이면 잠근다.
+function updateSendRows() {
+  const o = (!isBusId(_selTrack) && selValid(_selTrack)) ? selTrackObj(_selTrack) : null;
+  const sv = sendsOf(o);
+  for (let i = 0; i < BUS_COUNT; i++) {
+    const key = BUS_NAMES[i].toLowerCase();
+    const sl = $(`mx-send-${key}`), lb = $(`mx-send-${key}-val`);
+    if (!sl) continue;
+    sl.disabled = !o;
+    sl.value = Math.round((o ? sv[i] : 0) * 100);
+    if (lb) lb.textContent = sl.value;
+  }
+}
 function updateTrackFader() {   // 믹서 우측 = 선택 트랙 볼륨
+  updateSendRows();
   const f = $('mx-track'), val = $('mx-track-val'), lbl = $('mx-track-lbl'); if (!f) return;
+  // 버스를 선택했을 땐 버스 전용 스트립이 따로 있으므로 트랙 페이더는 비활성
+  if (isBusId(_selTrack)) {
+    f.disabled = true; f.value = FADER_UNITY_POS; val.textContent = '—';
+    lbl.textContent = selTrackLabel(_selTrack);
+    for (let i = 0; i < BUS_COUNT; i++)
+      $(`mx-bus${BUS_NAMES[i]}-lbl`)?.classList.toggle('on', busIndexOf(_selTrack) === i);
+    return;
+  }
+  for (const n of BUS_NAMES) $(`mx-bus${n}-lbl`)?.classList.remove('on');
   if (selValid(_selTrack)) {
     const g = selTrackGain(_selTrack);
     f.disabled = false; f.value = gainToFader(g); val.textContent = dbText(g);
@@ -1667,18 +1722,24 @@ async function buildProjectObject() {
   const sr = _sr || 44100;
   const master = faderToGain($('mx-master')?.value ?? FADER_UNITY_POS);
   const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
-  await gatherChains([..._recTracks.map(r => r.id), ...stemIds]);   // 녹음+스템 FX 체인 확보(선택 안 된 것 포함)
+  const busIds = BUS_NAMES.map((_, i) => BUS_ID_BASE + i);
+  await gatherChains([..._recTracks.map(r => r.id), ...stemIds, ...busIds]);   // 녹음+스템+버스 FX 체인 확보(선택 안 된 것 포함)
   const pairs = [];
   _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
   stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
+  busIds.forEach(bid => (_chainByTrack[bid] || []).forEach(s => pairs.push({ track: bid, id: s.id })));
   const states = await gatherFx(pairs);
   const autoOut = (id) => { const a = _auto.get(id); return a && (a.pts.length || a.on)
     ? { on: !!a.on, open: !!a.open, pts: a.pts.map(p => ({ t: p.t, v: p.v })) } : null; };
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, pan: r.pan != null ? r.pan : 0, mute: !!r.mute, solo: !!r.solo,
     name: r.name || '', color: r.color || '', height: r.height || 0,
-    auto: autoOut(r.id),
+    auto: autoOut(r.id), sends: sendsOf(r).slice(),
     fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
+  }));
+  const buses = _buses.map((b, i) => ({
+    gain: b.gain != null ? b.gain : 1, mute: !!b.mute,
+    fx: (_chainByTrack[BUS_ID_BASE + i] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
   }));
   const takes = _takes.map(t => ({
     file: t.file, start: Math.round(t.start * sr), inOff: t.inOff || 0, dur: t.dur,
@@ -1688,11 +1749,11 @@ async function buildProjectObject() {
   const stemMix = _tracks.map(t => {
     const sid = stemIdOf(t.engineIndex);
     return { key: t.key, gain: t.gain != null ? t.gain : 1, pan: t.pan != null ? t.pan : 0, mute: !!t.mute, solo: !!t.solo,
-      auto: autoOut(sid),
+      auto: autoOut(sid), sends: sendsOf(t).slice(),
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, stems, tracks, takes };
+  return { kind: 'yssproj', version: 1, name: _songName || '프로젝트', savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1745,7 +1806,8 @@ async function applyProject(p) {
       p.stems.mix.forEach(m => {
         const t = _tracks.find(x => x.key === m.key); if (!t) return;
         t.gain = m.gain != null ? m.gain : 1; t.pan = m.pan != null ? m.pan : 0; t.mute = !!m.mute; t.solo = !!m.solo;
-        api.engine.track(t.engineIndex, { gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo });
+        t.sends = Array.isArray(m.sends) ? m.sends.slice(0, BUS_COUNT) : [0, 0];
+        api.engine.track(t.engineIndex, { gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, sends: t.sends });
         const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`); if (!lane) return;
         const v = lane.querySelector('.daw-vol'); if (v) v.value = gainToFader(t.gain);
         const pn = lane.querySelector('.daw-pan'); if (pn) { const pv = Math.round(t.pan * 100); pn.value = pv; pn.classList.toggle('off', pv === 0); }
@@ -1776,7 +1838,7 @@ async function applyProject(p) {
   if (Array.isArray(p.tracks) && p.tracks.length) {
     _recTracks = [];
     const gen = ++_recTracksGenReq;
-    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo })), gen);
+    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] })), gen);
     const ok = await waitRecTracks(gen);
     if (!ok) { _suppressDirty = false; flashTake('트랙 복원 시간 초과 — 다시 시도하세요.'); return; }
     idMap = {};
@@ -1790,6 +1852,7 @@ async function applyProject(p) {
         a.pts = (t.auto.pts || []).map(x => ({ t: x.t, v: x.v }));
         autoPush(_recTracks[i].id);
       }
+      _recTracks[i].sends = Array.isArray(t.sends) ? t.sends.slice(0, BUS_COUNT) : [0, 0];
       if (Array.isArray(t.fx) && t.fx.length)
         api.engine.fxSetChain(_recTracks[i].id, t.fx.map(s => ({ index: s.index, bypass: s.bypass, data: s.data })));
     });
@@ -1815,6 +1878,9 @@ async function applyProject(p) {
     const s = $('mx-master'); if (s) s.value = gainToFader(p.master);
     const mv = $('mx-master-val'); if (mv) mv.textContent = dbText(p.master);
   }
+  // 5) 센드 버스 — 없으면(구 프로젝트) 기본값으로 되돌린다
+  applyBusState(Array.isArray(p.buses) ? p.buses : []);
+  updateSendRows();
   layout();
   clearUndo();   // 새 상태 로드 → 히스토리 초기화
   _suppressDirty = false;
@@ -2024,6 +2090,12 @@ function openDevModal(d) {
   const opts = (arr, cur) => (arr || []).map(v => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const curType = (d.types || []).find(t => t.name === d.currentType) || (d.types || [])[0] || { outputs: [], inputs: [] };
   const rates = (d.rates && d.rates.length ? d.rates : [44100, 48000, 96000]).map(r => Math.round(r));
+  // 입력 채널 목록 — 엔진이 준 이름(활성 입력만, 콜백 순서와 동일)이 없으면 번호로
+  const chNames = (_inCfg.names && _inCfg.names.length)
+    ? _inCfg.names
+    : Array.from({ length: Math.max(1, _deviceInfo?.in || 1) }, (_, i) => `입력 ${i + 1}`);
+  const chOpts = (cur) => chNames.map((n, i) =>
+    `<option value="${i}" ${i === cur ? 'selected' : ''}>${i + 1}. ${esc(n)}</option>`).join('');
   host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>오디오 설정</span><button class="x">✕</button></div>
     <div class="daw-modal-list" style="padding:16px;display:flex;flex-direction:column;gap:12px">
       <label class="dev-field"><span>드라이버</span><select id="dv-type">${opts((d.types || []).map(t => t.name), d.currentType)}</select></label>
@@ -2031,10 +2103,26 @@ function openDevModal(d) {
       <label class="dev-field"><span>입력 기기</span><select id="dv-in">${opts(curType.inputs, d.input)}</select></label>
       <label class="dev-field"><span>샘플레이트</span><select id="dv-sr">${opts(rates, Math.round(d.sampleRate))}</select></label>
       <label class="dev-field"><span>버퍼 크기</span><select id="dv-buf">${opts(d.buffers && d.buffers.length ? d.buffers : [128, 256, 512], d.bufferSize)}</select></label>
+      <div class="dev-sep"></div>
+      <label class="dev-field"><span>입력 형식</span><select id="dv-inmode">
+        <option value="0" ${_inCfg.mode === 1 ? '' : 'selected'}>모노 (악기·마이크 1개)</option>
+        <option value="1" ${_inCfg.mode === 1 ? 'selected' : ''}>스테레오 (입력 2개)</option>
+      </select></label>
+      <label class="dev-field"><span id="dv-chl-lb">입력 채널</span><select id="dv-chl">${chOpts(_inCfg.chL)}</select></label>
+      <label class="dev-field" id="dv-chr-row" ${_inCfg.mode === 1 ? '' : 'hidden'}><span>오른쪽 채널</span><select id="dv-chr">${chOpts(_inCfg.chR)}</select></label>
+      <div class="dev-field"><span>입력 신호</span><div class="dev-inmeters" id="dv-inmeters">${
+        chNames.map((n, i) => `<div class="dev-inm"><b>${i + 1}</b><i data-ch="${i}"></i><em>${esc(n)}</em></div>`).join('')
+      }</div></div>
       <div style="display:flex;justify-content:flex-end"><button class="mini" id="dv-apply">적용</button></div>
     </div></div>`;
   host.hidden = false;
   host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  // 모노/스테레오 전환 — 스테레오일 때만 오른쪽 채널을 고른다
+  $('dv-inmode').addEventListener('change', (e) => {
+    const st = e.target.value === '1';
+    $('dv-chr-row').hidden = !st;
+    $('dv-chl-lb').textContent = st ? '왼쪽 채널' : '입력 채널';
+  });
   // 드라이버 변경 → 즉시 전환 후 목록 갱신
   $('dv-type').addEventListener('change', (e) => { api.engine.setDevice({ type: e.target.value }); });
   $('dv-apply').addEventListener('click', () => {
@@ -2042,8 +2130,38 @@ function openDevModal(d) {
       type: $('dv-type').value, output: $('dv-out').value, input: $('dv-in').value,
       sampleRate: Number($('dv-sr').value), bufferSize: Number($('dv-buf').value),
     });
+    applyInputConfig({
+      mode: Number($('dv-inmode').value),
+      chL: Number($('dv-chl').value),
+      chR: Number($('dv-chr').value),
+    });
     host.hidden = true;
   });
+}
+// ── 입력 구성 (모노/스테레오 · 채널 선택) ────────────────
+// 장치를 다시 열면 엔진 기본값으로 돌아가므로 여기 값을 다시 밀어 넣는다.
+let _inCfg = { mode: 0, chL: 0, chR: 1, names: [] };
+const IN_CFG_KEY = 'yss.inputConfig';
+function applyInputConfig(cfg) {
+  _inCfg = { ..._inCfg, ...cfg };
+  api.engine.inputConfig({ mode: _inCfg.mode, chL: _inCfg.chL, chR: _inCfg.chR });
+  try { localStorage.setItem(IN_CFG_KEY, JSON.stringify({ mode: _inCfg.mode, chL: _inCfg.chL, chR: _inCfg.chR })); } catch {}
+}
+// 설정 창이 열려 있을 때만 채널별 입력 미터를 갱신한다.
+function updateInputChannelMeters(chans) {
+  if (!Array.isArray(chans)) return;
+  const host = document.getElementById('dv-inmeters');
+  if (!host) return;
+  for (const el of host.querySelectorAll('i[data-ch]')) {
+    const v = chans[Number(el.dataset.ch)] || 0;
+    el.style.setProperty('--v', meterPct(v) + '%');
+  }
+}
+function loadInputConfig() {
+  try {
+    const s = JSON.parse(localStorage.getItem(IN_CFG_KEY) || 'null');
+    if (s && typeof s === 'object') _inCfg = { ..._inCfg, mode: s.mode | 0, chL: s.chL | 0, chR: s.chR | 0 };
+  } catch {}
 }
 
 // ── 이벤트 ─────────────────────────────────────────
@@ -2057,13 +2175,21 @@ function onEngineEvent(m) {
       setEnabled(true);
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
       break;
-    case 'device':
+    case 'device': {
       _sr = m.sr || 44100;
       _deviceInfo = { name: m.name, sr: m.sr, block: m.block, in: m.in, out: m.out,
                       roundtripMs: m.roundtripMs, srMismatch: !!m.srMismatch };
+      _inCfg.names = Array.isArray(m.inNames) ? m.inNames : [];
+      // 장치를 새로 열면 엔진이 기본값(모노 1번)으로 돌아간다 → 저장해둔 설정을 다시 밀어 넣는다.
+      // 이미 같은 값이면 보내지 않아 device 이벤트가 무한히 되돌아오는 것을 막는다.
+      const want = _inCfg;
+      const same = (m.inMode | 0) === want.mode && (m.inChL | 0) === want.chL && (m.inChR | 0) === want.chR;
+      const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
+      if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
       $('st-engine-status').textContent = `${m.name} · ${Number(m.roundtripMs).toFixed(2)}ms`;
       if (m.srMismatch) flashTake(`⚠ 샘플레이트 불일치: 스템 ${Math.round(m.stemSr)}Hz ≠ 장치 ${Math.round(m.sr)}Hz — 피치/템포 어긋남. 장치 SR을 맞추세요.`);
       break;
+    }
     case 'fxError':
       flashTake(`⚠ 이펙트 ${m.failed}개 로드 실패 (플러그인 누락/버전)`);
       break;
@@ -2127,7 +2253,7 @@ function onEngineEvent(m) {
       else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
       break;
     case 'pos': onPos(m.samples); break;
-    case 'level': updateVU(m.peak); break;
+    case 'level': updateVU(m.peak); updateInputChannelMeters(m.chans); break;
     case 'pitch': updateTuner(m.freq); break;
     case 'trackMeter': onTrackMeter(m.list || []); break;
     case 'pdc': {   // 플러그인 지연 보정 — 보정할 지연이 있을 때만 표시. 클릭으로 on/off
@@ -2291,6 +2417,7 @@ function wire() {
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
     else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
   });
+  loadInputConfig();   // 저장된 입력 구성 — device 이벤트에서 엔진에 반영된다
   buildFaderScales();
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
   const applyMaster = (pos) => {
@@ -2309,6 +2436,43 @@ function wire() {
   };
   $('mx-track').addEventListener('input', (e) => applyTrackVol(Number(e.target.value)));
   $('mx-track').addEventListener('dblclick', () => applyTrackVol(FADER_UNITY_POS));   // 더블클릭 = 100%
+
+  // ── 센드 버스 A/B ──
+  for (let i = 0; i < BUS_COUNT; i++) {
+    const n = BUS_NAMES[i];
+    const f = $(`mx-bus${n}`);
+    const applyBus = (pos) => {
+      const g = faderToGain(pos);
+      _buses[i].gain = g;
+      api.engine.bus(i, { gain: g });
+      f.value = pos; $(`mx-bus${n}-val`).textContent = dbText(g);
+      markDirty();
+    };
+    f?.addEventListener('input', (e) => applyBus(Number(e.target.value)));
+    f?.addEventListener('dblclick', () => applyBus(FADER_UNITY_POS));
+    // 라벨 클릭 = 이 버스를 이펙트 편집 대상으로. 같은 걸 다시 누르면 직전 트랙으로 돌아온다
+    // (버스에는 레인이 없어서 그냥 두면 트랙 이펙트로 되돌아갈 길이 없다).
+    $(`mx-bus${n}-lbl`)?.addEventListener('click', () => {
+      const id = BUS_ID_BASE + i;
+      if (_selTrack === id) { selectTrack(_prevTrackSel); return; }
+      if (!isBusId(_selTrack)) _prevTrackSel = _selTrack;
+      selectTrack(id);
+    });
+  }
+  // 선택 트랙 → 버스 센드량
+  for (let i = 0; i < BUS_COUNT; i++) {
+    const key = BUS_NAMES[i].toLowerCase();
+    $(`mx-send-${key}`)?.addEventListener('input', (e) => {
+      const o = selTrackObj(_selTrack); if (!o) return;
+      const v = Number(e.target.value) / 100;
+      const sends = sendsOf(o).slice(); sends[i] = v;
+      o.sends = sends;
+      pushSends(_selTrack, sends);
+      $(`mx-send-${key}-val`).textContent = Math.round(v * 100);
+      markDirty();
+    });
+    $(`mx-send-${key}`)?.addEventListener('dblclick', (e) => { e.target.value = 0; e.target.dispatchEvent(new Event('input')); });
+  }
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecId()) { flashTake('먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.'); return; }

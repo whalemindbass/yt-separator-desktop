@@ -77,6 +77,8 @@ struct Stem
     std::atomic<bool> autoOn { false };
     float curAutoGain = 1.0f;                 // 오디오 스레드 전용 — 락 실패 시 직전 값 유지
     float curGainL = 1.0f, curGainR = 1.0f;   // 오디오 스레드 전용 — L/R 각각 램프(pan+gain 결합)
+    std::atomic<float> send[2] {};            // 버스 A/B 로 보내는 양 (포스페이더)
+    float curSendL[2] {}, curSendR[2] {};     // 오디오 스레드 전용 램프 상태
     // PDC — 다른 트랙의 플러그인 지연에 맞추기 위한 보정 지연
     AudioBuffer<float> pdcBuf;                // 링버퍼 (message 스레드에서만 할당)
     std::atomic<int> pdcDelay { 0 };          // 목표 지연(샘플)
@@ -150,10 +152,29 @@ struct RecTrack
     std::atomic<bool> autoOn { false };
     float curAutoGain = 1.0f;
     float curGainL = 1.0f, curGainR = 1.0f;        // 오디오 스레드 전용 — L/R 결합 램프(게인·팬·뮤트·솔로)
+    std::atomic<float> send[2] {};                 // 버스 A/B 센드 (포스페이더)
+    float curSendL[2] {}, curSendR[2] {};
     // PDC
     AudioBuffer<float> pdcBuf;
     std::atomic<int> pdcDelay { 0 };
     int pdcActive = 0, pdcWrite = 0;
+};
+
+// 센드 버스 A/B — 트랙에서 보낸 신호를 모아 자체 FX 를 태우고 마스터로 합류.
+// 개수 고정(2). 오디오 스레드가 매 블록 참조하므로 목록이 변하지 않는 편이 안전하다.
+static constexpr int kNumBuses = 2;
+static constexpr int kBusIdBase = 95001;   // FX 주소용 id (스템 90001+, 녹음 트랙 id 와 겹치지 않게)
+
+struct Bus
+{
+    String name;
+    std::atomic<float> gain { 1.0f };
+    std::atomic<bool>  mute { false };
+    std::atomic<float> pkL { 0.0f }, pkR { 0.0f };
+    std::vector<std::unique_ptr<FxSlot>> chain;
+    CriticalSection fxLock;
+    AudioBuffer<float> buf;                  // 이번 블록에 모인 신호 (오디오 스레드 전용)
+    float curGain = 1.0f;                    // 오디오 스레드 전용 램프 상태
 };
 
 // 원본 → 목적지에 게인 램프(g0→g1) 걸어 합산 (블록 경계 클릭·지퍼 방지)
@@ -269,13 +290,14 @@ public:
         std::unique_ptr<FileOutputStream> os (out.createOutputStream());
         if (os == nullptr) { std::cerr << "[engine] cannot open " << out.getFullPathName() << "\n"; return; }
 
+        // 장치 채널 수가 아니라 입력 구성(모노/스테레오)을 따른다 — 모노면 1채널 파일
+        const int recCh = jmin (recordChannels(), jmax (1, numInputChans));
         WavAudioFormat wav;
-        auto* w = wav.createWriterFor (os.get(), deviceSampleRate,
-                                       (unsigned int) jmax (1, numInputChans), 24, {}, 0);
+        auto* w = wav.createWriterFor (os.get(), deviceSampleRate, (unsigned int) recCh, 24, {}, 0);
         if (w == nullptr) { std::cerr << "[engine] writer create failed\n"; return; }
         os.release();
 
-        writerChans = jmax (1, numInputChans);
+        writerChans = recCh;
         // FIFO 를 넉넉히 — 디스크가 잠깐 밀려도 샘플이 드롭돼 '틱' 이 남지 않도록
         threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 17));
         activeWriter.store (threadedWriter.get());
@@ -395,9 +417,15 @@ public:
     using FxChainVec = std::vector<std::unique_ptr<FxSlot>>;
     FxChainVec* fxChainOf (int id, CriticalSection*& lock)
     {
+        if (auto* b = findBus (id)) { lock = &b->fxLock; return &b->chain; }
         if (auto* rt = findRec (id)) { lock = &rt->fxLock; return &rt->chain; }
         for (auto& s : stems) if (s->id == id) { lock = &s->fxLock; return &s->chain; }
         lock = nullptr; return nullptr;
+    }
+    Bus* findBus (int id)
+    {
+        const int i = id - kBusIdBase;
+        return (i >= 0 && i < kNumBuses) ? &buses[i] : nullptr;
     }
     static FxSlot* findSlotIn (FxChainVec& chain, int id)
     {
@@ -520,6 +548,14 @@ public:
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
+    // 하드웨어 입력 채널별 peak (읽고 리셋). 설정 창에서 어느 단자에 신호가 있는지 본다.
+    Array<var> inputChannelLevels()
+    {
+        Array<var> out;
+        for (int c = 0; c < jmin (numInputChans, kMaxInMeters); ++c)
+            out.add (inChPk[c].exchange (0.0f, std::memory_order_relaxed));
+        return out;
+    }
     // 트랙 미터 수집 — 스템·녹음 트랙 + 마스터. 각 pkL/pkR exchange 로 소비.
     // 반환값: 하나라도 소리가 있었는지 (전부 0 이면 emit 생략)
     bool collectMeters (Array<var>& out)
@@ -537,6 +573,7 @@ public:
             out.add (var (o));
         };
         add (0, mstPkL, mstPkR);                       // master (id = 0 예약)
+        for (int i = 0; i < kNumBuses; ++i) add (kBusIdBase + i, buses[i].pkL, buses[i].pkR);
         for (auto& s : stems) add (s->id, s->pkL, s->pkR);
         const ScopedTryLock sl (takesLock);
         if (sl.isLocked())
@@ -605,7 +642,7 @@ public:
     }
 
     // 트랙 제어 (index = 스템 순서)
-    void setTrack (int index, const var& gain, const var& mute, const var& solo, const var& pan)
+    void setTrack (int index, const var& gain, const var& mute, const var& solo, const var& pan, const var& sends)
     {
         if (index < 0 || index >= (int) stems.size()) return;
         auto& s = *stems[(size_t) index];
@@ -613,7 +650,17 @@ public:
         if (! mute.isVoid()) s.mute = (bool) mute;
         if (! solo.isVoid()) s.solo = (bool) solo;
         if (! pan.isVoid())  s.pan  = jlimit (-1.0f, 1.0f, (float) (double) pan);
+        applySends (s, sends);
         recomputeSolos();
+    }
+    // sends: [a, b] 배열. 없는 원소는 건드리지 않는다.
+    template <typename Trk>
+    static void applySends (Trk& t, const var& sends)
+    {
+        auto* a = sends.getArray();
+        if (a == nullptr) return;
+        for (int i = 0; i < jmin (kNumBuses, a->size()); ++i)
+            if (! (*a)[i].isVoid()) t.send[i] = jlimit (0.0f, 2.0f, (float) (double) (*a)[i]);
     }
     // ---- 볼륨 자동화 ----
     // id: 스템(90001+) 또는 녹음 트랙 id. points 는 {s:샘플, v:게인} 배열(샘플 오름차순)
@@ -696,6 +743,16 @@ public:
     }
     void setPdcEnabled (bool on) { pdcEnabled = on; recomputePdc(); }
 
+    // 입력 구성 — mode: 0=mono, 1=stereo / chL, chR: 0-based 하드웨어 입력 번호
+    void setInputConfig (const var& mode, const var& chL, const var& chR)
+    {
+        if (! mode.isVoid()) inMode = ((int) mode == 1) ? 1 : 0;
+        if (! chL.isVoid())  inChL  = jmax (0, (int) chL);
+        if (! chR.isVoid())  inChR  = jmax (0, (int) chR);
+        std::cerr << "[engine] input: " << (inMode.load() ? "stereo" : "mono")
+                  << " ch " << inChL.load() << "/" << inChR.load() << "\n";
+        emitDeviceInfo();
+    }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
@@ -771,6 +828,7 @@ public:
                 if (! v["pan"].isVoid())  t->pan  = jlimit (-1.0f, 1.0f, (float) (double) v["pan"]);
                 if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
                 if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
+                applySends (*t, v["sends"]);
                 const ScopedLock sl (takesLock);
                 recTracks.push_back (std::move (t));
             }
@@ -779,7 +837,7 @@ public:
         recomputeSolos();
         emitRecTracks();
     }
-    void setRecTrack (int id, const var& gain, const var& mute, const var& solo, const var& pan)
+    void setRecTrack (int id, const var& gain, const var& mute, const var& solo, const var& pan, const var& sends)
     {
         auto* t = findRec (id);
         if (t == nullptr) return;
@@ -787,7 +845,17 @@ public:
         if (! mute.isVoid()) t->mute = (bool) mute;
         if (! solo.isVoid()) t->solo = (bool) solo;
         if (! pan.isVoid())  t->pan  = jlimit (-1.0f, 1.0f, (float) (double) pan);
+        applySends (*t, sends);
         recomputeSolos();
+    }
+    // ---- 센드 버스 ----
+    void setBus (int index, const var& gain, const var& mute, const var& name)
+    {
+        if (index < 0 || index >= kNumBuses) return;
+        auto& b = buses[index];
+        if (! gain.isVoid()) b.gain = jlimit (0.0f, 4.0f, (float) (double) gain);
+        if (! mute.isVoid()) b.mute = (bool) mute;
+        if (! name.isVoid()) b.name = name.toString();
     }
     void moveTake (int64 id, int64 newStart, int trackId)   // trackId>0 이면 트랙 이동
     {
@@ -993,7 +1061,8 @@ public:
         struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible;
                     bool autoOn; std::vector<AutoPoint> autoPts;
                     std::vector<std::unique_ptr<AudioPluginInstance>> fx; int latency = 0;
-                    AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; };
+                    AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
+                    float panL = 1.0f, panR = 1.0f; };
         std::vector<SR> srs;
         if (! mineOnly)
             for (auto& s : stems)
@@ -1011,6 +1080,8 @@ public:
                 sr2.audible = anySolo ? s->solo.load() : ! s->mute.load();
                 sr2.autoOn = s->autoOn.load();
                 sr2.autoPts = std::move (ap);
+                for (int b = 0; b < kNumBuses; ++b) sr2.send[b] = s->send[b].load();
+                panGains (s->pan.load(), sr2.panL, sr2.panR);   // 실시간과 동일한 equal-power 팬
                 {   // 스템 FX 체인도 오프라인 인스턴스로 복제 (실시간과 결과가 같아야 함)
                     const ScopedLock fl (s->fxLock);
                     for (auto& slot : s->chain)
@@ -1034,7 +1105,8 @@ public:
         struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; int64 fadeIn; int64 fadeOut; };
         struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes;
                      bool autoOn; std::vector<AutoPoint> autoPts; int latency = 0;
-                     AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; };
+                     AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
+                     float panL = 1.0f, panR = 1.0f; };
         std::vector<TRK> trks;
         {
             const bool trackSolo = mineOnly ? anyRecSolo.load() : anySolo;   // 내 녹음만이면 스템 솔로 무시
@@ -1043,6 +1115,8 @@ public:
             {
                 TRK tk; tk.gain = rt->gain.load(); tk.audible = trackSolo ? rt->solo.load() : ! rt->mute.load();
                 tk.autoOn = rt->autoOn.load();
+                for (int b = 0; b < kNumBuses; ++b) tk.send[b] = rt->send[b].load();
+                panGains (rt->pan.load(), tk.panL, tk.panR);
                 { const ScopedLock al (rt->autoLock); tk.autoPts = rt->autoPts; }   // 스냅샷
                 {
                     const ScopedLock fl (rt->fxLock);
@@ -1089,6 +1163,28 @@ public:
         if (writer == nullptr) { auto* e = ev ("exportError"); e->setProperty ("msg", "이 포맷/비트뎁스 지원 안 됨"); emit (var (e)); return; }
         os.release();
 
+        // 센드 버스 — 실시간과 같은 결과가 나오도록 FX 를 오프라인 인스턴스로 복제
+        struct BUSX { std::vector<std::unique_ptr<AudioPluginInstance>> fx; float gain = 1.0f; bool mute = false; };
+        BUSX busx[kNumBuses];
+        for (int b = 0; b < kNumBuses; ++b)
+        {
+            busx[b].gain = buses[b].gain.load();
+            busx[b].mute = buses[b].mute.load();
+            const ScopedLock fl (buses[b].fxLock);
+            for (auto& slot : buses[b].chain)
+            {
+                if (! slot || ! slot->plugin || slot->bypass.load()) continue;
+                String err;
+                auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
+                if (inst == nullptr) continue;
+                MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                inst->setPlayConfigDetails (2, 2, sr, block);
+                inst->prepareToPlay (sr, block);
+                inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                busx[b].fx.push_back (std::move (inst));
+            }
+        }
+
         // 내보내기 범위 (선택 없으면 전체)
         int64 s0 = startSec > 0 ? (int64) (startSec * sr) : 0;
         int64 s1 = endSec   > 0 ? (int64) (endSec   * sr) : total;
@@ -1118,6 +1214,8 @@ public:
         }
 
         AudioBuffer<float> mix (2, block), sbuf (2, block), tbuf (2, block), tmp (2, block);
+        AudioBuffer<float> bbuf[kNumBuses];
+        for (auto& bb : bbuf) bb.setSize (2, block);
         const float mg = monitorGain.load();
         const float master = masterGain.load();
         // 전체가 maxLat 만큼 늦게 나오므로 그만큼 앞에서부터 렌더해 버리고(프리롤) 파일에는 안 쓴다
@@ -1128,6 +1226,7 @@ public:
             const int n = (int) jmin<int64> ((int64) block, s1 - pos);
             if (n <= 0) break;
             mix.clear();
+            for (auto& bb : bbuf) bb.clear();
 
             for (auto& r : srs)   // 스템
             {
@@ -1149,8 +1248,20 @@ public:
                     for (int c = 0; c < 2; ++c)
                     {
                         const int sc = jmin (c, sbuf.getNumChannels() - 1);
-                        if (g0 == g1) mix.addFrom (c, 0, sbuf, sc, 0, n, g0);
-                        else          mix.addFromWithRamp (c, 0, sbuf.getReadPointer (sc), n, g0, g1);
+                        const float p = (c == 0 ? r.panL : r.panR);
+                        if (g0 == g1) mix.addFrom (c, 0, sbuf, sc, 0, n, g0 * p);
+                        else          mix.addFromWithRamp (c, 0, sbuf.getReadPointer (sc), n, g0 * p, g1 * p);
+                    }
+                    for (int b = 0; b < kNumBuses; ++b)   // 포스페이더 센드 (팬 반영 후)
+                    {
+                        if (r.send[b] <= 0.0f) continue;
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            const int sc = jmin (c, sbuf.getNumChannels() - 1);
+                            const float p = (c == 0 ? r.panL : r.panR) * r.send[b];
+                            if (g0 == g1) bbuf[b].addFrom (c, 0, sbuf, sc, 0, n, g0 * p);
+                            else          bbuf[b].addFromWithRamp (c, 0, sbuf.getReadPointer (sc), n, g0 * p, g1 * p);
+                        }
                     }
                 }
             }
@@ -1184,10 +1295,34 @@ public:
                     const float g1 = (tk.autoOn ? autoValueAt (tk.autoPts, pos + n) : tk.gain) * mg;
                     for (int c = 0; c < 2; ++c)
                     {
-                        if (g0 == g1) mix.addFrom (c, 0, tbuf, c, 0, n, g0);
-                        else          mix.addFromWithRamp (c, 0, tbuf.getReadPointer (c), n, g0, g1);
+                        const float p = (c == 0 ? tk.panL : tk.panR);
+                        if (g0 == g1) mix.addFrom (c, 0, tbuf, c, 0, n, g0 * p);
+                        else          mix.addFromWithRamp (c, 0, tbuf.getReadPointer (c), n, g0 * p, g1 * p);
+                    }
+                    for (int b = 0; b < kNumBuses; ++b)   // 포스페이더 센드 (팬 반영 후)
+                    {
+                        if (tk.send[b] <= 0.0f) continue;
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            const float p = (c == 0 ? tk.panL : tk.panR) * tk.send[b];
+                            if (g0 == g1) bbuf[b].addFrom (c, 0, tbuf, c, 0, n, g0 * p);
+                            else          bbuf[b].addFromWithRamp (c, 0, tbuf.getReadPointer (c), n, g0 * p, g1 * p);
+                        }
                     }
                 }
+            }
+
+            // 버스 → FX → 게인 → 믹스. 뮤트여도 FX 는 돌린다(리버브 테일이 실시간과 어긋나지 않도록).
+            for (int b = 0; b < kNumBuses; ++b)
+            {
+                if (! busx[b].fx.empty())
+                {
+                    AudioBuffer<float> pb (bbuf[b].getArrayOfWritePointers(), 2, n);
+                    MidiBuffer mm;
+                    for (auto& f : busx[b].fx) f->processBlock (pb, mm);
+                }
+                const float bg = busx[b].mute ? 0.0f : busx[b].gain;
+                if (bg != 0.0f) for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, bbuf[b], c, 0, n, bg);
             }
 
             mix.applyGain (0, n, master);   // 마스터 (+ 정수 포맷은 세이프 클리퍼, float 은 헤드룸 보존)
@@ -1244,15 +1379,35 @@ public:
             std::cerr << "[engine] WARN stem SR " << stemSampleRate
                       << " != device SR " << deviceSampleRate << " (no resample yet)\n";
 
+        emitDeviceInfo();
+    }
+
+    // 장치 정보 + 입력 구성. 입력 설정을 바꿀 때도 다시 보내 UI 가 현재 상태를 그대로 반영한다.
+    void emitDeviceInfo()
+    {
+        auto* dev = currentDevice;
         auto* o = ev ("device");
-        o->setProperty ("name", device->getName());
+        o->setProperty ("name", dev != nullptr ? dev->getName() : String());
         o->setProperty ("sr", deviceSampleRate);
-        o->setProperty ("block", block);
+        o->setProperty ("block", blockSize);
         o->setProperty ("in", numInputChans);
         o->setProperty ("out", numOutputChans);
         o->setProperty ("roundtripMs", (inLatSamp + outLatSamp) / deviceSampleRate * 1000.0);
         o->setProperty ("stemSr", stemSampleRate);
         o->setProperty ("srMismatch", ! approximatelyEqual (stemSampleRate, deviceSampleRate));
+        // 콜백의 inputs[] 는 '활성' 입력만 순서대로 담기므로 이름도 같은 기준으로 추린다
+        Array<var> inNames;
+        if (dev != nullptr)
+        {
+            const auto names  = dev->getInputChannelNames();
+            const auto active = dev->getActiveInputChannels();
+            for (int i = 0; i < names.size(); ++i)
+                if (active[i]) inNames.add (names[i]);
+        }
+        o->setProperty ("inNames", var (inNames));
+        o->setProperty ("inMode", inMode.load());
+        o->setProperty ("inChL", inChL.load());
+        o->setProperty ("inChR", inChR.load());
         emit (var (o));
     }
 
@@ -1264,6 +1419,58 @@ public:
         currentDevice = nullptr;
     }
 
+    // 선택한 하드웨어 입력을 L/R 포인터로 뽑는다. 모노면 같은 채널을 양쪽에 물려
+    // 가운데서 들리게 하고, 범위를 벗어난 번호는 있는 채널로 클램프한다.
+    // 모니터·미터·튜너·녹음이 전부 이걸 거치므로 네 경로가 항상 같은 소스를 본다.
+    void pickInputs (const float* const* inputs, int numIn, const float*& L, const float*& R) const
+    {
+        if (numIn <= 0 || inputs == nullptr) { L = R = nullptr; return; }
+        const int a = jlimit (0, numIn - 1, inChL.load());
+        L = inputs[a];
+        R = (inMode.load() == 1) ? inputs[jlimit (0, numIn - 1, inChR.load())] : inputs[a];
+    }
+    int recordChannels() const { return inMode.load() == 1 ? 2 : 1; }
+
+    // 포스페이더 센드 — 페이더·팬이 반영된 트랙 출력을 센드량만큼 버스에 더한다.
+    // 센드가 0 이고 직전에도 0 이면 아무것도 하지 않는다(램프가 끝난 상태라 더할 게 없음).
+    template <typename Trk>
+    void tapSends (Trk& trk, const float* srcL, const float* srcR, int n, float tgtL, float tgtR)
+    {
+        for (int b = 0; b < kNumBuses; ++b)
+        {
+            const float sv = trk.send[b].load();
+            const float bL = tgtL * sv, bR = tgtR * sv;
+            if (bL != 0.0f || bR != 0.0f || trk.curSendL[b] != 0.0f || trk.curSendR[b] != 0.0f)
+            {
+                addRamped (buses[b].buf.getWritePointer (0), srcL, n, trk.curSendL[b], bL);
+                addRamped (buses[b].buf.getWritePointer (1), srcR, n, trk.curSendR[b], bR);
+            }
+            trk.curSendL[b] = bL; trk.curSendR[b] = bR;
+        }
+    }
+
+    // 버스 → FX → 게인 → 마스터 합류. 마스터 게인·디클릭 전에 불러야 한다.
+    void mixBusesInto (float* const* outputs, int numOut, int numSamples)
+    {
+        for (auto& b : buses)
+        {
+            {
+                const ScopedTryLock fl (b.fxLock);
+                if (fl.isLocked())
+                    for (auto& s : b.chain)
+                        if (s && s->plugin && ! s->bypass.load()) { MidiBuffer mm; s->plugin->processBlock (b.buf, mm); }
+            }
+            const float tgt = b.mute.load() ? 0.0f : b.gain.load();
+            const float* bL = b.buf.getReadPointer (0);
+            const float* bR = b.buf.getReadPointer (jmin (1, b.buf.getNumChannels() - 1));
+            if (numOut >= 2) { addRamped (outputs[0], bL, numSamples, b.curGain, tgt); addRamped (outputs[1], bR, numSamples, b.curGain, tgt); }
+            else if (numOut > 0) addRamped (outputs[0], bL, numSamples, b.curGain, tgt);
+            updatePeak (b.pkL, blockPeak (bL, numSamples, b.curGain, tgt));
+            updatePeak (b.pkR, blockPeak (bR, numSamples, b.curGain, tgt));
+            b.curGain = tgt;
+        }
+    }
+
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numIn,
                                            float* const* outputs, int numOut,
                                            int numSamples,
@@ -1271,6 +1478,9 @@ public:
     {
         for (int c = 0; c < numOut; ++c)
             FloatVectorOperations::clear (outputs[c], numSamples);
+
+        // 센드 버스 — 이번 블록에 모을 자리를 비운다. setSize 는 이미 충분하면 재할당하지 않는다.
+        for (auto& b : buses) { b.buf.setSize (2, numSamples, false, false, true); b.buf.clear(); }
 
         const int64 phStart = playhead.load();
 
@@ -1327,6 +1537,7 @@ public:
                     addRamped (outputs[0], srcL, numSamples, s->curGainL, tgtL);
                 updatePeak (s->pkL, blockPeak (srcL, numSamples, s->curGainL, tgtL));
                 updatePeak (s->pkR, blockPeak (srcR, numSamples, s->curGainR, tgtR));
+                tapSends (*s, srcL, srcR, numSamples, tgtL, tgtR);
                 s->curGainL = tgtL; s->curGainR = tgtR;
             }
             playhead.fetch_add (numSamples);
@@ -1335,14 +1546,26 @@ public:
         // 레벨/튜너 분석 (원본 입력 — 모니터/트랙 무관하게 항상)
         if (numIn > 0)
         {
-            float pk = 0;
-            for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[0][i]); if (a > pk) pk = a; }
-            if (pk > inPeak.load()) inPeak.store (pk);
-            const SpinLock::ScopedTryLockType sl (pitchLock);
-            if (sl.isLocked())
+            // 채널별 피크 — 선택과 무관하게 전 채널을 잰다(설정 창에서 신호 유무 확인용)
+            for (int c = 0; c < jmin (numIn, kMaxInMeters); ++c)
             {
-                const int R = (int) pitchRing.size();
-                for (int i = 0; i < numSamples; ++i) { pitchRing[pitchW] = inputs[0][i]; pitchW = (pitchW + 1) % R; }
+                float p = 0;
+                for (int i = 0; i < numSamples; ++i) { const float a = std::abs (inputs[c][i]); if (a > p) p = a; }
+                updatePeak (inChPk[c], p);
+            }
+            // inputs[0] 고정이 아니라 선택한 입력을 본다 — 악기를 2번 단자에 꽂아도 튜너가 반응한다
+            const float *mL, *mR; pickInputs (inputs, numIn, mL, mR);
+            if (mL != nullptr)
+            {
+                float pk = 0;
+                for (int i = 0; i < numSamples; ++i) { const float a = std::abs (mL[i]); if (a > pk) pk = a; }
+                if (pk > inPeak.load()) inPeak.store (pk);
+                const SpinLock::ScopedTryLockType sl (pitchLock);
+                if (sl.isLocked())
+                {
+                    const int R = (int) pitchRing.size();
+                    for (int i = 0; i < numSamples; ++i) { pitchRing[pitchW] = mL[i]; pitchW = (pitchW + 1) % R; }
+                }
             }
         }
 
@@ -1394,8 +1617,14 @@ public:
                         }
 
                     if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
-                        for (int c = 0; c < fxBuf.getNumChannels(); ++c)
-                            fxBuf.addFrom (c, 0, inputs[jmin (c, numIn - 1)], numSamples);
+                    {
+                        const float *iL, *iR; pickInputs (inputs, numIn, iL, iR);
+                        if (iL != nullptr)
+                        {
+                            fxBuf.addFrom (0, 0, iL, numSamples);
+                            if (fxBuf.getNumChannels() > 1) fxBuf.addFrom (1, 0, iR, numSamples);
+                        }
+                    }
 
                     // 이 트랙의 독립 FX 체인 적용
                     {
@@ -1426,6 +1655,7 @@ public:
                         addRamped (outputs[0], rtL, numSamples, rt->curGainL, tgtL);
                     updatePeak (rt->pkL, blockPeak (rtL, numSamples, rt->curGainL, tgtL));
                     updatePeak (rt->pkR, blockPeak (rtR, numSamples, rt->curGainR, tgtR));
+                    tapSends (*rt, rtL, rtR, numSamples, tgtL, tgtR);
                     rt->curGainL = tgtL; rt->curGainR = tgtR;
                 }
             }
@@ -1457,6 +1687,9 @@ public:
                 }
             }
         }
+
+        // 센드 버스 합류 — 마스터 게인 이전이라 버스도 마스터 페이더의 영향을 받는다.
+        mixBusesInto (outputs, numOut, numSamples);
 
         // 마스터 볼륨 (램프) + 안전 클리퍼 (다트랙 합산 클리핑/왜곡 방지)
         const float master = masterGain.load();
@@ -1512,11 +1745,16 @@ public:
             if (recordedStart.load() < 0 && playing.load())
                 recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart). playhead 는 이미 +numSamples 됨
 
-            // writer 가 기대하는 채널 수보다 입력이 적으면 범위 밖을 읽어 잡음이 섞인다 → 방어
-            if (recordedStart.load() >= 0 && numIn >= writerChans)
+            // 장치 입력을 통째로 넘기지 않고 선택한 채널만 기록한다.
+            // (예전엔 2in 인터페이스에서 안 쓰는 2번 채널까지 들어가 한쪽이 무음인 파일이 나왔다)
+            if (recordedStart.load() >= 0 && numIn > 0)
                 if (auto* w = activeWriter.load())
-                    if (! w->write (inputs, numSamples))
+                {
+                    const float *iL, *iR; pickInputs (inputs, numIn, iL, iR);
+                    const float* chans[2] = { iL, iR };
+                    if (iL != nullptr && ! w->write (chans, numSamples))
                         ++recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
+                }
         }
     }
 
@@ -1574,6 +1812,17 @@ private:
     int numInputChans = 0, numOutputChans = 0, blockSize = 512;
     int64 inLatSamp = 0, outLatSamp = 0;
 
+    // ── 입력 구성 ─────────────────────────────────────────────
+    // 어떤 하드웨어 입력을, 모노/스테레오 중 무엇으로 받을지.
+    // 기본이 모노 1번인 이유: 악기·마이크는 대개 단자 하나만 쓴다. 예전처럼 장치의
+    // 0/1 번을 그대로 L/R 에 꽂으면 2in 인터페이스에서 한쪽만 소리가 난다.
+    std::atomic<int> inMode { 0 };   // 0 = mono, 1 = stereo
+    std::atomic<int> inChL  { 0 };   // mono 소스 / stereo L (0-based)
+    std::atomic<int> inChR  { 1 };   // stereo R
+    // 하드웨어 입력 채널별 피크 — 설정 창에서 어느 단자에 신호가 들어오는지 보여준다
+    static constexpr int kMaxInMeters = 16;
+    std::atomic<float> inChPk[kMaxInMeters] {};
+
     // VST FX (스캔 목록은 전역, 체인은 트랙별 RecTrack 에 보관)
     AudioPluginFormatManager pluginFmt;
     Array<PluginDescription> scanned;
@@ -1581,6 +1830,7 @@ private:
     AudioBuffer<float> fxBuf;  // 트랙별 처리용 스크래치
     AudioBuffer<float> stemFxBuf;// 스템 FX 처리용 스크래치
     AudioBuffer<float> clipTmp;// 페이드 적용용 클립 스크래치
+    Bus buses[kNumBuses];      // 센드 버스 A/B (개수 고정 — 오디오 스레드가 목록 락 없이 참조)
 
     std::atomic<bool>  playing { false };
     std::atomic<int64> playhead { 0 };
@@ -1652,7 +1902,8 @@ public:
             emit (var (o));
         }
         // 입력 레벨 (매 틱)
-        { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel()); emit (var (o)); }
+        { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel());
+          o->setProperty ("chans", var (engine.inputChannelLevels())); emit (var (o)); }
         // 트랙 미터 — 재생 중 or 모니터링 중 + 2틱=10Hz. JSON 스팸이 pos 이벤트 정체시켜 영상 싱크 반복 스냅 방지
         if ((engine.isPlaying() || engine.isMonitorOn()) && (tick % 2 == 0))
         {
@@ -1701,15 +1952,17 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "recTrackAdd") engine.addRecTrack ((int) c["type"]);
     else if (cmd == "recTrackRemove") engine.removeRecTrack ((int) c["id"]);
     else if (cmd == "recArm")      engine.armRec ((int) c["id"]);
-    else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"], c["pan"]);
+    else if (cmd == "recTrack")    engine.setRecTrack ((int) c["id"], c["gain"], c["mute"], c["solo"], c["pan"], c["sends"]);
     else if (cmd == "recTracks")   engine.emitRecTracks();
     else if (cmd == "recTracksReset") engine.setRecTracks (c["tracks"], (int) c["gen"]);
-    else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"], c["pan"]);
+    else if (cmd == "track")       engine.setTrack ((int) c["index"], c["gain"], c["mute"], c["solo"], c["pan"], c["sends"]);
+    else if (cmd == "bus")         engine.setBus ((int) c["index"], c["gain"], c["mute"], c["name"]);
     else if (cmd == "automation")  engine.setAutomation ((int) c["track"], c["points"], c["on"]);
     else if (cmd == "pdc")         engine.setPdcEnabled ((bool) c["on"]);
     else if (cmd == "master")      engine.setMaster ((float) (double) c["gain"]);
     else if (cmd == "monitor")     engine.setMonitor ((float) (double) c["gain"]);
     else if (cmd == "inputMonitor") engine.setInputMonitor ((bool) c["on"]);
+    else if (cmd == "inputConfig") engine.setInputConfig (c["mode"], c["chL"], c["chR"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
