@@ -3085,6 +3085,15 @@ body { background: var(--bg) !important; }
    로고를 눌러 들어오는 읽기 전용 화면.
    왼쪽 사이드바(구역 이동 + 버전 카드) · 가운데 본문 · 아래 푸터.
    ────────────────────────────────────────────────────────────*/
+
+/* button·input 은 문서 글꼴을 물려받지 않고 UA 기본을 쓴다. 이 앱은 규칙마다 글꼴을
+   따로 적어 왔는데, 홈은 버튼이 많아 하나씩 적으면 빠뜨리기 쉽다. 화면 단위로 한 번 되돌린다.
+   글꼴을 일부러 바꾼 곳(시각 표시의 mono 등)은 자기 규칙에서 다시 지정하므로 영향받지 않는다. */
+[data-view="home"] button,
+[data-view="home"] input,
+[data-view="home"] select,
+[data-view="home"] textarea { font-family: inherit; }
+
 .home-body {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
