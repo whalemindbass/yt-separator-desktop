@@ -34,19 +34,24 @@ export const DEFAULTS = {
   transMaxMs: 110,      // 경유음으로 볼 최대 길이
   transGapMs: 170,      // 다음 음까지의 간격
   transLongerX: 2.0,    // 다음 음이 이 배 이상 길면 목표음으로 본다
-  // 테크닉 — 어택 없이 음정만 바뀌면 왼손으로 낸 소리다.
+  // 슬라이드 — 손가락이 훑고 간 자리는 두 음 사이 음정에 남는다.
   techniques: true,     // 끄면 기호도, 같은 현 제약도 없다
   techMaxSemi: 12,      // 이보다 먼 도약은 검출 오류로 본다
   techMaxGapMs: 140,    // 앞 음이 끝나고 다음 음이 시작하기까지
   techMinVoiced: 0.8,   // 그 사이가 이만큼 이어져 울려야 한 번에 낸 소리다
   slideMinFrames: 2,    // 두 음 사이를 지나가는 중간 음정 프레임 수
-  hammerMaxSemi: 5,     // 손가락이 닿는 범위
-  hammerLoudMax: 0.85,  // 해머·풀은 앞 음보다 작게 난다 — 그 비율 상한
   slideStepMaxMs: 140,  // 슬라이드 도중 잠깐 걸린 음의 최대 길이
+  stepMaxSemi: 5,       // 중간 음정 없이 건너뛴 한 단계로 볼 최대 간격
+  stepLoudMax: 0.85,    // 그 단계가 앞 음보다 이 비율 아래로 작아야 한다
+  // 슬라이드로 이어진 음을 같은 현에 두려는 힘. 기본은 0 — 운지에 관여하지 않는다.
+  //   3.0 으로 밀면 기호가 26개까지 늘지만 580음 중 135음의 현이 바뀌었다. 즉 기호 14개를
+  //   얻으려고 운지를 지어낸 셈이고, 중간값(1~2)은 12프렛 이상 음이 기준보다도 늘어 더 나빴다.
+  //   0 이면 원래 고를 운지가 마침 같은 현인 슬라이드 12개만 남고 배치는 전혀 흔들리지 않는다.
+  sameStringPenalty: 0,
 };
 
 /** TAB 에 찍는 기호 */
-export const TECH_GLYPH = { slideUp: '/', slideDown: '\\', hammer: 'h', pull: 'p' };
+export const TECH_GLYPH = { slideUp: '/', slideDown: '\\' };
 
 /** [1,3,3,1]/8 저역통과 후 2배 데시메이션 */
 function decimate2(src) {
@@ -277,18 +282,17 @@ function dropGhosts(notes, opts) {
 }
 
 /**
- * 슬라이드·해머온·풀오프 찾기.
+ * 슬라이드 찾기.
  *
- * 근거는 하나다 — **어택 없이 음정만 바뀌면 왼손이 낸 소리다.** 오른손으로 다시 뜯었으면
- * 에너지가 솟아 온셋으로 잡힌다. 둘을 가르는 것은 그 사이의 음정 경로다.
- *   중간 음정을 밟고 지나가면 슬라이드, 곧바로 건너뛰면 해머온(위)·풀오프(아래).
+ * 근거는 **두 음 사이에 중간 음정이 실제로 찍혔는가** 다. 손가락이 지판을 훑고 가면
+ * 그 경로가 피치에 남는다. 다시 뜯은 음은 그 사이가 비어 있다.
  *
- * 분리 스템은 어택이 뭉개져 있어 온셋 임계값에 걸리는 경계가 무르다. 그래서
- * "사이가 끊기지 않고 계속 울렸는지"(techMinVoiced)를 같이 본다 — 다시 뜯은 음은
- * 앞 음이 먼저 사그라들기 때문이다.
+ * 해머온·풀오프도 한때 같이 찾았지만 뺐다. 그쪽 근거는 "어택이 없다"는 부재뿐인데,
+ * 분리 스템은 온셋이 전체 음의 24% 에서만 잡혀 그 부재가 아무것도 말해주지 않는다.
+ * 세기 조건을 더해도 결과가 미덥지 않아 노트 자리만 흔들었다.
  *
  * @param {Array} notes
- * @param {{midis:Float64Array, onsets:Uint8Array, hopSec:number}} ctx 프레임 단위 원자료
+ * @param {{midis:Float64Array, onsets:Uint8Array, rmss:Float64Array, hopSec:number}} ctx 프레임 단위 원자료
  */
 function detectTechniques(notes, ctx, opts) {
   const { midis, onsets, rmss, hopSec } = ctx;
@@ -334,26 +338,25 @@ function detectTechniques(notes, ctx, opts) {
       b.tech = d > 0 ? 'slideUp' : 'slideDown';         // 중간 음정을 밟고 갔다
       continue;
     }
-    if (ad > opts.hammerMaxSemi) continue;
-    // 해머·풀은 "온셋이 없다"는 부재의 증거뿐이라 약하다. 분리 스템은 어택이 뭉개져
-    // 온셋을 놓치기도 한다. 그래서 세기를 하나 더 본다 — 왼손으로 낸 소리는
-    // 방금 뜯은 앞 음보다 작다. 더 크면 오른손이 다시 뜯은 것으로 본다.
-    if (attackRms(b, 40) > attackRms(a, 40) * opts.hammerLoudMax) continue;
-    b.tech = d > 0 ? 'hammer' : 'pull';
+    // 중간 음정을 밟지 않은 한 단계 이동. 이것만으로는 기호를 달지 않는다 —
+    // 천천히 미끄러질 때 이런 단계가 같은 방향으로 줄줄이 이어지고, 그때만 아래에서 합친다.
+    if (ad <= opts.stepMaxSemi && attackRms(b, 40) <= attackRms(a, 40) * opts.stepLoudMax) {
+      b.step = d > 0 ? 1 : -1;
+    }
   }
 
   // 천천히 미끄러지면 중간 음정이 한 음으로 잡힐 만큼 오래 머문다. 그러면 위에서
-  // 짧은 해머가 여러 번 이어진 것처럼 보인다 — 같은 방향으로 연달아 붙었고
-  // 중간 음이 짧으면 하나의 슬라이드로 합친다.
+  // 짧은 단계가 여러 번 이어진 것처럼 보인다 — 같은 방향으로 연달아 붙었고
+  // 중간 음이 짧으면 하나의 슬라이드로 합친다. 단계가 하나뿐이면 기호를 달지 않는다.
   const keep = new Array(out.length).fill(true);
   for (let i = 1; i < out.length; i++) {
-    const dir = out[i].tech === 'hammer' ? 1 : out[i].tech === 'pull' ? -1 : 0;
+    const dir = out[i].step || 0;
     if (!dir) continue;
     let j = i;
     while (j + 1 < out.length
-           && out[j + 1].tech === out[i].tech
+           && out[j + 1].step === dir
            && out[j].dur * 1000 <= opts.slideStepMaxMs) j++;
-    if (j === i) continue;                             // 한 단계뿐이면 그냥 해머·풀
+    if (j === i) continue;
     for (let k = i; k < j; k++) keep[k] = false;       // 중간 경유음은 지운다
     const end = out[j].start + out[j].dur;
     out[j].tech = dir > 0 ? 'slideUp' : 'slideDown';
@@ -361,14 +364,16 @@ function detectTechniques(notes, ctx, opts) {
     out[j].dur = Math.max(0.05, end - out[j].start);
     i = j;
   }
-  return out.filter((_, i) => keep[i]);
+  const res = out.filter((_, i) => keep[i]);
+  for (const n of res) delete n.step;
+  return res;
 }
 
 /**
  * 지판 배치. 각 노트마다 (현, 프렛) 후보를 만들고 DP 로 손 이동이 적은 경로를 고른다.
  * 그리디로 하면 한 번 잘못 든 자리가 끝까지 따라온다.
  */
-export function assignFrets(notes, tuningId, maxFret) {
+export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
   const tuning = TUNINGS[tuningId] || TUNINGS[DEFAULTS.tuning];
   const open = tuning.strings;                      // 낮은 현 → 높은 현
   const cands = notes.map(n => {
@@ -398,9 +403,9 @@ export function assignFrets(notes, tuningId, maxFret) {
   const LOW_STRING  = 0.18;
   const HIGH_FRET   = 19;    // 이 위는 실제로 드물다
   const HIGH_PEN    = 1.2;
-  // 슬라이드·해머·풀은 한 현 위에서만 성립한다. 금지가 아니라 큰 벌점으로 둔다 —
+  // 슬라이드는 한 현 위에서만 성립한다. 금지가 아니라 벌점으로 둔다 —
   // 검출이 틀렸을 때 경로 자체가 막히면 그 구간 전체가 풀리지 않는다.
-  const SAME_STRING = 3.0;
+  const SAME_STRING = sameStringPenalty != null ? sameStringPenalty : DEFAULTS.sameStringPenalty;
 
   const linked = notes.map(n => !!n.tech);
 
@@ -467,18 +472,13 @@ export function assignFrets(notes, tuningId, maxFret) {
   const placed = notes.map((n, k) => ({ ...n, string: out[k] ? out[k].string : null, fret: out[k] ? out[k].fret : null }));
 
   // 배치가 끝나야 그 기호를 실제로 연주할 수 있는지 알 수 있다. 못 하는 것은 지운다.
-  //   · 같은 현 위가 아니면 어느 것도 성립하지 않는다
-  //   · 슬라이드는 양쪽 다 짚은 음이어야 한다 — 개방현은 미끄러뜨릴 손가락이 없다
-  //   · 해머온은 짚어서 내는 소리라 목표가 개방현일 수 없다
-  //   · 풀오프는 짚은 음에서 손가락을 떼는 것이라 출발이 개방현일 수 없다 (개방현으로 떼는 것은 정상)
+  //   · 같은 현 위가 아니면 미끄러질 수 없다
+  //   · 양쪽 다 짚은 음이어야 한다 — 개방현은 미끄러뜨릴 손가락이 없다
   for (let i = 0; i < placed.length; i++) {
     const n = placed[i], p = placed[i - 1];
     if (!n.tech) continue;
-    const bad = !p || n.string == null || p.string == null || n.string !== p.string
-      || ((n.tech === 'slideUp' || n.tech === 'slideDown') && (n.fret === 0 || p.fret === 0))
-      || (n.tech === 'hammer' && n.fret === 0)
-      || (n.tech === 'pull' && p.fret === 0);
-    if (bad) delete n.tech;
+    if (!p || n.string == null || p.string == null || n.string !== p.string
+        || n.fret === 0 || p.fret === 0) delete n.tech;
   }
   return placed;
 }
@@ -549,7 +549,7 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   if (opts.techniques) notes = detectTechniques(notes, { midis: smooth, onsets, rmss, hopSec }, opts);
   // 박 정보가 있으면 격자에 붙인다 (드럼 스템에서 얻는다)
   if (opts.beats && opts.beats.length > 1) notes = quantizeToGrid(notes, opts.beats, opts.subdiv || 4);
-  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret);
+  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret, opts.sameStringPenalty);
 
   if (onProgress) onProgress(100);
   return { notes: withFrets, tuning: opts.tuning, sampleRate: sr, hopSec };
