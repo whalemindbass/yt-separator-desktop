@@ -8,7 +8,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, onLocaleChange } from './i18n.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
-import { buildScore, beatAccents } from '../workers/tab-score.js';
+import { buildScore, beatAccents, estimateKey } from '../workers/tab-score.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -1141,9 +1141,13 @@ async function runStudioTab() {
     _tabAccent = beats && drumsMono ? beatAccents(drumsMono, drumsSr, beats) : null;
     _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent }) : null);
     updateTabBarButtons();
+    // 조성 — 표기(F#/Gb)에 쓴다. 정확도에는 쓰지 않는다: 실측에서 조 밖 음 15개는
+    // 하나도 틀리지 않았고, 오검출 41개는 전부 조 안이었다(옥타브 오류는 정의상 조 안이다).
+    const key = estimateKey(r.notes);
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? tr('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
-      : tr('tab.done', { n: r.notes.length });
+      : (key ? tr('tab.doneKey', { n: r.notes.length, key: key.name })
+             : tr('tab.done', { n: r.notes.length }));
     if (run) run.textContent = tr('tab.rerun');
   } catch (e) {
     if (status) { status.textContent = tr('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }

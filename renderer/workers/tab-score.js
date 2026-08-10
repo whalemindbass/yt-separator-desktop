@@ -191,6 +191,74 @@ export function buildScore(notes, beats, opts = {}) {
   return { bars, beatsPerBar, subdiv, phase };
 }
 
+// ── 조성 ────────────────────────────────────────────────────
+// Krumhansl-Schmuckler 프로파일. 사람이 각 음을 그 조에서 얼마나 "중심"으로 듣는지를
+// 실험으로 잰 값이라, 음 길이 히스토그램과 상관을 재면 조가 나온다.
+const PROFILE_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+const PROFILE_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+
+const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLAT_NAMES  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+/** 플랫으로 적는 조 (으뜸음 pc, 장/단) */
+const FLAT_KEYS = new Set(['5:major', '10:major', '3:major', '8:major', '1:major', '6:major',
+                           '2:minor', '7:minor', '0:minor', '5:minor', '10:minor', '3:minor']);
+
+function correlate(a, b) {
+  const n = a.length;
+  let ma = 0, mb = 0;
+  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+  ma /= n; mb /= n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i] - ma, y = b[i] - mb;
+    num += x * y; da += x * x; db += y * y;
+  }
+  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
+}
+
+/**
+ * 조를 추정한다. 음 길이로 가중한 음정 히스토그램을 24개 조 프로파일과 견준다.
+ *
+ * 베이스만으로 조를 정하는 것은 원래 불리하다 — 3음·7음을 잘 안 치기 때문에 장·단 구분이
+ * 약하다. 그래서 확신도(1위와 2위의 상관 차)를 같이 돌려주고, 쓰는 쪽에서 판단하게 한다.
+ *
+ * @returns {{tonic:number, mode:'major'|'minor', name:string, confidence:number, scale:number[]}|null}
+ */
+export function estimateKey(notes) {
+  if (!notes || !notes.length) return null;
+  const hist = new Array(12).fill(0);
+  for (const n of notes) {
+    if (n.midi == null) continue;
+    hist[((n.midi % 12) + 12) % 12] += Math.min(n.dur || 0.1, 2);
+  }
+  if (!hist.some(v => v > 0)) return null;
+
+  const scored = [];
+  for (let t = 0; t < 12; t++) {
+    for (const [mode, prof] of [['major', PROFILE_MAJOR], ['minor', PROFILE_MINOR]]) {
+      const rot = prof.map((_, i) => prof[(i - t + 12) % 12]);
+      scored.push({ tonic: t, mode, r: correlate(hist, rot) });
+    }
+  }
+  scored.sort((a, b) => b.r - a.r);
+  const best = scored[0];
+  const names = FLAT_KEYS.has(`${best.tonic}:${best.mode}`) ? FLAT_NAMES : SHARP_NAMES;
+  const steps = best.mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
+  return {
+    tonic: best.tonic,
+    mode: best.mode,
+    name: `${names[best.tonic]} ${best.mode === 'major' ? 'Major' : 'minor'}`,
+    confidence: Math.max(0, best.r - scored[1].r),
+    scale: steps.map(s => (best.tonic + s) % 12),
+  };
+}
+
+/** 조에 맞춰 음이름을 적는다 — 같은 건반도 조에 따라 F# 이거나 Gb 다. */
+export function noteNameInKey(midi, key) {
+  const names = key && FLAT_KEYS.has(`${key.tonic}:${key.mode}`) ? FLAT_NAMES : SHARP_NAMES;
+  return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
+}
+
 /** 박 번호 → 시각. 배열 밖은 마지막 간격으로 연장한다. */
 function beatAt(beats, idx) {
   const n = beats.length;
