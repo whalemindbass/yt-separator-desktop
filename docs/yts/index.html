@@ -222,9 +222,10 @@ $('login').addEventListener('click', async () => {
     });
     let d = null;
     try { d = await res.json(); } catch {}
+    // 서버가 이유를 말해 주면 그대로 보여준다 — 여기서 다시 지어내면 틀린 안내가 된다
     if (!res.ok || !d || !d.token) {
-      throw new Error(res.status === 401 ? '아이디나 비밀번호가 맞지 않습니다.'
-                    : (d && d.error) || ('HTTP ' + res.status));
+      throw new Error((d && d.error)
+                   || (res.status === 401 ? '아이디나 비밀번호가 맞지 않습니다.' : 'HTTP ' + res.status));
     }
     sessionStorage.setItem(KEY, d.token);
     $('password').value = '';
