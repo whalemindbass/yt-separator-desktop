@@ -1131,9 +1131,45 @@ body { display: flex; flex-direction: column; }
 .player-name:focus + .player-name-edit-icon + .player-name-hint { opacity: 1; }
 
 /* Local file row */
-.local-row {
-  display: flex; align-items: center; gap: 12px;
-  margin-top: 12px;
+/* 분리할 대상 고르기 — 링크 / 내 파일. 첫 화면에서 제일 먼저 정해야 하는 것이라
+   다른 무엇보다 크게 두고, 고른 쪽만 아래에 필요한 입력을 펼친다. */
+.src-choice {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  margin: 18px 0 16px;
+}
+.src-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 20px 20px 18px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.src-card:hover { border-color: var(--accent-soft-border); background: var(--elev); }
+.src-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.src-card.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.src-ico {
+  display: grid; place-items: center;
+  width: 42px; height: 42px; border-radius: 10px;
+  margin-bottom: 8px;
+  background: var(--elev);
+  border: 1px solid var(--border-mid);
+  color: var(--tx-2);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.src-card.on .src-ico { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.src-ico svg { width: 21px; height: 21px; }
+.src-card b { font-size: 16.5px; font-weight: 700; color: var(--tx-1); letter-spacing: -.015em; }
+.src-sub { font-size: 12.5px; color: var(--tx-3); line-height: 1.5; }
+
+/* 좁은 창에서는 위아래로 */
+@media (max-width: 620px) {
+  .src-choice { grid-template-columns: 1fr; }
 }
 
 /* ── mixer-inline-row: 오디오/속도/구간반복/키 4개 블록 ─────────────

@@ -592,8 +592,25 @@ $('reset-btn').addEventListener('click', async () => {
   resetSeparateView(true); urlInput.focus();
 });
 
+// ── 분리할 대상 고르기 (링크 / 내 파일) ─────────
+// 고른 쪽에 필요한 것만 남긴다 — 내 파일은 이미 손에 있으니 주소 칸도, 받아올 화질도 쓸 데가 없다.
+const srcLink = $('src-link'), srcFile = $('src-file');
+const linkRow = $('link-row'), qualityRow = $('quality-row');
+function setSource(mode) {
+  const isLink = mode === 'link';
+  srcLink.classList.toggle('on', isLink);
+  srcFile.classList.toggle('on', !isLink);
+  srcLink.setAttribute('aria-pressed', String(isLink));
+  srcFile.setAttribute('aria-pressed', String(!isLink));
+  linkRow.hidden = !isLink;
+  qualityRow.hidden = !isLink;
+}
+srcLink.addEventListener('click', () => { setSource('link'); urlInput.focus(); });
+setSource('link');
+
 // ── 로컬 파일로 분리 ─────────────────────────────
-$('local-btn').addEventListener('click', async () => {
+srcFile.addEventListener('click', async () => {
+  setSource('file');
   const res = await api.dialog.pickMedia();
   if (!res.ok) return;
   const filePath = res.filePath;
