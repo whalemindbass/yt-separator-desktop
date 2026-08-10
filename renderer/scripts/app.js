@@ -664,6 +664,9 @@ const YT_RE = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|
 let lastClipboardSeen = '';
 
 async function tryPasteFromClipboard() {
+  // 내 파일 분리 중이면 손대지 않는다 — 주소 칸이 접혀 있는데 클립보드 링크를 물어와
+  // 미리보기 블록이 혼자 튀어나오던 문제. 사용자가 고른 입력 방식을 뒤집으면 안 된다.
+  if (srcMode !== 'link') return;
   // 다운로드/분리 진행 중이면 방해 X
   if (urlInput.disabled) return;
   // 이미 입력창에 뭔가 있으면 방해 X
