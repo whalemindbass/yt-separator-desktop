@@ -2093,6 +2093,27 @@ function setClipState(id, st) {
   api.engine.takeFade(tk.id, Math.round(tk.fadeIn * sr), Math.round(tk.fadeOut * sr));
   renderTakes(); layout();
 }
+/**
+ * 장치 샘플레이트가 바뀌었을 때 엔진 쪽을 다시 맞춘다.
+ *
+ * 엔진이 들고 있는 값은 전부 샘플 단위라 장치가 다시 열리면 옛 레이트 기준으로 남는다.
+ * 스템은 장치가 열릴 때 엔진이 스스로 다시 잡지만, 녹음 클립은 그때의 레이트로 변환해 둔
+ * 버퍼와 위치를 그대로 쥐고 있어 속도도 자리도 어긋난다. 이쪽은 초로 들고 있으니 기준이 된다.
+ */
+function repushForSampleRate() {
+  const sr = _sr || 44100;
+  if (_stemPaths) api.engine.stemOffset(Math.round(_stemOffset * sr));
+  if (_takes.length) {
+    api.engine.takeClear();                 // 새 레이트로 파일을 다시 읽게 한다
+    for (const tk of _takes) {
+      api.engine.takeLoad(tk.file, Math.round(tk.start * sr), tk.trackId, tk.id);
+      api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round((tk.inOff || 0) * sr), Math.round(tk.dur * sr));
+      api.engine.takeFade(tk.id, Math.round((tk.fadeIn || 0) * sr), Math.round((tk.fadeOut || 0) * sr));
+    }
+  }
+  api.engine.seek(Math.round((_lastSec || 0) * sr));   // 재생 위치도 시간 기준으로 다시
+}
+
 function reAddClip(tkObj) {   // 삭제/분할 취소용 — 보관한 take 객체를 엔진·렌더러에 복구
   const sr = _sr || 44100;
   if (!_takes.some(t => t.id === tkObj.id)) _takes.push(tkObj);
@@ -2355,6 +2376,7 @@ function onEngineEvent(m) {
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
       break;
     case 'device': {
+      const prevSr = _sr;
       _sr = m.sr || 44100;
       // srMismatch 는 더 이상 경고가 아니다 — 엔진이 스템을 장치 레이트로 맞춰 읽는다.
       // 사용자가 할 일이 없으므로 화면에는 띄우지 않고, 제보에 실리도록 진단에만 남긴다.
@@ -2368,6 +2390,8 @@ function onEngineEvent(m) {
       const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
       if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
       setEngineStatus('device', { name: m.name, ms: m.roundtripMs });
+      // 레이트가 실제로 달라졌을 때만 — 같은 값으로 다시 열리는 경우가 잦다
+      if (prevSr && _sr !== prevSr) repushForSampleRate();
       break;
     }
     case 'fxError':
