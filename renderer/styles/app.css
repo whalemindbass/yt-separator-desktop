@@ -235,8 +235,10 @@ body { display: flex; flex-direction: column; }
 .brand {
   display: flex; align-items: center; gap: 12px;
   -webkit-app-region: no-drag;
-  background: none; border: 0; padding: 0 6px 0 0; margin: 0;
-  border-radius: 8px; cursor: pointer;
+  background: none; border: 0;
+  /* 음수 margin 으로 상쇄해 글자 위치는 그대로 두고 호버 배경이 앉을 자리만 만든다 */
+  padding: 5px 10px; margin: 0 0 0 -8px;
+  border-radius: 9px; cursor: pointer;
   transition: background var(--dur-1) var(--ease);
   /* button 은 UA 기본으로 buttontext(검정)와 제 글꼴을 갖는다. div 였을 때 문서에서
      물려받던 제목이 그 검정을 상속해 테마와 무관하게 굳었다. 문서 쪽 값으로 되돌린다. */
@@ -244,8 +246,14 @@ body { display: flex; flex-direction: column; }
   font: inherit;
 }
 .brand:hover { background: var(--elev); }
+/* 누를 수 있다는 신호를 배경 하나에만 걸면 밝은 테마에서 거의 안 보인다 */
+.brand .logo, .brand .titles h1 { transition: transform var(--dur-1) var(--ease), color var(--dur-1) var(--ease); }
+.brand:hover .logo { transform: scale(1.06); }
+.brand:hover .titles h1 { color: var(--accent); }
+.brand:active { transform: scale(.985); }
 .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .brand.on { background: var(--accent-soft); }
+.brand.on .titles h1 { color: var(--accent); }
 .tabs, .titlebar-drag { -webkit-app-region: drag; }
 .tab, .titlebar-meta, .titlebar-controls { -webkit-app-region: no-drag; }
 
@@ -3260,12 +3268,19 @@ body { background: var(--bg) !important; }
 
 .board-list { display: flex; flex-direction: column; }
 .board-row {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 13px 6px; cursor: pointer; text-align: left;
-  background: transparent; border: 0; border-top: 1px solid var(--border);
+  width: 100%; padding: 13px 10px; cursor: pointer; text-align: left;
+  background: transparent; border: 0;
+  /* 좌우 여백보다 작은 반지름이라야 모서리가 글자를 물지 않는다 */
+  border-radius: 8px;
   transition: background var(--dur-1) var(--ease);
 }
-.board-row:first-child { border-top: 0; }
+/* 구분선을 border-top 으로 두면 반지름을 따라 양끝이 휜다. 선은 곧게, 배경만 둥글게. */
+.board-row::before {
+  content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--border);
+}
+.board-row:first-child::before { display: none; }
 .board-row:hover { background: var(--elev); }
 .board-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .board-row b {
@@ -3277,11 +3292,16 @@ body { background: var(--bg) !important; }
 /* 홈의 공지 미리보기 — 게시판과 같은 줄 모양 */
 .notice-row-btn {
   display: flex; align-items: center; gap: 9px;
-  width: 100%; padding: 11px 4px; cursor: pointer; text-align: left;
-  background: transparent; border: 0; border-top: 1px solid var(--border);
+  position: relative;
+  width: 100%; padding: 11px 8px; cursor: pointer; text-align: left;
+  background: transparent; border: 0;
+  border-radius: 8px;
   transition: background var(--dur-1) var(--ease);
 }
-.notice-row-btn:first-child { border-top: 0; }
+.notice-row-btn::before {
+  content: ''; position: absolute; inset: 0 0 auto; height: 1px; background: var(--border);
+}
+.notice-row-btn:first-child::before { display: none; }
 .notice-row-btn:hover { background: var(--elev); }
 .notice-row-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
