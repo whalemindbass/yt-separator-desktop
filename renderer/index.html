@@ -149,6 +149,34 @@
           <div class="home-hero-wave" id="home-wave" aria-hidden="true"></div>
         </section>
 
+        <!-- 바로 시작 — 홈에서 탭으로 나가지 않고 일을 시작할 수 있게 -->
+        <div class="home-quick">
+          <button class="quick-card" data-view-go="separate">
+            <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><path d="M11 4v14M4 8v6M18 8v6M7.5 6v10M14.5 6v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <b data-i18n="home.quick.separate">새 분리</b>
+            <span data-i18n="home.quick.separateSub">링크나 내 파일에서 스템 뽑기</span>
+          </button>
+          <button class="quick-card" data-view-go="library">
+            <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 8h16M8 8v10" stroke="currentColor" stroke-width="1.6"/></svg>
+            <b data-i18n="home.quick.library">라이브러리</b>
+            <span data-i18n="home.quick.librarySub">분리해 둔 곡 듣고 관리</span>
+          </button>
+          <button class="quick-card" data-view-go="studio">
+            <svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="9" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M11 13v5M7.5 18h7M5 9a6 6 0 0 0 12 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <b data-i18n="home.quick.studio">스튜디오</b>
+            <span data-i18n="home.quick.studioSub">녹음하고 믹스하기</span>
+          </button>
+        </div>
+
+        <!-- 이어서 하기 — 라이브러리가 비어 있으면 통째로 숨긴다 -->
+        <section class="home-panel" id="home-recent-panel" hidden>
+          <header>
+            <h3 data-i18n="home.recent">이어서 하기</h3>
+            <button class="link-btn" data-view-go="library" data-i18n="home.viewAll">전체 보기</button>
+          </header>
+          <div id="home-recent" class="recent-grid"></div>
+        </section>
+
         <div class="home-two">
           <section class="home-panel">
             <header>

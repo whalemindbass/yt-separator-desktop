@@ -3155,6 +3155,66 @@ body { background: var(--bg) !important; }
   box-shadow: 0 0 6px rgba(var(--accent-rgb), .45);
 }
 
+/* 바로 시작 — 홈에서 곧장 일을 벌일 수 있는 세 갈래 */
+.home-quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.quick-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "icon title" "icon sub";
+  align-items: center; gap: 2px 13px;
+  padding: 15px 17px; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  color: var(--tx-1);
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+              transform var(--dur-1) var(--ease);
+}
+.quick-card svg { grid-area: icon; width: 26px; height: 26px; color: var(--accent); }
+.quick-card b    { grid-area: title; font-size: 14px; font-weight: 700; }
+.quick-card span { grid-area: sub; font-size: 11.5px; color: var(--tx-3); word-break: keep-all; }
+.quick-card:hover { background: var(--elev); border-color: var(--border-mid); transform: translateY(-1px); }
+.quick-card:active { transform: translateY(0); }
+.quick-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 이어서 하기 */
+.recent-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.recent-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 0 11px; text-align: left; cursor: pointer;
+  background: var(--elev); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--tx-1); overflow: hidden;
+  transition: border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.recent-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.recent-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 썸네일은 원격이라 없을 수도, 못 받을 수도 있다. 자리는 늘 같게 잡고 —
+   flex 항목이라 내용 유무로 높이가 흔들리므로 width/flex 를 못 박는다 —
+   빈 칸에는 표식을 둔다. 아무것도 없는 큰 사각형은 고장처럼 보인다. */
+.recent-thumb {
+  position: relative; display: block; flex: none;
+  width: 100%; aspect-ratio: 16 / 9; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.recent-ph {
+  position: absolute; inset: 0; margin: auto;
+  width: 26px; height: 26px; color: var(--tx-3); opacity: .45;
+}
+/* 다 받기 전까지는 표식이 보이게 둔다 — 회색 빈 상자가 먼저 뜨면 고장으로 읽힌다 */
+.recent-thumb img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
+  opacity: 0; transition: opacity var(--dur-1) var(--ease);
+}
+.recent-thumb img.on { opacity: 1; }
+.recent-card b {
+  padding: 0 11px; font-size: 12.5px; font-weight: 600; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 제목이 한 줄이든 두 줄이든 아래 줄은 카드 바닥에 나란히 선다 */
+.recent-meta { margin-top: auto; display: flex; align-items: center; gap: 7px; padding: 0 11px; }
+.recent-model {
+  font: 600 9.5px/1 var(--mono); letter-spacing: .03em; padding: 3px 5px; border-radius: 4px;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft-border);
+}
+.recent-meta time { margin-left: auto; font: 400 10.5px/1 var(--mono); color: var(--tx-3); }
+
 /* 패널 */
 .home-panel {
   background: var(--surface); border: 1px solid var(--border);
@@ -3242,12 +3302,14 @@ body { background: var(--bg) !important; }
 .home-foot-copy { margin-left: auto; font-size: 11.5px; color: var(--tx-3); }
 
 /* 좁은 창 */
+@media (max-width: 1180px) { .recent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1080px) { .home-two { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 860px) {
   .home-body { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "foot"; }
   .home-nav { display: none; }
   .home-hero { grid-template-columns: minmax(0, 1fr); }
   .home-hero-wave { display: none; }
+  .home-quick { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ── 홈: 페이지 전환 · 게시판 ──────────────────────────────────

@@ -6,6 +6,7 @@
 // 공지는 운영자가 D1 에 넣고 앱은 가져다 보여주기만 한다.
 
 import { t, getLocale } from './i18n.js';
+import { Library } from './library.js';
 
 const API = 'https://ytseparator.com/community/api';
 const CACHE_KEY = 'yss:notices';        // 오프라인·서버 지연에도 지난 공지는 보이게
@@ -16,6 +17,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'
 
 let booted = false;
 let notices = [];                        // 마지막으로 받은 목록 — 상세 화면이 여기서 찾는다
+let goView = null;                       // 탭 전환 — app.js 가 넘겨 준다
 
 /** 공지 본문 — 굵게·링크·목록만 허용한다. 이스케이프가 먼저다. */
 function renderBody(md) {
@@ -43,6 +45,16 @@ function fmtDate(ms) {
   const d = new Date(ms);
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+}
+
+/** 최근 항목은 날짜보다 "얼마 전"이 읽기 쉽다. 일주일이 넘으면 날짜가 낫다. */
+function fmtWhen(ms) {
+  if (!ms) return '';
+  const days = Math.floor((Date.now() - ms) / 86400000);
+  if (days <= 0) return t('home.recent.today');
+  if (days === 1) return t('home.recent.yesterday');
+  if (days < 7) return t('home.recent.daysAgo', { n: days });
+  return fmtDate(ms);
 }
 
 const kindLabel = (k) => t(k === 'tip' ? 'home.kind.tip' : k === 'update' ? 'home.kind.update' : 'home.kind.notice');
@@ -110,6 +122,53 @@ function openDetail(id) {
 function closeDetail() {
   document.querySelector('.home-page[data-page="notices"] .board').hidden = false;
   $('board-detail').hidden = true;
+}
+
+/** 이어서 하기 — 라이브러리 최근 항목. 없으면 칸 자체를 숨긴다. */
+async function paintRecent() {
+  const panel = $('home-recent-panel');
+  const box = $('home-recent');
+  if (!panel || !box) return;
+  let items = [];
+  try { items = await window.yssApi?.library?.list?.() || []; } catch { items = []; }
+
+  const rows = items.slice(0, 4);        // library:list 가 이미 최신 순으로 준다
+  panel.hidden = rows.length === 0;
+  if (!rows.length) { box.innerHTML = ''; return; }
+
+  box.innerHTML = rows.map(it => {
+    const thumb = it.meta && it.meta.thumbnail;
+    return `
+    <button class="recent-card" data-song="${esc(it.id)}" title="${esc(it.name || '')}">
+      <span class="recent-thumb">
+        <svg class="recent-ph" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 14v-4M8 17V7M12 20V4M16 17V7M20 14v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        ${thumb ? `<img src="${esc(thumb)}" alt="" draggable="false" loading="lazy" />` : ''}
+      </span>
+      <b>${esc(it.name || t('home.recent.untitled'))}</b>
+      <span class="recent-meta">
+        <span class="recent-model">${esc(it.modelKey || '4stem')}</span>
+        <time>${esc(fmtWhen(it.createdAt))}</time>
+      </span>
+    </button>`;
+  }).join('');
+
+  // CSP 가 인라인 핸들러를 막으므로 여기서 건다. 썸네일은 원격이라 못 받을 수 있고,
+  // 깨진 그림 아이콘보다 빈 자리가 낫다.
+  box.querySelectorAll('.recent-thumb img').forEach(img => {
+    if (img.complete && img.naturalWidth) { img.classList.add('on'); return; }
+    img.addEventListener('load',  () => img.classList.add('on'), { once: true });
+    img.addEventListener('error', () => img.remove(), { once: true });
+  });
+}
+
+/** 곡 하나를 라이브러리에서 연다 — 홈은 고르는 자리, 재생은 라이브러리 몫 */
+async function openSong(id) {
+  if (!goView) return;
+  goView('library');
+  try {
+    await Library.refresh();             // 목록이 채워져야 selectItem 이 찾는다
+    await Library.selectItem(id);
+  } catch { /* 파일이 사라졌으면 라이브러리가 알아서 비워 보여 준다 */ }
 }
 
 function paintAll(list) {
@@ -185,8 +244,10 @@ function showPage(name) {
   document.querySelector('.home-main')?.scrollTo({ top: 0 });
 }
 
-export function initHome() {
-  if (booted) { loadNotices(); return; }
+export function initHome(switchView) {
+  if (typeof switchView === 'function') goView = switchView;
+  // 홈에 다시 들어올 때마다 최근 목록은 새로 읽는다 — 그 사이 분리가 끝났을 수 있다
+  if (booted) { loadNotices(); paintRecent(); return; }
   booted = true;
 
   const api = window.yssApi;
@@ -202,6 +263,12 @@ export function initHome() {
 
     const goto = e.target.closest('[data-goto]');
     if (goto) return showPage(goto.dataset.goto);
+
+    const song = e.target.closest('[data-song]');
+    if (song) return void openSong(song.dataset.song);
+
+    const view = e.target.closest('[data-view-go]');
+    if (view) return void goView?.(view.dataset.viewGo);
 
     const open = e.target.closest('[data-open]');
     if (open) { showPage('notices'); openDetail(open.dataset.open); return; }
@@ -225,6 +292,7 @@ export function initHome() {
     .catch(() => {});
 
   loadNotices();
+  paintRecent();
 }
 
 export { loadNotices };
