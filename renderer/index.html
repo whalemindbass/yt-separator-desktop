@@ -106,26 +106,22 @@
     </div>
   </div>
 
-  <!-- View 0: 홈 — 로고를 눌러야 온다. 공지·업데이트·사용 가이드. 탭에는 넣지 않는다. -->
+  <!-- View 0: 홈 — 로고를 눌러야 온다. 사이드바는 고정, 오른쪽만 바뀐다. -->
   <main class="body view home-body" data-view="home" hidden>
     <nav class="home-nav">
-      <button class="home-nav-item on" data-sec="home">
+      <button class="home-nav-item on" data-page="home">
         <svg viewBox="0 0 20 20" fill="none"><path d="M3 8.5 10 3l7 5.5V16a1 1 0 0 1-1 1h-4v-5H8v5H4a1 1 0 0 1-1-1V8.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
         <span data-i18n="home.nav.home">홈</span>
       </button>
-      <button class="home-nav-item" data-sec="notices">
+      <button class="home-nav-item" data-page="notices">
         <svg viewBox="0 0 20 20" fill="none"><path d="M4 8v4h3l5 3V5L7 8H4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M15 8a3 3 0 0 1 0 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="home.nav.notices">공지사항</span>
       </button>
-      <button class="home-nav-item" data-sec="updates">
+      <button class="home-nav-item" data-page="updates">
         <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="home.nav.updates">업데이트</span>
       </button>
-      <button class="home-nav-item" data-sec="guide">
-        <svg viewBox="0 0 20 20" fill="none"><path d="M3 5c2.5-1 4.5-1 7 0v11c-2.5-1-4.5-1-7 0V5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M17 5c-2.5-1-4.5-1-7 0v11c2.5-1 4.5-1 7 0V5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-        <span data-i18n="home.nav.guide">사용 가이드</span>
-      </button>
-      <button class="home-nav-item" data-sec="faq">
+      <button class="home-nav-item" data-page="faq">
         <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 8a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14" r=".8" fill="currentColor"/></svg>
         <span data-i18n="home.nav.faq">자주 묻는 질문</span>
       </button>
@@ -134,61 +130,90 @@
         <span data-i18n="home.nav.contact">문의하기</span>
       </button>
 
+      <!-- 지금 쓰는 버전만 알려 준다. 업데이트 확인은 설정에 이미 있다 -->
       <div class="home-nav-card">
-        <div class="home-nav-card-head">
-          <img src="./assets/app-icon.png" alt="" draggable="false" />
-          <b>Dr.studio</b>
-          <span id="home-version" class="home-ver-tag"></span>
-        </div>
-        <p data-i18n="home.updCard">더 빠르고 강력해진 Dr.studio를 경험해 보세요.</p>
-        <button id="home-check-update" class="btn primary" data-i18n="home.checkUpdate">업데이트 확인</button>
-        <div id="home-update-status" class="home-upd-status"></div>
+        <img src="./assets/app-icon.png" alt="" draggable="false" />
+        <b>Dr.studio</b>
+        <span id="home-version" class="home-ver-tag"></span>
       </div>
     </nav>
 
     <div class="home-main">
-      <section class="home-hero">
-        <div class="home-hero-text">
-          <h2 data-i18n="home.hero">Dr.studio 에 오신 것을 환영합니다</h2>
-          <p data-i18n="home.heroSub">스템 분리부터 커버 녹음까지. 전부 이 컴퓨터에서 이뤄집니다.</p>
+      <!-- 홈 -->
+      <section class="home-page on" data-page="home">
+        <section class="home-hero">
+          <div class="home-hero-text">
+            <h2 data-i18n="home.hero">Dr.studio 에 오신 것을 환영합니다</h2>
+            <p data-i18n="home.heroSub">스템 분리부터 커버 녹음까지. 전부 이 컴퓨터에서 이뤄집니다.</p>
+          </div>
+          <div class="home-hero-wave" id="home-wave" aria-hidden="true"></div>
+        </section>
+
+        <div class="home-two">
+          <section class="home-panel">
+            <header>
+              <h3 data-i18n="home.notices">공지사항</h3>
+              <button class="link-btn" data-goto="notices" data-i18n="home.viewAll">전체 보기</button>
+            </header>
+            <div id="home-notices" class="notice-list">
+              <div class="notice-empty muted" data-i18n="home.notices.loading">불러오는 중…</div>
+            </div>
+          </section>
+
+          <section class="home-panel">
+            <header>
+              <h3 data-i18n="home.updates">최신 업데이트</h3>
+              <button class="link-btn" data-goto="updates" data-i18n="home.viewAll">전체 보기</button>
+            </header>
+            <div id="home-updates" class="update-list">
+              <div class="notice-empty muted" data-i18n="home.notices.loading">불러오는 중…</div>
+            </div>
+          </section>
         </div>
-        <div class="home-hero-wave" id="home-wave" aria-hidden="true"></div>
       </section>
 
-      <div class="home-two">
-        <section class="home-panel" data-sec-block="notices">
-          <header>
-            <h3 data-i18n="home.notices">공지사항</h3>
-            <button class="link-btn" id="home-notice-reload" data-i18n="home.reload">새로고침</button>
+      <!-- 공지사항 게시판 -->
+      <section class="home-page" data-page="notices">
+        <div class="board">
+          <header class="board-head">
+            <h2 data-i18n="home.notices">공지사항</h2>
+            <button class="link-btn" id="board-reload" data-i18n="home.reload">새로고침</button>
           </header>
-          <div id="home-notices" class="notice-list">
-            <div class="notice-empty muted" data-i18n="home.notices.loading">불러오는 중…</div>
+          <div id="board-list" class="board-list"></div>
+        </div>
+        <article id="board-detail" class="board-detail" hidden>
+          <button class="board-back" id="board-back">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M10 3 5 8l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span data-i18n="home.board.back">목록으로</span>
+          </button>
+          <div class="board-detail-head">
+            <span id="detail-kind" class="notice-kind"></span>
+            <h2 id="detail-title"></h2>
+            <time id="detail-date"></time>
           </div>
-        </section>
-
-        <section class="home-panel" data-sec-block="updates">
-          <header>
-            <h3 data-i18n="home.updates">최신 업데이트</h3>
-            <button class="link-btn" id="home-all-releases" data-i18n="home.viewAll">전체 보기</button>
-          </header>
-          <div id="home-updates" class="update-list">
-            <div class="notice-empty muted" data-i18n="home.notices.loading">불러오는 중…</div>
-          </div>
-        </section>
-      </div>
-
-      <section class="home-panel" data-sec-block="guide">
-        <header>
-          <h3 data-i18n="home.guide">사용 가이드</h3>
-        </header>
-        <div class="guide-grid" id="home-guide"></div>
+          <div id="detail-body" class="notice-body"></div>
+        </article>
       </section>
 
-      <section class="home-panel" data-sec-block="faq">
-        <header>
-          <h3 data-i18n="home.faq">자주 묻는 질문</h3>
-        </header>
-        <div class="faq-list" id="home-faq"></div>
+      <!-- 업데이트 이력 -->
+      <section class="home-page" data-page="updates">
+        <div class="board">
+          <header class="board-head">
+            <h2 data-i18n="home.updates">업데이트</h2>
+            <button class="link-btn" id="home-all-releases" data-i18n="home.foot.notes">릴리즈 노트</button>
+          </header>
+          <div id="updates-full" class="update-list"></div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="home-page" data-page="faq">
+        <div class="board">
+          <header class="board-head">
+            <h2 data-i18n="home.faq">자주 묻는 질문</h2>
+          </header>
+          <div class="faq-list" id="home-faq"></div>
+        </div>
       </section>
     </div>
 

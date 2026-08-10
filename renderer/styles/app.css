@@ -238,6 +238,10 @@ body { display: flex; flex-direction: column; }
   background: none; border: 0; padding: 0 6px 0 0; margin: 0;
   border-radius: 8px; cursor: pointer;
   transition: background var(--dur-1) var(--ease);
+  /* button 은 UA 기본으로 buttontext(검정)와 제 글꼴을 갖는다. div 였을 때 문서에서
+     물려받던 제목이 그 검정을 상속해 테마와 무관하게 굳었다. 문서 쪽 값으로 되돌린다. */
+  color: var(--tx-1);
+  font: inherit;
 }
 .brand:hover { background: var(--elev); }
 .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -3103,24 +3107,6 @@ body { background: var(--bg) !important; }
 .home-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .home-nav-item.on { background: var(--elev); color: var(--tx-1); border-color: var(--border-mid); }
 
-/* 사이드바 아래 버전 카드 */
-.home-nav-card {
-  margin-top: auto; padding: 14px;
-  background: var(--elev); border: 1px solid var(--border);
-  border-radius: 11px;
-  display: flex; flex-direction: column; gap: 9px;
-}
-.home-nav-card-head { display: flex; align-items: center; gap: 8px; }
-.home-nav-card-head img { width: 22px; height: 22px; border-radius: 6px; }
-.home-nav-card-head b { font-size: 13.5px; color: var(--tx-1); }
-.home-nav-card p { font-size: 12px; line-height: 1.55; color: var(--tx-3); word-break: keep-all; }
-.home-nav-card .btn { width: 100%; justify-content: center; }
-.home-ver-tag {
-  margin-left: auto; font: 500 10.5px/1.6 var(--mono);
-  color: var(--tx-3); padding: 1px 6px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--border);
-}
-.home-upd-status { font-size: 11.5px; color: var(--tx-3); min-height: 14px; }
 
 /* 본문 */
 .home-main {
@@ -3199,37 +3185,6 @@ body { background: var(--bg) !important; }
 .upd-body ul { margin: 0; padding-left: 17px; }
 .upd-body p { margin: 0 0 4px; }
 
-/* 사용 가이드 */
-.guide-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 12px; }
-.guide-card {
-  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
-  padding: 15px; text-align: left; cursor: pointer;
-  background: var(--elev); border: 1px solid var(--border); border-radius: 10px;
-  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
-}
-.guide-card:hover { border-color: var(--accent-soft-border); }
-.guide-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* 아이콘은 CSS 로 그린다 — 종류마다 막대 배치만 달리해 파일을 늘리지 않는다 */
-.guide-ico {
-  width: 34px; height: 34px; border-radius: 9px; margin-bottom: 4px; display: block;
-  background-color: var(--accent-soft);
-  border: 1px solid var(--accent-soft-border);
-  background-image:
-    linear-gradient(var(--accent), var(--accent)),
-    linear-gradient(var(--accent), var(--accent)),
-    linear-gradient(var(--accent), var(--accent));
-  background-repeat: no-repeat;
-  background-position: 9px 13px, 15px 9px, 21px 15px;
-  background-size: 3px 8px, 3px 16px, 3px 6px;
-}
-.guide-ico.g-library { background-position: 9px 9px, 15px 9px, 21px 9px; background-size: 3px 16px, 3px 16px, 3px 16px; }
-.guide-ico.g-studio  { background-position: 8px 11px, 14px 16px, 20px 9px;  background-size: 5px 4px, 5px 4px, 5px 4px; }
-.guide-ico.g-record  { background-position: 11px 10px, 11px 21px, 15px 10px; background-size: 11px 2px, 11px 2px, 2px 12px; }
-.guide-ico.g-export  { background-position: 15px 8px, 10px 17px, 10px 22px; background-size: 4px 9px, 13px 2px, 13px 2px; }
-.guide-card b { font-size: 13.5px; font-weight: 650; color: var(--tx-1); }
-.guide-sub { font-size: 12px; line-height: 1.55; color: var(--tx-3); word-break: keep-all; flex: 1; }
-.guide-more { font-size: 11.5px; font-weight: 600; color: var(--accent); margin-top: 2px; }
-
 /* FAQ */
 .faq-list { display: flex; flex-direction: column; }
 .faq { border-top: 1px solid var(--border); }
@@ -3277,3 +3232,77 @@ body { background: var(--bg) !important; }
   .home-hero { grid-template-columns: minmax(0, 1fr); }
   .home-hero-wave { display: none; }
 }
+
+/* ── 홈: 페이지 전환 · 게시판 ──────────────────────────────────
+   사이드바는 고정이고 오른쪽만 갈린다. 한 번에 한 페이지만 보인다.
+   ────────────────────────────────────────────────────────────*/
+.home-page { display: none; flex-direction: column; gap: 18px; }
+.home-page.on { display: flex; }
+
+/* 사이드바 아래 버전 표시 — 버튼 없이 지금 버전만 */
+.home-nav-card {
+  margin-top: auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 12px;
+  background: var(--elev); border: 1px solid var(--border); border-radius: 10px;
+}
+.home-nav-card img { width: 20px; height: 20px; border-radius: 5px; }
+.home-nav-card b { font-size: 12.5px; color: var(--tx-1); }
+
+/* 게시판 */
+.board {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px 18px; min-width: 0;
+}
+.board-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.board-head h2 { font-size: 17px; font-weight: 700; color: var(--tx-1); letter-spacing: -.015em; }
+.board-head .link-btn { margin-left: auto; }
+
+.board-list { display: flex; flex-direction: column; }
+.board-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 13px 6px; cursor: pointer; text-align: left;
+  background: transparent; border: 0; border-top: 1px solid var(--border);
+  transition: background var(--dur-1) var(--ease);
+}
+.board-row:first-child { border-top: 0; }
+.board-row:hover { background: var(--elev); }
+.board-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.board-row b {
+  font-size: 13.5px; font-weight: 600; color: var(--tx-1); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.board-row time { margin-left: auto; font: 400 11.5px/1 var(--mono); color: var(--tx-3); flex: none; }
+
+/* 홈의 공지 미리보기 — 게시판과 같은 줄 모양 */
+.notice-row-btn {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 11px 4px; cursor: pointer; text-align: left;
+  background: transparent; border: 0; border-top: 1px solid var(--border);
+  transition: background var(--dur-1) var(--ease);
+}
+.notice-row-btn:first-child { border-top: 0; }
+.notice-row-btn:hover { background: var(--elev); }
+.notice-row-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 고정 공지는 뱃지를 채워 눈에 먼저 들어오게 */
+.notice-kind.pin { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* 상세 */
+.board-detail {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px 18px 22px;
+}
+.board-back {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px 6px 6px; margin-bottom: 12px; border-radius: 7px;
+  background: transparent; border: 0; cursor: pointer;
+  font-size: 12.5px; color: var(--tx-3);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.board-back svg { width: 15px; height: 15px; }
+.board-back:hover { background: var(--elev); color: var(--tx-1); }
+.board-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.board-detail-head h2 { font-size: 18px; font-weight: 700; color: var(--tx-1); letter-spacing: -.015em; word-break: keep-all; }
+.board-detail-head time { margin-left: auto; font: 400 11.5px/1 var(--mono); color: var(--tx-3); }
+.board-detail .notice-body { font-size: 13px; line-height: 1.8; color: var(--tx-2); }

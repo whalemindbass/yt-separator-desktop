@@ -1,6 +1,7 @@
 'use strict';
-// 홈 — 로고를 누르면 오는 화면. 공지 · 업데이트 · 사용 가이드 · FAQ.
+// 홈 — 로고를 누르면 오는 화면.
 //
+// 사이드바는 고정이고 오른쪽만 바뀐다. 홈 · 공지사항(게시판) · 업데이트 · 자주 묻는 질문.
 // 읽기 전용이다. 커뮤니티(community.js)와 다르다: 로그인도, 글쓰기도, 댓글도 없다.
 // 공지는 운영자가 D1 에 넣고 앱은 가져다 보여주기만 한다.
 
@@ -9,12 +10,12 @@ import { t, getLocale } from './i18n.js';
 const API = 'https://ytseparator.com/community/api';
 const CACHE_KEY = 'yss:notices';        // 오프라인·서버 지연에도 지난 공지는 보이게
 const CACHE_TTL = 10 * 60 * 1000;       // 10분 안에 다시 열면 네트워크를 다시 타지 않는다
-// 디스코드 초대 주소는 아직 없다. 생기면 푸터 링크로 붙인다 — 죽은 링크를 미리 두지 않는다.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
 let booted = false;
+let notices = [];                        // 마지막으로 받은 목록 — 상세 화면이 여기서 찾는다
 
 /** 공지 본문 — 굵게·링크·목록만 허용한다. 이스케이프가 먼저다. */
 function renderBody(md) {
@@ -45,37 +46,30 @@ function fmtDate(ms) {
 }
 
 const kindLabel = (k) => t(k === 'tip' ? 'home.kind.tip' : k === 'update' ? 'home.kind.update' : 'home.kind.notice');
+const isUpdate = (n) => n.kind === 'update';
 
-/** 공지 목록 — 업데이트 종류는 오른쪽 칸이 따로 가져가므로 여기서는 뺀다 */
-function paintNotices(all) {
+// ── 그리기 ────────────────────────────────────────
+const emptyBox = (key) => `<div class="notice-empty muted">${esc(t(key))}</div>`;
+
+/** 홈의 공지 미리보기 — 최근 몇 개만, 본문 없이 */
+function paintNoticePreview(list) {
   const box = $('home-notices');
   if (!box) return;
-  const list = all.filter(n => n.kind !== 'update');
-  if (!list.length) {
-    box.innerHTML = `<div class="notice-empty muted">${esc(t('home.notices.none'))}</div>`;
-    return;
-  }
-  box.innerHTML = list.map(n => `
-    <article class="notice${n.pinned ? ' pinned' : ''}">
-      <div class="notice-row">
-        <span class="notice-kind k-${esc(n.kind)}">${esc(kindLabel(n.kind))}</span>
-        <b class="notice-title">${esc(n.title)}</b>
-        <time class="notice-date">${esc(fmtDate(n.publishedAt))}</time>
-      </div>
-      <div class="notice-body">${renderBody(n.body)}</div>
-    </article>`).join('');
+  const rows = list.filter(n => !isUpdate(n)).slice(0, 4);
+  box.innerHTML = rows.length ? rows.map(n => `
+    <button class="notice-row-btn" data-open="${esc(n.id)}">
+      <span class="notice-kind k-${esc(n.kind)}${n.pinned ? ' pin' : ''}">${esc(kindLabel(n.kind))}</span>
+      <b class="notice-title">${esc(n.title)}</b>
+      <time class="notice-date">${esc(fmtDate(n.publishedAt))}</time>
+    </button>`).join('') : emptyBox('home.notices.none');
 }
 
-/** 최신 업데이트 — kind=update 인 공지를 버전 이력처럼 보여준다 */
-function paintUpdates(all) {
-  const box = $('home-updates');
+/** 업데이트 이력 — 버전과 바뀐 점 */
+function paintUpdates(list, boxId, limit) {
+  const box = $(boxId);
   if (!box) return;
-  const list = all.filter(n => n.kind === 'update').slice(0, 4);
-  if (!list.length) {
-    box.innerHTML = `<div class="notice-empty muted">${esc(t('home.updates.none'))}</div>`;
-    return;
-  }
-  box.innerHTML = list.map((n, i) => `
+  const rows = list.filter(isUpdate).slice(0, limit);
+  box.innerHTML = rows.length ? rows.map((n, i) => `
     <article class="upd">
       <div class="upd-ver">
         <b>${esc(n.title)}</b>
@@ -83,9 +77,50 @@ function paintUpdates(all) {
         <time>${esc(fmtDate(n.publishedAt))}</time>
       </div>
       <div class="upd-body">${renderBody(n.body)}</div>
-    </article>`).join('');
+    </article>`).join('') : emptyBox('home.updates.none');
 }
 
+/** 공지 게시판 — 목록 */
+function paintBoard(list) {
+  const box = $('board-list');
+  if (!box) return;
+  const rows = list.filter(n => !isUpdate(n));
+  box.innerHTML = rows.length ? rows.map(n => `
+    <button class="board-row" data-open="${esc(n.id)}">
+      <span class="notice-kind k-${esc(n.kind)}${n.pinned ? ' pin' : ''}">${esc(kindLabel(n.kind))}</span>
+      <b>${esc(n.title)}</b>
+      <time>${esc(fmtDate(n.publishedAt))}</time>
+    </button>`).join('') : emptyBox('home.board.empty');
+}
+
+/** 공지 게시판 — 상세. 목록 자리를 대신 차지한다 */
+function openDetail(id) {
+  const n = notices.find(x => x.id === id);
+  if (!n) return;
+  $('detail-kind').textContent = kindLabel(n.kind);
+  $('detail-kind').className = 'notice-kind k-' + n.kind + (n.pinned ? ' pin' : '');
+  $('detail-title').textContent = n.title;
+  $('detail-date').textContent = fmtDate(n.publishedAt);
+  $('detail-body').innerHTML = renderBody(n.body);
+  document.querySelector('.home-page[data-page="notices"] .board').hidden = true;
+  $('board-detail').hidden = false;
+  $('board-detail').scrollIntoView({ block: 'start' });
+}
+
+function closeDetail() {
+  document.querySelector('.home-page[data-page="notices"] .board').hidden = false;
+  $('board-detail').hidden = true;
+}
+
+function paintAll(list) {
+  notices = list;
+  paintNoticePreview(list);
+  paintUpdates(list, 'home-updates', 3);
+  paintUpdates(list, 'updates-full', 30);
+  paintBoard(list);
+}
+
+// ── 자료 ──────────────────────────────────────────
 function readCache() {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
@@ -95,51 +130,27 @@ function readCache() {
 
 async function loadNotices(force = false) {
   const cached = readCache();
-  if (cached) { paintNotices(cached.notices); paintUpdates(cached.notices); }
+  if (cached) paintAll(cached.notices);
   if (!force && cached && Date.now() - cached.at < CACHE_TTL) return;
 
   try {
-    const res = await fetch(`${API}/notices?lang=${encodeURIComponent(getLocale())}&limit=30`, { cache: 'no-store' });
+    const res = await fetch(`${API}/notices?lang=${encodeURIComponent(getLocale())}&limit=50`, { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const list = Array.isArray(data.notices) ? data.notices : [];
     localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), notices: list }));
-    paintNotices(list); paintUpdates(list);
+    paintAll(list);
   } catch {
     // 못 가져오면 지난 공지를 그대로 둔다 — 아무것도 없을 때만 안내한다
     if (!cached) {
-      const msg = `<div class="notice-empty muted">${esc(t('home.notices.failed'))}</div>`;
-      if ($('home-notices')) $('home-notices').innerHTML = msg;
-      if ($('home-updates')) $('home-updates').innerHTML = msg;
+      for (const id of ['home-notices', 'home-updates', 'updates-full', 'board-list']) {
+        if ($(id)) $(id).innerHTML = emptyBox('home.notices.failed');
+      }
     }
   }
 }
 
-/** 사용 가이드 — 앱에 실제로 있는 기능만 적는다. 없는 문서로 보내지 않는다. */
-const GUIDE = [
-  { key: 'sep',     go: 'separate' },
-  { key: 'library', go: 'library' },
-  { key: 'studio',  go: 'studio' },
-  { key: 'record',  go: 'studio' },
-  { key: 'export',  go: 'studio' },
-];
-
-function paintGuide(switchView) {
-  const box = $('home-guide');
-  if (!box) return;
-  box.innerHTML = GUIDE.map(g => `
-    <button class="guide-card" data-go="${g.go}">
-      <span class="guide-ico g-${g.key}"></span>
-      <b>${esc(t('home.guide.' + g.key))}</b>
-      <span class="guide-sub">${esc(t('home.guide.' + g.key + 'Sub'))}</span>
-      <span class="guide-more">${esc(t('home.guide.more'))} →</span>
-    </button>`).join('');
-  box.querySelectorAll('[data-go]').forEach(b =>
-    b.addEventListener('click', () => switchView(b.dataset.go)));
-}
-
 const FAQ_KEYS = ['offline', 'time', 'gpu', 'quality', 'where'];
-
 function paintFaq() {
   const box = $('home-faq');
   if (!box) return;
@@ -150,7 +161,7 @@ function paintFaq() {
     </details>`).join('');
 }
 
-/** 히어로의 파형 — 장식이라 데이터가 아니라 결정적 난수로 그린다 */
+/** 히어로의 파형 — 장식이라 데이터가 아니라 고정 시드 난수로 그린다 */
 function paintWave() {
   const box = $('home-wave');
   if (!box || box.childElementCount) return;
@@ -158,60 +169,56 @@ function paintWave() {
   let seed = 7;
   const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   box.innerHTML = Array.from({ length: N }, (_, i) => {
-    const center = 1 - Math.abs(i - (N - 1) / 2) / ((N - 1) / 2);   // 가운데가 높다
-    const h = Math.max(6, (center ** 2.2 * 78 + rnd() * 16));
+    const center = 1 - Math.abs(i - (N - 1) / 2) / ((N - 1) / 2);
+    const h = Math.max(6, center ** 2.2 * 78 + rnd() * 16);
     return `<i style="height:${h.toFixed(1)}%;opacity:${(0.25 + center * 0.75).toFixed(2)}"></i>`;
   }).join('');
 }
 
-/** 사이드바 — 해당 구역으로 스크롤하고 표시를 옮긴다 */
-function initNav() {
-  const items = document.querySelectorAll('.home-nav-item[data-sec]');
-  items.forEach(b => b.addEventListener('click', () => {
-    items.forEach(x => x.classList.toggle('on', x === b));
-    const sec = b.dataset.sec;
-    const main = document.querySelector('.home-main');
-    if (sec === 'home') { main.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    document.querySelector(`[data-sec-block="${sec}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
+// ── 페이지 전환 ────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.home-nav-item[data-page]').forEach(b =>
+    b.classList.toggle('on', b.dataset.page === name));
+  document.querySelectorAll('.home-page').forEach(p =>
+    p.classList.toggle('on', p.dataset.page === name));
+  if (name === 'notices') closeDetail();     // 게시판은 항상 목록부터
+  document.querySelector('.home-main')?.scrollTo({ top: 0 });
 }
 
-/**
- * @param {(view:string)=>void} switchView 탭 전환 (app.js 가 넘겨준다)
- */
-export function initHome(switchView) {
+export function initHome() {
   if (booted) { loadNotices(); return; }
   booted = true;
 
   const api = window.yssApi;
   paintWave();
-  paintGuide(switchView);
   paintFaq();
-  initNav();
 
-  $('home-notice-reload')?.addEventListener('click', () => loadNotices(true));
+  const root = document.querySelector('[data-view="home"]');
+
+  // 사이드바 · "전체 보기" · 공지 열기 · 바깥 링크를 한자리에서 받는다
+  root?.addEventListener('click', (e) => {
+    const nav = e.target.closest('.home-nav-item[data-page]');
+    if (nav) return showPage(nav.dataset.page);
+
+    const goto = e.target.closest('[data-goto]');
+    if (goto) return showPage(goto.dataset.goto);
+
+    const open = e.target.closest('[data-open]');
+    if (open) { showPage('notices'); openDetail(open.dataset.open); return; }
+
+    const ext = e.target.closest('[data-ext]');
+    if (ext) { e.preventDefault(); api?.openExternal?.(ext.dataset.ext); }
+  });
+
+  $('board-back')?.addEventListener('click', closeDetail);
+  $('board-reload')?.addEventListener('click', () => loadNotices(true));
   $('home-all-releases')?.addEventListener('click', () =>
     api?.openExternal?.('https://github.com/whalemindbass/yt-separator-releases/releases'));
   $('home-contact')?.addEventListener('click', () => $('report-btn')?.click());
-  $('home-check-update')?.addEventListener('click', () => {
-    const el = $('home-update-status');
-    if (el) el.textContent = t('common.checking');
-    api?.update?.check?.();
-  });
-
-  // 바깥으로 나가는 링크는 한 곳에서 처리한다 — 공지 본문의 링크도 여기로 온다
-  document.querySelector('[data-view="home"]')?.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-ext]');
-    if (!el) return;
-    e.preventDefault();
-    api?.openExternal?.(el.dataset.ext);
-  });
 
   api?.settings?.appInfo?.()
     .then(info => {
-      if (info?.appVersion) {
-        const v = $('home-version'); if (v) v.textContent = 'v' + info.appVersion;
-      }
+      if (info?.appVersion) { const v = $('home-version'); if (v) v.textContent = 'v' + info.appVersion; }
       const c = $('home-copy');
       if (c) c.textContent = `© ${new Date().getFullYear()} Dr.studio`;
     })
