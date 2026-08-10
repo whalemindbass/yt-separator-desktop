@@ -58,13 +58,20 @@
 <body>
 <div class="wrap">
   <h1>공지 작성</h1>
-  <p class="lede">앱 홈 화면에 뜨는 공지를 쓰고 고칩니다. 토큰은 이 브라우저 탭에만 남고 새로고침하면 사라집니다.</p>
+  <p class="lede">앱 홈 화면에 뜨는 공지를 쓰고 고칩니다. 관리자 계정으로 로그인하며, 세션은 이 브라우저 탭에만 남습니다.</p>
 
   <fieldset id="auth-box">
-    <legend>토큰</legend>
+    <legend>로그인</legend>
     <div class="row">
-      <input id="token" type="password" autocomplete="off" placeholder="NOTICE_TOKEN" />
-      <button class="primary" id="login" style="flex:none">확인</button>
+      <div>
+        <label for="username">아이디</label>
+        <input id="username" type="text" autocomplete="username" placeholder="admin" />
+      </div>
+      <div>
+        <label for="password">비밀번호</label>
+        <input id="password" type="password" autocomplete="current-password" />
+      </div>
+      <button class="primary" id="login" style="flex:none">로그인</button>
     </div>
     <div class="msg" id="auth-msg"></div>
   </fieldset>
@@ -112,7 +119,8 @@
 </div>
 
 <script>
-const API = 'https://ytseparator.com/community/api/yts/notices';
+const BASE = 'https://ytseparator.com/community/api';
+const API = BASE + '/yts/notices';
 const $ = (id) => document.getElementById(id);
 // sessionStorage — 탭을 닫으면 사라진다. localStorage 에 두면 기기에 계속 남는다.
 const KEY = 'yts:token';
@@ -133,7 +141,9 @@ async function call(method, path, body) {
   let data = null;
   try { data = await res.json(); } catch {}
   if (!res.ok) {
-    const msg = res.status === 401 ? '토큰이 맞지 않습니다.'
+    // 401 은 세션이 없거나 만료, 403 은 로그인은 됐지만 관리자가 아님 — 고칠 곳이 다르다
+    const msg = res.status === 401 ? '로그인이 풀렸습니다. 다시 로그인하세요.'
+              : res.status === 403 ? '이 계정은 관리자가 아닙니다. (ADMIN_USER_IDS 확인)'
               : res.status === 429 ? '시도가 너무 잦습니다. 15분 뒤에 다시 하세요.'
               : (data && data.error) || ('HTTP ' + res.status);
     throw new Error(msg);
@@ -189,22 +199,46 @@ function fillForm(n) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+/** 세션이 살아 있는지 실제 요청으로 확인하고, 되면 화면을 넘긴다 */
+async function enter() {
+  await call('GET');
+  $('auth-box').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  refresh();
+}
+
 $('login').addEventListener('click', async () => {
-  const v = $('token').value.trim();
-  if (!v) return say('auth-msg', '토큰을 넣으세요.', 'err');
-  sessionStorage.setItem(KEY, v);
-  say('auth-msg', '확인 중…');
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  if (!username || !password) return say('auth-msg', '아이디와 비밀번호를 넣으세요.', 'err');
+
+  $('login').disabled = true;
+  say('auth-msg', '로그인 중…');
   try {
-    await call('GET');
-    $('auth-box').classList.add('hidden');
-    $('app').classList.remove('hidden');
-    refresh();
+    const res = await fetch(BASE + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    let d = null;
+    try { d = await res.json(); } catch {}
+    if (!res.ok || !d || !d.token) {
+      throw new Error(res.status === 401 ? '아이디나 비밀번호가 맞지 않습니다.'
+                    : (d && d.error) || ('HTTP ' + res.status));
+    }
+    sessionStorage.setItem(KEY, d.token);
+    $('password').value = '';
+    await enter();
   } catch (e) {
     sessionStorage.removeItem(KEY);
     say('auth-msg', e.message, 'err');
+  } finally {
+    $('login').disabled = false;
   }
 });
-$('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login').click(); });
+for (const id of ['username', 'password']) {
+  $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login').click(); });
+}
 
 $('save').addEventListener('click', async () => {
   const payload = {
@@ -255,8 +289,9 @@ $('rows').addEventListener('click', async (e) => {
   }
 });
 
-// 탭을 다시 열었을 때 토큰이 살아 있으면 바로 들어간다
-if (token()) $('login').click();
+// 같은 탭 안에서 새로고침했을 때는 다시 로그인시키지 않는다
+if (token()) enter().catch(() => sessionStorage.removeItem(KEY));
+else $('username').focus();
 </script>
 </body>
 </html>
