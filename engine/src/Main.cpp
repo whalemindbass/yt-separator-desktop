@@ -62,6 +62,12 @@ struct FxSlot
 struct Stem
 {
     std::unique_ptr<AudioFormatReaderSource> src;
+    // 스템 파일은 분리 결과 그대로(대개 44.1kHz)이고 장치는 사용자가 고른 레이트로 돈다.
+    // 변환 없이 먹이면 그 비율만큼 빠르고 높게 재생된다 — 48k 장치에서 8.8% 어긋난다.
+    // 파일은 그대로 두고 읽는 동안 장치 레이트로 맞춘다.
+    std::unique_ptr<ResamplingAudioSource> rs;
+    int64 nextDevicePos = -1;   // 이어서 읽을 자리(장치 샘플). 어긋나면 되감는다 —
+                                // 리샘플러 내부 상태는 연달아 읽을 때만 뜻이 있다
     String name;
     String path;   // export(오프라인 렌더)용 프레시 리더 생성
     int id = 0;    // FX 주소용 id (스템은 90001+ 범위 — 녹음 트랙 id와 충돌 방지)
@@ -258,9 +264,36 @@ public:
         s->path = f.getFullPathName();
         s->id   = 90001 + (int) stems.size();   // 스템 FX 주소용 id (녹음 트랙 id와 분리된 범위)
         s->src  = std::make_unique<AudioFormatReaderSource> (r, true);
+        s->rs   = std::make_unique<ResamplingAudioSource> (s->src.get(), false, 2);   // false: 소유는 Stem 이 계속 쥔다
         stemSampleRate = r->sampleRate;
         stems.push_back (std::move (s));
         return true;
+    }
+
+    // 스템 파일 샘플 하나가 장치 샘플 몇 개에 해당하는가. 같은 레이트면 1.
+    double stemRatio() const
+    {
+        return (deviceSampleRate > 0.0 && stemSampleRate > 0.0) ? stemSampleRate / deviceSampleRate : 1.0;
+    }
+
+    /** 스템을 장치 기준 위치로 되감는다. 오디오 스레드에서도 부르므로 할당하지 않는다. */
+    void seekStem (Stem& s, int64 devicePos)
+    {
+        s.src->setNextReadPosition ((int64) std::llround ((double) devicePos * stemRatio()));
+        s.rs->flushBuffers();
+        s.nextDevicePos = devicePos;
+    }
+
+    /** 장치가 열리거나 스템이 바뀔 때 — 변환 비율과 버퍼를 다시 잡는다 */
+    void prepareStems (int block)
+    {
+        const double ratio = stemRatio();
+        for (auto& s : stems)
+        {
+            s->rs->setResamplingRatio (ratio);
+            s->rs->prepareToPlay (block, deviceSampleRate);   // 안쪽 리더는 ResamplingAudioSource 가 준비시킨다
+            s->nextDevicePos = -1;
+        }
     }
 
     // ---- 트랜스포트 ----
@@ -274,7 +307,7 @@ public:
     {
         declickPending = true;
         playhead = p;
-        for (auto& s : stems) s->src->setNextReadPosition (p);
+        for (auto& s : stems) seekStem (*s, p);
     }
 
     // ---- 녹음 ----
@@ -480,7 +513,7 @@ public:
         stemOffset = 0;
         for (auto& p : paths) addStem (p);
         if (currentDevice != nullptr)
-            for (auto& s : stems) s->src->prepareToPlay (blockSize, deviceSampleRate);
+            prepareStems (blockSize);
         setPos (0);
         recomputeSolos();   // 새 스템은 solo=false → 이전 곡 솔로 캐시 stale 방지(무음 버그)
         auto* o = ev ("stems");
@@ -1120,24 +1153,33 @@ public:
         int64 total = 0;
 
         // 스템: 프레시 리더(실시간 소스와 공유 안 함). "내 녹음만" 이면 스킵
-        struct SR { std::unique_ptr<AudioFormatReaderSource> src; float gain; bool audible;
+        //   실시간과 같은 이유로 여기서도 렌더 레이트에 맞춰 읽는다.
+        //   rs 가 src 를 가리키므로 선언 순서를 바꾸면 안 된다 — 뒤에 선언된 것이 먼저 파괴된다.
+        struct SR { std::unique_ptr<AudioFormatReaderSource> src;
+                    std::unique_ptr<ResamplingAudioSource> rs; int64 nextPos = -1;
+                    float gain; bool audible;
                     bool autoOn; std::vector<AutoPoint> autoPts;
                     std::vector<std::unique_ptr<AudioPluginInstance>> fx; int latency = 0;
                     AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
                     float panL = 1.0f, panR = 1.0f; };
         std::vector<SR> srs;
+        const double exportRatio = (sr > 0.0 && stemSampleRate > 0.0) ? stemSampleRate / sr : 1.0;
         if (! mineOnly)
             for (auto& s : stems)
             {
                 auto* rd = fmt.createReaderFor (File (s->path));
                 if (rd == nullptr) continue;
                 auto src = std::make_unique<AudioFormatReaderSource> (rd, true);
-                src->prepareToPlay (block, sr);
-                total = jmax (total, soff + rd->lengthInSamples);
+                auto rsrc = std::make_unique<ResamplingAudioSource> (src.get(), false, 2);
+                rsrc->setResamplingRatio (exportRatio);
+                rsrc->prepareToPlay (block, sr);
+                // 길이도 렌더 레이트로 환산한다 — 안 하면 44.1k 길이만큼만 쓰고 끝이 잘린다
+                total = jmax (total, soff + (int64) std::llround ((double) rd->lengthInSamples / exportRatio));
                 std::vector<AutoPoint> ap;
                 { const ScopedLock al (s->autoLock); ap = s->autoPts; }   // 스냅샷
                 SR sr2;
                 sr2.src = std::move (src);
+                sr2.rs  = std::move (rsrc);
                 sr2.gain = s->gain.load();
                 sr2.audible = anySolo ? s->solo.load() : ! s->mute.load();
                 sr2.autoOn = s->autoOn.load();
@@ -1293,8 +1335,14 @@ public:
             for (auto& r : srs)   // 스템
             {
                 sbuf.clear();
-                r.src->setNextReadPosition (jmax<int64> (0, pos - soff));
-                AudioSourceChannelInfo info (&sbuf, 0, n); r.src->getNextAudioBlock (info);
+                const int64 want = jmax<int64> (0, pos - soff);
+                if (r.nextPos != want)
+                {
+                    r.src->setNextReadPosition ((int64) std::llround ((double) want * exportRatio));
+                    r.rs->flushBuffers();
+                }
+                AudioSourceChannelInfo info (&sbuf, 0, n); r.rs->getNextAudioBlock (info);
+                r.nextPos = want + n;
                 if (! r.fx.empty())   // 스템 FX 체인 (실시간과 동일하게 적용)
                 {
                     AudioBuffer<float> pb (sbuf.getArrayOfWritePointers(), 2, n);
@@ -1421,7 +1469,7 @@ public:
         inLatSamp  = device->getInputLatencyInSamples();
         outLatSamp = device->getOutputLatencyInSamples();
 
-        for (auto& s : stems) s->src->prepareToPlay (block, deviceSampleRate);
+        prepareStems (block);
         for (auto& rt : recTracks) { const ScopedLock sl (rt->fxLock); for (auto& s : rt->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         for (auto& st : stems) { const ScopedLock sl (st->fxLock); for (auto& s : st->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         // PDC 링버퍼 — 최대 1초까지 보정. 오디오 스레드에서 절대 재할당하지 않도록 여기서 확보
@@ -1438,8 +1486,8 @@ public:
         if (! writerThread.isThreadRunning()) writerThread.startThread();
 
         if (! approximatelyEqual (stemSampleRate, deviceSampleRate))
-            std::cerr << "[engine] WARN stem SR " << stemSampleRate
-                      << " != device SR " << deviceSampleRate << " (no resample yet)\n";
+            std::cerr << "[engine] stem SR " << stemSampleRate
+                      << " != device SR " << deviceSampleRate << " — resampling stems\n";
 
         emitDeviceInfo();
     }
@@ -1476,7 +1524,7 @@ public:
     void audioDeviceStopped() override
     {
         finishRecording();
-        for (auto& s : stems) s->src->releaseResources();
+        for (auto& s : stems) s->rs->releaseResources();
         writerThread.stopThread (500);
         currentDevice = nullptr;
     }
@@ -1555,9 +1603,11 @@ public:
             {
                 scratch.setSize (2, numSamples, false, false, true);
                 scratch.clear();
-                s->src->setNextReadPosition (stemPos);   // 오프셋 반영
+                // 이어지는 블록이면 그대로 읽는다. 되감으면 리샘플러 상태가 날아가 이음매가 생긴다.
+                if (s->nextDevicePos != stemPos) seekStem (*s, stemPos);
                 AudioSourceChannelInfo info (&scratch, 0, numSamples);
-                s->src->getNextAudioBlock (info);
+                s->rs->getNextAudioBlock (info);
+                s->nextDevicePos = stemPos + numSamples;
 
                 const bool audible = anySolo ? s->solo.load() : ! s->mute.load();
                 if (s->autoOn.load())   // 자동화 ON — 페이더 대신 곡선 값(read 모드)

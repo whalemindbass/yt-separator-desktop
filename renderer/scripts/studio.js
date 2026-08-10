@@ -1794,7 +1794,8 @@ function finishTakeSetGather() {
   persistTakeSet(g.name, tracks, g.takes);
 }
 function persistTakeSet(name, tracks, takes) {
-  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, tracks, takes }); setTakeSets(a);
+  // 프로젝트 파일과 같은 이유로 잰 레이트를 함께 남긴다 — takes[].start 가 샘플 단위다
+  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, sampleRate: _sr || 44100, tracks, takes }); setTakeSets(a);
   flashTake(tr('studio.m.takeSetSaved') + name);
 }
 function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
@@ -1809,6 +1810,7 @@ let _loadingTakeSet = false;
 async function loadTakeSet(ts) {
   if (_loadingTakeSet) return;   // 재진입 차단 (더블클릭 시 전역상태 오염 방지)
   _loadingTakeSet = true;
+  const setSr = ts.sampleRate > 0 ? ts.sampleRate : 44100;   // 레이트를 안 적던 세트는 44.1k 로 본다
   try {
     api.engine.takeClear();
     _takes = []; renderTakes();
@@ -1836,8 +1838,9 @@ async function loadTakeSet(ts) {
       if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
       else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
       const id = t.id != null ? t.id : t.start;   // 고유 id (구버전은 start 폴백)
-      api.engine.takeLoad(t.file, t.start, tid, id);
-      await renderTake(t.file, t.start, id, tid);
+      const startSamples = Math.round(((t.start || 0) / setSr) * (_sr || 44100));
+      api.engine.takeLoad(t.file, startSamples, tid, id);
+      await renderTake(t.file, startSamples, id, tid);
       // 트림·페이드 복원 (구버전 세트는 inOff/fade 없음)
       const tk = _takes.find(x => x.id === id);
       if (tk) {
@@ -1917,7 +1920,9 @@ async function buildProjectObject() {
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
-  return { kind: 'yssproj', version: 1, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
+  // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
+  // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -1957,12 +1962,19 @@ async function openProject() {
 }
 async function applyProject(p) {
   const sr = _sr || 44100;
+  // 저장 당시 레이트로 잰 샘플을 지금 레이트로 옮긴다. 44.1k 로 저장한 것을 48k 로 열면
+  // 환산 없이는 모든 클립이 44100/48000 배 자리로 가 통째로 당겨진 것처럼 들린다.
+  //
+  // 레이트를 안 적던 시절 파일은 44100 으로 본다. 그때는 스템 리샘플이 없어서
+  // 44.1k 가 아닌 레이트로는 반주 자체가 어긋나 재생됐다 — 쓸 만한 프로젝트는 44.1k 에서 나왔다.
+  const savedSr = p.sampleRate > 0 ? p.sampleRate : 44100;
+  const toNow = (samples) => Math.round(((samples || 0) / savedSr) * sr);
   _suppressDirty = true;
   api.engine.takeClear(); _takes = []; renderTakes();
   // 1) 스템 (있으면 로드, 없으면 스템 트랙 비움)
   if (p.stems && p.stems.paths && Object.keys(p.stems.paths).length) {
     await loadSong({ stemPaths: p.stems.paths, videoPath: p.stems.videoPath, name: p.name, id: p.name }, { autoBpm: false });
-    _stemOffset = (p.stems.offset || 0) / sr;
+    _stemOffset = (p.stems.offset || 0) / savedSr;
     api.engine.stemOffset(Math.round(_stemOffset * sr));
     repositionStems();
     // 스템 트랙 믹스(볼륨·뮤트·솔로) 복원 — 파형 유지 위해 DOM 직접 갱신
@@ -2027,8 +2039,9 @@ async function applyProject(p) {
     if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
     else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
     const id = nextClipId();
-    api.engine.takeLoad(t.file, t.start, tid, id);
-    await renderTake(t.file, t.start, id, tid);
+    const startSamples = toNow(t.start);
+    api.engine.takeLoad(t.file, startSamples, tid, id);
+    await renderTake(t.file, startSamples, id, tid);
     const tk = _takes.find(x => x.id === id);
     if (tk) {
       if (t.inOff || (t.srcDur && t.dur < t.srcDur - 1e-4)) { tk.inOff = t.inOff || 0; tk.dur = t.dur; commitTrim(tk); }
@@ -2343,7 +2356,9 @@ function onEngineEvent(m) {
       break;
     case 'device': {
       _sr = m.sr || 44100;
-      _deviceInfo = { name: m.name, sr: m.sr, block: m.block, in: m.in, out: m.out,
+      // srMismatch 는 더 이상 경고가 아니다 — 엔진이 스템을 장치 레이트로 맞춰 읽는다.
+      // 사용자가 할 일이 없으므로 화면에는 띄우지 않고, 제보에 실리도록 진단에만 남긴다.
+      _deviceInfo = { name: m.name, sr: m.sr, stemSr: m.stemSr, block: m.block, in: m.in, out: m.out,
                       roundtripMs: m.roundtripMs, srMismatch: !!m.srMismatch };
       _inCfg.names = Array.isArray(m.inNames) ? m.inNames : [];
       // 장치를 새로 열면 엔진이 기본값(모노 1번)으로 돌아간다 → 저장해둔 설정을 다시 밀어 넣는다.
@@ -2353,7 +2368,6 @@ function onEngineEvent(m) {
       const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
       if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
       setEngineStatus('device', { name: m.name, ms: m.roundtripMs });
-      if (m.srMismatch) flashTake(tr('studio.p.srMismatch', { stem: Math.round(m.stemSr), dev: Math.round(m.sr) }));
       break;
     }
     case 'fxError':
