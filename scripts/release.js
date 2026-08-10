@@ -267,6 +267,15 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   }
   done('에셋 정합성 확인');
 
+  // 릴리즈 노트가 비어 있으면 앱의 업데이트 창이 엉뚱한 것을 보여준다.
+  //   본문이 비면 electron-updater 가 GitHub atom 피드로 떨어지고, 거기서는 태그가 가리키는
+  //   커밋 메시지가 나온다 — releases 레포의 아무 커밋 메시지가 사용자에게 패치 노트로 뜬다.
+  //   실제로 v1.4.10 에서 "docs: point download links..." 가 그렇게 노출됐다.
+  if (!String(final.body || '').trim()) {
+    warn(`릴리즈 노트가 비어 있다 — 앱 업데이트 창에 엉뚱한 커밋 메시지가 뜬다. 지금 채워라:`);
+    console.log(`   ${C.dim}gh release edit ${tag} --repo ${REPO} --title "Dr.studio ${tag}" --notes-file <파일>${C.x}`);
+  }
+
   console.log();
   done(`릴리즈 ${tag} 완료`);
   console.log(`   ${C.dim}https://github.com/${REPO}/releases/tag/${tag}${C.x}`);
