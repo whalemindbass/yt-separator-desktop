@@ -68,13 +68,16 @@ function beatPosition(beats, t) {
  *
  * 박 검출은 "박이 여기 있다"까지만 알려주고 "이게 1박이다"는 알려주지 않는다.
  *
- * 가장 확실한 단서는 드럼의 킥이다 — 1박에 온다. 그래서 beatAccent(박마다의 저역 세기)를
- * 받으면 그걸 쓴다. 없으면 베이스로 넘어간다: 마디 첫 박에는 음이 놓이고 대개 길게 끈다.
- * 다만 베이스 단서는 약해서, 긴 음 하나에 끌려가면 마디가 통째로 어긋난다.
+ * 실측에서 단서마다 힘이 크게 달랐다. 드럼 킥은 위상별 세기가 99/97/100/92 로 사실상
+ * 아무것도 말해주지 않았고(이 곡은 킥이 모든 박에 고르게 들어간다), 화성 변화는
+ * 22/2/6/29 로 갈렸다. 코드는 대개 마디 머리에서 바뀌기 때문이다.
+ * 그래서 코드 변화(barPhase)가 있으면 그것을 먼저 쓰고, 없을 때만 킥·베이스로 내려간다.
  *
+ * @param {number|null} barPhase 코드 변화로 판정한 위상 (tab-chord 의 phaseFromChords)
  * @param {number[]|null} beatAccent 박마다의 세기 (drums 저역). 길이는 beats 와 같다.
  */
-function pickPhase(notes, beats, beatsPerBar, beatAccent) {
+function pickPhase(notes, beats, beatsPerBar, beatAccent, barPhase) {
+  if (barPhase != null) return ((barPhase % beatsPerBar) + beatsPerBar) % beatsPerBar;
   const score = new Array(beatsPerBar).fill(0);
 
   if (beatAccent && beatAccent.length >= beats.length) {
@@ -132,7 +135,7 @@ export function buildScore(notes, beats, opts = {}) {
   const subdiv = opts.subdiv || 4;                    // 한 박을 나눌 수 (4 = 16분음표)
   const perBar = beatsPerBar * subdiv;
   const phase = opts.phase != null ? opts.phase
-                                   : pickPhase(notes, beats, beatsPerBar, opts.beatAccent);
+                                   : pickPhase(notes, beats, beatsPerBar, opts.beatAccent, opts.barPhase);
 
   // 각 음을 마디 번호와 마디 안 위치로 옮긴다
   const placed = [];

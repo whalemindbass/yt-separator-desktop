@@ -9,6 +9,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 import { t as tr, onLocaleChange } from './i18n.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
 import { buildScore, beatAccents, estimateKey } from '../workers/tab-score.js';
+import { detectChords, phaseFromChords } from '../workers/tab-chord.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -1032,7 +1033,7 @@ let _tabView = null;
 let _tabBusy = false;
 let _tabSongKey = null;    // 어느 곡의 결과인지 — 곡이 바뀌면 비운다
 // 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
-let _tabNotes = null, _tabBeats = null, _tabAccent = null;
+let _tabNotes = null, _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
 let _tabPhase = null;      // null = 자동 판정
 
 function updateTabBarButtons() {
@@ -1045,7 +1046,7 @@ function updateTabBarButtons() {
 /** 마디 시작을 박 단위로 옮긴다. 채보는 그대로 두고 마디선만 다시 그린다. */
 function shiftTabBars(delta) {
   if (!_tabNotes || !_tabBeats || !_tabView) return;
-  const auto = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, phase: _tabPhase });
+  const auto = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase });
   const base = _tabPhase != null ? _tabPhase : (auto ? auto.phase : 0);
   _tabPhase = ((base + delta) % 4 + 4) % 4;
   _tabView.setScore(buildScore(_tabNotes, _tabBeats, { phase: _tabPhase }));
@@ -1057,7 +1058,7 @@ function refreshTabPanel() {
   if (_tabSongKey && _tabSongKey !== (_stemPaths && _stemPaths.bass)) {
     if (_tabView) _tabView.clear();
     _tabSongKey = null;
-    _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null;
+    _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null;
     updateTabBarButtons();
     if (run) run.textContent = tr('tab.run');
   }
@@ -1126,6 +1127,13 @@ async function runStudioTab() {
 
         const b = await detectBeats(dL, dR, daudio.sampleRate, mix);
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
+        // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다
+        if (beats && mix) {
+          try {
+            const ph = phaseFromChords(detectChords(toMono(mix[0], mix[1]), daudio.sampleRate, beats));
+            if (ph) _tabBarPhase = ph.phase;
+          } catch { /* 코드 검출 실패 — 킥·베이스 단서로 내려간다 */ }
+        }
       } catch { /* 박자 감지 실패 — 격자도 마디도 없이 진행 */ }
     }
 
@@ -1139,7 +1147,7 @@ async function runStudioTab() {
     // 마디 — 박이 있을 때만. 첫 박은 드럼 킥으로 추정하고, 틀리면 사용자가 옮긴다.
     _tabNotes = r.notes; _tabBeats = beats; _tabPhase = null;
     _tabAccent = beats && drumsMono ? beatAccents(drumsMono, drumsSr, beats) : null;
-    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent }) : null);
+    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null);
     updateTabBarButtons();
     // 조성 — 표기(F#/Gb)에 쓴다. 정확도에는 쓰지 않는다: 실측에서 조 밖 음 15개는
     // 하나도 틀리지 않았고, 오검출 41개는 전부 조 안이었다(옥타브 오류는 정의상 조 안이다).
