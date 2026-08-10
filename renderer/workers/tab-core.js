@@ -373,7 +373,8 @@ function detectTechniques(notes, ctx, opts) {
  * 지판 배치. 각 노트마다 (현, 프렛) 후보를 만들고 DP 로 손 이동이 적은 경로를 고른다.
  * 그리디로 하면 한 번 잘못 든 자리가 끝까지 따라온다.
  */
-export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
+export function assignFrets(notes, tuningId, maxFret, sameStringPenalty, tune) {
+  const T = tune || {};        // 가중치 실험용 — 실사용 경로에서는 비어 있다
   const tuning = TUNINGS[tuningId] || TUNINGS[DEFAULTS.tuning];
   const open = tuning.strings;                      // 낮은 현 → 높은 현
   const cands = notes.map(n => {
@@ -393,14 +394,23 @@ export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
   const SHIFT_PER   = 0.45;  // 옮기는 거리(프렛)당
   const SPAN        = 4;     // 손이 한 번에 덮는 프렛 수
   const IN_SPAN     = 0.15;  // span 안에서의 손가락 이동은 싸다
-  const STRING_COST = 0.3;   // 현 이동 — 오른손 문제라 왼손 이동보다 가볍다
+  // 현 이동 — 오른손 문제라 왼손 이동보다 가볍다. 다만 방향에 따라 값이 다르다.
+  //   베이스는 굵은 현이 소리로 유리하므로 아래로 내려가는 것은 이득 쪽이고,
+  //   얇은 현으로 올라가는 것은 손해 쪽이다. 같은 값을 주면 "웬만하면 저음현"이
+  //   성립하지 못한다 — 내려가는 비용(0.3)이 저음현 보너스(0.18)보다 커서
+  //   공짜일 때만 내려가게 된다. 실제로 같은 G3 가 1현12 와 2현17 을 오갔고
+  //   그 차이는 0.07 이었다.
+  const STRING_DOWN = T.stringDown != null ? T.stringDown : 0.12;   // 굵은 현 쪽으로
+  const STRING_UP   = T.stringUp != null ? T.stringUp : 0.32;       // 얇은 현 쪽으로
   const OPEN_BONUS  = 0.25;  // 개방현
   // 낮은 프렛 선호는 아주 약하게만 준다.
   //   노트마다 누적되는 값이라 조금만 키워도 포지션 유지 비용을 이겨버리고,
   //   결과가 매 음 낮은 자리로 흩어진다. 연주자는 한 자리에 머문다.
   const POS_COST    = 0.02;
-  // 같은 음이면 굵은 현(낮은 현) 쪽을 택한다 — 톤이 굵고 포지션이 유지된다.
-  const LOW_STRING  = 0.18;
+  // 같은 음이면 굵은 현을 택한다 — 베이스는 그쪽이 소리로 유리하다.
+  //   현을 내려갔다 돌아오는 비용(STRING_DOWN + STRING_UP)보다 커야 실제로 내려간다.
+  //   작게 주면(0.18) 공짜일 때만 내려가고, 같은 G3 가 구절마다 1현12 와 2현17 을 오갔다.
+  const LOW_STRING  = T.lowString != null ? T.lowString : 0.50;
   const HIGH_FRET   = 19;    // 이 위는 실제로 드물다
   const HIGH_PEN    = 1.2;
   // 슬라이드는 한 현 위에서만 성립한다. 금지가 아니라 벌점으로 둔다 —
@@ -435,7 +445,8 @@ export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
         for (let k = 0; k < prevRow.length; k++) {
           const p = prevRow[k];
           const ph = p.hand;                       // 직전에 손이 있던 프렛 (-1 = 아직 모름)
-          let move = STRING_COST * Math.abs(c.string - p.string);
+          const ds = c.string - p.string;
+          let move = (ds < 0 ? STRING_DOWN : STRING_UP) * Math.abs(ds);
           if (linked[i] && c.string !== p.string) move += SAME_STRING;
           let hand = anchor;
           if (c.fret === 0) {
@@ -549,7 +560,7 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   if (opts.techniques) notes = detectTechniques(notes, { midis: smooth, onsets, rmss, hopSec }, opts);
   // 박 정보가 있으면 격자에 붙인다 (드럼 스템에서 얻는다)
   if (opts.beats && opts.beats.length > 1) notes = quantizeToGrid(notes, opts.beats, opts.subdiv || 4);
-  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret, opts.sameStringPenalty);
+  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret, opts.sameStringPenalty, opts.tune);
 
   if (onProgress) onProgress(100);
   return { notes: withFrets, tuning: opts.tuning, sampleRate: sr, hopSec };

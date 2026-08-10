@@ -43,7 +43,7 @@ self.addEventListener('message', async (e) => {
     }
 
     // 격자 정렬로 순서가 바뀌었을 수 있으니 운지는 마지막에 다시 매긴다
-    notes = assignFrets(notes, r.tuning, (opts && opts.maxFret) || 22, opts && opts.sameStringPenalty);
+    notes = assignFrets(notes, r.tuning, (opts && opts.maxFret) || 22, opts && opts.sameStringPenalty, opts && opts.tune);
     self.postMessage({ id, type: 'done', notes, tuning: r.tuning });
   } catch (err) {
     self.postMessage({ id, type: 'error', error: (err && err.message) || String(err) });
