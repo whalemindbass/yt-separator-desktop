@@ -44,3 +44,4 @@ sample/
 
 # 로컬 메모 — 자격 증명이 들어갈 수 있는 파일은 저장소에 두지 않는다
 admin.txt
+GH_token.txt
