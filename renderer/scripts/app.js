@@ -8,6 +8,7 @@ import { separatePipeline, probeProviders, setProviderPreference, getUsedProvide
 import { Library } from './library.js';
 import { initCommunity } from './community.js';
 import { initStudio } from './studio.js';
+import { initHome } from './home.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
 import { initReport, noteError } from './report.js';
 
@@ -83,7 +84,11 @@ function switchView(name) {
   if (name === 'library') Library.refresh().catch(console.error);
   if (name === 'community') initCommunity().catch(console.error);
   if (name === 'studio') initStudio().catch(console.error);
+  if (name === 'home') initHome(switchView);
+  // 홈은 탭이 아니라 로고로 들어온다 — 홈일 때는 어떤 탭도 켜져 있으면 안 된다
+  document.getElementById('brand-home')?.classList.toggle('on', name === 'home');
 }
+$('brand-home').addEventListener('click', () => switchView('home'));
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 
 initReport();   // 오류 제보 (상단바 · 설정)

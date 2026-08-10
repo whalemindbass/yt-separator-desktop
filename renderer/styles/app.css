@@ -231,8 +231,18 @@ body { display: flex; flex-direction: column; }
 :root[data-theme="light"]       #theme-toggle .theme-sun  { opacity: 0; transform: rotate(60deg)  scale(.6); }
 :root[data-theme="light"]       #theme-toggle .theme-moon { opacity: 1; transform: rotate(0)      scale(1); }
 
-.brand { display: flex; align-items: center; gap: 12px; -webkit-app-region: drag; }
-.tabs, .brand, .titlebar-drag { -webkit-app-region: drag; }
+/* 브랜드는 홈으로 가는 버튼이다 — drag 영역 안에 있으면 클릭이 창 끌기에 먹힌다 */
+.brand {
+  display: flex; align-items: center; gap: 12px;
+  -webkit-app-region: no-drag;
+  background: none; border: 0; padding: 0 6px 0 0; margin: 0;
+  border-radius: 8px; cursor: pointer;
+  transition: background var(--dur-1) var(--ease);
+}
+.brand:hover { background: var(--elev); }
+.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand.on { background: var(--accent-soft); }
+.tabs, .titlebar-drag { -webkit-app-region: drag; }
 .tab, .titlebar-meta, .titlebar-controls { -webkit-app-region: no-drag; }
 
 /* Tabs — 언더라인 스타일 (박스 제거) */
@@ -3058,3 +3068,77 @@ body { background: var(--bg) !important; }
   letter-spacing: .5px;
 }
 .tabv-note.tech.now { border-left-color: var(--accent); }
+
+/* ── 홈 ────────────────────────────────────────────────────────
+   로고를 눌러 들어오는 읽기 전용 화면. 공지 · 바로가기 · 디스코드.
+   ────────────────────────────────────────────────────────────*/
+.home-body { display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+.home-body > * { flex-shrink: 0; }
+
+.home-head h2 {
+  font-size: 24px; font-weight: 750; letter-spacing: -.02em;
+  color: var(--tx-1); margin-bottom: 6px;
+}
+.home-head .muted { word-break: keep-all; text-wrap: balance; max-width: 52ch; }
+.home-ver { margin-top: 10px; }
+.home-ver-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font: 500 11px/1.6 var(--mono);
+  color: var(--tx-3); background: var(--elev); border: 1px solid var(--border);
+}
+
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.home-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+.home-sec-head { display: flex; align-items: baseline; gap: 10px; }
+.home-sec-head h3, .home-card h3 {
+  font-size: 14px; font-weight: 700; color: var(--tx-1); letter-spacing: -.01em;
+}
+.home-sec-head .link-btn { margin-left: auto; }
+
+/* 공지 */
+.notice-list { display: flex; flex-direction: column; gap: 10px; }
+.notice {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.notice.pinned { border-color: var(--accent-soft-border); }
+.notice > header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.notice-kind {
+  font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 999px;
+  background: var(--elev); color: var(--tx-2); border: 1px solid var(--border-mid);
+}
+.notice-kind.k-update { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
+.notice-title { font-size: 14.5px; font-weight: 650; color: var(--tx-1); min-width: 0; word-break: keep-all; }
+.notice-date { margin-left: auto; font: 400 11.5px/1 var(--mono); color: var(--tx-3); white-space: nowrap; }
+.notice-body { font-size: 13px; line-height: 1.7; color: var(--tx-2); word-break: keep-all; }
+.notice-body p { margin: 0 0 6px; }
+.notice-body p:last-child { margin-bottom: 0; }
+.notice-body ul { margin: 0 0 6px; padding-left: 18px; }
+.notice-body a { color: var(--accent); }
+.notice-empty { padding: 24px 4px; font-size: 13px; }
+
+/* 오른쪽 카드 */
+.home-col-side { gap: 14px; }
+.home-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.home-card .muted { font-size: 12.5px; word-break: keep-all; }
+.home-links { display: flex; flex-direction: column; gap: 6px; }
+.home-link {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid transparent;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.home-link:hover { background: var(--elev); border-color: var(--border); }
+.home-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-link b { font-size: 13.5px; font-weight: 650; color: var(--tx-1); }
+.home-link span { font-size: 12px; color: var(--tx-3); word-break: keep-all; }
+
+/* 좁을 때는 한 줄로 */
+@media (max-width: 900px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+}

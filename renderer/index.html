@@ -10,14 +10,15 @@
 <body>
   <div class="titlebar">
     <div class="titlebar-drag">
-      <div class="brand">
+      <!-- 로고·이름이 홈으로 가는 문. 창 드래그 영역 안이라 CSS 에서 no-drag 로 클릭을 살린다 -->
+      <button class="brand" id="brand-home" type="button" data-i18n-title="home.goTitle" title="홈으로">
         <div class="logo" aria-hidden="true">
           <img src="./assets/app-icon.png" alt="" draggable="false" />
         </div>
         <div class="titles">
           <h1>Dr.studio</h1>
         </div>
-      </div>
+      </button>
     </div>
     <nav class="tabs">
       <button class="tab on" data-view="separate" data-i18n="title.tab.separate">새 분리</button>
@@ -104,6 +105,53 @@
       </div>
     </div>
   </div>
+
+  <!-- View 0: 홈 — 로고를 눌러야 온다. 공지·기능 안내·바로가기. 탭에는 넣지 않는다. -->
+  <main class="body view home-body" data-view="home" hidden>
+    <section class="home-head">
+      <h2 data-i18n="home.title">Dr.studio</h2>
+      <p class="muted" data-i18n="home.subtitle">스템 분리부터 커버 녹음까지, 전부 이 컴퓨터에서.</p>
+      <div class="home-ver"><span id="home-version" class="home-ver-tag"></span></div>
+    </section>
+
+    <div class="home-grid">
+      <section class="home-col">
+        <div class="home-sec-head">
+          <h3 data-i18n="home.notices">공지</h3>
+          <button id="home-notice-reload" class="link-btn" data-i18n="home.reload">새로고침</button>
+        </div>
+        <div id="home-notices" class="notice-list">
+          <div class="notice-empty muted" data-i18n="home.notices.loading">불러오는 중…</div>
+        </div>
+      </section>
+
+      <aside class="home-col home-col-side">
+        <section class="home-card">
+          <h3 data-i18n="home.start">시작하기</h3>
+          <div class="home-links">
+            <button class="home-link" data-go="separate">
+              <b data-i18n="home.link.separate">스템 분리</b>
+              <span data-i18n="home.link.separateSub">링크나 내 파일을 악기별로 나눕니다</span>
+            </button>
+            <button class="home-link" data-go="library">
+              <b data-i18n="home.link.library">라이브러리</b>
+              <span data-i18n="home.link.librarySub">나눠 둔 곡을 듣고 연습합니다</span>
+            </button>
+            <button class="home-link" data-go="studio">
+              <b data-i18n="home.link.studio">스튜디오</b>
+              <span data-i18n="home.link.studioSub">커버를 녹음하고 믹스합니다</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="home-card" id="home-discord" hidden>
+          <h3 data-i18n="home.discord">디스코드</h3>
+          <p class="muted" data-i18n="home.discordSub">새 소식을 받고 이야기를 나눕니다.</p>
+          <button id="home-discord-btn" class="btn" data-i18n="home.discordJoin">들어가기</button>
+        </section>
+      </aside>
+    </div>
+  </main>
 
   <!-- View 1: 분리 처리 -->
   <main class="body view" data-view="separate">
