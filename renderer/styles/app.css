@@ -892,7 +892,7 @@ body { display: flex; flex-direction: column; }
   overflow: hidden;
   display: flex; flex-direction: column;
 }
-.lib-right { grid-area: right; border-left: 1px solid var(--border); padding: 20px 18px; overflow-y: auto; background: var(--surface); }
+.lib-right { grid-area: right; border-left: 1px solid var(--border); padding: 0px 18px; overflow-y: auto; background: var(--surface); }
 
 .lib-side {
   background: var(--surface);
@@ -1152,11 +1152,10 @@ body { display: flex; flex-direction: column; }
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  padding: 12px 0;
   border-bottom: 1px solid var(--border);
   min-width: 0;
 }
-.mixer-master.mixer-master-inline:last-child { border-bottom: 0; padding-bottom: 4px; }
+.mixer-master.mixer-master-inline:last-child { border-bottom: 0; }
 .mixer-master.mixer-master-inline > .mixer-label {
   white-space: nowrap;
   flex-shrink: 0;
@@ -1170,6 +1169,8 @@ body { display: flex; flex-direction: column; }
 
 /* Master 볼륨 (그룹 안에 들어옴) */
 .master-controls { display: flex; align-items: center; gap: 8px; }
+/* 값 칸은 줄지 않게 — 슬라이더가 먼저 줄어야 한다. 자릿수가 바뀌어도 칸이 안 흔들리도록 폭을 고정 */
+.master-controls .mixer-val { flex: none; min-width: 4.8em; }
 .master-slider { width: 130px; }
 
 /* 믹서 그룹 내 모든 버튼 · 인터랙션 요소 높이 통일 (26px) */
@@ -1931,6 +1932,7 @@ body { display: flex; flex-direction: column; }
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
+  white-space: nowrap;   /* 폭이 좁아지면 '0.0' 과 'dB' 가 갈라졌다 */
 }
 
 /* 모든 트랙이 컬럼을 공유하도록 부모에서 그리드 정의 → subgrid 로 상속.
@@ -2690,7 +2692,7 @@ body { display: flex; flex-direction: column; }
 .mx-bus-lbl.on { color: var(--accent); }
 
 /* 선택 트랙 → 버스 센드 */
-.mx-sends { display: flex; flex-direction: column; gap: 4px; padding: 0 10px; }
+.mx-sends { display: flex; flex-direction: column; gap: 4px; padding: 0 10px; margin-top: 4px; }
 .mx-send-row { display: flex; align-items: center; gap: 6px; }
 .mx-send-row .lb { font: 700 8px/1 var(--mono); color: var(--tx-4); letter-spacing: .04em; width: 36px; flex: none; }
 .mx-send-row .val { font: 600 9px/1 var(--mono); color: var(--tx-3); width: 18px; text-align: right; flex: none; }
@@ -2907,3 +2909,88 @@ body { background: var(--bg) !important; }
 }
 .settings-section { padding: 20px 22px; }
 .settings-section h3 { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--tx-3); font-family: var(--mono); }
+
+/* ── 베이스 TAB 채보 ─────────────────────────────────────────── */
+.tab-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lib-right > .tab-panel {
+  padding: 14px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tab-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tab-title {
+  font-size: var(--fs-sm); font-weight: 600; color: var(--tx-2);
+  letter-spacing: .04em; flex: 1; min-width: 0;
+}
+.tab-tuning {
+  font: 500 11px/1 var(--mono); color: var(--tx-2);
+  background: var(--input); border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm); padding: 4px 6px; flex: none;
+}
+.tab-status { font-size: var(--fs-sm); color: var(--tx-3); }
+.tab-status.err { color: var(--err-tx); }
+
+/* 악보 — 재생선은 고정, 악보가 그 아래로 흐른다 */
+.tabv {
+  --tab-row: 17px;
+  --tab-playhead: 30%;
+  position: relative;
+  overflow: hidden;
+  height: calc(var(--tab-strings, 4) * var(--tab-row) + 14px);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: crosshair;
+}
+.tabv:not(.has-notes) { display: none; }
+
+.tabv-gutter {
+  position: absolute; left: 0; top: 7px; z-index: 3;
+  display: grid; grid-template-rows: repeat(var(--tab-strings, 4), var(--tab-row));
+  padding-left: 6px; padding-right: 6px;
+  background: linear-gradient(90deg, var(--elev) 70%, transparent);
+}
+.tabv-gutter b {
+  font: 600 9.5px/1 var(--mono); color: var(--tx-3);
+  letter-spacing: .06em; align-self: center;
+}
+
+.tabv-flow {
+  /* 현재 시각의 음이 재생선 위에 오도록 시작점을 재생선에 맞춘다 */
+  position: absolute; left: var(--tab-playhead); top: 7px; bottom: 7px;
+  will-change: transform;
+}
+.tabv-string {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: var(--border-mid);
+}
+.tabv-note {
+  position: absolute;
+  height: var(--tab-row);
+  display: grid; place-items: center;
+  font: 600 11px/1 var(--mono);
+  color: var(--tx-1);
+  background: var(--elev);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  padding: 0 3px;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.tabv-note:hover { border-color: var(--accent-soft-border); }
+.tabv-note:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tabv-note.now { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* 재생선 */
+.tabv-playhead {
+  position: absolute; top: 0; bottom: 0; left: var(--tab-playhead);
+  width: 1px; background: var(--accent); z-index: 2;
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), .5);
+}
+.tabv-playhead::before {
+  content: ''; position: absolute; top: 0; left: -3px;
+  border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
+  border-top: 5px solid var(--accent);
+}
+/* 두 검출기가 합의하지 않은 음 — 지우지 않고 확신도만 낮춰 보여준다 */
+.tabv-note.unsure { opacity: .45; border-style: dashed; }
+.tabv-note.unsure.now { opacity: .8; }

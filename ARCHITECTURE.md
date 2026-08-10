@@ -136,8 +136,10 @@ Renderer (renderer/)
 | `fader.js` | dB 테이퍼 변환(`faderToGain`/`gainToFader`). 유니티는 travel 의 72%, 상한 +10 dB |
 | `i18n.js` (1.1k줄) | ko/en 사전 + `applyI18n`. `data-i18n` / `-html` / `-title` / `-placeholder` / `-aria` |
 | `community.js` · `report.js` | Cloudflare Worker API 호출 (커뮤니티 · 오류 제보) |
+| `tabview.js` | 베이스 TAB — 워커 실행(`transcribeBass`) + 흐르는 악보 표시(`TabView`). 라이브러리·스튜디오가 공유 |
 
-`renderer/workers/` — `stem-worker.js`(onnx 추론) · `encoder-worker.js`(WAV 인코딩) · `beat-worker.js`(BPM).
+`renderer/workers/` — `stem-worker.js`(onnx 추론) · `encoder-worker.js`(WAV 인코딩) · `beat-worker.js`(BPM)
+· `tab-worker.js`(베이스 채보) · `tab-core.js`(YIN·온셋·운지 DP) · `bp-run.js`+`bp-notes.js`(basic-pitch, 기본 꺼짐).
 `renderer/lib/` — onnxruntime-web 번들, music-tempo, signalsmith-stretch. 전부 로컬. CDN 을 쓰지 않는다(CSP 가 막는다).
 
 ### 오디오 엔진 (`engine/`)
@@ -147,6 +149,20 @@ Renderer (renderer/)
 
 핵심 개념: 스템/녹음 트랙별 게인·팬·뮤트·솔로, 고정 2개 센드 버스(`kBusIdBase = 95001`),
 트랙별 링버퍼 지연선으로 PDC, `pickInputs()` 로 모노/스테레오 입력 선택.
+
+### 베이스 TAB 채보
+
+분리된 **베이스 스템**만 입력으로 받는다. 표시와 재생 동기화까지가 범위다 — 편집·MIDI 내보내기는 없다.
+
+1. `tab-core.js` — 2단계 YIN(2배 데시메이션 후 전체 레이트로 ±4 랙 정밀화), 로그 에너지 플럭스 온셋,
+   잔음·유령음 제거, 손 위치를 상태로 갖는 DP 운지 배정.
+2. 드럼 스템에서 얻은 박(`detectBeats`)이 있으면 `quantizeToGrid` 로 16분 격자에 붙인다.
+   격자에서 간격의 45%보다 먼 음은 건드리지 않는다 — 당김음을 억지로 끌어오면 틀린 자리에 고정된다.
+3. `tab-worker.js` 가 워커에서 돌리고 `tabview.js` 가 흐르는 악보로 그린다.
+
+**basic-pitch 교차 확인은 기본으로 끈다**(`opts.crossCheck === true` 일 때만). 사용자 수정 정답지 617음 대비
+자체 YIN 87% · basic-pitch 18%(옥타브 무시 90% vs 29%)로, 불일치는 신뢰도 신호가 아니라 basic-pitch 의 오답이었다.
+채점 도구는 `scratchpad/tablab/_cmp.html` (renderer/ 에 복사해서 연다).
 
 ---
 

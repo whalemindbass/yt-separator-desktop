@@ -7,6 +7,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, onLocaleChange } from './i18n.js';
+import { TabView, transcribeBass, toMono } from './tabview.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -1025,8 +1026,88 @@ function tracksHeight() {
   const lanes = $('daw-lanes'); if (!lanes) return 0;
   return lanes.offsetHeight || 0;   // spacer 포함 — 재생선·범위선이 아래 여백까지 자연스럽게 이어짐
 }
+// ── 베이스 TAB (도구 탭) ─────────────────────────────────────
+let _tabView = null;
+let _tabBusy = false;
+let _tabSongKey = null;    // 어느 곡의 결과인지 — 곡이 바뀌면 비운다
+
+function refreshTabPanel() {
+  const status = $('st-tab-status'), run = $('st-tab-run');
+  const bass = _stemPaths && _stemPaths.bass;
+  if (_tabSongKey && _tabSongKey !== (_stemPaths && _stemPaths.bass)) {
+    if (_tabView) _tabView.clear();
+    _tabSongKey = null;
+    if (run) run.textContent = tr('tab.run');
+  }
+  if (run) run.disabled = !bass || _tabBusy;
+  if (status && !_tabBusy) {
+    status.classList.remove('err');
+    status.textContent = !_stemPaths ? tr('tab.noSong') : (bass ? tr('tab.hintStudio') : tr('tab.noBass'));
+  }
+}
+
+async function runStudioTab() {
+  const view = $('st-tab-view'), status = $('st-tab-status'), run = $('st-tab-run');
+  const tuningSel = $('st-tab-tuning');
+  const bassPath = _stemPaths && _stemPaths.bass;
+  if (!view || _tabBusy) return;
+  if (!bassPath) { if (status) { status.textContent = tr(_stemPaths ? 'tab.noBass' : 'tab.noSong'); status.classList.add('err'); } return; }
+
+  _tabBusy = true;
+  if (run) run.disabled = true;
+  if (status) { status.classList.remove('err'); status.textContent = tr('tab.working', { pct: 0 }); }
+  try {
+    if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => {
+      if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
+      const t = Math.max(0, Math.min(fullSec(), sec));
+      api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
+    } });
+    // 스템은 파일로만 들고 있으므로 여기서 디코드한다
+    const res = await fetch(toYtsepUrl(bassPath));
+    const buf = await res.arrayBuffer();
+    const ctx = new AudioContext();
+    let audio;
+    try { audio = await ctx.decodeAudioData(buf); } finally { try { ctx.close(); } catch {} }
+    const L = audio.getChannelData(0);
+    const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+    const mono = toMono(L, R);
+
+    // 드럼 스템이 있으면 박자를 잡아 격자에 붙인다
+    let beats = null;
+    if (_stemPaths.drums) {
+      try {
+        const db = await fetch(toYtsepUrl(_stemPaths.drums));
+        const dctx = new AudioContext();
+        let daudio;
+        try { daudio = await dctx.decodeAudioData(await db.arrayBuffer()); } finally { try { dctx.close(); } catch {} }
+        const dL = daudio.getChannelData(0);
+        const dR = daudio.numberOfChannels > 1 ? daudio.getChannelData(1) : dL;
+        const b = await detectBeats(dL, dR, daudio.sampleRate, null);
+        if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
+      } catch { /* 박자 감지 실패 — 격자 없이 진행 */ }
+    }
+
+    const r = await transcribeBass(mono, audio.sampleRate, { tuning: tuningSel ? tuningSel.value : '4', beats },
+      (pct, phase) => {
+        if (status) status.textContent = tr(phase === 'bp' ? 'tab.workingBp' : 'tab.working', { pct });
+      });
+    _tabView.setNotes(r.notes, r.tuning);
+    _tabSongKey = bassPath;
+    if (status) status.textContent = r.cross && r.cross.agreed != null
+      ? tr('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
+      : tr('tab.done', { n: r.notes.length });
+    if (run) run.textContent = tr('tab.rerun');
+  } catch (e) {
+    if (status) { status.textContent = tr('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+  } finally {
+    _tabBusy = false;
+    if (run) run.disabled = !(_stemPaths && _stemPaths.bass);
+  }
+}
+
 function updatePlayhead(sec) {
   _lastSec = sec; _phEmitTs = performance.now(); _phEmitSec = sec;
+  if (_tabView) _tabView.setTime(sec);
   const ph = $('daw-playhead');
   if (!ph) return;
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
@@ -1047,6 +1128,7 @@ function _phTick(ts) {
     ph.style.transform = `translate3d(${x}px, 0, 0)`;
     const p = $('st-pos'); if (p) p.textContent = fmtTC(sec);
   }
+  if (_tabView) _tabView.setTime(sec);   // 엔진 pos 는 20Hz — 여기서 보간해야 부드럽다
   requestAnimationFrame(_phTick);
 }
 
@@ -2740,7 +2822,10 @@ function wire() {
     const empty = $('tool-empty'); if (empty) empty.hidden = !!name;
     // 피치 검출은 무거우므로 튜너가 열려 있을 때만 돌린다
     api.engine.tuner(name === 'tuner');
+    if (name === 'tab') refreshTabPanel();
   };
+  const tabRun = $('st-tab-run');
+  if (tabRun) tabRun.addEventListener('click', runStudioTab);
   document.querySelectorAll('.daw-tool-tab').forEach(b =>
     b.addEventListener('click', () => selectTool(b.classList.contains('on') ? null : b.dataset.tool)));   // 다시 누르면 닫기
   selectTool(null);   // 처음엔 아무 도구도 안 열림

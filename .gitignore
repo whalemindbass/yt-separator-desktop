@@ -9,6 +9,7 @@ vendor/yt-dlp/*.exe
 vendor/yt-dlp/yt-dlp
 vendor/ffmpeg/**
 models/*.onnx
+renderer/models/*.onnx
 
 # Editor
 .vscode/
@@ -20,8 +21,14 @@ concept.png
 symbol.png
 daw스크린샷.png
 
-# 테스트용 녹음 (로컬 전용)
+# 테스트용 녹음·채보 자료 (로컬 전용)
 low_B_sample.wav
+bass_sample.wav
+bass_sample_TAB*.txt
+nmp.onnx
+ymt3_notes.json
+chatgpt_answer.png
+chatgpt_answer.txt
 
 # Release GUI 빌드 산출물
 scripts/release-build/

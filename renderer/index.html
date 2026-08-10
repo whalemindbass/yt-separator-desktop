@@ -356,6 +356,21 @@
     </section>
 
     <aside class="lib-right">
+      <!-- 베이스 TAB 채보 — 기능 패널 맨 위 -->
+      <section class="tab-panel" id="lib-tab-panel">
+        <header class="tab-head">
+          <span class="tab-title" data-i18n="tab.title">베이스 TAB</span>
+          <select id="lib-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
+            <option value="4">E A D G</option>
+            <option value="5">B E A D G</option>
+            <option value="5H">E A D G C</option>
+          </select>
+          <button id="lib-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+        </header>
+        <div class="tab-status" id="lib-tab-status" data-i18n="tab.hintLibrary">베이스 스템에서 TAB 을 만듭니다.</div>
+        <div class="tab-view" id="lib-tab-view"></div>
+      </section>
+
       <div class="mixer">
         <div class="mixer-inline-row">
           <!-- Row 1: 마스터 / 오디오 -->
@@ -555,6 +570,7 @@
           <div class="daw-tool-tabs">
             <button class="daw-tool-tab" data-tool="vu" data-i18n="studio.h.inputLevel">입력 레벨</button>
             <button class="daw-tool-tab" data-tool="tuner" data-i18n="studio.h.tuner">튜너</button>
+            <button class="daw-tool-tab" data-tool="tab" data-i18n="tab.title">베이스 TAB</button>
           </div>
           <div class="daw-fx-b">
             <div class="daw-tool" id="tool-vu" data-tool="vu" hidden>
@@ -583,6 +599,18 @@
                   <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
                 </div>
               </div>
+            </div>
+            <div class="daw-tool tab-panel" id="tool-tab" data-tool="tab" hidden>
+              <header class="tab-head">
+                <select id="st-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
+                  <option value="4">E A D G</option>
+                  <option value="5">B E A D G</option>
+                  <option value="5H">E A D G C</option>
+                </select>
+                <button id="st-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+              </header>
+              <div class="tab-status" id="st-tab-status" data-i18n="tab.hintStudio">곡을 불러오면 베이스 스템에서 TAB 을 만듭니다.</div>
+              <div class="tab-view" id="st-tab-view"></div>
             </div>
             <div class="daw-tool-empty" id="tool-empty" data-i18n="studio.h.pickTool">위에서 도구를 선택하세요</div>
           </div>

@@ -5,6 +5,7 @@ import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, t
 import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
+import { TabView, transcribeBass, toMono } from './tabview.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -519,6 +520,9 @@ async function mountPlayer(item) {
       stemUrls[name] = toYtsepUrl(p);
     }
     currentPlayer = new Player(playerVideo, videoUrl, stems, sampleRate, stemUrls);
+
+    // 베이스 TAB — 곡이 바뀌면 이전 결과를 비우고, 이번 곡의 베이스 스템을 쥐고 있는다
+    setTabSource(stems.bass || null, sampleRate, stems.drums || null);
 
     // 파형 peaks 계산 (스템 합산 진폭)
     computeWavePeaks(stems);
@@ -1397,6 +1401,81 @@ function addCheckpoint() {
   drawWaveform();
 }
 
+// ── 베이스 TAB ──────────────────────────────────────────────
+let _tabView = null;
+let _tabBass = null;      // [L, R] — 현재 곡의 베이스 스템
+let _tabDrums = null;     // [L, R] — 박자 감지용 드럼 스템
+let _tabSr = 44100;
+let _tabBusy = false;
+
+function tabEls() {
+  return { view: $('lib-tab-view'), status: $('lib-tab-status'), run: $('lib-tab-run'), tuning: $('lib-tab-tuning') };
+}
+
+function setTabSource(bass, sampleRate, drums) {
+  _tabBass = bass || null;
+  _tabDrums = drums || null;
+  _tabSr = sampleRate || 44100;
+  const { status, run } = tabEls();
+  if (_tabView) _tabView.clear();
+  if (run) run.disabled = !_tabBass || _tabBusy;
+  if (status) {
+    status.classList.remove('err');
+    status.textContent = _tabBass ? t('tab.hintLibrary') : t('tab.noBass');
+  }
+}
+
+async function runTabTranscribe() {
+  const { view, status, run, tuning } = tabEls();
+  if (!view || _tabBusy) return;
+  if (!_tabBass) { if (status) { status.textContent = t('tab.noBass'); status.classList.add('err'); } return; }
+
+  _tabBusy = true;
+  if (run) run.disabled = true;
+  if (status) { status.classList.remove('err'); status.textContent = t('tab.working', { pct: 0 }); }
+
+  try {
+    if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
+    const mono = toMono(_tabBass[0], _tabBass[1]);
+    const tun = tuning ? tuning.value : '4';
+    // 드럼 스템이 있으면 박자를 먼저 잡아 노트를 격자에 붙인다
+    let beats = null;
+    if (_tabDrums) {
+      try {
+        const b = await detectBeats(_tabDrums[0], _tabDrums[1], _tabSr, null);
+        if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
+      } catch { /* 박자 감지 실패 — 격자 없이 진행 */ }
+    }
+    const r = await transcribeBass(mono, _tabSr, { tuning: tun, beats },
+      (pct, phase) => {
+        if (status) status.textContent = t(phase === 'bp' ? 'tab.workingBp' : 'tab.working', { pct });
+      });
+    _tabView.setNotes(r.notes, r.tuning);
+    if (status) status.textContent = r.cross && r.cross.agreed != null
+      ? t('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
+      : t('tab.done', { n: r.notes.length });
+    if (run) run.textContent = t('tab.rerun');
+  } catch (e) {
+    if (status) { status.textContent = t('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+  } finally {
+    _tabBusy = false;
+    if (run) run.disabled = !_tabBass;
+  }
+}
+
+function initTabPanel() {
+  const { run } = tabEls();
+  if (run) run.addEventListener('click', runTabTranscribe);
+  setTabSource(null, 44100);
+  // 재생 위치 추적은 독립 루프로 둔다 — 파형 그리기(drawWaveform)는
+  // 캔버스가 없으면 일찍 반환하므로 거기에 얹으면 같이 죽는다.
+  const tick = () => {
+    if (_tabView) _tabView.setTime(playerVideo.currentTime || 0);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function toggleCheckpointPanel(force) {
   if (!cpPanel) return;
   const show = force != null ? force : cpPanel.hidden;
@@ -1716,4 +1795,4 @@ export const Library = {
 };
 
 // 뷰 첫 진입 시 자동 로드
-document.addEventListener('DOMContentLoaded', () => { refresh(); });
+document.addEventListener('DOMContentLoaded', () => { refresh(); initTabPanel(); });
