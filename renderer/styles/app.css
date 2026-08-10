@@ -410,7 +410,13 @@ body { display: flex; flex-direction: column; }
   margin-bottom: 8px;
   text-wrap: balance;
 }
-.hero > .muted { font-size: 13.5px; line-height: 1.6; max-width: 46ch; }
+/* 설명 줄바꿈.
+   keep-all 이 없으면 한글이 낱자에서 잘려 "나눕니 / 다." 처럼 끊긴다 — CJK 는 기본이
+   어디서나 줄바꿈이다. balance 는 두 줄 길이를 비슷하게 맞춰 끝줄에 한두 글자만 남는 것을 막는다. */
+.hero > .muted {
+  font-size: 13.5px; line-height: 1.65; max-width: 52ch;
+  word-break: keep-all; text-wrap: balance;
+}
 .muted { color: var(--tx-2); font-size: 13px; }
 
 /* URL row */

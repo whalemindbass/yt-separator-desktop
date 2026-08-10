@@ -573,6 +573,13 @@ function resetSeparateView(alsoClearUrl = false) {
   sepWrap.hidden = true;
   existingBanner.hidden = true;
   errBox.hidden = true; errBox.textContent = '';
+  // 감추는 것으로 끝내면 안 된다 — 카드 안의 옛 내용이 남아, 다음에 그 카드가 뜰 때
+  // 새 값을 넣기 전 한 순간 지난 파일 경로·제목이 비친다.
+  donePath.textContent = '';
+  $('probe-title').textContent = '';
+  $('probe-sub').textContent = '';
+  $('probe-thumb').removeAttribute('src');
+  $('existing-banner-sub').textContent = '';
   currentProbe = null;
   currentVideoPath = null;
   currentBaseName = null;
@@ -596,7 +603,23 @@ $('reset-btn').addEventListener('click', async () => {
 // 고른 쪽에 필요한 것만 남긴다 — 내 파일은 이미 손에 있으니 주소 칸도, 받아올 화질도 쓸 데가 없다.
 const srcLink = $('src-link'), srcFile = $('src-file');
 const linkRow = $('link-row'), qualityRow = $('quality-row');
-function setSource(mode) {
+let srcMode = 'link';
+
+/** 다운로드나 스템 분리가 돌고 있는가 — 화면만 갈아치우면 뒤에서 계속 돈다 */
+function jobRunning() { return !progWrap.hidden || !sepWrap.hidden; }
+
+/**
+ * 입력 방식을 바꾼다.
+ * 실제로 바뀔 때는 앞의 결과를 지운다 — 파일을 고른 뒤 링크로 옮기면 그 파일의
+ * "다운로드 완료" 카드가 남아 있어서, 링크와 상관없는 파일이 분리 대상으로 잡혔다.
+ * @returns {boolean} 바뀌었거나 이미 그 모드면 true, 진행 중이라 막혔으면 false
+ */
+function setSource(mode, fromUser = false) {
+  const changed = mode !== srcMode;
+  if (fromUser && changed && jobRunning()) { setError(t('sep.src.busy')); return false; }
+  if (fromUser && changed) resetSeparateView(false);   // 주소 입력은 남기고 결과만 지운다
+  srcMode = mode;
+
   const isLink = mode === 'link';
   srcLink.classList.toggle('on', isLink);
   srcFile.classList.toggle('on', !isLink);
@@ -604,13 +627,14 @@ function setSource(mode) {
   srcFile.setAttribute('aria-pressed', String(!isLink));
   linkRow.hidden = !isLink;
   qualityRow.hidden = !isLink;
+  return true;
 }
-srcLink.addEventListener('click', () => { setSource('link'); urlInput.focus(); });
+srcLink.addEventListener('click', () => { if (setSource('link', true)) urlInput.focus(); });
 setSource('link');
 
 // ── 로컬 파일로 분리 ─────────────────────────────
 srcFile.addEventListener('click', async () => {
-  setSource('file');
+  if (!setSource('file', true)) return;
   const res = await api.dialog.pickMedia();
   if (!res.ok) return;
   const filePath = res.filePath;
@@ -731,7 +755,7 @@ dlBtn.addEventListener('click', async () => {
     const u = urlInput.value.trim();
     if (isValidUrl(u)) { setError(''); probeBtn.click(); return; }
     setError(getLocale() === 'en'
-      ? 'Paste a YouTube URL and press 확인 (Check) first.'
+      ? 'Paste a video address and press Check first.'
       : '먼저 YouTube 주소를 붙여넣고 “확인”을 눌러 주세요.');
     return;
   }
