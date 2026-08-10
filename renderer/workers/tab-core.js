@@ -373,7 +373,7 @@ function detectTechniques(notes, ctx, opts) {
  * 지판 배치. 각 노트마다 (현, 프렛) 후보를 만들고 DP 로 손 이동이 적은 경로를 고른다.
  * 그리디로 하면 한 번 잘못 든 자리가 끝까지 따라온다.
  */
-export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
+export function assignFrets(notes, tuningId, maxFret, sameStringPenalty, tune) {
   const tuning = TUNINGS[tuningId] || TUNINGS[DEFAULTS.tuning];
   const open = tuning.strings;                      // 낮은 현 → 높은 현
   const cands = notes.map(n => {
@@ -387,86 +387,122 @@ export function assignFrets(notes, tuningId, maxFret, sameStringPenalty) {
 
   // 사람 손 기준 비용.
   //   베이스는 한 손가락 한 프렛(4프렛 span)으로 짚고, 손을 옮기는 것(포지션 이동)이
-  //   현을 건너뛰는 것보다 훨씬 부담이 크다. 예전 가중치는 그 반대라서
-  //   한 현에 눌러앉아 17프렛까지 기어올라갔다.
-  const SHIFT_FIXED = 1.4;   // 손을 옮기는 행위 자체의 비용
+  //   현을 건너뛰는 것보다 훨씬 부담이 크다.
+  const T = tune || {};        // 가중치 실험용 — 실사용 경로에서는 비어 있다
+  const SHIFT_FIXED = T.shiftFixed != null ? T.shiftFixed : 1.4;  // 손을 옮기는 행위 자체
   const SHIFT_PER   = 0.45;  // 옮기는 거리(프렛)당
   const SPAN        = 4;     // 손이 한 번에 덮는 프렛 수
   const IN_SPAN     = 0.15;  // span 안에서의 손가락 이동은 싸다
   const STRING_COST = 0.3;   // 현 이동 — 오른손 문제라 왼손 이동보다 가볍다
-  const OPEN_BONUS  = 0.25;  // 개방현
-  // 낮은 프렛 선호는 아주 약하게만 준다.
-  //   노트마다 누적되는 값이라 조금만 키워도 포지션 유지 비용을 이겨버리고,
-  //   결과가 매 음 낮은 자리로 흩어진다. 연주자는 한 자리에 머문다.
-  const POS_COST    = 0.02;
-  // 같은 음이면 굵은 현(낮은 현) 쪽을 택한다 — 톤이 굵고 포지션이 유지된다.
-  const LOW_STRING  = 0.18;
+  const OPEN_BONUS  = T.openBonus != null ? T.openBonus : 0.25;  // 개방현 — 손을 안 쓴다
   const HIGH_FRET   = 19;    // 이 위는 실제로 드물다
   const HIGH_PEN    = 1.2;
+  // 낮은 현 선호. 베이스는 굵은 현이 소리로 유리해서, 같은 음이면 프렛이 올라가더라도
+  //   아래 현을 잡는 편이 낫다 (G현 12프렛보다 D현 17프렛).
+  //   낮춰보면 오히려 나빠진다 — 0.10 에서 DP 가 현을 넘나들며 포지션 이동이 24→54 회로 늘었다.
+  const LOW_STRING  = T.lowString != null ? T.lowString : 0.18;
+  // 낮은 프렛 선호는 아주 약하게, 프렛에 비례해서만 준다.
+  //   누진(고프렛 급벌점)으로 바꿔봤지만 베이스에는 맞지 않았다 — 저음현 고프렛을
+  //   밀어내는 바람에 같은 음이 매번 다른 자리에 놓였다. 연주자는 그 자리를 실제로 쓴다.
+  const POS_COST    = T.posCost != null ? T.posCost : 0.02;
   // 슬라이드는 한 현 위에서만 성립한다. 금지가 아니라 벌점으로 둔다 —
   // 검출이 틀렸을 때 경로 자체가 막히면 그 구간 전체가 풀리지 않는다.
   const SAME_STRING = sameStringPenalty != null ? sameStringPenalty : DEFAULTS.sameStringPenalty;
+  // 곡 전체에서 그 음을 잡던 자리로 당기는 힘 (2패스). 0 이면 1패스만 돈다.
+  //   더 키우면 일관성은 조금 더 오르지만 2.5 부터 포지션 이동이 다시 늘어난다 —
+  //   습관이 그 자리에서 더 나은 국소 선택까지 눌러버리는 지점이다.
+  const HABIT_BONUS = T.habitBonus != null ? T.habitBonus : 1.5;
 
   const linked = notes.map(n => !!n.tech);
 
-  const out = new Array(notes.length).fill(null);
+  /**
+   * 한 번 푼다. habit 이 있으면 그 자리에 보너스를 준다.
+   * @param {Map<number,string>|null} habit  음정 → 'string:fret' (곡 전체에서 그 음의 대표 자리)
+   */
+  const solve = (habit) => {
+    const out = new Array(notes.length).fill(null);
+    // 후보가 없는 음(음역 밖 = 대개 오검출)에서 구간을 끊고, 구간마다 따로 DP 를 돌린다.
+    // 한 줄로 이으면 그런 음 하나가 앞쪽 전부를 못 풀게 만든다.
+    let s = 0;
+    while (s < notes.length) {
+      if (!cands[s].length) { s++; continue; }
+      let e = s;
+      while (e + 1 < notes.length && cands[e + 1].length) e++;
 
-  // 후보가 없는 음(음역 밖 = 대개 오검출)에서 구간을 끊고, 구간마다 따로 DP 를 돌린다.
-  // 한 줄로 이으면 그런 음 하나가 앞쪽 전부를 못 풀게 만든다.
-  let s = 0;
-  while (s < notes.length) {
-    if (!cands[s].length) { s++; continue; }
-    let e = s;
-    while (e + 1 < notes.length && cands[e + 1].length) e++;
-
-    const dp = [];
-    for (let i = s; i <= e; i++) {
-      const row = cands[i].map(c => {
-        const emit = c.fret * POS_COST
+      const dp = [];
+      for (let i = s; i <= e; i++) {
+        const row = cands[i].map(c => {
+          let emit = c.fret * POS_COST
                    - (c.fret === 0 ? OPEN_BONUS : 0)
                    + c.string * LOW_STRING
                    + (c.fret > HIGH_FRET ? HIGH_PEN : 0);
-        // 개방현은 손을 움직이지 않으므로 직전 손 위치를 그대로 물려받는다
-        const anchor = c.fret === 0 ? -1 : c.fret;
-        if (i === s) return { ...c, cost: emit, prev: -1, hand: anchor };
+          if (habit && habit.get(notes[i].midi) === `${c.string}:${c.fret}`) emit -= HABIT_BONUS;
+          // 개방현은 손을 움직이지 않으므로 직전 손 위치를 그대로 물려받는다
+          const anchor = c.fret === 0 ? -1 : c.fret;
+          if (i === s) return { ...c, cost: emit, prev: -1, hand: anchor };
 
-        const prevRow = dp[i - 1 - s];
-        let best = Infinity, bestIdx = -1, bestHand = anchor;
-        for (let k = 0; k < prevRow.length; k++) {
-          const p = prevRow[k];
-          const ph = p.hand;                       // 직전에 손이 있던 프렛 (-1 = 아직 모름)
-          let move = STRING_COST * Math.abs(c.string - p.string);
-          if (linked[i] && c.string !== p.string) move += SAME_STRING;
-          let hand = anchor;
-          if (c.fret === 0) {
-            hand = ph;                             // 개방현 — 손은 그대로
-          } else if (ph < 0) {
-            hand = c.fret;                         // 첫 짚는 음
-          } else if (Math.abs(c.fret - ph) < SPAN) {
-            move += IN_SPAN * Math.abs(c.fret - ph);   // 같은 자리 안에서 손가락만
-            hand = ph;
-          } else {
-            const d = Math.abs(c.fret - ph);
-            move += SHIFT_FIXED + SHIFT_PER * d;   // 포지션 이동
-            hand = c.fret;
+          const prevRow = dp[i - 1 - s];
+          let best = Infinity, bestIdx = -1, bestHand = anchor;
+          for (let k = 0; k < prevRow.length; k++) {
+            const p = prevRow[k];
+            const ph = p.hand;                       // 직전에 손이 있던 프렛 (-1 = 아직 모름)
+            let move = STRING_COST * Math.abs(c.string - p.string);
+            if (linked[i] && c.string !== p.string) move += SAME_STRING;
+            let hand = anchor;
+            if (c.fret === 0) {
+              hand = ph;                             // 개방현 — 손은 그대로
+            } else if (ph < 0) {
+              hand = c.fret;                         // 첫 짚는 음
+            } else if (Math.abs(c.fret - ph) < SPAN) {
+              move += IN_SPAN * Math.abs(c.fret - ph);   // 같은 자리 안에서 손가락만
+              hand = ph;
+            } else {
+              const d = Math.abs(c.fret - ph);
+              move += SHIFT_FIXED + SHIFT_PER * d;   // 포지션 이동
+              hand = c.fret;
+            }
+            const total = p.cost + move;
+            if (total < best) { best = total; bestIdx = k; bestHand = hand; }
           }
-          const total = p.cost + move;
-          if (total < best) { best = total; bestIdx = k; bestHand = hand; }
-        }
-        return { ...c, cost: best + emit, prev: bestIdx, hand: bestHand };
-      });
-      dp.push(row);
-    }
+          return { ...c, cost: best + emit, prev: bestIdx, hand: bestHand };
+        });
+        dp.push(row);
+      }
 
-    let idx = 0, best = Infinity;
-    dp[dp.length - 1].forEach((c, k) => { if (c.cost < best) { best = c.cost; idx = k; } });
-    for (let i = e; i >= s; i--) {
-      const c = dp[i - s][idx];
-      out[i] = { string: c.string, fret: c.fret };
-      idx = c.prev;
-      if (idx < 0) break;
+      let idx = 0, best = Infinity;
+      dp[dp.length - 1].forEach((c, k) => { if (c.cost < best) { best = c.cost; idx = k; } });
+      for (let i = e; i >= s; i--) {
+        const c = dp[i - s][idx];
+        out[i] = { string: c.string, fret: c.fret };
+        idx = c.prev;
+        if (idx < 0) break;
+      }
+      s = e + 1;
     }
-    s = e + 1;
+    return out;
+  };
+
+  // 1패스로 풀고, 음정마다 곡 전체에서 가장 많이 쓴 자리를 뽑아 2패스에서 그쪽으로 당긴다.
+  //   DP 는 직전 음만 보므로 "이 음을 아까 어디서 잡았는지"를 기억할 방법이 없다. 그래서
+  //   같은 음이 구간마다 다른 자리에 놓였고, 그것이 악보에서 제일 거슬리는 부분이었다.
+  //   연주자는 한 곡 안에서 같은 음을 대체로 같은 자리에서 잡는다 — 그 습관을 넣는다.
+  let out = solve(null);
+  if (HABIT_BONUS > 0) {
+    const seen = new Map();                       // midi → Map<'s:f', 횟수>
+    for (let i = 0; i < notes.length; i++) {
+      if (!out[i]) continue;
+      const m = seen.get(notes[i].midi) || new Map();
+      const k = `${out[i].string}:${out[i].fret}`;
+      m.set(k, (m.get(k) || 0) + 1);
+      seen.set(notes[i].midi, m);
+    }
+    const habit = new Map();
+    for (const [midi, m] of seen) {
+      let topK = null, top = 0;
+      for (const [k, v] of m) if (v > top) { top = v; topK = k; }
+      if (top >= 2) habit.set(midi, topK);        // 한 번뿐인 음은 습관이라 할 수 없다
+    }
+    if (habit.size) out = solve(habit);
   }
 
   const placed = notes.map((n, k) => ({ ...n, string: out[k] ? out[k].string : null, fret: out[k] ? out[k].fret : null }));
@@ -549,7 +585,7 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   if (opts.techniques) notes = detectTechniques(notes, { midis: smooth, onsets, rmss, hopSec }, opts);
   // 박 정보가 있으면 격자에 붙인다 (드럼 스템에서 얻는다)
   if (opts.beats && opts.beats.length > 1) notes = quantizeToGrid(notes, opts.beats, opts.subdiv || 4);
-  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret, opts.sameStringPenalty);
+  const withFrets = assignFrets(notes, opts.tuning, opts.maxFret, opts.sameStringPenalty, opts.tune);
 
   if (onProgress) onProgress(100);
   return { notes: withFrets, tuning: opts.tuning, sampleRate: sr, hopSec };
