@@ -6,6 +6,7 @@ import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
+import { buildScore, beatAccents } from '../workers/tab-score.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -522,7 +523,7 @@ async function mountPlayer(item) {
     currentPlayer = new Player(playerVideo, videoUrl, stems, sampleRate, stemUrls);
 
     // 베이스 TAB — 곡이 바뀌면 이전 결과를 비우고, 이번 곡의 베이스 스템을 쥐고 있는다
-    setTabSource(stems.bass || null, sampleRate, stems.drums || null);
+    setTabSource(stems, sampleRate);
 
     // 파형 peaks 계산 (스템 합산 진폭)
     computeWavePeaks(stems);
@@ -1405,24 +1406,62 @@ function addCheckpoint() {
 let _tabView = null;
 let _tabBass = null;      // [L, R] — 현재 곡의 베이스 스템
 let _tabDrums = null;     // [L, R] — 박자 감지용 드럼 스템
+let _tabMix = null;       // [L, R] — 스템을 전부 합친 것. 드럼만으로 템포가 안 잡힐 때 쓴다
 let _tabSr = 44100;
 let _tabBusy = false;
+// 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
+let _tabNotes = null, _tabTuning = '4', _tabBeats = null, _tabAccent = null;
+let _tabPhase = null;     // null = 자동 판정
 
 function tabEls() {
-  return { view: $('lib-tab-view'), status: $('lib-tab-status'), run: $('lib-tab-run'), tuning: $('lib-tab-tuning') };
+  return {
+    view: $('lib-tab-view'), status: $('lib-tab-status'), run: $('lib-tab-run'),
+    tuning: $('lib-tab-tuning'), barPrev: $('lib-tab-bar-prev'), barNext: $('lib-tab-bar-next'),
+  };
 }
 
-function setTabSource(bass, sampleRate, drums) {
-  _tabBass = bass || null;
-  _tabDrums = drums || null;
+function setTabSource(stems, sampleRate) {
+  _tabBass = (stems && stems.bass) || null;
+  _tabDrums = (stems && stems.drums) || null;
   _tabSr = sampleRate || 44100;
+  _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null;
+
+  // 스템 합 = 원본 믹스. 드럼만으로 템포가 안 잡히는 곡이 있어 폴백으로 준다.
+  _tabMix = null;
+  if (stems) {
+    const parts = Object.values(stems).filter(s => s && s[0] && s[1]);
+    if (parts.length > 1) {
+      const n = Math.min(...parts.map(p => p[0].length));
+      const L = new Float32Array(n), R = new Float32Array(n);
+      for (const p of parts) for (let i = 0; i < n; i++) { L[i] += p[0][i]; R[i] += p[1][i]; }
+      _tabMix = [L, R];
+    }
+  }
+
   const { status, run } = tabEls();
   if (_tabView) _tabView.clear();
   if (run) run.disabled = !_tabBass || _tabBusy;
+  updateTabBarButtons();
   if (status) {
     status.classList.remove('err');
     status.textContent = _tabBass ? t('tab.hintLibrary') : t('tab.noBass');
   }
+}
+
+function updateTabBarButtons() {
+  const { barPrev, barNext } = tabEls();
+  const on = !!(_tabBeats && _tabNotes);
+  if (barPrev) barPrev.disabled = !on;
+  if (barNext) barNext.disabled = !on;
+}
+
+/** 마디 시작을 박 단위로 옮긴다. 채보는 그대로 두고 마디선만 다시 그린다. */
+function shiftTabBars(delta) {
+  if (!_tabNotes || !_tabBeats || !_tabView) return;
+  const sc = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, phase: _tabPhase });
+  const base = _tabPhase != null ? _tabPhase : (sc ? sc.phase : 0);
+  _tabPhase = ((base + delta) % 4 + 4) % 4;
+  _tabView.setScore(buildScore(_tabNotes, _tabBeats, { phase: _tabPhase }));
 }
 
 async function runTabTranscribe() {
@@ -1438,19 +1477,25 @@ async function runTabTranscribe() {
     if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
     const mono = toMono(_tabBass[0], _tabBass[1]);
     const tun = tuning ? tuning.value : '4';
-    // 드럼 스템이 있으면 박자를 먼저 잡아 노트를 격자에 붙인다
+    // 드럼 스템이 있으면 박자를 먼저 잡아 노트를 격자에 붙이고 마디를 나눈다
     let beats = null;
     if (_tabDrums) {
       try {
-        const b = await detectBeats(_tabDrums[0], _tabDrums[1], _tabSr, null);
+        const b = await detectBeats(_tabDrums[0], _tabDrums[1], _tabSr, _tabMix);
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
-      } catch { /* 박자 감지 실패 — 격자 없이 진행 */ }
+      } catch { /* 박자 감지 실패 — 격자도 마디도 없이 진행 */ }
     }
     const r = await transcribeBass(mono, _tabSr, { tuning: tun, beats },
       (pct, phase) => {
         if (status) status.textContent = t(phase === 'bp' ? 'tab.workingBp' : 'tab.working', { pct });
       });
     _tabView.setNotes(r.notes, r.tuning);
+
+    // 마디 — 박이 있을 때만. 첫 박은 드럼 킥으로 추정하고, 틀리면 사용자가 옮긴다.
+    _tabNotes = r.notes; _tabTuning = r.tuning; _tabBeats = beats; _tabPhase = null;
+    _tabAccent = beats && _tabDrums ? beatAccents(toMono(_tabDrums[0], _tabDrums[1]), _tabSr, beats) : null;
+    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent }) : null);
+    updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? t('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
       : t('tab.done', { n: r.notes.length });
@@ -1464,8 +1509,10 @@ async function runTabTranscribe() {
 }
 
 function initTabPanel() {
-  const { run } = tabEls();
+  const { run, barPrev, barNext } = tabEls();
   if (run) run.addEventListener('click', runTabTranscribe);
+  if (barPrev) barPrev.addEventListener('click', () => shiftTabBars(-1));
+  if (barNext) barNext.addEventListener('click', () => shiftTabBars(1));
   setTabSource(null, 44100);
   // 재생 위치 추적은 독립 루프로 둔다 — 파형 그리기(drawWaveform)는
   // 캔버스가 없으면 일찍 반환하므로 거기에 얹으면 같이 죽는다.

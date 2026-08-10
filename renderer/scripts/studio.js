@@ -8,6 +8,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, onLocaleChange } from './i18n.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
+import { buildScore, beatAccents } from '../workers/tab-score.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -1030,6 +1031,25 @@ function tracksHeight() {
 let _tabView = null;
 let _tabBusy = false;
 let _tabSongKey = null;    // 어느 곡의 결과인지 — 곡이 바뀌면 비운다
+// 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
+let _tabNotes = null, _tabBeats = null, _tabAccent = null;
+let _tabPhase = null;      // null = 자동 판정
+
+function updateTabBarButtons() {
+  const on = !!(_tabBeats && _tabNotes);
+  const p = $('st-tab-bar-prev'), n = $('st-tab-bar-next');
+  if (p) p.disabled = !on;
+  if (n) n.disabled = !on;
+}
+
+/** 마디 시작을 박 단위로 옮긴다. 채보는 그대로 두고 마디선만 다시 그린다. */
+function shiftTabBars(delta) {
+  if (!_tabNotes || !_tabBeats || !_tabView) return;
+  const auto = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, phase: _tabPhase });
+  const base = _tabPhase != null ? _tabPhase : (auto ? auto.phase : 0);
+  _tabPhase = ((base + delta) % 4 + 4) % 4;
+  _tabView.setScore(buildScore(_tabNotes, _tabBeats, { phase: _tabPhase }));
+}
 
 function refreshTabPanel() {
   const status = $('st-tab-status'), run = $('st-tab-run');
@@ -1037,6 +1057,8 @@ function refreshTabPanel() {
   if (_tabSongKey && _tabSongKey !== (_stemPaths && _stemPaths.bass)) {
     if (_tabView) _tabView.clear();
     _tabSongKey = null;
+    _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null;
+    updateTabBarButtons();
     if (run) run.textContent = tr('tab.run');
   }
   if (run) run.disabled = !bass || _tabBusy;
@@ -1072,19 +1094,39 @@ async function runStudioTab() {
     const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
     const mono = toMono(L, R);
 
-    // 드럼 스템이 있으면 박자를 잡아 격자에 붙인다
-    let beats = null;
+    // 드럼 스템이 있으면 박자를 잡아 격자에 붙이고 마디를 나눈다
+    const decode = async (p) => {
+      const rr = await fetch(toYtsepUrl(p));
+      const c = new AudioContext();
+      try { return await c.decodeAudioData(await rr.arrayBuffer()); } finally { try { c.close(); } catch {} }
+    };
+    let beats = null, drumsMono = null, drumsSr = audio.sampleRate;
     if (_stemPaths.drums) {
       try {
-        const db = await fetch(toYtsepUrl(_stemPaths.drums));
-        const dctx = new AudioContext();
-        let daudio;
-        try { daudio = await dctx.decodeAudioData(await db.arrayBuffer()); } finally { try { dctx.close(); } catch {} }
+        const daudio = await decode(_stemPaths.drums);
         const dL = daudio.getChannelData(0);
         const dR = daudio.numberOfChannels > 1 ? daudio.getChannelData(1) : dL;
-        const b = await detectBeats(dL, dR, daudio.sampleRate, null);
+        drumsMono = toMono(dL, dR); drumsSr = daudio.sampleRate;
+
+        // 드럼만으로 템포가 안 잡히는 곡이 있다 — 스템을 합쳐 원본 믹스를 폴백으로 준다
+        let mix = null;
+        try {
+          const parts = [[L, R], [dL, dR]];
+          for (const [k, p] of Object.entries(_stemPaths)) {
+            if (k === 'drums' || k === 'bass' || !p) continue;
+            const a2 = await decode(p);
+            const aL = a2.getChannelData(0);
+            parts.push([aL, a2.numberOfChannels > 1 ? a2.getChannelData(1) : aL]);
+          }
+          const n = Math.min(...parts.map(p => p[0].length));
+          const mL = new Float32Array(n), mR = new Float32Array(n);
+          for (const p of parts) for (let i = 0; i < n; i++) { mL[i] += p[0][i]; mR[i] += p[1][i]; }
+          mix = [mL, mR];
+        } catch { /* 믹스를 못 만들면 드럼만으로 시도한다 */ }
+
+        const b = await detectBeats(dL, dR, daudio.sampleRate, mix);
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
-      } catch { /* 박자 감지 실패 — 격자 없이 진행 */ }
+      } catch { /* 박자 감지 실패 — 격자도 마디도 없이 진행 */ }
     }
 
     const r = await transcribeBass(mono, audio.sampleRate, { tuning: tuningSel ? tuningSel.value : '4', beats },
@@ -1093,6 +1135,12 @@ async function runStudioTab() {
       });
     _tabView.setNotes(r.notes, r.tuning);
     _tabSongKey = bassPath;
+
+    // 마디 — 박이 있을 때만. 첫 박은 드럼 킥으로 추정하고, 틀리면 사용자가 옮긴다.
+    _tabNotes = r.notes; _tabBeats = beats; _tabPhase = null;
+    _tabAccent = beats && drumsMono ? beatAccents(drumsMono, drumsSr, beats) : null;
+    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent }) : null);
+    updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? tr('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
       : tr('tab.done', { n: r.notes.length });
@@ -2826,6 +2874,8 @@ function wire() {
   };
   const tabRun = $('st-tab-run');
   if (tabRun) tabRun.addEventListener('click', runStudioTab);
+  $('st-tab-bar-prev')?.addEventListener('click', () => shiftTabBars(-1));
+  $('st-tab-bar-next')?.addEventListener('click', () => shiftTabBars(1));
   document.querySelectorAll('.daw-tool-tab').forEach(b =>
     b.addEventListener('click', () => selectTool(b.classList.contains('on') ? null : b.dataset.tool)));   // 다시 누르면 닫기
   selectTool(null);   // 처음엔 아무 도구도 안 열림

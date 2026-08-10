@@ -2995,6 +2995,20 @@ body { background: var(--bg) !important; }
 .tabv-note.unsure { opacity: .45; border-style: dashed; }
 .tabv-note.unsure.now { opacity: .8; }
 
+/* 마디 시작 옮기기 — 자동 판정이 틀렸을 때 사람이 맞춘다 */
+.tab-bars { display: inline-flex; gap: 2px; margin-left: auto; }
+.tab-bars .btn { padding: 0 6px; min-width: 0; line-height: 1.6; }
+
+/* 마디선 — 노트 뒤에 깔린다 */
+.tabv-bar {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--border-mid); z-index: 0;
+}
+.tabv-barnum {
+  position: absolute; top: 0; z-index: 0;
+  font: 500 9px/1 var(--mono); color: var(--tx-3); text-decoration: none;
+}
+
 /* 앞 음에서 이어지는 음(/ \ h p) — 새로 뜯은 음과 구분되게 왼쪽을 연다 */
 .tabv-note.tech {
   border-left-color: transparent;

@@ -75,6 +75,7 @@ export class TabView {
     this.playheadAt = playheadAt;
     this.notes = [];
     this.tuning = '4';
+    this.score = null;
     this._cells = [];
     this._active = -1;
     this._time = 0;
@@ -91,7 +92,7 @@ export class TabView {
   }
 
   clear() {
-    this.notes = []; this._cells = []; this._active = -1; this._time = 0;
+    this.notes = []; this.score = null; this._cells = []; this._active = -1; this._time = 0;
     this.el.innerHTML = '';
     this.el.classList.remove('has-notes');
   }
@@ -99,6 +100,16 @@ export class TabView {
   setNotes(notes, tuning) {
     this.notes = notes || [];
     this.tuning = TUNINGS[tuning] ? tuning : '4';
+    this._render();
+  }
+
+  /**
+   * 마디선을 얹는다. 노트는 그대로 두고 그 위에 마디의 틀만 그린다 —
+   * 박이 없으면 마디도 없다(null 을 주면 지운다).
+   * @param {{bars:Array}|null} score buildScore() 결과
+   */
+  setScore(score) {
+    this.score = score && score.bars && score.bars.length ? score : null;
     this._render();
   }
 
@@ -130,6 +141,21 @@ export class TabView {
     flow.className = 'tabv-flow';
     const last = this.notes[this.notes.length - 1];
     flow.style.width = `${(last.start + last.dur + 4) * this.pps}px`;
+
+    // 마디선 — 노트보다 먼저 깔아 뒤에 놓이게 한다
+    if (this.score) {
+      for (const bar of this.score.bars) {
+        const line = document.createElement('i');
+        line.className = 'tabv-bar';
+        line.style.left = `${bar.start * this.pps}px`;
+        flow.appendChild(line);
+        const num = document.createElement('u');
+        num.className = 'tabv-barnum';
+        num.textContent = String(bar.index);
+        num.style.left = `${bar.start * this.pps + 3}px`;
+        flow.appendChild(num);
+      }
+    }
 
     for (let s = nStrings - 1; s >= 0; s--) {
       const line = document.createElement('i');
