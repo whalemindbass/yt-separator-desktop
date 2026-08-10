@@ -34,7 +34,19 @@ export const DEFAULTS = {
   transMaxMs: 110,      // 경유음으로 볼 최대 길이
   transGapMs: 170,      // 다음 음까지의 간격
   transLongerX: 2.0,    // 다음 음이 이 배 이상 길면 목표음으로 본다
+  // 테크닉 — 어택 없이 음정만 바뀌면 왼손으로 낸 소리다.
+  techniques: true,     // 끄면 기호도, 같은 현 제약도 없다
+  techMaxSemi: 12,      // 이보다 먼 도약은 검출 오류로 본다
+  techMaxGapMs: 140,    // 앞 음이 끝나고 다음 음이 시작하기까지
+  techMinVoiced: 0.8,   // 그 사이가 이만큼 이어져 울려야 한 번에 낸 소리다
+  slideMinFrames: 2,    // 두 음 사이를 지나가는 중간 음정 프레임 수
+  hammerMaxSemi: 5,     // 손가락이 닿는 범위
+  hammerLoudMax: 0.85,  // 해머·풀은 앞 음보다 작게 난다 — 그 비율 상한
+  slideStepMaxMs: 140,  // 슬라이드 도중 잠깐 걸린 음의 최대 길이
 };
+
+/** TAB 에 찍는 기호 */
+export const TECH_GLYPH = { slideUp: '/', slideDown: '\\', hammer: 'h', pull: 'p' };
 
 /** [1,3,3,1]/8 저역통과 후 2배 데시메이션 */
 function decimate2(src) {
@@ -265,6 +277,94 @@ function dropGhosts(notes, opts) {
 }
 
 /**
+ * 슬라이드·해머온·풀오프 찾기.
+ *
+ * 근거는 하나다 — **어택 없이 음정만 바뀌면 왼손이 낸 소리다.** 오른손으로 다시 뜯었으면
+ * 에너지가 솟아 온셋으로 잡힌다. 둘을 가르는 것은 그 사이의 음정 경로다.
+ *   중간 음정을 밟고 지나가면 슬라이드, 곧바로 건너뛰면 해머온(위)·풀오프(아래).
+ *
+ * 분리 스템은 어택이 뭉개져 있어 온셋 임계값에 걸리는 경계가 무르다. 그래서
+ * "사이가 끊기지 않고 계속 울렸는지"(techMinVoiced)를 같이 본다 — 다시 뜯은 음은
+ * 앞 음이 먼저 사그라들기 때문이다.
+ *
+ * @param {Array} notes
+ * @param {{midis:Float64Array, onsets:Uint8Array, hopSec:number}} ctx 프레임 단위 원자료
+ */
+function detectTechniques(notes, ctx, opts) {
+  const { midis, onsets, rmss, hopSec } = ctx;
+  if (notes.length < 2) return notes;
+  const fr = (t) => Math.round(t / hopSec);
+  const onsetNear = (f) => {
+    for (let i = f - 1; i <= f + 1; i++) if (i >= 0 && i < onsets.length && onsets[i]) return true;
+    return false;
+  };
+  /** 음이 시작하고 ms 동안의 최대 세기 — 뜯은 소리인지 짚어서 낸 소리인지 가른다 */
+  const attackRms = (n, ms) => {
+    const a = fr(n.start), b = a + Math.max(1, Math.round(ms / 1000 / hopSec));
+    let peak = 0;
+    for (let f = a; f <= b && f < rmss.length; f++) if (rmss[f] > peak) peak = rmss[f];
+    return peak;
+  };
+
+  const out = notes.map(n => ({ ...n, attacked: onsetNear(fr(n.start)) }));
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1], b = out[i];
+    const d = b.midi - a.midi;
+    const ad = Math.abs(d);
+    if (!ad || ad > opts.techMaxSemi) continue;
+
+    const gapMs = (b.start - (a.start + a.dur)) * 1000;
+    if (gapMs > opts.techMaxGapMs || gapMs < -20) continue;
+    const bf = fr(b.start);
+    if (b.attacked) continue;                          // 다시 뜯었다
+
+    // 앞 음 끝에서 다음 음 시작까지의 음정 경로
+    const f0 = Math.max(0, fr(a.start + a.dur) - 1);
+    let total = 0, voiced = 0, between = 0;
+    const lo = Math.min(a.midi, b.midi) + 0.4, hi = Math.max(a.midi, b.midi) - 0.4;
+    for (let f = f0; f <= bf && f < midis.length; f++) {
+      total++;
+      const m = midis[f];
+      if (m > 0) voiced++;
+      if (m > lo && m < hi) between++;
+    }
+    if (total && voiced < total * opts.techMinVoiced) continue;
+
+    if (between >= opts.slideMinFrames) {
+      b.tech = d > 0 ? 'slideUp' : 'slideDown';         // 중간 음정을 밟고 갔다
+      continue;
+    }
+    if (ad > opts.hammerMaxSemi) continue;
+    // 해머·풀은 "온셋이 없다"는 부재의 증거뿐이라 약하다. 분리 스템은 어택이 뭉개져
+    // 온셋을 놓치기도 한다. 그래서 세기를 하나 더 본다 — 왼손으로 낸 소리는
+    // 방금 뜯은 앞 음보다 작다. 더 크면 오른손이 다시 뜯은 것으로 본다.
+    if (attackRms(b, 40) > attackRms(a, 40) * opts.hammerLoudMax) continue;
+    b.tech = d > 0 ? 'hammer' : 'pull';
+  }
+
+  // 천천히 미끄러지면 중간 음정이 한 음으로 잡힐 만큼 오래 머문다. 그러면 위에서
+  // 짧은 해머가 여러 번 이어진 것처럼 보인다 — 같은 방향으로 연달아 붙었고
+  // 중간 음이 짧으면 하나의 슬라이드로 합친다.
+  const keep = new Array(out.length).fill(true);
+  for (let i = 1; i < out.length; i++) {
+    const dir = out[i].tech === 'hammer' ? 1 : out[i].tech === 'pull' ? -1 : 0;
+    if (!dir) continue;
+    let j = i;
+    while (j + 1 < out.length
+           && out[j + 1].tech === out[i].tech
+           && out[j].dur * 1000 <= opts.slideStepMaxMs) j++;
+    if (j === i) continue;                             // 한 단계뿐이면 그냥 해머·풀
+    for (let k = i; k < j; k++) keep[k] = false;       // 중간 경유음은 지운다
+    const end = out[j].start + out[j].dur;
+    out[j].tech = dir > 0 ? 'slideUp' : 'slideDown';
+    out[j].start = out[i - 1].start + out[i - 1].dur;  // 앞 음이 끝나자마자 미끄러진다
+    out[j].dur = Math.max(0.05, end - out[j].start);
+    i = j;
+  }
+  return out.filter((_, i) => keep[i]);
+}
+
+/**
  * 지판 배치. 각 노트마다 (현, 프렛) 후보를 만들고 DP 로 손 이동이 적은 경로를 고른다.
  * 그리디로 하면 한 번 잘못 든 자리가 끝까지 따라온다.
  */
@@ -298,6 +398,11 @@ export function assignFrets(notes, tuningId, maxFret) {
   const LOW_STRING  = 0.18;
   const HIGH_FRET   = 19;    // 이 위는 실제로 드물다
   const HIGH_PEN    = 1.2;
+  // 슬라이드·해머·풀은 한 현 위에서만 성립한다. 금지가 아니라 큰 벌점으로 둔다 —
+  // 검출이 틀렸을 때 경로 자체가 막히면 그 구간 전체가 풀리지 않는다.
+  const SAME_STRING = 3.0;
+
+  const linked = notes.map(n => !!n.tech);
 
   const out = new Array(notes.length).fill(null);
 
@@ -326,6 +431,7 @@ export function assignFrets(notes, tuningId, maxFret) {
           const p = prevRow[k];
           const ph = p.hand;                       // 직전에 손이 있던 프렛 (-1 = 아직 모름)
           let move = STRING_COST * Math.abs(c.string - p.string);
+          if (linked[i] && c.string !== p.string) move += SAME_STRING;
           let hand = anchor;
           if (c.fret === 0) {
             hand = ph;                             // 개방현 — 손은 그대로
@@ -358,7 +464,23 @@ export function assignFrets(notes, tuningId, maxFret) {
     s = e + 1;
   }
 
-  return notes.map((n, k) => ({ ...n, string: out[k] ? out[k].string : null, fret: out[k] ? out[k].fret : null }));
+  const placed = notes.map((n, k) => ({ ...n, string: out[k] ? out[k].string : null, fret: out[k] ? out[k].fret : null }));
+
+  // 배치가 끝나야 그 기호를 실제로 연주할 수 있는지 알 수 있다. 못 하는 것은 지운다.
+  //   · 같은 현 위가 아니면 어느 것도 성립하지 않는다
+  //   · 슬라이드는 양쪽 다 짚은 음이어야 한다 — 개방현은 미끄러뜨릴 손가락이 없다
+  //   · 해머온은 짚어서 내는 소리라 목표가 개방현일 수 없다
+  //   · 풀오프는 짚은 음에서 손가락을 떼는 것이라 출발이 개방현일 수 없다 (개방현으로 떼는 것은 정상)
+  for (let i = 0; i < placed.length; i++) {
+    const n = placed[i], p = placed[i - 1];
+    if (!n.tech) continue;
+    const bad = !p || n.string == null || p.string == null || n.string !== p.string
+      || ((n.tech === 'slideUp' || n.tech === 'slideDown') && (n.fret === 0 || p.fret === 0))
+      || (n.tech === 'hammer' && n.fret === 0)
+      || (n.tech === 'pull' && p.fret === 0);
+    if (bad) delete n.tech;
+  }
+  return placed;
 }
 
 /**
@@ -423,6 +545,8 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   const hopSec = hop / sr;
   const onsets = detectOnsets(rmss, hopSec, opts);
   let notes = dropGhosts(segment(smooth, confs, hopSec, opts, onsets, rmss, lows), opts);
+  // 테크닉은 프레임 시각 그대로일 때 판별한다 — 격자에 붙이고 나면 사이의 경로가 흐려진다
+  if (opts.techniques) notes = detectTechniques(notes, { midis: smooth, onsets, rmss, hopSec }, opts);
   // 박 정보가 있으면 격자에 붙인다 (드럼 스템에서 얻는다)
   if (opts.beats && opts.beats.length > 1) notes = quantizeToGrid(notes, opts.beats, opts.subdiv || 4);
   const withFrets = assignFrets(notes, opts.tuning, opts.maxFret);

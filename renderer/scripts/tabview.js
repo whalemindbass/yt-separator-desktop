@@ -2,7 +2,7 @@
 // 베이스 TAB 채보 — 워커 실행과 화면 표시.
 // 라이브러리와 스튜디오가 같은 모듈을 쓴다. 재생 위치만 넣어주면 현재 음을 따라간다.
 
-import { TUNINGS } from '../workers/tab-core.js';
+import { TUNINGS, TECH_GLYPH } from '../workers/tab-core.js';
 import { t as tr } from './i18n.js';
 
 const STRING_LABELS = {
@@ -144,10 +144,16 @@ export class TabView {
       const b = document.createElement('b');
       b.className = 'tabv-note';
       b.dataset.i = String(i);
-      b.textContent = String(n.fret);
+      // 테크닉은 앞 음에서 이어진다는 뜻이라 프렛 앞에 붙인다 (/9, \5, h9, p7)
+      const glyph = n.tech ? TECH_GLYPH[n.tech] : '';
+      b.textContent = glyph + n.fret;
+      if (glyph) {
+        b.classList.add('tech');
+        b.title = tr('tab.tech.' + n.tech);
+      }
       b.style.left = `${n.start * this.pps}px`;
       b.style.top = `calc(${nStrings - 1 - n.string} * var(--tab-row))`;
-      b.style.minWidth = `${Math.max(16, n.dur * this.pps)}px`;
+      b.style.minWidth = `${Math.max(glyph ? 24 : 16, n.dur * this.pps)}px`;
       // 두 검출기가 합의하지 않은 음은 흐리게 — 지우지 않고 확신도만 알린다
       if (n.agree === false) { b.classList.add('unsure'); b.title = tr('tab.unsure'); }
       if (this.onSeek) {
@@ -197,8 +203,9 @@ export class TabView {
       const chunk = this.notes.slice(i, i + perLine);
       for (let s = labels.length - 1; s >= 0; s--) {
         const row = chunk.map(n => {
-          const v = n.string === s && n.fret != null ? String(n.fret) : '-';
-          return v.length === 1 ? v + '-' : v;
+          if (!(n.string === s && n.fret != null)) return '---';
+          const v = (n.tech ? TECH_GLYPH[n.tech] : '') + n.fret;
+          return v.padEnd(3, '-');
         }).join('--');
         out.push(`${labels[s]}|--${row}--|`);
       }

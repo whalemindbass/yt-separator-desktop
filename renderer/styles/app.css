@@ -2994,3 +2994,11 @@ body { background: var(--bg) !important; }
 /* 두 검출기가 합의하지 않은 음 — 지우지 않고 확신도만 낮춰 보여준다 */
 .tabv-note.unsure { opacity: .45; border-style: dashed; }
 .tabv-note.unsure.now { opacity: .8; }
+
+/* 앞 음에서 이어지는 음(/ \ h p) — 새로 뜯은 음과 구분되게 왼쪽을 연다 */
+.tabv-note.tech {
+  border-left-color: transparent;
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+  letter-spacing: .5px;
+}
+.tabv-note.tech.now { border-left-color: var(--accent); }
