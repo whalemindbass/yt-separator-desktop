@@ -412,6 +412,7 @@ ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
     filters,
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  grantWrite(res.filePath);
   return { ok: true, filePath: res.filePath };
 });
 // 프로젝트(.yssproj) — 사용자가 고른 임의 경로에 JSON 저장/열기
@@ -445,11 +446,27 @@ ipcMain.handle('dialog:pickFolder', async (_ev, title) => {
     properties: ['openDirectory', 'createDirectory'],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  grantWriteDir(res.filePaths[0]);
   return { ok: true, dir: res.filePaths[0] };
 });
-// 렌더러가 쓰기 요청하는 경로는 반드시 허용 폴더(다운로드/스템/userData) 하위여야 함
+
+// 사용자가 대화상자에서 직접 고른 위치.
+//   렌더러는 이 값을 스스로 만들어낼 수 없다 — 사람이 네이티브 창에서 고른 것만 들어온다.
+//   그래서 허용 폴더 밖이라도 여기 담긴 곳에는 쓸 수 있다. 이게 없으면 저장 위치를
+//   설정의 영상/스템 폴더 밖으로 고른 순간 "path not allowed" 로 막혔다.
+const grantedFiles = new Set();
+const grantedDirs  = new Set();
+const norm = (p) => { try { return path.normalize(p).replace(/[\/]+$/, '').toLowerCase(); } catch { return null; } };
+function grantWrite(p)    { const n = norm(p); if (n) grantedFiles.add(n); }
+function grantWriteDir(p) { const n = norm(p); if (n) grantedDirs.add(n); }
+
+// 렌더러가 쓰기 요청하는 경로는 허용 폴더(다운로드/스템/userData) 하위이거나,
+// 사용자가 직접 고른 곳이어야 한다.
 function allowedWriteTarget(p) {
   if (typeof p !== 'string' || !p) return false;
+  const n = norm(p);
+  if (n && grantedFiles.has(n)) return true;
+  if (n && grantedDirs.has(norm(path.dirname(p)))) return true;   // 고른 폴더 바로 아래
   const roots = [downloadsDir(), stemsDir(), app.getPath('userData')];
   return roots.some(r => { try { return path.normalize(p) === path.normalize(r) || isInsideDir(r, p); } catch { return false; } });
 }
