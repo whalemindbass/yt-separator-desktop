@@ -806,7 +806,11 @@ function onTrackMeter(list) {
 // 높이는 px 로 기억한다 — vh 로 두면 창 크기를 바꿀 때마다 고른 값이 흔들린다.
 const HERO_H_KEY = 'yss:studio-hero-h';
 const HERO_MIN_H = 200;      // CSS 의 min-height 와 같은 값
-const TRACKS_MIN_H = 220;    // 타임라인이 최소한 이만큼은 남아야 쓸모가 있다
+// 타임라인이 남겨야 할 최소 높이. CSS 의 .daw-tracks min-height 와 같아야 한다 —
+// 여기서 더 크게 잡으면 CSS 가 허용하는 것보다 먼저 막혀 영상을 덜 키우게 되고,
+// 더 작게 잡으면 CSS 가 안 줄어들어 계산과 실제 크기가 어긋난다.
+// 24px 룰러 + 트랙 한 줄이 보이는 높이.
+const TRACKS_MIN_H = 120;
 
 function heroMaxH() {
   const content = document.querySelector('.daw-content');
