@@ -801,6 +801,83 @@ function onTrackMeter(list) {
   }
   if (!_metersRafOn) { _metersRafOn = true; requestAnimationFrame(_metersTick); }
 }
+// ── 영상 높이 조절 ────────────────────────────────────────────
+// 곡마다 영상을 크게 보고 싶을 때와 트랙을 넓게 쓰고 싶을 때가 다르다.
+// 높이는 px 로 기억한다 — vh 로 두면 창 크기를 바꿀 때마다 고른 값이 흔들린다.
+const HERO_H_KEY = 'yss:studio-hero-h';
+const HERO_MIN_H = 200;      // CSS 의 min-height 와 같은 값
+const TRACKS_MIN_H = 220;    // 타임라인이 최소한 이만큼은 남아야 쓸모가 있다
+
+function heroMaxH() {
+  const content = document.querySelector('.daw-content');
+  return Math.max(HERO_MIN_H, (content?.clientHeight || 900) - TRACKS_MIN_H);
+}
+function setHeroHeight(px, save = true) {
+  const hero = document.getElementById('daw-hero');
+  if (!hero) return;
+  const h = Math.round(Math.min(heroMaxH(), Math.max(HERO_MIN_H, px)));
+  hero.style.height = h + 'px';
+  if (save) { try { localStorage.setItem(HERO_H_KEY, String(h)); } catch {} }
+  layout();
+}
+function resetHeroHeight() {
+  const hero = document.getElementById('daw-hero');
+  if (hero) hero.style.height = '';   // CSS 기본값(46vh)으로 되돌린다
+  try { localStorage.removeItem(HERO_H_KEY); } catch {}
+  layout();
+}
+function wireHeroResize() {
+  const grip = document.getElementById('daw-hero-resize');
+  const hero = document.getElementById('daw-hero');
+  const content = document.querySelector('.daw-content');
+  if (!grip || !hero) return;
+
+  let saved = 0;
+  try { saved = Number(localStorage.getItem(HERO_H_KEY)) || 0; } catch {}
+  if (saved > 0) setHeroHeight(saved, false);
+
+  // 손잡이는 7px 이라 조금만 빠르게 끌어도 포인터가 밖으로 나간다.
+  // 그동안의 움직임은 window 에서 받는다 — 캡처는 되면 좋고 안 돼도 동작해야 한다.
+  let startY = 0, startH = 0, dragging = false;
+  const onMove = (e) => { if (dragging) setHeroHeight(startH + (e.clientY - startY)); };
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', endDrag);
+    window.removeEventListener('pointercancel', endDrag);
+    grip.classList.remove('dragging');
+    content?.classList.remove('resizing');
+  };
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startH = hero.getBoundingClientRect().height;
+    try { grip.setPointerCapture(e.pointerId); } catch {}
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
+    grip.classList.add('dragging');
+    content?.classList.add('resizing');
+  });
+  grip.addEventListener('dblclick', resetHeroHeight);
+  grip.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    setHeroHeight(hero.getBoundingClientRect().height + (e.key === 'ArrowUp' ? -step : step));
+  });
+
+  // 창이 작아지면 기억해 둔 높이가 한도를 넘는다 — 그때만 줄이고, 고른 값은 그대로 둔다
+  window.addEventListener('resize', () => {
+    if (!hero.style.height) return;
+    const cur = hero.getBoundingClientRect().height;
+    const max = heroMaxH();
+    if (cur > max) { hero.style.height = Math.round(max) + 'px'; layout(); }
+  });
+}
+
 function syncHeroState() {   // hero 클래스에 도구 오픈 여부 반영 — 접힘 + 도구 열림 = 도구가 hero 전체 폭 채움
   const hero = document.getElementById('daw-hero'); if (!hero) return;
   const toolsOpen = !document.getElementById('daw-tools')?.hidden;
@@ -2914,6 +2991,7 @@ function wire() {
   $('daw-video-collapse').addEventListener('click', () => { $('daw-hero').classList.add('video-collapsed'); syncHeroState(); });
   $('daw-hero-expand').addEventListener('click', () => { $('daw-hero').classList.remove('video-collapsed'); syncHeroState(); layout(); });
   syncHeroState();
+  wireHeroResize();
   const selectTool = (name) => {
     document.querySelectorAll('.daw-tool-tab').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
     document.querySelectorAll('.daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
