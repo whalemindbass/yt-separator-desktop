@@ -3172,6 +3172,8 @@ body { background: var(--bg) !important; }
 .home-nav-discord:hover { background: var(--elev); border-color: #5865f2; color: var(--tx-1); }
 .home-nav-discord:hover .dc-out { opacity: .9; }
 .home-nav-discord:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* display:flex 가 [hidden] 의 기본 display:none 을 이긴다 — 숨기려면 명시해야 한다 */
+.home-nav-discord[hidden] { display: none; }
 
 
 /* 본문 */
