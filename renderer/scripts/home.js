@@ -283,13 +283,9 @@ export function initHome(switchView) {
     api?.openExternal?.('https://github.com/whalemindbass/yt-separator-releases/releases'));
   $('home-contact')?.addEventListener('click', () => $('report-btn')?.click());
 
-  api?.settings?.appInfo?.()
-    .then(info => {
-      if (info?.appVersion) { const v = $('home-version'); if (v) v.textContent = 'v' + info.appVersion; }
-      const c = $('home-copy');
-      if (c) c.textContent = `© ${new Date().getFullYear()} Dr.studio`;
-    })
-    .catch(() => {});
+  // 버전은 설정 화면이 이미 보여 준다 — 여기서는 저작권 한 줄이면 되고, 그건 앱에 물어볼 것이 없다
+  const c = $('home-copy');
+  if (c) c.textContent = `© ${new Date().getFullYear()} Dr.studio`;
 
   loadNotices();
   paintRecent();
