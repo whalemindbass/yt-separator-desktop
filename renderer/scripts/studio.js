@@ -30,6 +30,15 @@ const stemLabel = (k) => (STEM_LABEL_KEY[k] ? tr(STEM_LABEL_KEY[k]) : k);
 
 let _wired = false, _started = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
+
+// 시간은 초로 들고 다니고, 엔진 경계에서만 샘플로 바꾼다.
+//
+// 샘플 수를 그냥 숫자로 주고받으면 어느 레이트로 잰 것인지가 값에 붙어 다니지 않는다.
+// 지난 버그 세 건(48kHz 에서 8.8% 빠른 재생 · 프로젝트 열면 클립만 밀림 · 레이트 바꾸면 어긋남)이
+// 전부 그 하나에서 나왔다. 변환은 이 두 함수만 쓰고, 그래야 어디서 바뀌는지 한눈에 찾힌다.
+function deviceSr() { return _sr || 44100; }
+const secToSamples = (sec) => Math.round((sec || 0) * deviceSr());
+const samplesToSec = (n)   => (n || 0) / deviceSr();
 let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
@@ -153,7 +162,7 @@ function autoOf(id) {
   return a;
 }
 function autoPush(id) {   // 엔진에 현재 곡선·on 상태 전송
-  const a = autoOf(id), sr = _sr || 44100;
+  const a = autoOf(id), sr = deviceSr();
   api.engine.automation(id, { on: !!a.on, points: a.pts.map(p => ({ s: Math.round(p.t * sr), v: p.v })) });
 }
 // ── 스템 자동화 ↔ 스템 오프셋 연동 ────────────────────────
@@ -227,7 +236,7 @@ function repositionStems() {
 function seekToClientX(cx) {
   const rect = $('daw-lanes').getBoundingClientRect();
   const t = Math.max(0, Math.min(fullSec(), (cx - rect.left - HEAD_W) / _pxPerSec));
-  api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
+  api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
 }
 // 룰러/트랙 빈 곳 클릭·드래그 = 재생선 따라오기(스크럽). 좌우 스크롤은 휠
 function grabPan(e) {
@@ -337,7 +346,7 @@ function renderTracks() {
         shiftStemAuto(autoBase, _stemOffset - base);
         showDragBadge(_stemOffset - base, cx, cy);
       }, (moved) => {
-        hideDragBadge(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100)));
+        hideDragBadge(); api.engine.stemOffset(secToSamples(_stemOffset));
         if (moved && _stemOffset !== base) {
           const nw = _stemOffset;
           pushStemAuto();   // 이동 끝난 곡선을 엔진에 반영
@@ -1164,7 +1173,7 @@ async function runStudioTab() {
     if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => {
       if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
       const t = Math.max(0, Math.min(fullSec(), sec));
-      api.engine.seek(Math.round(t * (_sr || 44100))); syncVideo(t); updatePlayhead(t);
+      api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
     } });
     // 스템은 파일로만 들고 있으므로 여기서 디코드한다
     const res = await fetch(toYtsepUrl(bassPath));
@@ -1285,7 +1294,7 @@ function stopStudio() {
   clearRecLive();
   if (_returnOnStop) {   // 정지 시 재생 시작 위치로 복귀(옵션)
     const back = Math.max(0, _playStart || 0);
-    api.engine.seek(Math.round(back * (_sr || 44100)));
+    api.engine.seek(secToSamples(back));
     syncVideo(back);
     updatePlayhead(back);
   }
@@ -1321,7 +1330,7 @@ function syncVideo(t) {
   if (_playing && v.paused && vt <= v.duration) v.play().catch(() => {});
 }
 function onPos(samples) {
-  const t = (samples || 0) / (_sr || 44100);
+  const t = samplesToSec(samples || 0);
   updatePlayhead(t);
   if (_recArmed && _playing) updateRecLive(t);
   const vdur = _dur > 0 ? _dur + _stemOffset : 0;
@@ -1428,7 +1437,7 @@ async function importAudio(paths, startSec, trackId) {
   const dropTrack = _recTracks.find(t => t.id === trackId && t.type === 1);
   const tid = dropTrack ? dropTrack.id : await newAudioTrack();
   if (tid == null) { flashTake(tr('studio.m.trackCreateFail')); return; }
-  const startS = Math.round(Math.max(0, startSec || 0) * (_sr || 44100));
+  const startS = secToSamples(Math.max(0, startSec || 0));
   for (const p of paths) {
     const id = nextClipId();
     api.engine.takeLoad(p, startS, tid, id);
@@ -1489,7 +1498,7 @@ async function loadSong(item, opts) {
     const { stems, sampleRate } = await loadStemFilesToBuffers(it.stemPaths);
     renderWaves(stems);
     flashTake(tr('studio.p.loaded', { name: it.name }));
-    if (autoBpm) detectSongBpm(stems, sampleRate || _sr || 44100);   // drums 에서 BPM·박자 감지(비동기)
+    if (autoBpm) detectSongBpm(stems, sampleRate || deviceSr());   // drums 에서 BPM·박자 감지(비동기)
   } catch (e) { flashTake(tr('studio.p.waveDecodeFail', { err: (e && e.message) || e })); }
   finally { _loadingSong = false; }
 }
@@ -1522,15 +1531,17 @@ function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
 let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
 async function renderTake(file, startSamples, engineId, trackId) {
   try {
-    const { stems } = await loadStemFilesToBuffers({ take: file });
+    // 길이는 디코드한 버퍼가 실제로 몇 Hz 인지로 나눠야 한다. 그 레이트는 AudioContext 가 정하는 것이라
+    // 엔진 장치 레이트와 다를 수 있고, 장치 레이트로 나누면 그 비율만큼 클립 길이가 틀어진다.
+    const { stems, sampleRate: bufSr } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
     const tid = trackId != null ? trackId : armedRecId();
     const isAudio = (_recTracks.find(r => r.id === tid) || {}).type === 1;   // 오디오 트랙 클립 = 다른 색
-    const srcDur = ch[0].length / (_sr || 44100);
+    const srcDur = ch[0].length / (bufSr || deviceSr());
     _takes.push({
       id: engineId != null ? engineId : Date.now(), file,
       trackId: tid,
-      start: (startSamples || 0) / (_sr || 44100),
+      start: samplesToSec(startSamples || 0),
       inOff: 0, srcDur, dur: srcDur,   // 트림: inOff(소스 내 시작)·dur(가시 길이)·srcDur(전체)
       fadeIn: 0, fadeOut: 0,           // 페이드(초)
       svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
@@ -1623,7 +1634,7 @@ function renderTakes() {
         hideDragBadge();
         document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
         if (!dragging) { if (!_recArmed) seekToClientX(startX); return; }   // 클릭 = 재생선 이동(클립 위에서도)
-        const sr = _sr || 44100;
+        const sr = deviceSr();
         if (!multi) {
           const newId = target ? Number(target.dataset.recid) : tk.trackId;
           if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, Math.round(tk.start * sr), newId); }
@@ -1675,7 +1686,7 @@ function wireTrim(handle, tk, el, wave, dir) {
   });
 }
 function commitTrim(tk) {
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round(tk.inOff * sr), Math.round(tk.dur * sr));
 }
 // 페이드 핸들: dir -1=인, +1=아웃. 코너 드래그로 길이 갱신, up 시 커밋
@@ -1704,7 +1715,7 @@ function wireFade(handle, tk, paint, dir) {
   });
 }
 function commitFade(tk) {
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   api.engine.takeFade(tk.id, Math.round(tk.fadeIn * sr), Math.round(tk.fadeOut * sr));
 }
 // 클립 복제 — 뒤로 dur 만큼 이어붙임
@@ -1722,7 +1733,7 @@ function splitSelectedAtPlayhead() {
 function splitClip(tk, atSec) {
   const rel = atSec - tk.start;
   if (rel <= MIN_CLIP || rel >= tk.dur - MIN_CLIP) { flashTake(tr('studio.m.splitInsideOnly')); return; }
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   const newId = nextClipId();
   const origId = tk.id, origDur = tk.dur;
   // 뒷부분 = 새 클립
@@ -1852,7 +1863,7 @@ function saveTakeSet(name) {
     name: r.name || '', color: r.color || '', height: r.height || 0,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
-  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: Math.round(t.start * (_sr || 44100)), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId }));
+  const takes = _takes.map(t => ({ id: t.id, file: t.file, start: secToSamples(t.start), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId }));
   const need = [];
   tracks.forEach(t => t.fxOrder.forEach(s => need.push({ track: t.id, id: s.id })));
   if (!need.length) { persistTakeSet(name, stripFxOrder(tracks), takes); return; }   // FX 없으면 바로 저장
@@ -1876,7 +1887,7 @@ function finishTakeSetGather() {
 }
 function persistTakeSet(name, tracks, takes) {
   // 프로젝트 파일과 같은 이유로 잰 레이트를 함께 남긴다 — takes[].start 가 샘플 단위다
-  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, sampleRate: _sr || 44100, tracks, takes }); setTakeSets(a);
+  const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, sampleRate: deviceSr(), tracks, takes }); setTakeSets(a);
   flashTake(tr('studio.m.takeSetSaved') + name);
 }
 function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
@@ -1919,7 +1930,7 @@ async function loadTakeSet(ts) {
       if (idMap && idMap[t.trackId] != null) tid = idMap[t.trackId];
       else if (!_recTracks.some(r => r.id === tid)) tid = armedRecId();
       const id = t.id != null ? t.id : t.start;   // 고유 id (구버전은 start 폴백)
-      const startSamples = Math.round(((t.start || 0) / setSr) * (_sr || 44100));
+      const startSamples = secToSamples((t.start || 0) / setSr);
       api.engine.takeLoad(t.file, startSamples, tid, id);
       await renderTake(t.file, startSamples, id, tid);
       // 트림·페이드 복원 (구버전 세트는 inOff/fade 없음)
@@ -1969,7 +1980,7 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
 // opts.skipFx — 엔진에 묻지 않고 지금 알고 있는 것만으로 만든다.
 // 엔진이 죽은 뒤 구조를 뜰 때 쓴다. 이펙트 노브 값은 엔진만 알고 있어 빠진다.
 async function buildProjectObject(opts = {}) {
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   const master = faderToGain($('mx-master')?.value ?? FADER_UNITY_POS);
   const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
   const busIds = BUS_NAMES.map((_, i) => BUS_ID_BASE + i);
@@ -2170,7 +2181,7 @@ async function openProject() {
   finally { _openingProject = false; }
 }
 async function applyProject(p) {
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   // 저장 당시 레이트로 잰 샘플을 지금 레이트로 옮긴다. 44.1k 로 저장한 것을 48k 로 열면
   // 환산 없이는 모든 클립이 44100/48000 배 자리로 가 통째로 당겨진 것처럼 들린다.
   //
@@ -2296,7 +2307,7 @@ function clipState(tk) { return { start: tk.start, inOff: tk.inOff, dur: tk.dur,
 function setClipState(id, st) {
   const tk = _takes.find(t => t.id === id); if (!tk) return;
   Object.assign(tk, st);
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   api.engine.takeMove(tk.id, Math.round(tk.start * sr), tk.trackId);
   api.engine.takeTrim(tk.id, Math.round(tk.start * sr), Math.round(tk.inOff * sr), Math.round(tk.dur * sr));
   api.engine.takeFade(tk.id, Math.round(tk.fadeIn * sr), Math.round(tk.fadeOut * sr));
@@ -2310,7 +2321,7 @@ function setClipState(id, st) {
  * 버퍼와 위치를 그대로 쥐고 있어 속도도 자리도 어긋난다. 이쪽은 초로 들고 있으니 기준이 된다.
  */
 function repushForSampleRate() {
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   if (_stemPaths) api.engine.stemOffset(Math.round(_stemOffset * sr));
   if (_takes.length) {
     api.engine.takeClear();                 // 새 레이트로 파일을 다시 읽게 한다
@@ -2324,7 +2335,7 @@ function repushForSampleRate() {
 }
 
 function reAddClip(tkObj) {   // 삭제/분할 취소용 — 보관한 take 객체를 엔진·렌더러에 복구
-  const sr = _sr || 44100;
+  const sr = deviceSr();
   if (!_takes.some(t => t.id === tkObj.id)) _takes.push(tkObj);
   api.engine.takeLoad(tkObj.file, Math.round(tkObj.start * sr), tkObj.trackId, tkObj.id);
   api.engine.takeTrim(tkObj.id, Math.round(tkObj.start * sr), Math.round(tkObj.inOff * sr), Math.round(tkObj.dur * sr));
@@ -2367,7 +2378,7 @@ function reorderTracks(orderIds) {
   renderRecLanes(); renderTakes();
 }
 function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); }
-function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(Math.round(_stemOffset * (_sr || 44100))); layout(); }
+function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(secToSamples(_stemOffset)); layout(); }
 // BPM 배수 보정 (감지가 ×2/÷2 로 틀릴 때)
 function adjustBpm(factor) {
   const old = _bpm;
