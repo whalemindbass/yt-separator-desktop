@@ -2009,8 +2009,15 @@ async function buildProjectObject() {
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
 let _dirty = false;        // 마지막 저장 이후 변경 여부
 let _suppressDirty = false;// 로드 중 dirty 표시 억제
-function markDirty() { if (_suppressDirty) return; if (!_dirty) { _dirty = true; updateProjectLabel(); } }
-function markClean() { _dirty = false; updateProjectLabel(); }
+function markDirty() { if (_suppressDirty) return; if (!_dirty) { _dirty = true; updateProjectLabel(); notifyDirty(); } }
+function markClean() {
+  _dirty = false;
+  updateProjectLabel();
+  notifyDirty();
+  api.project?.autosaveClear?.();   // 제대로 저장했으면 복구본은 쓸모가 없다
+}
+/** 창을 닫을 때 물어볼지 판단하도록 메인에 알린다 */
+function notifyDirty() { try { api.project?.setDirty?.(_dirty); } catch {} }
 function updateProjectLabel() {
   const el = $('st-proj-name'); if (!el) return;
   const lab = el.querySelector('.pn-label'), dot = el.querySelector('.pn-dot');
@@ -2030,6 +2037,67 @@ async function saveProjectSmart() {
   else if (!r || !r.canceled) flashTake(tr('studio.m.saveFail'));
 }
 const saveProject = saveProjectSmart;   // 드롭다운 tr('studio.d.saveProjectShort') 도 동일 로직
+
+// ── 자동 저장 · 복구 ──────────────────────────────────────────
+// 사용자가 고른 .yssproj 는 절대 자동으로 덮어쓰지 않는다. 별도 스냅샷만 남기고,
+// 제대로 저장했거나 사용자가 버리기로 하면 지운다.
+const AUTOSAVE_MS = 60000;
+let _autosaveTimer = null;
+let _autosaving = false;
+
+function hasWork() { return !!_stemPaths || _takes.length > 0 || _recTracks.length > 0; }
+
+async function autosaveNow() {
+  if (_autosaving || !_dirty || !hasWork()) return;
+  if (_recArmed && _playing) return;   // 녹음 중에는 비켜 준다 — 지금 끊기면 안 되는 순간이다
+  _autosaving = true;
+  try {
+    const obj = await buildProjectObject();
+    await api.project?.autosaveWrite?.(JSON.stringify(obj), {
+      projectPath: _projectPath || null,
+      name: _songName || null,
+    });
+  } catch { /* 다음 주기에 다시 시도한다 */ }
+  finally { _autosaving = false; }
+}
+
+function startAutosave() {
+  if (_autosaveTimer) return;
+  _autosaveTimer = setInterval(autosaveNow, AUTOSAVE_MS);
+}
+
+/** 지난번에 저장하지 못하고 끝났으면 복구를 제안한다 */
+async function offerRecovery() {
+  let r = null;
+  try { r = await api.project?.autosaveRead?.(); } catch {}
+  if (!r || !r.ok || !r.data) return;
+
+  const at = r.meta?.at ? new Date(r.meta.at) : null;
+  const p = (n) => String(n).padStart(2, '0');
+  const when = at ? `${at.getFullYear()}.${p(at.getMonth() + 1)}.${p(at.getDate())} ${p(at.getHours())}:${p(at.getMinutes())}` : '';
+  const name = r.meta?.name || r.meta?.projectPath || tr('studio.lbl.project');
+
+  openModal(tr('studio.rec.title'), `
+    <div class="daw-modal-item" data-idx="1">
+      <div class="mt"><div class="n">${esc(String(name))}</div>
+      <div class="m">${esc(when)} · ${esc(tr('studio.rec.restoreSub'))}</div></div></div>
+    <div class="daw-modal-item" data-idx="0">
+      <div class="mt"><div class="n">${esc(tr('studio.rec.discard'))}</div>
+      <div class="m">${esc(tr('studio.rec.discardSub'))}</div></div></div>`,
+    async (idx) => {
+      if (idx !== '1') { api.project?.autosaveClear?.(); return; }
+      try {
+        const obj = JSON.parse(r.data);
+        await applyProject(obj);
+        _projectPath = r.meta?.projectPath || null;
+        _songName = r.meta?.name || _songName;
+        markDirty();                      // 복구본은 아직 파일에 저장된 상태가 아니다
+        flashTake(tr('studio.rec.restored'));
+      } catch {
+        flashTake(tr('studio.rec.failed'));
+      }
+    });
+}
 let _openingProject = false;
 async function openProject() {
   if (_openingProject) return;
@@ -3013,7 +3081,18 @@ function wire() {
   selectTool(null);   // 처음엔 아무 도구도 안 열림
 }
 
+let _studioBooted = false;
 export async function initStudio() {
   wire();
   startEngine(false).catch(() => {});   // 탭에 들어오면 알아서 연결 (실패 시 버튼으로 재시도)
+  if (_studioBooted) return;            // 아래는 스튜디오에 처음 들어왔을 때 한 번만
+  _studioBooted = true;
+  startAutosave();
+  offerRecovery();                      // 지난번에 저장하지 못하고 끝났으면 여기서 제안한다
+
+  // 창을 닫으려 할 때 메인이 저장을 시킨다. 끝났는지 알려 주어야 닫힐지가 정해진다.
+  api.project?.onSaveRequest?.(async () => {
+    try { await saveProjectSmart(); } catch {}
+    api.project?.saveResult?.(!_dirty);   // 아직 dirty 면 저장이 취소·실패한 것이다
+  });
 }

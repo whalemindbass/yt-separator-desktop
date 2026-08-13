@@ -61,6 +61,15 @@ contextBridge.exposeInMainWorld('yssApi', {
   project: {
     save: (json, name, path) => ipcRenderer.invoke('project:save', json, name, path),
     open: ()           => ipcRenderer.invoke('project:open'),
+    // 자동 저장 — 사용자가 고른 파일이 아니라 별도 스냅샷에 쓴다
+    autosaveWrite: (json, meta) => ipcRenderer.invoke('project:autosaveWrite', json, meta),
+    autosaveRead:  ()           => ipcRenderer.invoke('project:autosaveRead'),
+    autosaveClear: ()           => ipcRenderer.invoke('project:autosaveClear'),
+    // 저장 안 한 변경 여부를 알려 두면 창을 닫을 때 메인이 묻는다
+    setDirty:      (v)  => ipcRenderer.send('project:dirty', !!v),
+    // 닫기 전 저장 요청 → 끝나면 결과를 돌려준다
+    onSaveRequest: (fn) => ipcRenderer.on('project:save-request', () => fn()),
+    saveResult:    (ok) => ipcRenderer.send('project:save-result', !!ok),
   },
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),

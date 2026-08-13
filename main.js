@@ -140,7 +140,42 @@ function createMainWindow() {
       event.preventDefault();
     }
   });
+  // 저장하지 않은 작업이 있으면 닫기 전에 묻는다.
+  // 창이 닫힌 뒤에 도는 'closed' 로는 늦다 — 그때는 이미 되돌릴 수 없다.
+  let closeConfirmed = false;
+  mainWindow.on('close', (e) => {
+    if (closeConfirmed || !unsavedWork) return;
+    e.preventDefault();
+    (async () => {
+      const win = mainWindow;
+      if (!win) return;
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['저장하고 닫기', '저장하지 않고 닫기', '취소'],
+        defaultId: 0, cancelId: 2, noLink: true,
+        message: '저장하지 않은 작업이 있습니다',
+        detail: '지금 닫으면 마지막 저장 이후의 변경을 잃습니다.',
+      });
+      if (response === 2) return;                       // 취소 — 그대로 둔다
+      if (response === 0 && !(await requestRendererSave())) return;   // 저장 취소·실패 시에도 닫지 않는다
+      // 여기까지 왔으면 저장했거나 버리기로 한 것이다 — 복구본을 남겨 둘 이유가 없다
+      for (const p of [autosavePath(), autosaveMetaPath()]) { try { fs.unlinkSync(p); } catch {} }
+      closeConfirmed = true;
+      win.close();
+    })();
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+/** 렌더러에 저장을 시키고 끝났는지 기다린다. 응답이 없으면 닫지 않는 쪽으로 판단한다. */
+function requestRendererSave() {
+  return new Promise((resolve) => {
+    if (!mainWindow) return resolve(true);
+    const done = (_e, ok) => { clearTimeout(timer); ipcMain.removeListener('project:save-result', done); resolve(!!ok); };
+    const timer = setTimeout(() => { ipcMain.removeListener('project:save-result', done); resolve(false); }, 30000);
+    ipcMain.on('project:save-result', done);
+    mainWindow.webContents.send('project:save-request');
+  });
 }
 
 // 데스크톱 Chrome UA — 커뮤니티 webview 에서 Google OAuth 임베드 차단 회피
@@ -430,6 +465,40 @@ ipcMain.handle('project:save', async (_ev, json, name, existingPath) => {
   try { fs.writeFileSync(target, String(json), 'utf8'); return { ok: true, path: target }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
+// ── 자동 저장 ────────────────────────────────────────────────
+// 저장 안 한 작업을 잃지 않기 위한 최소 장치. 사용자가 고른 .yssproj 는 건드리지 않고
+// 별도 파일에 스냅샷만 남긴다 — 자동 저장이 원본을 덮어쓰면 그게 더 큰 사고다.
+function autosavePath() { return path.join(app.getPath('userData'), 'autosave.yssproj'); }
+function autosaveMetaPath() { return path.join(app.getPath('userData'), 'autosave.json'); }
+
+ipcMain.handle('project:autosaveWrite', (_ev, json, meta) => {
+  try {
+    // 임시 파일에 쓰고 바꿔치기한다. 쓰는 도중 죽으면 지난 스냅샷이라도 남아야 한다.
+    const tmp = autosavePath() + '.tmp';
+    fs.writeFileSync(tmp, String(json), 'utf8');
+    fs.renameSync(tmp, autosavePath());
+    fs.writeFileSync(autosaveMetaPath(), JSON.stringify({ ...(meta || {}), at: Date.now() }), 'utf8');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('project:autosaveRead', () => {
+  try {
+    if (!fs.existsSync(autosavePath())) return { ok: false };
+    const meta = JSON.parse(fs.readFileSync(autosaveMetaPath(), 'utf8'));
+    return { ok: true, data: fs.readFileSync(autosavePath(), 'utf8'), meta };
+  } catch { return { ok: false }; }
+});
+
+ipcMain.handle('project:autosaveClear', () => {
+  for (const p of [autosavePath(), autosaveMetaPath()]) { try { fs.unlinkSync(p); } catch {} }
+  return { ok: true };
+});
+
+// 저장 안 한 변경이 있는지 렌더러가 알려 준다 — 창을 닫을 때 물어보기 위해서다
+let unsavedWork = false;
+ipcMain.on('project:dirty', (_ev, v) => { unsavedWork = !!v; });
+
 ipcMain.handle('project:open', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
     title: '프로젝트 열기',
