@@ -153,15 +153,25 @@ try {
       + `   기준 대비 +${gained}음 / 잉여 +${added}  (1음당 ${cost})`);
   }
 
-  // 국소 적응 임계값 — 고정 여유값 하나가 깨끗한 신호와 분리 스템을 함께 감당하지 못한다.
-  // 그 자리의 flux 변동폭(MAD)에 맞춰 여유를 정하면 둘 다 될 수 있는지 본다.
+  // 문턱을 최선으로 두고도 남는 것 — 여기서부터는 분절의 문제다
   say('');
-  say('# 국소 적응 임계값 (median + k·MAD)');
-  for (const k of [1.5, 2.0, 2.5, 3.0, 4.0]) {
-    const s = score(gt, transcribe(mono, sr, { tuning: '4', onsetAdaptive: true, onsetK: k }).notes);
-    say(`#   k ${k.toFixed(1)}  일치 ${String(s.hit).padStart(3)} (${String(s.pct).padStart(2)}%)`
-      + ` · 음정오류 ${String(s.pitchWrong).padStart(2)} · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(3)}`
-      + `   기준 대비 +${s.hit - base.hit}음 / 잉여 ${s.extra - base.extra >= 0 ? '+' : ''}${s.extra - base.extra}`);
+  fmt('[YIN th=0.02]', transcribe(mono, sr, { tuning: '4', onsetThresh: 0.02 }).notes, true);
+
+  // 온셋용 에너지 창 × 문턱.
+  //
+  // 피치 창(93ms)으로 잰 에너지에서는 150ms 간격 반복의 상승이 평균에 묻힌다. 창을 줄이면
+  // 봉우리는 서지만 잡음도 같이 커지므로 문턱을 함께 올려야 한다. 둘은 따로 못 고른다.
+  say('');
+  say('# 온셋 창 × 문턱  (일치% / 잉여)');
+  const winsMs = [0, 8, 12, 20, 30, 46];
+  const ths = [0.08, 0.12, 0.18, 0.25, 0.35];
+  say('#   창\\문턱 ' + ths.map(t => String(t).padStart(11)).join(''));
+  for (const w of winsMs) {
+    const cells = ths.map(th => {
+      const s = score(gt, transcribe(mono, sr, { tuning: '4', onsetWinMs: w, onsetThresh: th }).notes);
+      return `${String(s.pct).padStart(4)}% /${String(s.extra).padStart(4)}`;
+    });
+    say(`#   ${String(w === 0 ? '피치창' : w + 'ms').padEnd(7)}` + cells.join(''));
   }
 
   const bp = await runBasicPitch(mono, sr, new URL('./', location.href).href);

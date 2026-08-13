@@ -26,6 +26,13 @@ export const DEFAULTS = {
   // 고정 여유값 하나가 두 가지 신호를 함께 감당하지 못한다. 깨끗한 신호에서 0.08 은
   // 반복 타현을 통째로 버리고, 분리 스템에서 그보다 낮추면 아티팩트가 쏟아진다
   // (lab/tab/README.md 의 스윕). 그래서 그 자리의 flux 변동폭에 맞춰 여유를 정한다.
+  // 온셋용 에너지를 재는 창(ms). 0 이면 피치 창(약 93ms)을 그대로 쓴다.
+  //   피치 창은 저음 한 주기를 담으려 길다. 어택은 5~20ms 사건이라 그 창에서는 평균에 묻힌다.
+  //   20ms 로 줄이면 합성 음원(정답이 알려진)에서 62% → 88% 로 오르고 잉여는 그대로다.
+  //   그런데 분리 스템에서는 +3%p 를 얻는 대신 잉여가 26 → 156 으로 뛴다. 스템 쪽 잉여 수치는
+  //   정답지가 검출기에서 파생돼 믿을 수 없지만, 6배를 전부 그 편향으로 돌리기도 어렵다.
+  //   그래서 기본은 옛 동작으로 둔다. 실제 곡의 독립 정답지가 생기면 그때 정한다.
+  onsetWinMs: 0,
   onsetAdaptive: false, // 켜면 아래 두 값을 쓰고 onsetThresh 는 무시한다
   onsetK: 2.5,          // 국소 MAD 의 몇 배를 여유로 둘 것인가
   onsetFloor: 0.012,    // 무음 구간에서 MAD 가 0 이 되면 아무거나 잡히므로 바닥을 둔다
@@ -161,15 +168,16 @@ function medianSmooth(arr, k) {
  * 같은 음을 두 번 연달아 튕기면 음정이 바뀌지 않으므로, 피치만 보면 한 음으로 붙어버린다.
  * @returns {Uint8Array} 프레임별 온셋 여부
  */
-function detectOnsets(rmsArr, hopSec, opts) {
-  const n = rmsArr.length;
+function detectOnsets(fluxSrc, hopSec, opts, gateArr) {
+  const n = fluxSrc.length;
+  const gate = gateArr || fluxSrc;
   const onset = new Uint8Array(n);
   if (n < 3) return onset;
 
   // 로그 에너지의 상승분만 취한다 (감쇠는 무시)
   const flux = new Float64Array(n);
   for (let i = 1; i < n; i++) {
-    const a = Math.log(rmsArr[i] + 1e-9), b = Math.log(rmsArr[i - 1] + 1e-9);
+    const a = Math.log(fluxSrc[i] + 1e-9), b = Math.log(fluxSrc[i - 1] + 1e-9);
     flux[i] = Math.max(0, a - b);
   }
   // 국소 평균 대비 튀는 지점만 남긴다 — 곡 전체 음량에 좌우되지 않는다
@@ -200,7 +208,7 @@ function detectOnsets(rmsArr, hopSec, opts) {
     }
 
     const isPeak = flux[i] > flux[i - 1] && flux[i] >= (flux[i + 1] || 0);
-    if (isPeak && flux[i] > bar && rmsArr[i] > opts.rmsGate && i - last >= minGap) {
+    if (isPeak && flux[i] > bar && gate[i] > opts.rmsGate && i - last >= minGap) {
       onset[i] = 1; last = i;
     }
   }
@@ -560,6 +568,13 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   const confs = new Float64Array(frames);
   const rmss = new Float64Array(frames);
   const lows = new Float64Array(frames);
+  // 온셋용 에너지는 따로 짧은 창으로 잰다.
+  //
+  // 피치 창(N=2048 ≈ 93ms)은 저음의 한 주기를 담으려고 그만큼 긴 것인데, 어택은 5~20ms 짜리
+  // 사건이다. 그 창으로 잰 에너지에서는 상승이 평균에 묻혀, 150ms 간격 반복 타현이
+  // 신호에 뚜렷이 있어도(20ms 창 에너지비 중앙값 1.66) flux 에 봉우리가 서지 않는다.
+  const onN = Math.max(32, Math.round(sr * opts.onsetWinMs / 1000));
+  const onsetRms = new Float64Array(frames);
   let lastPct = -1;
   for (let f = 0; f < frames; f++) {
     const { hz, conf, rms } = yinFrame(sig, f * hop, N, sr, minLag, maxLag, opts.rmsGate, scratch, opts.fmin, opts.octRatio);
@@ -571,6 +586,12 @@ export function transcribe(mono, sampleRate, options, onProgress) {
       for (let i = 0, o = f * hop; i < N; i++) { const a = lp[o + i], b = sig[o + i]; lo += a * a; all += b * b; }
       lows[f] = all > 1e-12 ? Math.sqrt(lo / all) : 0;
     }
+    { // 온셋용 짧은 창 에너지 — 프레임 시작부터 onN 샘플
+      let e = 0;
+      const o = f * hop, end = Math.min(sig.length, o + onN);
+      for (let i = o; i < end; i++) e += sig[i] * sig[i];
+      onsetRms[f] = Math.sqrt(e / Math.max(1, end - o));
+    }
     if (onProgress) {
       const pct = Math.floor((f / frames) * 100);
       if (pct !== lastPct) { lastPct = pct; onProgress(pct); }
@@ -579,7 +600,7 @@ export function transcribe(mono, sampleRate, options, onProgress) {
 
   const smooth = medianSmooth(rawMidi, 5);
   const hopSec = hop / sr;
-  const onsets = detectOnsets(rmss, hopSec, opts);
+  const onsets = detectOnsets(opts.onsetWinMs > 0 ? onsetRms : rmss, hopSec, opts, rmss);
   let notes = dropGhosts(segment(smooth, confs, hopSec, opts, onsets, rmss, lows), opts);
   // 테크닉은 프레임 시각 그대로일 때 판별한다 — 격자에 붙이고 나면 사이의 경로가 흐려진다
   if (opts.techniques) notes = detectTechniques(notes, { midis: smooth, onsets, rmss, hopSec }, opts);
