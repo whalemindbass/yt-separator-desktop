@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('yssApi', {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
   },
 
+  // 지난 실행이 비정상 종료했는지 — 읽으면 지워진다
+  takeLastCrash: () => ipcRenderer.invoke('crash:take'),
+
   // 외부
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath:     (p)   => ipcRenderer.invoke('shell:openPath', p),

@@ -122,4 +122,35 @@ export function initReport() {
     v.textContent = JSON.stringify(await diagnostics(), null, 2);
     v.hidden = false;
   });
+
+  checkLastCrash();
+}
+
+/**
+ * 지난 실행이 비정상 종료했으면 알린다.
+ *
+ * 전에는 예외가 콘솔로만 가서 아무 데도 남지 않았다. 사용자는 앱이 사라진 것만 알고
+ * 나는 아무것도 모른다. 이제 마지막 한 건이 남고, 그것을 여기서 꺼내 보여 준다.
+ * 내용은 제보 본문에 미리 채운다 — 숨겨 보내는 진단 정보가 아니라 사용자가 읽고 보내는 글이다.
+ */
+async function checkLastCrash() {
+  let rec = null;
+  try { rec = await api.takeLastCrash?.(); } catch {}
+  if (!rec) return;
+
+  const at = new Date(rec.at || Date.now());
+  const p = (n) => String(n).padStart(2, '0');
+  const when = `${at.getFullYear()}.${p(at.getMonth() + 1)}.${p(at.getDate())} ${p(at.getHours())}:${p(at.getMinutes())}`;
+
+  noteError('lastrun', `[${rec.kind}] ${rec.message || ''}`);   // 진단 정보에도 실리게
+
+  open();
+  $('report-intent').value = `지난 실행이 예기치 않게 종료됨 (${when})`;
+  $('report-body').value =
+    '앱이 갑자기 종료됐습니다. 무엇을 하던 중이었는지 적어 주시면 큰 도움이 됩니다.\n\n' +
+    '── 자동으로 채워진 정보 ──\n' +
+    `종류: ${rec.kind} · 버전: ${rec.version || '-'}\n` +
+    `${rec.message || ''}\n${rec.stack || ''}`.trim();
+  $('report-body').focus();
+  $('report-body').setSelectionRange(0, 0);
 }

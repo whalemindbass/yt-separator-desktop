@@ -8,9 +8,12 @@ const { Readable } = require('stream');
 const path = require('path');
 const fs = require('fs');
 
-// 예상 못한 예외로 프로세스가 조용히 죽는 것 방지 — 로그만 남기고 유지
-process.on('uncaughtException', (e) => { try { console.error('[uncaught]', e && e.stack || e); } catch {} });
-process.on('unhandledRejection', (e) => { try { console.error('[unhandledRejection]', e); } catch {} });
+// 예상 못한 예외로 프로세스가 조용히 죽는 것 방지 — 기록을 남기고 유지.
+//
+// 콘솔로만 보내면 사용자 화면에도 파일에도 남지 않아 사실상 사라진다. 그렇다고 로그를
+// 쌓아 두지는 않는다 — 마지막 한 건만 덮어쓰고, 다음 실행 때 보여 준 뒤 지운다.
+process.on('uncaughtException',  (e) => { try { console.error('[uncaught]', e && e.stack || e); } catch {} noteCrash('main', e); });
+process.on('unhandledRejection', (e) => { try { console.error('[unhandledRejection]', e); } catch {} noteCrash('promise', e); });
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
@@ -124,6 +127,10 @@ function createMainWindow() {
       webSecurity: true,
       webviewTag: true,            // 커뮤니티 임베드용
     },
+  });
+  // 화면이 통째로 죽는 경우 — 자바스크립트 예외로는 잡히지 않는다
+  mainWindow.webContents.on('render-process-gone', (_e, d) => {
+    noteCrash('renderer', null, { message: `화면 프로세스 종료: ${d.reason}`, reason: d.reason, exitCode: d.exitCode });
   });
   mainWindow.on('maximize',   () => mainWindow.webContents.send('window:state', { maximized: true }));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:state', { maximized: false }));
@@ -604,6 +611,34 @@ app.on('window-all-closed', () => {
 const { AudioEngine } = require('./engine-client');
 let audioEngine = null;
 let lastRecordFile = null;   // 마지막으로 녹음을 걸어 둔 파일 — 엔진이 죽었을 때 되살릴 대상
+
+// ── 마지막 크래시 한 건 ────────────────────────────────────
+// 로그를 쌓지 않는다는 원칙은 그대로다. 파일 하나를 덮어쓰고, 다음 실행 때 보여 준 뒤 지운다.
+function crashPath() { return path.join(app.getPath('userData'), 'lastcrash.json'); }
+
+function noteCrash(kind, err, extra) {
+  try {
+    fs.writeFileSync(crashPath(), JSON.stringify({
+      at: Date.now(),
+      kind,
+      version: app.getVersion(),
+      message: String((err && err.message) || err || '').slice(0, 400),
+      // 스택은 위쪽 몇 줄이면 어디서 났는지 알기 충분하다. 경로에 사용자 이름이 섞이므로 길게 담지 않는다.
+      stack: String((err && err.stack) || '').split('\n').slice(1, 7).map(s => s.trim()).join('\n').slice(0, 900),
+      ...(extra || {}),
+    }), 'utf8');
+  } catch { /* 크래시를 적다가 또 죽지는 않게 */ }
+}
+
+// 읽으면 지운다 — 같은 크래시를 두 번 묻지 않는다
+ipcMain.handle('crash:take', () => {
+  try {
+    if (!fs.existsSync(crashPath())) return null;
+    const rec = JSON.parse(fs.readFileSync(crashPath(), 'utf8'));
+    fs.unlinkSync(crashPath());
+    return rec;
+  } catch { return null; }
+});
 
 /**
  * 쓰다 만 WAV 의 길이 필드를 실제 파일 크기로 고친다.
