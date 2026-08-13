@@ -153,6 +153,17 @@ try {
       + `   기준 대비 +${gained}음 / 잉여 +${added}  (1음당 ${cost})`);
   }
 
+  // 국소 적응 임계값 — 고정 여유값 하나가 깨끗한 신호와 분리 스템을 함께 감당하지 못한다.
+  // 그 자리의 flux 변동폭(MAD)에 맞춰 여유를 정하면 둘 다 될 수 있는지 본다.
+  say('');
+  say('# 국소 적응 임계값 (median + k·MAD)');
+  for (const k of [1.5, 2.0, 2.5, 3.0, 4.0]) {
+    const s = score(gt, transcribe(mono, sr, { tuning: '4', onsetAdaptive: true, onsetK: k }).notes);
+    say(`#   k ${k.toFixed(1)}  일치 ${String(s.hit).padStart(3)} (${String(s.pct).padStart(2)}%)`
+      + ` · 음정오류 ${String(s.pitchWrong).padStart(2)} · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(3)}`
+      + `   기준 대비 +${s.hit - base.hit}음 / 잉여 ${s.extra - base.extra >= 0 ? '+' : ''}${s.extra - base.extra}`);
+  }
+
   const bp = await runBasicPitch(mono, sr, new URL('./', location.href).href);
   fmt('[basic-pitch]', bp);
 } catch (e) { say('ERROR: ' + (e && (e.stack || e.message) || e)); }

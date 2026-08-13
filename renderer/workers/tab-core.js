@@ -22,7 +22,13 @@ export const DEFAULTS = {
   gapMs: 45,       // 같은 음이 이 간격 안에서 끊기면 하나로 잇는다
   rmsGate: 0.0016, // 튜너 실측에서 약하게 튕긴 음이 rms 0.0017 근처였다
   octRatio: 0.55,       // 한 옥타브 아래 성분이 이 비율보다 크면 그쪽이 진짜 기본파
-  onsetThresh: 0.08,    // 로그 에너지 상승분이 국소 평균보다 이만큼 크면 어택
+  onsetThresh: 0.08,    // 로그 에너지 상승분이 국소 평균보다 이만큼 크면 어택 (고정 방식)
+  // 고정 여유값 하나가 두 가지 신호를 함께 감당하지 못한다. 깨끗한 신호에서 0.08 은
+  // 반복 타현을 통째로 버리고, 분리 스템에서 그보다 낮추면 아티팩트가 쏟아진다
+  // (lab/tab/README.md 의 스윕). 그래서 그 자리의 flux 변동폭에 맞춰 여유를 정한다.
+  onsetAdaptive: false, // 켜면 아래 두 값을 쓰고 onsetThresh 는 무시한다
+  onsetK: 2.5,          // 국소 MAD 의 몇 배를 여유로 둘 것인가
+  onsetFloor: 0.012,    // 무음 구간에서 MAD 가 0 이 되면 아무거나 잡히므로 바닥을 둔다
   minOnsetGapMs: 90,    // 어택 사이 최소 간격 (16분음표 @ 160BPM ≈ 94ms)
   // 손을 떼는 소리·앞 음의 잔향은 "주변보다 훨씬 작고 짧다".
   // 절대 세기로는 못 거른다 — 곡의 구간마다 음량이 다르기 때문.
@@ -169,13 +175,32 @@ function detectOnsets(rmsArr, hopSec, opts) {
   // 국소 평균 대비 튀는 지점만 남긴다 — 곡 전체 음량에 좌우되지 않는다
   const win = Math.max(3, Math.round(0.12 / hopSec));
   const minGap = Math.max(1, Math.round(opts.minOnsetGapMs / 1000 / hopSec));
+  const buf = [];
   let last = -minGap;
   for (let i = 1; i < n; i++) {
-    let sum = 0, cnt = 0;
-    for (let j = i - win; j <= i + win; j++) { if (j < 1 || j >= n) continue; sum += flux[j]; cnt++; }
-    const mean = cnt ? sum / cnt : 0;
+    const lo = Math.max(1, i - win), hi = Math.min(n - 1, i + win);
+
+    let bar;
+    if (opts.onsetAdaptive) {
+      // 빼야 할 것은 "이 근처에서 flux 가 평소 얼마나 흔들리는가" 다.
+      // 고정 여유값 하나는 조용한 구간에서 너무 크고(음을 버린다) 지저분한 구간에서 너무 작다
+      // (아티팩트를 줍는다). 분리 스템은 구간마다 잡음 바닥이 달라 그 차이가 크게 벌어진다.
+      // 중앙값과 MAD 는 온셋 봉우리 자체에 끌려가지 않아 이 자리에 맞다.
+      buf.length = 0;
+      for (let j = lo; j <= hi; j++) buf.push(flux[j]);
+      buf.sort((a, b) => a - b);
+      const med = buf[buf.length >> 1];
+      for (let k = 0; k < buf.length; k++) buf[k] = Math.abs(buf[k] - med);
+      buf.sort((a, b) => a - b);
+      bar = Math.max(opts.onsetFloor, med + opts.onsetK * buf[buf.length >> 1]);
+    } else {
+      let sum = 0, cnt = 0;
+      for (let j = lo; j <= hi; j++) { sum += flux[j]; cnt++; }
+      bar = (cnt ? sum / cnt : 0) + opts.onsetThresh;
+    }
+
     const isPeak = flux[i] > flux[i - 1] && flux[i] >= (flux[i + 1] || 0);
-    if (isPeak && flux[i] > mean + opts.onsetThresh && rmsArr[i] > opts.rmsGate && i - last >= minGap) {
+    if (isPeak && flux[i] > bar && rmsArr[i] > opts.rmsGate && i - last >= minGap) {
       onset[i] = 1; last = i;
     }
   }
