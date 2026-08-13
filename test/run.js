@@ -30,9 +30,17 @@ if (!files.length) { console.error('돌릴 테스트가 없다'); process.exit(1
 const electron = path.join(ROOT, 'node_modules', 'electron', 'cli.js');
 const results = [];
 
+// 앞선 스위트가 엔진을 남기면 그 프로세스가 오디오 장치를 물고 있어
+// 다음 스위트의 재생이 조용히 어긋난다. 실패가 코드 탓처럼 보이므로 미리 치운다.
+function killStrayEngine() {
+  if (process.platform !== 'win32') return;
+  try { spawnSync('taskkill', ['/IM', 'yss-engine.exe', '/F'], { stdio: 'ignore' }); } catch {}
+}
+
 for (const f of files) {
   const label = f.replace(/\.test\.js$/, '');
   console.log(`\n${'─'.repeat(58)}\n${label}\n${'─'.repeat(58)}`);
+  killStrayEngine();
   const target = path.join(DIR, f);
   const r = NODE_ONLY.has(f)
     ? spawnSync(process.execPath, [target], { stdio: 'inherit', cwd: ROOT })

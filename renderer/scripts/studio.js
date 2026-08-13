@@ -2122,11 +2122,23 @@ async function openProject() {
   if (_openingProject) return;
   const r = await api.project.open();
   if (!r || !r.ok) { if (r && r.error) flashTake(tr('studio.m.openFail') + r.error); return; }
-  let p; try { p = JSON.parse(r.data); } catch { flashTake(tr('studio.m.projectParseFail')); return; }
-  if (p.kind !== 'yssproj') { flashTake(tr('studio.m.notProjectFile')); return; }
+  await loadProjectData(r.path, r.data);
+}
+
+/** 이미 읽어 둔 내용으로 연다 — 파일 선택창으로 고른 경우와 더블클릭으로 들어온 경우가 같이 쓴다 */
+export async function loadProjectData(filePath, raw) {
+  if (_openingProject) return false;
+  let p;
+  try { p = JSON.parse(raw); } catch { flashTake(tr('studio.m.projectParseFail')); return false; }
+  if (p.kind !== 'yssproj') { flashTake(tr('studio.m.notProjectFile')); return false; }
   _openingProject = true;
-  try { _songName = baseName(r.path); await applyProject(p); _projectPath = r.path; markClean(); }
-  finally { _openingProject = false; }
+  try {
+    _songName = baseName(filePath);
+    await applyProject(p);
+    _projectPath = filePath;
+    markClean();
+    return true;
+  } finally { _openingProject = false; }
 }
 async function applyProject(p) {
   const sr = deviceSr();

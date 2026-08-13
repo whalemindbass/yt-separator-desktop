@@ -52,8 +52,14 @@ class AudioEngine extends EventEmitter {
       if (msg && msg.ev) { this.emit('event', msg); this.emit(msg.ev, msg); }
     });
     this.proc.stderr.on('data', (d) => this.emit('log', String(d)));
+    // 부모가 사라져도 엔진은 살아남는다. 그러면 ASIO 장치를 계속 물고 있어
+    // 다시 켠 앱도, 사용자의 다른 DAW 도 소리를 못 낸다. 나갈 때 같이 데려간다.
+    this._killOnExit = () => { try { this.proc?.kill(); } catch {} };
+    process.once('exit', this._killOnExit);
+
     this.proc.on('exit', (code) => {
       try { this.rl?.close(); } catch {}
+      try { process.removeListener('exit', this._killOnExit); } catch {}
       this.rl = null; this.proc = null;
       const crashed = !this.expectExit;
       this.expectExit = false;

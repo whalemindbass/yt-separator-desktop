@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     // 닫기 전 저장 요청 → 끝나면 결과를 돌려준다
     onSaveRequest: (fn) => ipcRenderer.on('project:save-request', () => fn()),
     saveResult:    (ok) => ipcRenderer.send('project:save-result', !!ok),
+    // .yssproj 를 더블클릭해 들어온 경우
+    onOpenFile:    (fn) => ipcRenderer.on('project:open-file', (_e, p) => fn(p)),
   },
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),

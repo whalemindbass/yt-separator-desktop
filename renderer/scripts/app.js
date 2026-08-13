@@ -7,7 +7,7 @@
 import { separatePipeline, probeProviders, setProviderPreference, getUsedProvider, cancelSeparation } from './separator.js';
 import { Library } from './library.js';
 import { initCommunity } from './community.js';
-import { initStudio } from './studio.js';
+import { initStudio, loadProjectData } from './studio.js';
 import { initHome } from './home.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
 import { initReport, noteError } from './report.js';
@@ -92,6 +92,14 @@ $('brand-home').addEventListener('click', () => switchView('home'));
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 
 initReport();   // 오류 제보 (상단바 · 설정)
+
+// .yssproj 를 더블클릭해 들어온 경우 — 스튜디오로 옮기고 그대로 연다.
+// 파일을 눌렀는데 홈 화면이 뜨면 무엇이 열린 것인지 알 수 없다.
+api.project?.onOpenFile?.(async ({ path, data }) => {
+  switchView('studio');
+  await initStudio();
+  await loadProjectData(path, data);
+});
 
 // ── 초기 뷰: 라이브러리에 항목이 있으면 라이브러리로, 없으면 새 분리 ──
 (async () => {

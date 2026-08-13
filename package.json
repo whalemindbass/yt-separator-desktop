@@ -107,6 +107,15 @@
         "repo": "yt-separator-releases",
         "releaseType": "release"
       }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "yssproj",
+        "name": "Dr.studio Project",
+        "description": "Dr.studio 프로젝트",
+        "icon": "build/yssproj.ico",
+        "role": "Editor"
+      }
     ]
   },
   "dependencies": {

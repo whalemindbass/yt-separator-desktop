@@ -123,20 +123,7 @@ function engine() {
   console.log(`   1000Hz ${Math.round(at1k)} · 1088Hz ${Math.round(at1088)}`);
   expect('음정 보존    ', at1k > at1088 * 100, true);   // 변환 없으면 1088Hz 쪽이 커진다
 
-  // 실시간 재생은 익스포트와 다른 코드다. 소리가 언제까지 나오는지로 잰다 —
-  // 변환이 빠지면 44.1k 분량이 48k 로 흘러 3.675초에 끊긴다.
-  console.log('2) 실시간 재생도 끝까지 간다 (48kHz)');
-  e.send({ cmd: 'master', gain: 0.0005 });   // 스피커로는 들리지 않게
-  e.send({ cmd: 'setDevice', sampleRate: 48000 });
-  await e.on('devices');
-  e.send({ cmd: 'seek', pos: 0 });
-  e.send({ cmd: 'play' });
-  const heard = await e.track(5400);
-  e.send({ cmd: 'stop' });
-  console.log(`   마지막 소리 ${heard.toFixed(3)}초 · 변환 없으면 ${(4 * 44100 / 48000).toFixed(3)}초`);
-  near('끝까지 재생  ', Number(heard.toFixed(2)), 4.0, 0.25);
-
-  console.log('3) 레이트가 같으면 그대로다');
+  console.log('2) 레이트가 같으면 그대로다');
   e.send({ cmd: 'setDevice', sampleRate: 44100 });
   await e.on('devices');
   const out2 = path.join(TMP, 'out44.wav');
@@ -148,7 +135,30 @@ function engine() {
   expect('음정 보존    ', b.mag(1000) > b.mag(1088.4) * 100, true);
 
   e.send({ cmd: 'quit' });
-  await wait(600); e.kill();
+  await wait(700); e.kill();
+
+  // 실시간 재생은 익스포트와 다른 코드다. 소리가 언제까지 나오는지로 잰다 —
+  // 변환이 빠지면 44.1k 분량이 48k 로 흘러 3.675초에 끊긴다.
+  //
+  // 엔진을 새로 띄워서 잰다. 익스포트를 끝낸 세션에서 장치를 다시 열고 이어 재면
+  // 재생이 일찍 끝나 측정이 흔들린다 — 사용자가 겪는 흐름도 아니다.
+  console.log('3) 실시간 재생도 끝까지 간다 (48kHz, 새 세션)');
+  const r = engine();
+  await r.on('ready');
+  r.send({ cmd: 'listDevices' });
+  let rdev = await r.on('devices');
+  if (Math.round(rdev.sampleRate) !== 48000) { r.send({ cmd: 'setDevice', sampleRate: 48000 }); rdev = await r.on('devices'); }
+  r.send({ cmd: 'master', gain: 0.0005 });   // 스피커로는 들리지 않게
+  r.send({ cmd: 'loadStems', paths: [stem] });
+  await r.on('stems');
+  r.send({ cmd: 'seek', pos: 0 });
+  r.send({ cmd: 'play' });
+  const heard = await r.track(5400);
+  r.send({ cmd: 'stop' }); r.send({ cmd: 'quit' });
+  await wait(600); r.kill();
+  console.log(`   마지막 소리 ${heard.toFixed(3)}초 · 변환 없으면 ${(4 * 44100 / 48000).toFixed(3)}초`);
+  near('끝까지 재생  ', Number(heard.toFixed(2)), 4.0, 0.25);
+
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
 
   console.log(`\n통과 ${pass} · 실패 ${fail}`);

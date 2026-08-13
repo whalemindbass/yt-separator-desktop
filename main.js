@@ -23,6 +23,39 @@ const { spawn } = require('child_process');
 // 업데이트로 exe 가 교체될 때마다 고정이 끊긴다. 두 값은 반드시 같아야 한다.
 if (process.platform === 'win32') app.setAppUserModelId('com.whalemindbass.yt-separator');
 
+// ── .yssproj 더블클릭으로 열기 ──────────────────────────────
+// 파일 연결만 등록하고 여는 처리를 안 하면, 아이콘은 붙었는데 눌러도 아무 일이 없다.
+// 그건 연결이 없는 것보다 나쁘다.
+let pendingProject = null;   // 창이 준비되기 전에 들어온 것
+
+function projectFromArgv(argv) {
+  return (argv || []).find(a => typeof a === 'string' && a.toLowerCase().endsWith('.yssproj')) || null;
+}
+
+/** 창이 있으면 바로 보내고, 없으면 준비될 때까지 들고 있는다 */
+function deliverProject(file) {
+  if (!file) return;
+  try {
+    if (!fs.existsSync(file)) return;
+    const payload = { path: file, data: fs.readFileSync(file, 'utf8') };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.send('project:open-file', payload);
+    } else {
+      pendingProject = payload;
+    }
+  } catch { /* 못 읽으면 조용히 넘어간다 — 앱은 평소대로 뜬다 */ }
+}
+
+// 두 번째로 띄우면 새 창을 만들지 않고 원래 창에서 연다.
+// 없으면 프로젝트를 열 때마다 앱이 하나씩 더 뜬다.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => deliverProject(projectFromArgv(argv)));
+}
+
 // ── 네이티브 대화상자 문구 ──────────────────────────────────
 // 파일 선택창·저장창은 OS 가 그리므로 화면 쪽 번역이 닿지 않는다. 언어를 영어로 바꿔도
 // 여기가 한국어로 남아 있었다. 화면이 고른 언어를 알려 주면 그대로 따른다.
@@ -171,6 +204,16 @@ function createMainWindow() {
   mainWindow.once('ready-to-show', () => {
     if (mainWindow) mainWindow.show();
     if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
+  });
+  // 파일을 더블클릭해 실행한 경우 — 화면이 자리를 잡은 뒤에 건넨다
+  mainWindow.webContents.once('did-finish-load', () => {
+    const p = pendingProject || (() => {
+      const f = projectFromArgv(process.argv);
+      if (!f) return null;
+      try { return { path: f, data: fs.readFileSync(f, 'utf8') }; } catch { return null; }
+    })();
+    pendingProject = null;
+    if (p) setTimeout(() => mainWindow?.webContents.send('project:open-file', p), 400);
   });
   // F12 로 DevTools 토글 (패키지 빌드에서도 디버깅 가능)
   mainWindow.webContents.on('before-input-event', (event, input) => {
