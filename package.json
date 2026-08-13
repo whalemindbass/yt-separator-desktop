@@ -12,6 +12,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --inspect=9229",
+    "test": "node test/run.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win --publish never",
     "release": "node scripts/release.js",

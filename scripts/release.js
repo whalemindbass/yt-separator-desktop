@@ -10,6 +10,7 @@
  *   npm run release -- major        # 0.x.x → 1.0.0
  *   npm run release -- --no-bump    # 현재 버전 그대로 재빌드/재업로드
  *   npm run release -- --no-git     # 커밋/푸시 스킵 (dist 재발행만)
+ *   npm run release -- --skip-tests  # 테스트 건너뛰기 (권장하지 않음)
  *
  * 하는 일:
  *   1) 로컬 clean 확인 (변경사항 있으면 중단)
@@ -148,6 +149,17 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
     const st = shOut('git status --porcelain');
     if (st) die(`로컬에 커밋되지 않은 변경사항이 있어요:\n${st}\n먼저 커밋하거나 --no-git 옵션을 사용하세요.`);
     done('git working tree clean');
+  }
+
+  // 1-2) 테스트 — 깨진 것을 내보내지 않는다.
+  //      급할 때 빠져나갈 --skip-tests 는 두되, 의식해서 골라야 하는 길로 만든다.
+  if (!args.includes('--skip-tests')) {
+    log('테스트 실행...');
+    try { sh('npm test'); }
+    catch { die('테스트가 실패했습니다. 고치고 다시 하세요. (정말 무시하려면 --skip-tests)'); }
+    done('테스트 통과');
+  } else {
+    warn('테스트를 건너뜁니다 (--skip-tests)');
   }
 
   // 2) 버전 bump
