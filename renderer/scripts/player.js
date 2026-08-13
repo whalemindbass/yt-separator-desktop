@@ -37,11 +37,9 @@ export async function loadStemFilesToBuffers(stemPaths) {
     let sampleRate = ctx.sampleRate;
     for (const [name, p] of Object.entries(stemPaths)) {
       const url = toYtsepUrl(p);
-      console.log(`[loadStems] fetching ${name}: ${url}`);
       const res = await fetch(url);
       if (!res.ok) throw new Error(`fetch stem ${name} failed: ${res.status} (${p})`);
       const ab = await res.arrayBuffer();
-      console.log(`[loadStems] ${name} fetched, bytes=${ab.byteLength}`);
       let audioBuf;
       try {
         audioBuf = await ctx.decodeAudioData(ab);
@@ -49,7 +47,6 @@ export async function loadStemFilesToBuffers(stemPaths) {
         throw new Error(`decodeAudioData failed for ${name}: ${e.message}`);
       }
       sampleRate = audioBuf.sampleRate;
-      console.log(`[loadStems] ${name} decoded, ch=${audioBuf.numberOfChannels}, sr=${audioBuf.sampleRate}, samples=${audioBuf.length}`);
       const L = audioBuf.getChannelData(0);
       const R = audioBuf.numberOfChannels > 1 ? audioBuf.getChannelData(1) : audioBuf.getChannelData(0);
       out[name] = [new Float32Array(L), new Float32Array(R)];
@@ -116,7 +113,6 @@ export class Player {
       Player._cache.set(videoEl, { ctx: this.audioCtx, source: this.videoSource });
     }
     this._sampleRate = sampleRate;
-    console.log(`[Player] ctx state=${this.audioCtx.state} ctxSR=${this.audioCtx.sampleRate} bufSR=${sampleRate}`);
 
     // 그래프: masterGain → destination
     this.masterGain = this.audioCtx.createGain();
@@ -339,7 +335,6 @@ export class Player {
         // 이미 sync 상태 — 재시작 안 함 (audible glitch 방지)
         return;
       }
-      console.log(`[Player] resync (${reason}) drift=${drift.toFixed(3)}s`);
       this._stopAll();
     }
     this._startAll(v.currentTime);
@@ -389,7 +384,6 @@ export class Player {
           started++;
         } catch (e) { console.error('[Player] audio start failed', name, e); }
       }
-      console.log(`[Player] started ${started} audio elements @ ${offset.toFixed(3)}s rate=${rate}`);
       return;
     }
     // BufferSource 폴백
@@ -404,7 +398,6 @@ export class Player {
       catch (e) { console.error('[Player] source start failed', name, e); }
       this.sources[name] = src;
     }
-    console.log('[Player] started sources:', started, 'offset:', offset);
   }
 
   _stopAll() {
@@ -562,7 +555,6 @@ export class Player {
     const now = this.audioCtx.currentTime;
     src.start(now, 0);
     src.stop(now + 3);
-    console.log(`[Player] direct stem test scheduled, buf.duration=${buf.duration.toFixed(2)}s buf.sampleRate=${buf.sampleRate} ctx.sampleRate=${this.audioCtx.sampleRate}`);
   }
 
   /** 현재 stemsCurrent (pitched 반영) Float32 [L,R]로 반환 (내보내기용) */
@@ -596,9 +588,6 @@ export class Player {
     const now = this.audioCtx.currentTime;
     osc.start(now);
     osc.stop(now + 0.5);
-    console.log('[Player] beep scheduled, ctx.state=', this.audioCtx.state,
-                'masterGain=', this.masterGain.gain.value,
-                'destination.maxChannels=', this.audioCtx.destination.maxChannelCount);
   }
 
   getStatus() {

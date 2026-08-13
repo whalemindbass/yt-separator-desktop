@@ -104,7 +104,7 @@ async function loadModelWith(provider, modelKey) {
       const d = e.data;
       if (d.type === 'MODEL_OK')    { modelReady = true; usedProvider = d.ep || provider; done(resolve); }
       if (d.type === 'MODEL_ERROR') done(reject, new Error(d.error));
-      if (d.type === 'MODEL_DIAG')  { usedProvider = d.ep || provider; console.log('[stem] diag:', JSON.stringify(d)); }
+      if (d.type === 'MODEL_DIAG')  { usedProvider = d.ep || provider; }
     };
     worker.addEventListener('message', onMsg);
     worker.postMessage(
@@ -186,7 +186,6 @@ export async function separatePipeline(videoPath, baseName, onStep, opts = {}) {
   // ArrayBuffer → Float32Array
   const left  = new Float32Array(ex.left);
   const right = new Float32Array(ex.right);
-  console.log(`[sep] extract done: samples=${left.length} sr=${ex.sampleRate} L_${peakOf(left)} R_${peakOf(right)}`);
 
   onStep?.('separate', 0.15, '스템 분리 시작');
   let stems = await process(left, right, ex.totalSamples, (r) => {
@@ -198,7 +197,6 @@ export async function separatePipeline(videoPath, baseName, onStep, opts = {}) {
   for (const [n, arr] of Object.entries(stems)) {
     if (Array.isArray(arr) && arr[0] && arr[1]) {
       const info = peakOf(arr[0]);
-      console.log(`[sep] worker "${n}": L(len=${arr[0].length} ${info}) R(len=${arr[1].length} ${peakOf(arr[1])})`);
       if (info.includes('NaN')) nanFound = true;
     } else {
       console.warn(`[sep] worker "${n}": unexpected shape`, arr);
@@ -223,7 +221,6 @@ export async function separatePipeline(videoPath, baseName, onStep, opts = {}) {
       onStep?.('separate', 0.15 + r * 0.75, 'CPU 분리 중 (WebGPU 실패)');
     });
     for (const [n, arr] of Object.entries(stems)) {
-      console.log(`[sep] wasm-retry "${n}": L(len=${arr[0].length} ${peakOf(arr[0])})`);
     }
     // 이후 이 세션에서는 WASM 우선
     localStorage.setItem('executionProvider', 'wasm');
@@ -237,12 +234,10 @@ export async function separatePipeline(videoPath, baseName, onStep, opts = {}) {
     // 저장용 사본 (main IPC로 transfer됨)
     const Lc = new Float32Array(L);
     const Rc = new Float32Array(R);
-    console.log(`[sep] payload "${name}" copy: L(${peakOf(Lc)}) R(${peakOf(Rc)}) bufBytes=${Lc.buffer.byteLength}`);
     payload[name] = [Lc.buffer, Rc.buffer];
   }
   const save = await api.stem.saveStems(payload, baseName, ex.sampleRate || 44100);
   if (!save.ok) throw new Error(save.error);
-  if (save.dbg) save.dbg.forEach(line => console.log('[main:save]', line));
 
   onStep?.('done', 1, '완료');
   return {
