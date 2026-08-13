@@ -23,6 +23,38 @@ const { spawn } = require('child_process');
 // 업데이트로 exe 가 교체될 때마다 고정이 끊긴다. 두 값은 반드시 같아야 한다.
 if (process.platform === 'win32') app.setAppUserModelId('com.whalemindbass.yt-separator');
 
+// ── 네이티브 대화상자 문구 ──────────────────────────────────
+// 파일 선택창·저장창은 OS 가 그리므로 화면 쪽 번역이 닿지 않는다. 언어를 영어로 바꿔도
+// 여기가 한국어로 남아 있었다. 화면이 고른 언어를 알려 주면 그대로 따른다.
+let uiLocale = 'ko';
+ipcMain.on('app:locale', (_e, loc) => { if (loc === 'ko' || loc === 'en') uiLocale = loc; });
+
+const DIALOG_TEXT = {
+  ko: {
+    saveClose: '저장하고 닫기', discardClose: '저장하지 않고 닫기', cancel: '취소',
+    unsavedTitle: '저장하지 않은 작업이 있습니다',
+    unsavedDetail: '지금 닫으면 마지막 저장 이후의 변경을 잃습니다.',
+    pickVideoDir: '영상 다운로드 폴더 선택', pickStemDir: '스템 저장 폴더 선택',
+    pickSaveTo: '저장 위치 선택', pickFolder: '폴더 선택',
+    projectSave: '프로젝트 저장', projectOpen: '프로젝트 열기',
+    pickMedia: '분리할 영상/오디오 파일 선택',
+    importAudio: '오디오 파일 임포트', importVideo: '영상 파일 임포트',
+    fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fAll: '모든 파일', fProject: 'YSS 프로젝트',
+  },
+  en: {
+    saveClose: 'Save and close', discardClose: 'Close without saving', cancel: 'Cancel',
+    unsavedTitle: 'You have unsaved work',
+    unsavedDetail: 'Closing now loses everything changed since the last save.',
+    pickVideoDir: 'Choose the download folder', pickStemDir: 'Choose the stem folder',
+    pickSaveTo: 'Choose where to save', pickFolder: 'Choose a folder',
+    projectSave: 'Save project', projectOpen: 'Open project',
+    pickMedia: 'Choose a video or audio file to separate',
+    importAudio: 'Import audio file', importVideo: 'Import video file',
+    fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fAll: 'All files', fProject: 'YSS project',
+  },
+};
+const td = (k) => (DIALOG_TEXT[uiLocale] || DIALOG_TEXT.ko)[k] || k;
+
 function mimeFor(p) {
   const ext = path.extname(p).toLowerCase();
   return {
@@ -158,10 +190,10 @@ function createMainWindow() {
       if (!win) return;
       const { response } = await dialog.showMessageBox(win, {
         type: 'warning',
-        buttons: ['저장하고 닫기', '저장하지 않고 닫기', '취소'],
+        buttons: [td('saveClose'), td('discardClose'), td('cancel')],
         defaultId: 0, cancelId: 2, noLink: true,
-        message: '저장하지 않은 작업이 있습니다',
-        detail: '지금 닫으면 마지막 저장 이후의 변경을 잃습니다.',
+        message: td('unsavedTitle'),
+        detail: td('unsavedDetail'),
       });
       if (response === 2) return;                       // 취소 — 그대로 둔다
       if (response === 0 && !(await requestRendererSave())) return;   // 저장 취소·실패 시에도 닫지 않는다
@@ -380,7 +412,7 @@ ipcMain.handle('settings:set', (_ev, obj) => {
 });
 ipcMain.handle('settings:pickDownloadsDir', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '영상 다운로드 폴더 선택',
+    title: td('pickVideoDir'),
     properties: ['openDirectory', 'createDirectory'],
     defaultPath: downloadsDir(),
   });
@@ -393,7 +425,7 @@ ipcMain.handle('settings:pickDownloadsDir', async () => {
 ipcMain.handle('settings:downloadsDir', () => downloadsDir());
 ipcMain.handle('settings:pickStemsDir', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '스템 저장 폴더 선택',
+    title: td('pickStemDir'),
     properties: ['openDirectory', 'createDirectory'],
     defaultPath: stemsDir(),
   });
@@ -449,7 +481,7 @@ ipcMain.handle('settings:openUserData', async () => {
 ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
   const filters = [{ name: 'WAV', extensions: exts || ['wav'] }];
   const res = await dialog.showSaveDialog(mainWindow || null, {
-    title: '저장 위치 선택',
+    title: td('pickSaveTo'),
     defaultPath: defaultName || 'export.wav',
     filters,
   });
@@ -462,9 +494,9 @@ ipcMain.handle('project:save', async (_ev, json, name, existingPath) => {
   let target = existingPath;
   if (!target) {   // 경로 없으면 새로 저장(다이얼로그)
     const res = await dialog.showSaveDialog(mainWindow || null, {
-      title: '프로젝트 저장',
+      title: td('projectSave'),
       defaultPath: (name || '프로젝트') + '.yssproj',
-      filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
+      filters: [{ name: td('fProject'), extensions: ['yssproj'] }],
     });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     target = res.filePath;
@@ -508,9 +540,9 @@ ipcMain.on('project:dirty', (_ev, v) => { unsavedWork = !!v; });
 
 ipcMain.handle('project:open', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '프로젝트 열기',
+    title: td('projectOpen'),
     properties: ['openFile'],
-    filters: [{ name: 'YSS Project', extensions: ['yssproj'] }],
+    filters: [{ name: td('fProject'), extensions: ['yssproj'] }],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
@@ -559,11 +591,11 @@ ipcMain.handle('fs:writeBuffer', async (_ev, p, data) => {
 
 ipcMain.handle('dialog:pickMedia', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '분리할 영상/오디오 파일 선택',
+    title: td('pickMedia'),
     properties: ['openFile'],
     filters: [
-      { name: '영상/오디오', extensions: ['mp4','mkv','webm','mov','avi','m4a','mp3','wav','flac','aac','ogg'] },
-      { name: '모든 파일', extensions: ['*'] },
+      { name: td('fMedia'), extensions: ['mp4','mkv','webm','mov','avi','m4a','mp3','wav','flac','aac','ogg'] },
+      { name: td('fAll'), extensions: ['*'] },
     ],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
@@ -572,11 +604,11 @@ ipcMain.handle('dialog:pickMedia', async () => {
 // 스튜디오: 오디오 파일 여러 개 임포트 (트랙 클립)
 ipcMain.handle('dialog:pickAudioFiles', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '오디오 파일 임포트',
+    title: td('importAudio'),
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: '오디오', extensions: ['wav','mp3','flac','ogg','aif','aiff','m4a','aac'] },
-      { name: '모든 파일', extensions: ['*'] },
+      { name: td('fAudio'), extensions: ['wav','mp3','flac','ogg','aif','aiff','m4a','aac'] },
+      { name: td('fAll'), extensions: ['*'] },
     ],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
@@ -585,11 +617,11 @@ ipcMain.handle('dialog:pickAudioFiles', async () => {
 // 스튜디오: 비디오 파일 임포트
 ipcMain.handle('dialog:pickVideoFile', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: '영상 파일 임포트',
+    title: td('importVideo'),
     properties: ['openFile'],
     filters: [
-      { name: '영상', extensions: ['mp4','mkv','webm','mov','avi','m4v'] },
-      { name: '모든 파일', extensions: ['*'] },
+      { name: td('fVideo'), extensions: ['mp4','mkv','webm','mov','avi','m4v'] },
+      { name: td('fAll'), extensions: ['*'] },
     ],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };

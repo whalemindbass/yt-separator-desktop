@@ -47,7 +47,17 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   expect('물어봤다     ', asked.length >= 1, true);
   expect('문구         ', asked[asked.length - 1], '저장하지 않은 작업이 있습니다');
 
-  section('4) "저장하지 않고 닫기" — 닫히고 복구본도 지운다');
+  section('4) 언어를 영어로 두면 대화상자도 영어로 뜬다');
+  await js('window.yssApi.setLocale("en"); true');
+  await wait(200);
+  answer = 2;
+  win.close();
+  await wait(800);
+  expect('영어 문구    ', asked[asked.length - 1], 'You have unsaved work');
+  await js('window.yssApi.setLocale("ko"); true');
+  await wait(200);
+
+  section('5) "저장하지 않고 닫기" — 닫히고 복구본도 지운다');
   // 창이 닫히면 앱이 곧 종료되므로 검사도 그 순간에 한다
   win.on('closed', () => {
     expect('스냅샷 삭제  ', fs.existsSync(AUTO), false);

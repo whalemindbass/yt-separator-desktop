@@ -58,6 +58,7 @@ const DEFAULT_STUBS = {
   'project:autosaveRead':  () => ({ ok: false }),
   'project:autosaveWrite': () => ({ ok: true }),
   'project:autosaveClear': () => ({ ok: true }),
+  'crash:take': () => null,
 };
 
 async function bootRenderer(opts = {}) {

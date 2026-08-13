@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('yssApi', {
   // 지난 실행이 비정상 종료했는지 — 읽으면 지워진다
   takeLastCrash: () => ipcRenderer.invoke('crash:take'),
 
+  // OS 가 그리는 파일 선택창·경고창도 같은 언어로 뜨게 한다
+  setLocale: (loc) => ipcRenderer.send('app:locale', loc),
+
   // 외부
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath:     (p)   => ipcRenderer.invoke('shell:openPath', p),

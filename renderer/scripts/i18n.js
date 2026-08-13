@@ -1207,6 +1207,9 @@ let _current = (() => {
 
 const _listeners = new Set();
 
+// 시작할 때 한 번 — 바꿀 때만 보내면 처음 언어가 main 에 닿지 않는다
+try { window.yssApi?.setLocale?.(_current); } catch {}
+
 export function getLocale() { return _current; }
 export function supportedLocales() { return SUPPORTED.slice(); }
 
@@ -1223,6 +1226,8 @@ export function setLocale(loc) {
   if (!SUPPORTED.includes(loc)) return;
   _current = loc;
   try { localStorage.setItem(LS_KEY, loc); } catch {}
+  // 파일 선택창 같은 OS 대화상자는 main 이 띄운다 — 거기까지 언어가 닿게 알려 준다
+  try { window.yssApi?.setLocale?.(loc); } catch {}
   document.documentElement.setAttribute('lang', loc);
   applyI18n(document);
   for (const fn of _listeners) { try { fn(loc); } catch {} }
