@@ -49,9 +49,10 @@ const stem = (kind) => {
   return fs.existsSync(f) ? f : null;
 };
 
-// score 는 <bass>|<정답지>, 나머지는 <bass>|<drums>|<other>|<vocals>
+// score 는 <bass>|<정답지>|<drums>|<other>|<vocals> — 뒤 셋은 격자 정렬까지 재기 위한 것이라 없어도 된다.
+// 나머지 도구는 <bass>|<drums>|<other>|<vocals>.
 const parts = want === 'score'
-  ? [bass, gt]
+  ? [bass, gt, stem('drums'), stem('other'), stem('vocals')].filter(Boolean)
   : [bass, stem('drums'), stem('other'), stem('vocals')].filter(Boolean);
 
 console.log(`도구 ${want} · 입력 ${parts.length}개`);

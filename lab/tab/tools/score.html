@@ -1,14 +1,17 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>YIN vs basic-pitch 정답지 채점</title>
-<!-- renderer/ 에 복사해서 연다:  ?q=<wav URL>|<정답지 TXT URL> -->
+<title>정답지 채점</title>
+<!-- npm run lab -- score  로 연다
+     ?q=<베이스>|<정답지>|<드럼>|<기타>|<보컬>
+     드럼부터는 없어도 된다 — 있으면 박자 격자에 붙인 결과도 같이 잰다. -->
 <body><pre id="out">running…</pre>
 <script type="module">
 import { transcribe } from './workers/tab-core.js';
 import { runBasicPitch } from './workers/bp-run.js';
+import { detectBeats } from './scripts/beat-detect.js';
 
 const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
-const [WAV, GT] = Q;
+const [WAV, GT, DRUMS, OTHER, VOCALS] = Q;
 const lines = [];
 const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
 
@@ -73,16 +76,43 @@ try {
   for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
   const sr = audio.sampleRate;
 
-  const yin = transcribe(mono, sr, { tuning: '4' }).notes;
-  const bp = await runBasicPitch(mono, sr, new URL('./', location.href).href);
-
   const fmt = (label, det) => {
     const s = score(gt, det);
-    say(`${label} 검출 ${det.length}개 · 정답 일치 ${s.hit} (${s.pct}%) · 음정 오류 ${s.pitchWrong} · 놓침 ${s.miss} · 잉여 ${s.extra}`);
+    say(`${label.padEnd(16)} 검출 ${String(det.length).padStart(3)} · 일치 ${String(s.hit).padStart(3)} (${s.pct}%)`
+      + ` · 음정오류 ${String(s.pitchWrong).padStart(2)} · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(2)}`
+      + ` · 옥타브무시 ${score(gt, det, 0.25, true).pct}%`);
+    return s;
   };
+
+  const yin = transcribe(mono, sr, { tuning: '4' }).notes;
   fmt('[YIN]', yin);
+
+  // 박자를 줄 수 있으면 격자에 붙인 결과도 같이 잰다.
+  // 문서에 남은 87%/잉여 0 이 이 구성에서 나온 것인지 여기서 갈린다.
+  if (DRUMS) {
+    const load = async (u) => {
+      const a = await new AudioContext().decodeAudioData(await (await fetch(u)).arrayBuffer());
+      const L = a.getChannelData(0);
+      return { L, R: a.numberOfChannels > 1 ? a.getChannelData(1) : L };
+    };
+    const dr = await load(DRUMS);
+    let mix = null;
+    if (OTHER && VOCALS) {   // 드럼만으로 템포가 안 잡히는 곡이 있다 — 합친 믹스를 폴백으로
+      const parts = [{ L, R }, dr, await load(OTHER), await load(VOCALS)];
+      const n = Math.min(...parts.map(p => p.L.length));
+      const mL = new Float32Array(n), mR = new Float32Array(n);
+      for (const p of parts) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
+      mix = [mL, mR];
+    }
+    const bt = await detectBeats(dr.L, dr.R, sr, mix);
+    say(`# 박 ${bt.beats.length}개 · BPM ${bt.tempo ? bt.tempo.toFixed(1) : '?'}`);
+    fmt('[YIN+격자]', transcribe(mono, sr, { tuning: '4', beats: bt.beats }).notes);
+  } else {
+    say('# 드럼 스템이 없어 격자 정렬은 재지 않았다');
+  }
+
+  const bp = await runBasicPitch(mono, sr, new URL('./', location.href).href);
   fmt('[basic-pitch]', bp);
-  say(`옥타브 무시 정답률 — YIN ${score(gt, yin, 0.25, true).pct}% · basic-pitch ${score(gt, bp, 0.25, true).pct}%`);
 } catch (e) { say('ERROR: ' + (e && (e.stack || e.message) || e)); }
 console.log('###RESULT###\n' + lines.join('\n'));
 </script>
