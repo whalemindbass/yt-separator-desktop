@@ -1,0 +1,297 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>온셋 표기</title>
+<!-- npm run lab -- annotate
+     검출기 결과를 절대 보여주지 않는다. 보고 나면 확인하는 작업이 되고,
+     그러면 또 검출기에서 파생된 정답지가 된다 — 지금 막혀 있는 이유가 그것이다. -->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0e1416; color: #e6efec;
+         font: 13px/1.5 "Pretendard Variable", Pretendard, "Segoe UI", "Malgun Gothic", sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 14px;
+           background: #141d20; border-bottom: 1px solid #23302f; flex-wrap: wrap; }
+  button { font: inherit; padding: 6px 11px; border-radius: 7px; cursor: pointer;
+           background: #1d282a; border: 1px solid #2c3a38; color: #e6efec; }
+  button:hover { background: #24312f; }
+  button.pri { background: #2f9e6f; border-color: #2f9e6f; color: #06231a; font-weight: 700; }
+  .stat { font: 600 12px/1 ui-monospace, Consolas, monospace; color: #8fa39d; }
+  .stat b { color: #3ddc97; font-size: 14px; }
+  canvas { display: block; width: 100%; cursor: crosshair; }
+  #wrap { padding: 10px 14px; display: grid; gap: 8px; }
+  .hint { padding: 8px 14px; color: #7d918c; font-size: 12px; border-top: 1px solid #23302f; }
+  kbd { background: #1d282a; border: 1px solid #2c3a38; border-radius: 4px; padding: 1px 5px;
+        font: 600 11px ui-monospace, Consolas, monospace; color: #cfe0da; }
+  #out { width: 100%; height: 130px; background: #0b1113; color: #b9cdc6; border: 1px solid #23302f;
+         border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+</style>
+<body>
+<header>
+  <button id="play" class="pri">▶ 재생 <kbd>Space</kbd></button>
+  <span class="stat">속도 <b id="rate">1.00</b>×</span>
+  <span class="stat">확대 <b id="zoom">1</b>×</span>
+  <span class="stat">표기 <b id="count">0</b>개</span>
+  <span class="stat" id="pos">0.000s</span>
+  <span style="flex:1"></span>
+  <button id="save">저장 <kbd>S</kbd></button>
+</header>
+
+<div id="wrap">
+  <canvas id="over" height="90"></canvas>
+  <canvas id="zoomc" height="190"></canvas>
+  <textarea id="out" readonly spellcheck="false"></textarea>
+</div>
+
+<div class="hint">
+  <kbd>Space</kbd> 재생·정지 ·
+  <kbd>클릭</kbd> 그 자리에 표기 ·
+  <kbd>우클릭</kbd> 가까운 표기 삭제 ·
+  <kbd>드래그</kbd> 표기 옮기기 ·
+  <kbd>←</kbd><kbd>→</kbd> 1ms 이동(<kbd>Shift</kbd> 10ms) ·
+  <kbd>[</kbd><kbd>]</kbd> 속도 ·
+  <kbd>-</kbd><kbd>=</kbd> 확대 ·
+  <kbd>T</kbd> 재생 중 지금 위치에 표기
+</div>
+
+<script type="module">
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const [WAV] = Q;
+
+const overC = document.getElementById('over');
+const zoomC = document.getElementById('zoomc');
+const octx = overC.getContext('2d');
+const zctx = zoomC.getContext('2d');
+
+let audio = null, mono = null, sr = 44100, dur = 0;
+let marks = [];               // 표기한 시각(초) — 오름차순 유지
+let sel = -1, dragging = false;
+let rate = 1, zoom = 8, center = 0;   // center 는 오디오를 읽은 뒤 첫 구간 가운데로 옮긴다
+let ctx = null, src = null, startedAt = 0, startedFrom = 0, playing = false;
+
+const el = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ── 로드 ────────────────────────────────────────────────
+const ab = await (await fetch(WAV)).arrayBuffer();
+ctx = new AudioContext();
+audio = await ctx.decodeAudioData(ab);
+sr = audio.sampleRate; dur = audio.duration;
+{
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+}
+
+// 전체 파형 피크 (한 번만 계산)
+const OVER_N = 3000;
+const peaks = new Float32Array(OVER_N);
+{
+  const per = Math.max(1, Math.floor(mono.length / OVER_N));
+  for (let i = 0; i < OVER_N; i++) {
+    let p = 0;
+    for (let j = i * per, e = Math.min(mono.length, j + per); j < e; j += 4) {
+      const a = Math.abs(mono[j]); if (a > p) p = a;
+    }
+    peaks[i] = p;
+  }
+}
+
+function fit() {
+  for (const c of [overC, zoomC]) { c.width = c.clientWidth * devicePixelRatio; }
+  octx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  zctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  draw();
+}
+addEventListener('resize', fit);
+
+// ── 시간 ────────────────────────────────────────────────
+const now = () => playing ? clamp(startedFrom + (ctx.currentTime - startedAt) * rate, 0, dur) : startedFrom;
+
+// 확대 화면이 담는 시간 폭
+const span = () => clamp(6 / zoom, 0.05, dur);
+
+function draw() {
+  const t = now();
+  center = playing ? t : center;
+
+  // 전체 보기
+  const W = overC.clientWidth, H = overC.clientHeight;
+  octx.clearRect(0, 0, W, H);
+  octx.fillStyle = '#0b1113'; octx.fillRect(0, 0, W, H);
+  octx.strokeStyle = '#2a4a40'; octx.beginPath();
+  for (let x = 0; x < W; x++) {
+    const p = peaks[Math.floor(x / W * OVER_N)] || 0;
+    octx.moveTo(x + .5, H / 2 - p * H * .46);
+    octx.lineTo(x + .5, H / 2 + p * H * .46);
+  }
+  octx.stroke();
+  // 표기
+  octx.strokeStyle = '#3ddc97'; octx.globalAlpha = .5; octx.beginPath();
+  for (const m of marks) { const x = m / dur * W; octx.moveTo(x, 0); octx.lineTo(x, H); }
+  octx.stroke(); octx.globalAlpha = 1;
+  // 지금 보고 있는 구간
+  const s0 = (center - span() / 2) / dur * W, s1 = (center + span() / 2) / dur * W;
+  octx.fillStyle = 'rgba(255,255,255,.10)'; octx.fillRect(s0, 0, Math.max(2, s1 - s0), H);
+  octx.strokeStyle = '#e6efec'; octx.beginPath();
+  octx.moveTo(t / dur * W, 0); octx.lineTo(t / dur * W, H); octx.stroke();
+
+  // 확대 보기 — 여기서 어택 자리를 찍는다
+  const ZW = zoomC.clientWidth, ZH = zoomC.clientHeight;
+  const t0 = center - span() / 2, t1 = center + span() / 2;
+  zctx.clearRect(0, 0, ZW, ZH);
+  zctx.fillStyle = '#0b1113'; zctx.fillRect(0, 0, ZW, ZH);
+  const i0 = Math.max(0, Math.floor(t0 * sr)), i1 = Math.min(mono.length, Math.ceil(t1 * sr));
+  const per = Math.max(1, Math.floor((i1 - i0) / ZW));
+  zctx.strokeStyle = '#43b98a'; zctx.beginPath();
+  for (let x = 0; x < ZW; x++) {
+    let lo = 1, hi = -1;
+    for (let j = i0 + x * per, e = Math.min(i1, j + per); j < e; j++) {
+      const v = mono[j]; if (v < lo) lo = v; if (v > hi) hi = v;
+    }
+    if (hi < lo) continue;
+    zctx.moveTo(x + .5, ZH / 2 - hi * ZH * .46);
+    zctx.lineTo(x + .5, ZH / 2 - lo * ZH * .46);
+  }
+  zctx.stroke();
+  // 0.1초 눈금
+  zctx.strokeStyle = '#1d2b28'; zctx.beginPath();
+  for (let g = Math.ceil(t0 * 10) / 10; g < t1; g += 0.1) {
+    const x = (g - t0) / (t1 - t0) * ZW; zctx.moveTo(x, 0); zctx.lineTo(x, ZH);
+  }
+  zctx.stroke();
+  // 표기
+  for (let i = 0; i < marks.length; i++) {
+    const m = marks[i];
+    if (m < t0 || m > t1) continue;
+    const x = (m - t0) / (t1 - t0) * ZW;
+    zctx.strokeStyle = i === sel ? '#ffd166' : '#3ddc97';
+    zctx.lineWidth = i === sel ? 2 : 1.2;
+    zctx.beginPath(); zctx.moveTo(x, 0); zctx.lineTo(x, ZH); zctx.stroke();
+    zctx.fillStyle = zctx.strokeStyle;
+    zctx.fillRect(x - 3, 0, 6, 5);
+  }
+  zctx.lineWidth = 1;
+  zctx.strokeStyle = '#e6efec'; zctx.beginPath();
+  const px = (t - t0) / (t1 - t0) * ZW; zctx.moveTo(px, 0); zctx.lineTo(px, ZH); zctx.stroke();
+
+  el('pos').textContent = t.toFixed(3) + 's';
+  el('count').textContent = marks.length;
+  el('rate').textContent = rate.toFixed(2);
+  el('zoom').textContent = zoom;
+  if (playing) requestAnimationFrame(draw);
+}
+
+// ── 재생 ────────────────────────────────────────────────
+function play(from = null) {
+  stop();
+  startedFrom = from != null ? from : now();
+  src = ctx.createBufferSource();
+  src.buffer = audio;
+  src.playbackRate.value = rate;
+  src.connect(ctx.destination);
+  src.start(0, startedFrom);
+  startedAt = ctx.currentTime;
+  playing = true;
+  el('play').textContent = '⏸ 정지';
+  draw();
+}
+function stop() {
+  if (src) { try { src.stop(); } catch {} src.disconnect(); src = null; }
+  if (playing) startedFrom = now();
+  playing = false;
+  el('play').textContent = '▶ 재생';
+  draw();
+}
+el('play').onclick = () => playing ? stop() : play();
+
+// ── 표기 ────────────────────────────────────────────────
+const sortMarks = () => { const cur = marks[sel]; marks.sort((a, b) => a - b); sel = marks.indexOf(cur); };
+function addMark(t) {
+  marks.push(clamp(t, 0, dur));
+  sortMarks(); sel = marks.indexOf(clamp(t, 0, dur));
+  emit(); draw();
+}
+function nearest(t) {
+  let bi = -1, bd = Infinity;
+  for (let i = 0; i < marks.length; i++) { const d = Math.abs(marks[i] - t); if (d < bd) { bd = d; bi = i; } }
+  return { i: bi, d: bd };
+}
+
+const timeAt = (ev, canvas, full) => {
+  const r = canvas.getBoundingClientRect();
+  const f = (ev.clientX - r.left) / r.width;
+  if (full) return f * dur;
+  const t0 = center - span() / 2;
+  return t0 + f * span();
+};
+
+zoomC.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const t = timeAt(e, zoomC, false);
+  if (e.button === 2) {   // 우클릭 — 가까운 표기 삭제
+    const { i, d } = nearest(t);
+    if (i >= 0 && d < span() * 0.02) { marks.splice(i, 1); sel = -1; emit(); draw(); }
+    return;
+  }
+  const { i, d } = nearest(t);
+  if (i >= 0 && d < span() * 0.01) { sel = i; dragging = true; zoomC.setPointerCapture(e.pointerId); }
+  else addMark(t);
+  draw();
+});
+zoomC.addEventListener('pointermove', (e) => {
+  if (!dragging || sel < 0) return;
+  marks[sel] = clamp(timeAt(e, zoomC, false), 0, dur);
+  emit(); draw();
+});
+const endDrag = () => { if (dragging) { dragging = false; sortMarks(); emit(); draw(); } };
+zoomC.addEventListener('pointerup', endDrag);
+zoomC.addEventListener('pointercancel', endDrag);
+zoomC.addEventListener('contextmenu', (e) => e.preventDefault());
+
+overC.addEventListener('pointerdown', (e) => {
+  const t = timeAt(e, overC, true);
+  center = t;
+  if (playing) play(t); else { startedFrom = t; draw(); }
+});
+
+addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 0.010 : 0.001;
+  switch (e.key) {
+    case ' ': e.preventDefault(); playing ? stop() : play(); break;
+    case 't': case 'T': addMark(now()); break;
+    case 'ArrowLeft':  if (sel >= 0) { marks[sel] = clamp(marks[sel] - step, 0, dur); emit(); } else center = clamp(center - step * 20, 0, dur); draw(); e.preventDefault(); break;
+    case 'ArrowRight': if (sel >= 0) { marks[sel] = clamp(marks[sel] + step, 0, dur); emit(); } else center = clamp(center + step * 20, 0, dur); draw(); e.preventDefault(); break;
+    case 'Delete': case 'Backspace': if (sel >= 0) { marks.splice(sel, 1); sel = -1; emit(); draw(); } break;
+    case '[': rate = clamp(rate - 0.05, 0.25, 1.5); if (playing) play(); draw(); break;
+    case ']': rate = clamp(rate + 0.05, 0.25, 1.5); if (playing) play(); draw(); break;
+    case '-': zoom = clamp(zoom / 1.5, 1, 400); draw(); break;
+    case '=': case '+': zoom = clamp(zoom * 1.5, 1, 400); draw(); break;
+    case 's': case 'S': save(); break;
+  }
+});
+
+// ── 내보내기 ────────────────────────────────────────────
+// 음정은 적지 않는다. 지금 필요한 것은 시각이고, 음정 라벨은 이미 손으로 고친 것이 있다.
+function text() {
+  const L = [
+    '# 손으로 표기한 온셋 — 검출기와 무관하다',
+    `# ${marks.length}개 · 오디오 ${dur.toFixed(1)}초`,
+    '# 시각(초)만 적는다. 음정은 기존 정답지의 라벨을 시각으로 맞춰 쓴다.',
+    '',
+  ];
+  for (let i = 0; i < marks.length; i += 16) {
+    L.push(marks.slice(i, i + 16).map(t => t.toFixed(3)).join(' '));
+  }
+  return L.join('\n') + '\n';
+}
+function emit() { el('out').value = text(); }
+function save() { console.log('###SAVE###\n' + text()); el('save').textContent = '저장됨'; setTimeout(() => el('save').textContent = '저장 S', 1200); }
+
+// 처음 보이는 구간을 0초부터로 맞춘다. 가운데를 0 에 두면 화면 왼쪽 절반이 음수 시간이 되고,
+// 거기 찍은 표기가 전부 0초로 뭉친다.
+center = Math.min(dur / 2, span() / 2);
+
+emit();
+fit();
+</script>

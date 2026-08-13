@@ -6,6 +6,7 @@
 //   npm run lab -- synth           정답이 알려진 합성 베이스를 만든다
 //   npm run lab -- synth-score     그 합성 음원으로 채점  ← 시각까지 믿을 수 있는 유일한 기준
 //   npm run lab -- score           실제 곡 정답지로 채점  (시각은 검출기에서 파생 — README 를 보라)
+//   npm run lab -- annotate        실제 곡의 온셋을 손으로 표기 (창이 뜬다)
 //   npm run lab -- dump            마디 악보 덤프
 //
 // HTML 도구는 renderer/ 의 모듈을 import 하고 file:// 을 fetch 한다. 브라우저에서는 둘 다
@@ -24,7 +25,8 @@ const SYNTH = path.join(LAB, 'synth');
 
 const manifest = JSON.parse(fs.readFileSync(path.join(LAB, 'manifest.json'), 'utf8'));
 const sample = manifest.samples[0];
-const htmlTools = fs.readdirSync(TOOLS).filter(f => f.endsWith('.html')).map(f => f.replace(/\.html$/, ''));
+const htmlTools = fs.readdirSync(TOOLS).filter(f => f.endsWith('.html')).map(f => f.replace(/\.html$/, ''))
+  .filter(f => f !== 'annotate');   // 대화형이라 아래 오프스크린 흐름을 타지 않는다
 const want = process.argv[2];
 
 // ── 합성 음원 만들기 ─────────────────────────────────────
@@ -33,8 +35,53 @@ if (want === 'synth') {
   process.exit(r.status == null ? 1 : r.status);
 }
 
+// ── 손으로 온셋 표기 ─────────────────────────────────────
+// 화면을 보고 찍는 작업이라 창이 실제로 떠야 한다. 저장은 페이지가 표식과 함께 찍고 여기서 받는다.
+if (want === 'annotate') {
+  const target = process.argv[3]
+    ? path.resolve(process.argv[3])
+    : path.join(LAB, 'ground-truth', 'bass_sample.onsets.txt');
+  const bassPath = path.join(ROOT, sample.audio.bass);
+  if (!fs.existsSync(bassPath)) { console.error('없음:', bassPath); process.exit(1); }
+
+  const page = path.join(ROOT, 'renderer', '_lab-annotate.html');
+  fs.copyFileSync(path.join(TOOLS, 'annotate.html'), page);
+
+  const drv = path.join(os.tmpdir(), `yss-annot-${process.pid}.js`);
+  fs.writeFileSync(drv, `
+const { app, BrowserWindow } = require('electron');
+const fs = require('fs');
+const PAGE = process.argv[2], QUERY = process.argv[3], OUT = process.argv[4];
+app.commandLine.appendSwitch('allow-file-access-from-files');
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ width: 1280, height: 720, backgroundColor: '#0e1416',
+    title: '온셋 표기', webPreferences: { webSecurity: false, contextIsolation: true } });
+  win.setMenuBarVisibility(false);
+  win.webContents.on('console-message', (_e, _l, msg) => {
+    const s = String(msg);
+    if (!s.startsWith('###SAVE###')) return;
+    try { fs.writeFileSync(OUT, s.slice(10).replace(/^\\n/, ''), 'utf8');
+          console.log('저장:', OUT, '(' + (s.split('\\n').length - 4) + '줄)'); }
+    catch (e) { console.error('저장 실패:', e.message); }
+  });
+  await win.loadURL('file:///' + PAGE.replace(/\\\\/g, '/') + '?q=' + QUERY);
+  win.on('closed', () => app.exit(0));
+});
+`, 'utf8');
+
+  const asUrl2 = (p) => 'file:///' + p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/').replace('%3A', ':');
+  console.log('창이 뜹니다. 확대해서 어택 자리를 클릭하세요.');
+  console.log(`저장 위치: ${path.relative(ROOT, target)}\n`);
+  const rr = spawnSync(process.execPath,
+    [path.join(ROOT, 'node_modules', 'electron', 'cli.js'), drv, page, encodeURIComponent(asUrl2(bassPath)), target],
+    { stdio: 'inherit', cwd: ROOT });
+  try { fs.unlinkSync(drv); } catch {}
+  try { fs.unlinkSync(page); } catch {}
+  process.exit(rr.status == null ? 1 : rr.status);
+}
+
 if (!want || (!htmlTools.includes(want) && want !== 'synth-score')) {
-  console.log('도구:', ['synth', 'synth-score', ...htmlTools].join(' · '));
+  console.log('도구:', ['synth', 'synth-score', 'annotate', ...htmlTools].join(' · '));
   console.log('예)  npm run lab -- synth-score\n');
   const b = manifest.baseline.yin;
   console.log('실제 곡 기준선 (정답지의 시각은 검출기에서 파생 — 음정만 유효):');
