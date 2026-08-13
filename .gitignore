@@ -49,3 +49,6 @@ GH_token.txt
 # 채보 실험용 오디오 — 저작권 있는 음원이라 저장소에 넣지 않는다
 bass_sample*.wav
 renderer/_lab-*.html
+
+# 합성 음원은 생성기로 다시 만들 수 있다
+lab/tab/synth/

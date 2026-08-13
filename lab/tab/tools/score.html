@@ -49,6 +49,7 @@ function parseGt(text) {
 function score(gt, det, tol = 0.25, octaveLenient = false) {
   const used = new Set();
   let hit = 0, pitchWrong = 0, miss = 0;
+  const missed = [], wrong = [];
   for (const g of gt) {
     let best = -1, bd = Infinity;
     for (let i = 0; i < det.length; i++) {
@@ -56,12 +57,35 @@ function score(gt, det, tol = 0.25, octaveLenient = false) {
       const d = Math.abs(det[i].start - g.start);
       if (d < bd && d <= tol) { bd = d; best = i; }
     }
-    if (best < 0) { miss++; continue; }
+    if (best < 0) { miss++; missed.push(g); continue; }
     used.add(best);
     const ok = octaveLenient ? (det[best].midi - g.midi) % 12 === 0 : det[best].midi === g.midi;
-    if (ok) hit++; else pitchWrong++;
+    if (ok) hit++; else { pitchWrong++; wrong.push({ g, d: det[best] }); }
   }
-  return { hit, pitchWrong, miss, extra: det.length - used.size, pct: Math.round(hit / gt.length * 100) };
+  const extras = det.filter((_, i) => !used.has(i));
+  return { hit, pitchWrong, miss, extra: extras.length, pct: Math.round(hit / gt.length * 100), missed, wrong, extras };
+}
+
+/** 놓친 음들이 어디에 몰려 있는지 — 원인을 짚으려면 개수보다 자리가 필요하다 */
+function whereMissed(gt, s) {
+  const L = [];
+  // 직전 음과 같은 음정인가 (반복 타현) · 직전 음과의 간격
+  const idx = new Map(gt.map((g, i) => [g, i]));
+  let sameAsPrev = 0, fast = 0;
+  const gaps = [];
+  for (const m of s.missed) {
+    const i = idx.get(m);
+    if (i > 0) {
+      if (gt[i - 1].midi === m.midi) sameAsPrev++;
+      const gap = m.start - gt[i - 1].start;
+      gaps.push(gap);
+      if (gap < 0.2) fast++;
+    }
+  }
+  gaps.sort((a, b) => a - b);
+  L.push(`#   놓친 ${s.missed.length}음 중 — 직전과 같은 음정 ${sameAsPrev} · 직전과 0.2초 이내 ${fast}`);
+  if (gaps.length) L.push(`#   앞 음과의 간격 중앙값 ${gaps[gaps.length >> 1].toFixed(3)}초 (최소 ${gaps[0].toFixed(3)})`);
+  return L;
 }
 
 try {
@@ -76,16 +100,17 @@ try {
   for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
   const sr = audio.sampleRate;
 
-  const fmt = (label, det) => {
+  const fmt = (label, det, detail = false) => {
     const s = score(gt, det);
     say(`${label.padEnd(16)} 검출 ${String(det.length).padStart(3)} · 일치 ${String(s.hit).padStart(3)} (${s.pct}%)`
       + ` · 음정오류 ${String(s.pitchWrong).padStart(2)} · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(2)}`
       + ` · 옥타브무시 ${score(gt, det, 0.25, true).pct}%`);
+    if (detail && s.missed.length) for (const ln of whereMissed(gt, s)) say(ln);
     return s;
   };
 
   const yin = transcribe(mono, sr, { tuning: '4' }).notes;
-  fmt('[YIN]', yin);
+  fmt('[YIN]', yin, true);
 
   // 박자를 줄 수 있으면 격자에 붙인 결과도 같이 잰다.
   // 문서에 남은 87%/잉여 0 이 이 구성에서 나온 것인지 여기서 갈린다.
@@ -109,6 +134,23 @@ try {
     fmt('[YIN+격자]', transcribe(mono, sr, { tuning: '4', beats: bt.beats }).notes);
   } else {
     say('# 드럼 스템이 없어 격자 정렬은 재지 않았다');
+  }
+
+  // 온셋 임계값 스윕.
+  //
+  // 막다른 길 표에는 "임계값을 낮추면 얻는 음 1개당 잔음 6개"로 적혀 있다. 그 판정은
+  // 검출기에서 파생된 정답지로 잰 것이라 새 검출이 무조건 잉여로 보였다 — 다시 재야 한다.
+  // 정답지가 독립적일 때만 이 표가 뜻을 갖는다.
+  say('');
+  say('# 온셋 임계값 스윕 — 얻는 음 대비 잉여');
+  const base = score(gt, transcribe(mono, sr, { tuning: '4' }).notes);
+  for (const th of [0.08, 0.05, 0.035, 0.02, 0.012]) {
+    const s = score(gt, transcribe(mono, sr, { tuning: '4', onsetThresh: th }).notes);
+    const gained = s.hit - base.hit, added = s.extra - base.extra;
+    const cost = gained > 0 ? (added / gained).toFixed(1) : '—';
+    say(`#   thresh ${String(th).padEnd(5)} 일치 ${String(s.hit).padStart(3)} (${String(s.pct).padStart(2)}%)`
+      + ` · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(2)}`
+      + `   기준 대비 +${gained}음 / 잉여 +${added}  (1음당 ${cost})`);
   }
 
   const bp = await runBasicPitch(mono, sr, new URL('./', location.href).href);
