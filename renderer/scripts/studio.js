@@ -4,6 +4,8 @@ import { Library } from './library.js';
 import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
+import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
+         METER_BLOCKS, METER_FLOOR_DB, METER_GATE } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, onLocaleChange } from './i18n.js';
@@ -14,7 +16,6 @@ import { detectChords, phaseFromChords } from '../workers/tab-chord.js';
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
 // innerHTML 삽입 전 외부/사용자 유래 문자열 이스케이프 (yt 영상 제목·VST명·프리셋명 등)
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const STEM_COLOR = {
   vocals: 'var(--stem-vocals)', drums: 'var(--stem-drums)',
@@ -248,40 +249,9 @@ function grabPan(e) {
   const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
 }
-const fmtTC = (sec) => {
-  sec = Math.max(0, sec || 0);
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60), ms = Math.floor((sec - Math.floor(sec)) * 1000);
-  return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
-};
 const contentW = () => Math.max(1, _dur * _pxPerSec);
 
 // ── 파형 SVG ──────────────────────────────────────
-function buildWaveSvg(ch, color, N = 1400) {
-  if (!ch || !ch[0]) return '';
-  const L = ch[0], R = ch[1] || ch[0], len = L.length;
-  const bucket = Math.max(1, Math.floor(len / N));
-  let pts = '';
-  let mx = 1e-6;
-  const peaks = new Float32Array(N), rms = new Float32Array(N);
-  for (let i = 0; i < N; i++) {
-    const start = i * bucket, end = Math.min(len, start + bucket);
-    let p = 0, s2 = 0, cnt = 0;
-    const step = Math.max(1, Math.floor((end - start) / 200));
-    for (let j = start; j < end; j += step) { const a = (L[j] + R[j]) * 0.5; const aa = Math.abs(a); if (aa > p) p = aa; s2 += a * a; cnt++; }
-    peaks[i] = p; rms[i] = cnt ? Math.sqrt(s2 / cnt) : 0; if (p > mx) mx = p;
-  }
-  const poly = (arr, scale) => {
-    let a = '', b = '';
-    for (let i = 0; i < N; i++) { const h = Math.min(1, arr[i] / mx) * 22 * scale; a += `${i},${(25 - h).toFixed(1)} `; }
-    for (let i = N - 1; i >= 0; i--) { const h = Math.min(1, arr[i] / mx) * 22 * scale; b += `${i},${(25 + h).toFixed(1)} `; }
-    return a + b;
-  };
-  // peak = 흐린 외곽, rms = 본체(플랫·선명), 가운데 기준선 (그라디언트 없음)
-  return `<svg viewBox="0 0 ${N} 50" preserveAspectRatio="none">`
-    + `<polygon points="${poly(peaks, 1)}" fill="${color}" fill-opacity=".24"/>`
-    + `<polygon points="${poly(rms, 1)}" fill="${color}" fill-opacity=".7"/>`
-    + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".45" stroke-width=".6"/></svg>`;
-}
 
 // ── 렌더 ──────────────────────────────────────────
 function renderTracks() {
@@ -898,17 +868,6 @@ function syncHeroState() {   // hero 클래스에 도구 오픈 여부 반영 �
 }
 // 미터 스케일 — 선형 진폭을 그대로 쓰면 노이즈 플로어(-60dB 수준)도 첫 LED를 켜서
 // 무음일 때 깜빡이는 것처럼 보인다. dB 로 매핑하고 게이트 + 블록 단위 양자화로 고정.
-const METER_BLOCKS = 30;          // CSS 의 LED 분할 수와 동일
-const METER_FLOOR_DB = -54;       // 이 아래는 완전히 꺼짐
-const METER_GATE = 0.0056;        // ≈ -45 dB — 엔진 게이트와 동일. 입력 노이즈 플로어 차단
-function meterPct(v) {
-  if (!(v > METER_GATE)) return 0;
-  const db = 20 * Math.log10(Math.min(1, v));
-  const p = (db - METER_FLOOR_DB) / -METER_FLOOR_DB;
-  if (p <= 0) return 0;
-  // 블록 경계로 내림 — 블록 사이에서 값이 흔들려도 표시가 떨리지 않음
-  return Math.min(1, Math.floor(p * METER_BLOCKS) / METER_BLOCKS) * 100;
-}
 function applyMeter(el, st) {
   const iL = el.children[0], iR = el.children[1];
   iL.style.setProperty('--v', meterPct(st.curL) + '%');
@@ -945,10 +904,6 @@ function _metersTick(ts) {
 }
 
 // ── 드래그 이동량 배지 (+0:07) ──
-function fmtDelta(sec) {   // +M:SS.cc (센티초까지) — 세밀 이동 확인용
-  const a = Math.abs(sec), m = Math.floor(a / 60), s = a - m * 60;
-  return `${sec >= 0 ? '+' : '−'}${m}:${s.toFixed(2).padStart(5, '0')}`;
-}
 // 커서를 따라다니는 배지 (트랙 뒤쪽에서 이동해도 보이게 화면 고정)
 function showDragBadge(deltaSec, cx, cy) {
   let b = document.getElementById('daw-drag-badge');
@@ -970,13 +925,6 @@ function resolveColor(cssVar) {
   const m = String(cssVar).match(/var\((--[\w-]+)\)/);
   if (m) return getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || '#8a8f99';
   return cssVar;
-}
-function rgbToHex(c) {   // "rgb(r,g,b)" 또는 "#rrggbb" → "#rrggbb" (색상 input 기본값용)
-  c = String(c).trim();
-  if (c[0] === '#') return c.length === 4 ? '#' + [...c.slice(1)].map(x => x + x).join('') : c.slice(0, 7);
-  const m = c.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
-  if (!m) return '#888888';
-  return '#' + [1, 2, 3].map(i => Number(m[i]).toString(16).padStart(2, '0')).join('');
 }
 // 트랙 순서 변경 — 그립 드래그. 포인터 아래 rec 레인 감지, up 시 배열 재배치
 function wireReorder(e, rt, lane) {
