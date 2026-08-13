@@ -1,0 +1,96 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>운지 채점</title>
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe, assignFrets, midiToName } from './workers/tab-core.js';
+
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const WAV = Q[0];
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+
+// 사용자가 손으로 고친 정답 (bass_sample_TAB_fix.txt 앞 2블록).
+// string: 0=E 1=A 2=D 3=G · null = 그 시각의 검출이 잘못됐다고 표시된 음
+const GT = [
+  { t: 0.7, drop: true },                       // 슬라이드 인 — 별도 음이 아님
+  { t: 0.8, string: 2, fret: 15 },              // F3
+  { t: 2.0, string: 3, fret: 17 }, { t: 2.3, string: 3, fret: 16 }, { t: 2.6, string: 2, fret: 17 },
+  { t: 4.0, string: 3, fret: 17 }, { t: 4.3, string: 3, fret: 16 }, { t: 4.5, string: 2, fret: 17 },
+  { t: 4.8, string: 2, fret: 14 },
+  { t: 6.0, string: 3, fret: 17 }, { t: 6.3, string: 3, fret: 16 }, { t: 6.5, string: 3, fret: 14 },
+  { t: 7.2, drop: true },                       // G#3 — 오검출로 표시됨
+  { t: 7.3, string: 2, fret: 14 }, { t: 7.6, string: 1, fret: 12 }, { t: 8.0, string: 1, fret: 15 },
+  { t: 8.3, string: 1, fret: 14 }, { t: 8.6, string: 0, fret: 15 }, { t: 8.8, string: 0, fret: 13 },
+  { t: 10.0, string: 1, fret: 15 }, { t: 10.3, string: 1, fret: 14 }, { t: 10.6, string: 0, fret: 15 },
+  { t: 12.0, string: 1, fret: 15 }, { t: 12.3, string: 1, fret: 14 }, { t: 12.6, string: 0, fret: 15 },
+  { t: 12.8, string: 0, fret: 12 },
+  { t: 14.1, string: 1, fret: 15 }, { t: 14.3, string: 1, fret: 14 }, { t: 14.5, string: 1, fret: 12 },
+  // 15.3 / 16.8 / 17.1 은 표기가 모호해 채점에서 제외
+];
+
+function decimate2(src) {
+  const n = (src.length - 3) >> 1; const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const j = i * 2; out[i] = (src[j]+3*src[j+1]+3*src[j+2]+src[j+3])/8; }
+  return out;
+}
+
+try {
+  const ab = await (await fetch(WAV)).arrayBuffer();
+  const audio = await new AudioContext().decodeAudioData(ab);
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+
+  const r = transcribe(mono.slice(0, Math.round(20 * audio.sampleRate)), audio.sampleRate, { tuning: '4' });
+  const notes = r.notes;
+
+  const SNAP = 0.25;   // 이 안에 있으면 같은 음으로 본다
+  let pitchHit = 0, fretHit = 0, stringHit = 0, matched = 0, scored = 0, falsePos = 0;
+  const rows = [];
+  const used = new Set();
+  // 가장 가까운 것 하나만, 중복 없이 짝짓는다 (find 는 앞 음을 먼저 물어 결과를 밀어버린다)
+  const pick = (t) => {
+    let best = null, bestD = SNAP + 1e-9;
+    for (let i = 0; i < notes.length; i++) {
+      if (used.has(i)) continue;
+      const d = Math.abs(notes[i].start - t);
+      if (d <= SNAP && d < bestD) { bestD = d; best = i; }
+    }
+    if (best == null) return null;
+    used.add(best);
+    return notes[best];
+  };
+  for (const g of GT) {
+    const n = pick(g.t);
+    if (g.drop) {
+      if (n) {
+        falsePos++;
+        const nx = notes.find(x => x.start > n.start);
+        rows.push(`  ${g.t.toFixed(1)}s  버려야 할 음인데 ${midiToName(n.midi)} 검출`
+          + ` · dur ${n.dur.toFixed(3)} rms ${n.rms.toFixed(4)} conf ${n.conf.toFixed(2)}`
+          + (nx ? ` · 다음음까지 ${(nx.start - n.start).toFixed(3)}s (dur ${nx.dur.toFixed(3)} rms ${nx.rms.toFixed(4)})` : ''));
+      }
+      else rows.push(`  ${g.t.toFixed(1)}s  OK (버려짐)`);
+      continue;
+    }
+    scored++;
+    if (!n) { rows.push(`  ${g.t.toFixed(1)}s  놓침`); continue; }
+    matched++;
+    const okS = n.string === g.string, okF = n.fret === g.fret;
+    if (okS) stringHit++;
+    if (okS && okF) fretHit++;
+    pitchHit++;   // 음정은 아래에서 따로 확인
+    const S = ['E','A','D','G'];
+    rows.push(`  ${g.t.toFixed(1)}s  정답 ${S[g.string]}${g.fret}  검출 ${n.string!=null?S[n.string]+n.fret:'-'}  ${okS&&okF?'OK':(okS?'프렛✗':'현✗')}  (${midiToName(n.midi)})`);
+  }
+
+  say(`정답 ${scored}음 · 매칭 ${matched} · 현 일치 ${stringHit} · 현+프렛 일치 ${fretHit}`);
+  say(`오검출로 표시된 2음 중 여전히 검출된 것: ${falsePos}`);
+  say(`운지 정확도 ${(fretHit / scored * 100).toFixed(0)}%  (현만: ${(stringHit / scored * 100).toFixed(0)}%)`);
+  say('');
+  rows.forEach(say);
+} catch (e) { say('ERROR: ' + (e && (e.stack || e.message) || e)); }
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>

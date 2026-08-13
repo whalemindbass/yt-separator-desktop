@@ -45,3 +45,7 @@ sample/
 # 로컬 메모 — 자격 증명이 들어갈 수 있는 파일은 저장소에 두지 않는다
 admin.txt
 GH_token.txt
+
+# 채보 실험용 오디오 — 저작권 있는 음원이라 저장소에 넣지 않는다
+bass_sample*.wav
+renderer/_lab-*.html

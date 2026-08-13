@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>마디 악보 덤프</title>
+<!-- renderer/ 에 복사해서 연다:  ?q=<bass wav>|<drums wav> -->
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe, TUNINGS } from './workers/tab-core.js';
+import { buildScore, beatAccents } from './workers/tab-score.js';
+import { detectBeats } from './scripts/beat-detect.js';
+
+// ?q=<bass>|<drums>|<other>|<vocals>  — 뒤 둘은 박자 검출 폴백용 믹스를 만드는 데 쓴다
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const [BASS, DRUMS, OTHER, VOCALS] = Q;
+const lines = [];
+const say = (s) => lines.push(s);
+
+const NAMES = ['E', 'A', 'D', 'G'];
+const PER_LINE = 4;                  // 한 줄에 담을 마디 수
+
+async function load(url) {
+  const ab = await (await fetch(url)).arrayBuffer();
+  const a = await new AudioContext().decodeAudioData(ab);
+  const L = a.getChannelData(0);
+  const R = a.numberOfChannels > 1 ? a.getChannelData(1) : L;
+  return { L, R, sr: a.sampleRate, dur: a.duration };
+}
+
+try {
+  const bass = await load(BASS);
+  const mono = new Float32Array(bass.L.length);
+  for (let i = 0; i < bass.L.length; i++) mono[i] = (bass.L[i] + bass.R[i]) * 0.5;
+
+  const drums = await load(DRUMS);
+  // 드럼만으로 템포가 안 잡히는 곡이 있다 — 스템을 합쳐 원본 믹스를 만들어 폴백으로 준다
+  let mix = null;
+  if (OTHER && VOCALS) {
+    const parts = [bass, drums, await load(OTHER), await load(VOCALS)];
+    const n = Math.min(...parts.map(p => p.L.length));
+    const mL = new Float32Array(n), mR = new Float32Array(n);
+    for (const p of parts) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
+    mix = [mL, mR];
+  }
+  const bt = await detectBeats(drums.L, drums.R, drums.sr, mix);
+  say(`# BPM ${bt.tempo ? bt.tempo.toFixed(1) : '?'} · 박 ${bt.beats.length}개 · 격자오차 ${bt.fitStdMs != null ? bt.fitStdMs.toFixed(1) + 'ms' : '?'}`);
+
+  say(`# 앞 박 12개: ${bt.beats.slice(0, 12).map(b => b.toFixed(2)).join(' ')}`);
+  say(`# downbeat ${bt.downbeat != null ? bt.downbeat.toFixed(3) : '?'} · audioStart ${bt.audioStart != null ? bt.audioStart.toFixed(3) : '?'}`);
+
+  const r = transcribe(mono, bass.sr, { tuning: '4', beats: bt.beats });
+  // 노트 시작이 박 격자에서 얼마나 떨어져 있나 — 격자가 음악과 맞는지의 직접 증거
+  {
+    const iv = bt.beats[1] - bt.beats[0];
+    let sum = 0, n = 0;
+    const off16 = new Array(4).fill(0);
+    for (const nt of r.notes) {
+      const p = (nt.start - bt.beats[0]) / iv;
+      const frac = p - Math.floor(p);
+      sum += Math.min(frac, 1 - frac); n++;
+      off16[Math.round(frac * 4) % 4]++;
+    }
+    say(`# 노트가 박에서 벗어난 평균 ${(sum / n * iv * 1000).toFixed(0)}ms · 16분 위치 분포 ${off16.join('/')}`);
+  }
+  // 드럼 킥으로 마디 첫 박을 잡는다
+  const dMono = new Float32Array(drums.L.length);
+  for (let i = 0; i < drums.L.length; i++) dMono[i] = (drums.L[i] + drums.R[i]) * 0.5;
+  const acc = beatAccents(dMono, drums.sr, bt.beats);
+  const byPhase = [0, 0, 0, 0];
+  for (let i = 0; i < acc.length; i++) byPhase[i % 4] += acc[i];
+  const mx = Math.max(...byPhase);
+  say(`# 킥 세기 위상별: ${byPhase.map(v => (v / mx * 100).toFixed(0) + '%').join(' ')}`);
+
+  const sc = buildScore(r.notes, bt.beats, { beatAccent: acc });
+  say(`# 노트 ${r.notes.length}개 → 마디 ${sc.bars.length}개 · ${sc.beatsPerBar}박자 · 첫박 위상 ${sc.phase}`);
+  say('');
+
+  const perBar = sc.beatsPerBar * sc.subdiv;
+  const CELL = 3;                    // 16분 한 칸의 글자 폭
+
+  for (let i = 0; i < sc.bars.length; i += PER_LINE) {
+    const chunk = sc.bars.slice(i, i + PER_LINE);
+    // 마디 번호와 시작 시각
+    say('  ' + chunk.map(b => `${b.index}마디 ${b.start.toFixed(1)}s`.padEnd(perBar * CELL + 1)).join(' '));
+
+    for (let s = 3; s >= 0; s--) {
+      let row = '';
+      for (const b of chunk) {
+        const cells = new Array(perBar).fill('-'.repeat(CELL));
+        for (const it of b.items) {
+          if (it.rest || !it.note || it.note.string !== s || it.note.fret == null) continue;
+          cells[it.at] = String(it.note.fret).padEnd(CELL, '-');
+        }
+        row += '|' + cells.join('');
+      }
+      say(`${NAMES[s]} ${row}|`);
+    }
+    // 음표값 줄 — 길이가 어떻게 읽히는지 확인용
+    let vrow = '';
+    for (const b of chunk) {
+      const cells = new Array(perBar).fill(' '.repeat(CELL));
+      for (const it of b.items) {
+        if (it.rest) continue;
+        const v = it.values[0];
+        const tag = { whole: '온', half: '2', quarter: '4', eighth: '8', sixteenth: '6' }[v.name] + (v.dotted ? '.' : '');
+        cells[it.at] = tag.padEnd(CELL, ' ');
+      }
+      vrow += ' ' + cells.join('');
+    }
+    say(' ' + vrow);
+    say('');
+  }
+} catch (e) { say('ERROR: ' + (e && (e.stack || e.message) || e)); }
+
+document.getElementById('out').textContent = lines.join('\n');
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>
