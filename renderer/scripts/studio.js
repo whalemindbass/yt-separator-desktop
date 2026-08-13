@@ -1966,17 +1966,19 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
   });
   renderRecLanes();   // 이벤트 렌더는 메타 전이라 여기서 재렌더
 }
-async function buildProjectObject() {
+// opts.skipFx — 엔진에 묻지 않고 지금 알고 있는 것만으로 만든다.
+// 엔진이 죽은 뒤 구조를 뜰 때 쓴다. 이펙트 노브 값은 엔진만 알고 있어 빠진다.
+async function buildProjectObject(opts = {}) {
   const sr = _sr || 44100;
   const master = faderToGain($('mx-master')?.value ?? FADER_UNITY_POS);
   const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
   const busIds = BUS_NAMES.map((_, i) => BUS_ID_BASE + i);
-  await gatherChains([..._recTracks.map(r => r.id), ...stemIds, ...busIds]);   // 녹음+스템+버스 FX 체인 확보(선택 안 된 것 포함)
+  if (!opts.skipFx) await gatherChains([..._recTracks.map(r => r.id), ...stemIds, ...busIds]);
   const pairs = [];
   _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
   stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
   busIds.forEach(bid => (_chainByTrack[bid] || []).forEach(s => pairs.push({ track: bid, id: s.id })));
-  const states = await gatherFx(pairs);
+  const states = opts.skipFx ? {} : await gatherFx(pairs);
   const autoOut = (id) => { const a = _auto.get(id); return a && (a.pts.length || a.on)
     ? { on: !!a.on, open: !!a.open, pts: a.pts.map(p => ({ t: p.t, v: p.v })) } : null; };
   const tracks = _recTracks.map(r => ({
@@ -2064,6 +2066,64 @@ async function autosaveNow() {
 function startAutosave() {
   if (_autosaveTimer) return;
   _autosaveTimer = setInterval(autosaveNow, AUTOSAVE_MS);
+}
+
+// ── 엔진이 죽었을 때 ──────────────────────────────────────────
+// 오디오 엔진은 별도 프로세스이고 그 안에서 남의 VST 가 돈다. 죽는 것은 드문 일이 아니라
+// 예정된 일에 가깝다. 죽은 채로 두면 아무것도 안 되는 화면이 남고, 녹음 중이었다면
+// 디스크에 쓰다 만 파일이 남는데 앱은 그걸 모른다.
+let _crashRecovering = false;
+
+async function handleEngineCrash(m) {
+  if (_crashRecovering) return;
+  _crashRecovering = true;
+  try {
+    // 엔진이 없으므로 이펙트 노브 값은 못 가져온다. 나머지 구조는 이쪽이 다 알고 있다.
+    const snap = await buildProjectObject({ skipFx: true }).catch(() => null);
+
+    flashTake(tr('studio.crash.restarting'));
+    _engineTried = false;                     // 자동 시작 1회 제한을 푼다
+    if (!await startEngine(true)) { flashTake(tr('studio.crash.failed')); return; }
+    if (!await waitEngineReady(12000))       { flashTake(tr('studio.crash.failed')); return; }
+
+    if (snap) {
+      await applyProject(snap);
+      markDirty();                            // 되살린 상태는 아직 파일에 저장된 것이 아니다
+    }
+    if (m.take && m.take.file) offerCrashTake(m.take);
+    else flashTake(tr('studio.crash.restored'));
+  } finally { _crashRecovering = false; }
+}
+
+function waitEngineReady(ms) {
+  return new Promise((res) => {
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (_started || Date.now() - t0 > ms) { clearInterval(iv); res(_started); }
+    }, 100);
+  });
+}
+
+/** 쓰다 만 녹음 파일을 되살릴지 묻는다 */
+function offerCrashTake(take) {
+  const secs = Math.max(0, Math.round(take.seconds || 0));
+  openModal(tr('studio.crash.takeTitle'), `
+    <div class="daw-modal-item" data-idx="1">
+      <div class="mt"><div class="n">${esc(tr('studio.crash.takeAdd'))}</div>
+      <div class="m">${esc(tr('studio.crash.takeLen', { s: secs }))}</div></div></div>
+    <div class="daw-modal-item" data-idx="0">
+      <div class="mt"><div class="n">${esc(tr('studio.crash.takeShow'))}</div>
+      <div class="m">${esc(take.file)}</div></div></div>`,
+    async (idx) => {
+      if (idx !== '1') { api.openPath(take.file); return; }
+      const tid = armedRecId();
+      const id = nextClipId();
+      // 어느 시점에 녹음이 시작됐는지는 알 수 없다 — 맨 앞에 놓고 옮기게 한다
+      api.engine.takeLoad(take.file, 0, tid, id);
+      await renderTake(take.file, 0, id, tid);
+      markDirty();
+      flashTake(tr('studio.crash.takeAdded'));
+    });
 }
 
 /** 지난번에 저장하지 못하고 끝났으면 복구를 제안한다 */
@@ -2659,6 +2719,7 @@ function onEngineEvent(m) {
       _chain = []; _chainByTrack = {}; _selTrack = null; _recTracks = [];
       _recArmed = false; $('st-rec').classList.remove('armed'); clearRecLive();   // 재시작 후 녹음버튼 잔상 방지
       _activePresetId = null; renderFxSlots(); renderRecLanes(); updateFxPanel();
+      if (m.crashed) handleEngineCrash(m);   // 우리가 끝낸 것이 아니면 되살린다
       setEnabled(false);
       break;
     case 'error': setEngineStatus('error'); break;

@@ -603,12 +603,61 @@ app.on('window-all-closed', () => {
 // ── 실시간 오디오 엔진(JUCE 사이드카) 브리지 ──────────────
 const { AudioEngine } = require('./engine-client');
 let audioEngine = null;
+let lastRecordFile = null;   // 마지막으로 녹음을 걸어 둔 파일 — 엔진이 죽었을 때 되살릴 대상
+
+/**
+ * 쓰다 만 WAV 의 길이 필드를 실제 파일 크기로 고친다.
+ *
+ * 녹음 중 엔진이 죽으면 오디오 데이터는 디스크에 남지만 RIFF·data 크기가 처음 값 그대로라
+ * 대부분의 프로그램이 "길이 0" 으로 읽는다. 소리는 멀쩡히 있는데 못 여는 상태다.
+ * 청크를 훑어 data 를 찾고 두 크기를 파일 크기에서 되계산한다.
+ */
+function repairWav(file) {
+  try {
+    const size = fs.statSync(file).size;
+    if (size < 64) { try { fs.unlinkSync(file); } catch {} return null; }   // 헤더뿐 — 건질 것이 없다
+
+    const fd = fs.openSync(file, 'r+');
+    try {
+      const head = Buffer.alloc(Math.min(size, 4096));
+      fs.readSync(fd, head, 0, head.length, 0);
+      if (head.toString('latin1', 0, 4) !== 'RIFF' || head.toString('latin1', 8, 12) !== 'WAVE') return null;
+
+      let pos = 12, dataAt = -1, fmt = null;
+      while (pos + 8 <= head.length) {
+        const id = head.toString('latin1', pos, pos + 4);
+        const len = head.readUInt32LE(pos + 4);
+        if (id === 'fmt ') fmt = { channels: head.readUInt16LE(pos + 10), rate: head.readUInt32LE(pos + 12), bits: head.readUInt16LE(pos + 22) };
+        if (id === 'data') { dataAt = pos; break; }
+        pos += 8 + len + (len & 1);
+      }
+      if (dataAt < 0) return null;
+
+      const dataBytes = size - (dataAt + 8);
+      if (dataBytes <= 0) { try { fs.unlinkSync(file); } catch {} return null; }
+
+      const four = Buffer.alloc(4);
+      four.writeUInt32LE(size - 8, 0);      fs.writeSync(fd, four, 0, 4, 4);            // RIFF 크기
+      four.writeUInt32LE(dataBytes, 0);     fs.writeSync(fd, four, 0, 4, dataAt + 4);   // data 크기
+
+      const bytesPerFrame = Math.max(1, (fmt?.channels || 1) * Math.ceil((fmt?.bits || 16) / 8));
+      const seconds = dataBytes / bytesPerFrame / (fmt?.rate || 44100);
+      return seconds >= 0.5 ? { file, seconds } : null;   // 0.5초 미만은 되살릴 값이 없다
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
 function getEngine() {
   if (!audioEngine) {
     audioEngine = new AudioEngine();
     audioEngine.on('event', (m) => { try { mainWindow?.webContents.send('engine:event', m); } catch {} });
     audioEngine.on('log',   (s) => { try { mainWindow?.webContents.send('engine:event', { ev: 'log', msg: String(s) }); } catch {} });
-    audioEngine.on('exit',  (c) => { try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c }); } catch {} });
+    audioEngine.on('exit',  (c, crashed) => {
+      // 죽었는데 녹음 중이었다면 쓰다 만 WAV 가 남아 있다. 헤더를 고쳐 되살릴 수 있게 넘긴다.
+      let take = null;
+      if (crashed && lastRecordFile) take = repairWav(lastRecordFile);
+      lastRecordFile = null;
+      try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c, crashed: !!crashed, take }); } catch {}
+    });
   }
   return audioEngine;
 }
@@ -616,11 +665,16 @@ ipcMain.handle('engine:start', (_e, stems) => {
   const eng = getEngine();
   return { ok: eng.start(Array.isArray(stems) ? stems : []), exe: eng.exePath };
 });
-ipcMain.handle('engine:cmd',  (_e, cmd) => ({ ok: getEngine().send(cmd) }));
+ipcMain.handle('engine:cmd',  (_e, cmd) => {
+  // 정상적으로 멈췄으면 파일은 엔진이 마무리한다 — 되살릴 대상이 아니다
+  if (cmd && cmd.cmd === 'recordStop') lastRecordFile = null;
+  return { ok: getEngine().send(cmd) };
+});
 ipcMain.handle('engine:recordArm', () => {
   const dir = path.join(downloadsDir(), 'takes');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   const file = path.join(dir, `take-${Date.now()}.wav`);
+  lastRecordFile = file;   // 엔진이 죽으면 이 파일을 되살려야 한다
   return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
 });
 // Export MP3: 엔진이 렌더한 임시 WAV → ffmpeg 로 MP3 변환 후 임시 삭제

@@ -34,6 +34,7 @@ class AudioEngine extends EventEmitter {
   start(stemPaths = []) {
     if (this.proc) return true;
     if (!this.exePath) { this.emit('event', { ev: 'error', msg: 'engine exe not found' }); return false; }
+    this.expectExit = false;   // 우리가 끝낸 것과 죽은 것을 구별한다
     try {
       this.proc = spawn(this.exePath, stemPaths, { stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
@@ -51,7 +52,13 @@ class AudioEngine extends EventEmitter {
       if (msg && msg.ev) { this.emit('event', msg); this.emit(msg.ev, msg); }
     });
     this.proc.stderr.on('data', (d) => this.emit('log', String(d)));
-    this.proc.on('exit', (code) => { try { this.rl?.close(); } catch {} this.rl = null; this.proc = null; this.emit('exit', code); });
+    this.proc.on('exit', (code) => {
+      try { this.rl?.close(); } catch {}
+      this.rl = null; this.proc = null;
+      const crashed = !this.expectExit;
+      this.expectExit = false;
+      this.emit('exit', code, crashed);
+    });
     return true;
   }
 
@@ -64,6 +71,7 @@ class AudioEngine extends EventEmitter {
 
   quit() {
     if (!this.proc) return;
+    this.expectExit = true;
     this.send({ cmd: 'quit' });
     setTimeout(() => { if (this.proc) this.proc.kill(); }, 800);
   }
