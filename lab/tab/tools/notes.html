@@ -6,7 +6,9 @@
 import { transcribe, midiToName, TUNINGS, TECH_GLYPH } from './workers/tab-core.js';
 
 const P = new URLSearchParams(location.search);
-const FILE = P.get('f');
+// 실행기(npm run lab)는 q= 로 파일 목록을 준다. f= 는 실행기 이전의 손URL 방식 — 둘 다 받는다.
+const FILE = P.get('f')
+  || decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|')[0];
 const TUNING = P.get('t') || '4';
 const PER_LINE = 16;               // 한 줄에 담을 노트 수
 

@@ -80,6 +80,14 @@ app.whenReady().then(async () => {
     expect('파일 생성    ', fs.existsSync(OUT), true);
   }
 
+  // 버튼도 따로 재야 한다. 한 번은 S 만 이어져 있고 버튼이 죽어 있었는데, 키보드만 재고
+  // 있어서 검사를 통과했다. 그 사이에 한 시간짜리 표기가 조용히 사라졌다.
+  console.log('5-1) 저장 버튼도 같은 일을 하는가');
+  savedText = null;
+  await js("(() => { document.getElementById('save').click(); return true; })()");
+  await new Promise(r => setTimeout(r, 400));
+  expect('버튼 저장 신호', savedText != null, true);
+
   console.log('6) 검출기 결과를 보여주지 않는가');
   const src = fs.readFileSync(PAGE, 'utf8');
   expect('tab-core 안 씀', /tab-core|transcribe\(/.test(src), false);

@@ -22,17 +22,27 @@ export const DEFAULTS = {
   gapMs: 45,       // 같은 음이 이 간격 안에서 끊기면 하나로 잇는다
   rmsGate: 0.0016, // 튜너 실측에서 약하게 튕긴 음이 rms 0.0017 근처였다
   octRatio: 0.55,       // 한 옥타브 아래 성분이 이 비율보다 크면 그쪽이 진짜 기본파
-  onsetThresh: 0.08,    // 로그 에너지 상승분이 국소 평균보다 이만큼 크면 어택 (고정 방식)
-  // 고정 여유값 하나가 두 가지 신호를 함께 감당하지 못한다. 깨끗한 신호에서 0.08 은
-  // 반복 타현을 통째로 버리고, 분리 스템에서 그보다 낮추면 아티팩트가 쏟아진다
-  // (lab/tab/README.md 의 스윕). 그래서 그 자리의 flux 변동폭에 맞춰 여유를 정한다.
+  // 3배음이 2배음의 이 비율보다 작으면 지금 물고 있는 것이 기본파가 아니다 — 한 옥타브 올린다.
+  // 0 으로 두면 옛 동작(아래로 접기만 함)이 된다.
+  octUpRatio: 0.35,
+  // 그리고 지금 자리의 기본파가 2배음보다 약해야 한다 (죽어 있다는 증거).
+  // 두 곡 격자 훑기에서 고른 값 — 샘플1 음정 88%(옛값 89%) · 샘플2 옥타브 위쪽 음 69%(옛값 14%).
+  // octUpRatio 를 0.5 위로 올리면 샘플1 이 83% 로 무너진다.
+  octUpH2: 1.0,
+  onsetThresh: 0.12,    // 로그 에너지 상승분이 국소 평균보다 이만큼 크면 어택 (고정 방식)
   // 온셋용 에너지를 재는 창(ms). 0 이면 피치 창(약 93ms)을 그대로 쓴다.
   //   피치 창은 저음 한 주기를 담으려 길다. 어택은 5~20ms 사건이라 그 창에서는 평균에 묻힌다.
-  //   20ms 로 줄이면 합성 음원(정답이 알려진)에서 62% → 88% 로 오르고 잉여는 그대로다.
-  //   그런데 분리 스템에서는 +3%p 를 얻는 대신 잉여가 26 → 156 으로 뛴다. 스템 쪽 잉여 수치는
-  //   정답지가 검출기에서 파생돼 믿을 수 없지만, 6배를 전부 그 편향으로 돌리기도 어렵다.
-  //   그래서 기본은 옛 동작으로 둔다. 실제 곡의 독립 정답지가 생기면 그때 정한다.
-  onsetWinMs: 0,
+  //   한동안 0 으로 두었는데, 그때 근거로 삼은 "스템에서 잉여가 26 → 156 으로 뛴다" 는
+  //   검출기에서 파생된 정답지가 만든 허수였다. 손으로 찍은 독립 정답지
+  //   (ground-truth/bass_sample.onsets.txt) 로 다시 재니 짧은 창이 놓침과 잉여를 함께 줄인다.
+  //
+  //     실제 곡 (손 정답지 670개 · 밀림 보정 · 허용 50ms)   합성 (정답 정확)
+  //     피치창·0.08  일치 488 · 놓침 182 · 잉여 112  F1 77%   밀림 -39ms · IQR 38ms
+  //     20ms  ·0.12  일치 573 · 놓침  97 · 잉여 117  F1 84%   밀림  -9ms · IQR  7ms
+  //
+  //   밀림도 여기서 같이 사라진다. 93ms 창은 어택을 평균으로 뭉개면서 시각까지 39ms 앞으로
+  //   당기고 있었다. 상수 보정을 넣을 뻔했는데, 원인은 창이었다.
+  onsetWinMs: 20,
   onsetAdaptive: false, // 켜면 아래 두 값을 쓰고 onsetThresh 는 무시한다
   onsetK: 2.5,          // 국소 MAD 의 몇 배를 여유로 둘 것인가
   onsetFloor: 0.012,    // 무음 구간에서 MAD 가 0 이 되면 아무거나 잡히므로 바닥을 둔다
@@ -78,7 +88,7 @@ function decimate2(src) {
 }
 
 /** 한 프레임의 YIN. 반환 { hz, conf } — conf 는 1 - CMND 최소값(0~1). */
-function yinFrame(buf, off, N, sr, minLag, maxLag, rmsGate, scratch, fmin, OCT_RATIO) {
+function yinFrame(buf, off, N, sr, minLag, maxLag, rmsGate, scratch, fmin, OCT_RATIO, fmax, UP_RATIO, UP_H2) {
   const { win, d, cm } = scratch;
   let mean = 0;
   for (let i = 0; i < N; i++) mean += buf[off + i];
@@ -130,6 +140,24 @@ function yinFrame(buf, off, N, sr, minLag, maxLag, rmsGate, scratch, fmin, OCT_R
     const half = goertzel(win, N, hz / 2, sr);
     const full = goertzel(win, N, hz, sr);
     if (half > full * OCT_RATIO) hz /= 2;
+  }
+
+  // 위쪽 옥타브 확인.
+  //   낮은 음이 울리는 중에 그 한 옥타브 위를 치면(디스코 옥타브 주법) 잔향의 주기가
+  //   그대로 남아 있어 YIN 이 낮은 쪽을 문다. 위 검사는 아래로 접기만 해서 이것을 못 되돌린다.
+  //   가르는 표는 3배음이다 — hz 가 진짜 기본파면 3배음이 서 있고,
+  //   진짜가 2·hz 라면 3·hz 는 그것의 1.5배라 배음이 아니어서 비어 있다.
+  //
+  //   조건이 둘인 이유: 3배음만 보면 원래 배음이 약한 음(뮤트 톤 등)까지 올려버린다.
+  //   진짜로 한 옥타브 위가 울리고 있다면 지금 hz 자리의 기본파가 죽어 있어야 한다.
+  //
+  //     실측(bass_sample_2)  진짜 58Hz  h1 1.00 · h2 0.66 · h3 0.43   h3/h2 0.65 · h2/h1 0.66
+  //                          진짜 115Hz h1 0.11 · h2 1.00 · h3 0.00   h3/h2 0.00 · h2/h1 9.0
+  if (hz * 2 <= fmax) {
+    const h1 = goertzel(win, N, hz, sr);
+    const h2 = goertzel(win, N, hz * 2, sr);
+    const h3 = goertzel(win, N, hz * 3, sr);
+    if (h3 < h2 * UP_RATIO && h2 > h1 * UP_H2) hz *= 2;
   }
   return { hz, conf: Math.max(0, 1 - cm[tau]), rms };
 }
@@ -436,14 +464,17 @@ export function assignFrets(notes, tuningId, maxFret, sameStringPenalty, tune) {
   const STRING_DOWN = T.stringDown != null ? T.stringDown : 0.12;   // 굵은 현 쪽으로
   const STRING_UP   = T.stringUp != null ? T.stringUp : 0.32;       // 얇은 현 쪽으로
   const OPEN_BONUS  = 0.25;  // 개방현
-  // 낮은 프렛 선호는 아주 약하게만 준다.
-  //   노트마다 누적되는 값이라 조금만 키워도 포지션 유지 비용을 이겨버리고,
-  //   결과가 매 음 낮은 자리로 흩어진다. 연주자는 한 자리에 머문다.
-  const POS_COST    = 0.02;
-  // 같은 음이면 굵은 현을 택한다 — 베이스는 그쪽이 소리로 유리하다.
-  //   현을 내려갔다 돌아오는 비용(STRING_DOWN + STRING_UP)보다 커야 실제로 내려간다.
-  //   작게 주면(0.18) 공짜일 때만 내려가고, 같은 G3 가 구절마다 1현12 와 2현17 을 오갔다.
-  const LOW_STRING  = T.lowString != null ? T.lowString : 0.50;
+  // 낮은 프렛 선호. 프렛마다 같은 값을 매기면 안 된다 —
+  //   5프렛과 7프렛의 차이는 사람에게 거의 없고, 12프렛과 17프렛의 차이는 크다.
+  //   그래서 편한 자리(COMFY) 까지는 아주 약하게, 그 위로는 가파르게 올린다.
+  //   전에는 프렛당 0.02 하나였고, 그 값이 아래 LOW_STRING(0.50) 에 눌려
+  //   A2 를 A현 12(0.74) 대신 E현 17(0.34) 에 놓았다. 손이 17프렛까지 기어올라갔다.
+  const POS_COST    = T.posCost  != null ? T.posCost  : 0.02;
+  const COMFY       = T.comfy    != null ? T.comfy    : 7;
+  const HIGH_RATE   = T.highRate != null ? T.highRate : 0.10;   // COMFY 초과 프렛당
+  // 같은 음이면 굵은 현을 택한다 — 베이스는 그쪽이 소리로 유리하다. 다만 이것은
+  //   비슷한 자리들 사이의 가름말이지 프렛 높이를 이겨서는 안 된다.
+  const LOW_STRING  = T.lowString != null ? T.lowString : 0.12;
   const HIGH_FRET   = 19;    // 이 위는 실제로 드물다
   const HIGH_PEN    = 1.2;
   // 슬라이드는 한 현 위에서만 성립한다. 금지가 아니라 벌점으로 둔다 —
@@ -466,6 +497,7 @@ export function assignFrets(notes, tuningId, maxFret, sameStringPenalty, tune) {
     for (let i = s; i <= e; i++) {
       const row = cands[i].map(c => {
         const emit = c.fret * POS_COST
+                   + Math.max(0, c.fret - COMFY) * HIGH_RATE
                    - (c.fret === 0 ? OPEN_BONUS : 0)
                    + c.string * LOW_STRING
                    + (c.fret > HIGH_FRET ? HIGH_PEN : 0);
@@ -577,7 +609,8 @@ export function transcribe(mono, sampleRate, options, onProgress) {
   const onsetRms = new Float64Array(frames);
   let lastPct = -1;
   for (let f = 0; f < frames; f++) {
-    const { hz, conf, rms } = yinFrame(sig, f * hop, N, sr, minLag, maxLag, opts.rmsGate, scratch, opts.fmin, opts.octRatio);
+    const { hz, conf, rms } = yinFrame(sig, f * hop, N, sr, minLag, maxLag, opts.rmsGate, scratch,
+                                       opts.fmin, opts.octRatio, opts.fmax, opts.octUpRatio, opts.octUpH2);
     rawMidi[f] = hz > 0 ? hzToMidi(hz) : 0;
     confs[f] = conf;
     rmss[f] = rms || 0;

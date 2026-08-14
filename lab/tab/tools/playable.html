@@ -1,0 +1,189 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>연주 가능성 채점</title>
+<!-- npm run lab -- playable   로 연다
+     ?q=<베이스>
+
+     정답지를 쓰지 않는다. 연주 가능성은 물리 제약이라 (시각, 현, 프렛) 셋만 있으면 판정된다.
+     그래서 순환 측정의 위험이 없다 — 검출기가 무엇을 내놓든 손이 닿는지 아닌지는 따로 정해진다.
+
+     여기서 재는 것이 제품의 실제 값이다. 음정이 맞아도 짚을 수 없으면 쓸 수 없는 악보다. -->
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe } from './workers/tab-core.js';
+
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+
+// ── 손 모형 ──────────────────────────────────────────────
+// 왼손은 연속한 4프렛을 덮는다(검지가 p 면 p..p+3). 개방현은 손을 쓰지 않는다.
+// 자리를 옮기는 데 드는 시간은 "떼고 옮기고 짚기"의 고정분 + 거리분이다.
+const SPAN = 4;
+const SHIFT_FIXED = 0.060;   // 초 — 거리와 무관하게 드는 시간
+const SHIFT_PER   = 0.012;   // 초/프렛
+const needTime = (d) => SHIFT_FIXED + SHIFT_PER * d;
+
+/** 프렛 열 → 자리 이동 목록. 각 이동에 필요한 시간과 실제 주어진 시간을 함께 낸다. */
+function shifts(notes) {
+  const out = [];
+  let lo = null, hi = null, prev = null;
+  for (const n of notes) {
+    if (n.fret == null) continue;
+    if (n.fret === 0) continue;                 // 개방현 — 손은 그대로
+    if (lo == null) { lo = hi = n.fret; prev = n; continue; }
+    if (n.fret >= hi - (SPAN - 1) && n.fret <= lo + (SPAN - 1)) {
+      lo = Math.min(lo, n.fret); hi = Math.max(hi, n.fret);   // 같은 자리 안
+      prev = n; continue;
+    }
+    // 자리를 옮겨야 한다. 새 창의 가장 가까운 끝까지의 거리를 옮긴 거리로 본다.
+    const dist = n.fret > hi ? n.fret - hi : lo - n.fret;
+    out.push({ at: n.start, dist, gap: n.start - prev.start, from: `${lo}-${hi}`, to: n.fret });
+    lo = hi = n.fret; prev = n;
+  }
+  return out;
+}
+
+try {
+  const audio = await new AudioContext().decodeAudioData(await (await fetch(Q[0])).arrayBuffer());
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+
+  const notes = transcribe(mono, audio.sampleRate, { tuning: '4' }).notes;
+  const dur = mono.length / audio.sampleRate;
+  const placed = notes.filter(n => n.fret != null);
+  say(`노트 ${notes.length}개 (배치됨 ${placed.length}) · ${dur.toFixed(1)}초\n`);
+
+  // ── 1. 자리 이동이 시간 안에 되는가 ─────────────────────
+  const sh = shifts(placed);
+  const bad = sh.filter(s => s.gap < needTime(s.dist));
+  const tight = sh.filter(s => s.gap >= needTime(s.dist) && s.gap < needTime(s.dist) * 2);
+  say('1) 자리 이동 — 손이 그 시간 안에 갈 수 있는가');
+  say(`   이동 ${sh.length}회 (분당 ${(sh.length / dur * 60).toFixed(0)}회)`);
+  say(`   불가 ${bad.length}회 · 빠듯 ${tight.length}회 · 여유 ${sh.length - bad.length - tight.length}회`);
+  if (sh.length) say(`   불가 비율 ${(100 * bad.length / sh.length).toFixed(1)}%`);
+
+  say('\n   가장 심한 12개 (시각 · 옮긴 거리 · 주어진 시간 / 필요한 시간)');
+  for (const s of [...bad].sort((a, b) => (a.gap - needTime(a.dist)) - (b.gap - needTime(b.dist))).slice(0, 12)) {
+    say(`     ${s.at.toFixed(2)}s  ${String(s.from).padStart(5)} -> ${String(s.to).padStart(2)}프렛`
+      + `  ${String(s.dist).padStart(2)}칸  ${(s.gap * 1000).toFixed(0).padStart(4)}ms / ${(needTime(s.dist) * 1000).toFixed(0)}ms`);
+  }
+
+  // ── 2. 손이 얼마나 자주 옮겨 다니는가 ───────────────────
+  // 연주자는 한 자리에 머문다. 이동이 잦으면 음정이 맞아도 사람 악보가 아니다.
+  const gaps = sh.map(s => s.gap).sort((a, b) => a - b);
+  if (gaps.length) {
+    say(`\n2) 이동 사이 간격 중앙 ${gaps[gaps.length >> 1].toFixed(2)}초 `
+      + `(짧을수록 손이 쉴 틈 없이 옮겨 다닌다는 뜻)`);
+  }
+
+  // ── 3. 같은 음을 매번 같은 자리에서 짚는가 ──────────────
+  // 사람은 한 곡 안에서 같은 음을 대체로 같은 자리로 짚는다. 자리가 흩어지면
+  // 읽는 사람이 매번 손을 다시 찾아야 한다.
+  const byMidi = new Map();
+  for (const n of placed) {
+    if (!byMidi.has(n.midi)) byMidi.set(n.midi, new Map());
+    const k = `${n.string}:${n.fret}`;
+    const m = byMidi.get(n.midi);
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  let split = 0, splitNotes = 0;
+  for (const [, m] of byMidi) if (m.size > 1) { split++; splitNotes += [...m.values()].reduce((a, b) => a + b, 0); }
+  say(`\n3) 같은 음이 여러 자리로 흩어진 음정 ${split} / ${byMidi.size} (해당 노트 ${splitNotes}개)`);
+  const worst = [...byMidi.entries()].filter(([, m]) => m.size > 1)
+    .sort((a, b) => b[1].size - a[1].size).slice(0, 5);
+  for (const [midi, m] of worst) {
+    say(`     midi ${midi}: ` + [...m.entries()].map(([k, c]) => `${k}x${c}`).join(' · '));
+  }
+
+  // ── 4. 프렛 분포 ────────────────────────────────────────
+  // 베이스는 12프렛 위가 드물다. 거기에 몰려 있으면 대개 옥타브 오검출이다.
+  const hi12 = placed.filter(n => n.fret > 12).length;
+  const hi17 = placed.filter(n => n.fret > 17).length;
+  say(`\n4) 12프렛 위 ${hi12} (${(100 * hi12 / placed.length).toFixed(1)}%) · `
+    + `17프렛 위 ${hi17} (${(100 * hi17 / placed.length).toFixed(1)}%)`);
+  const hist = new Array(23).fill(0);
+  for (const n of placed) hist[Math.min(22, n.fret)]++;
+  say('   ' + hist.map((c, f) => c ? `${f}:${c}` : null).filter(Boolean).join(' '));
+
+  // ── 5. 고프렛이 옥타브 오검출 탓인가 ────────────────────
+  // 탭 악보 정답지는 시각은 못 믿어도 음정 라벨은 손으로 고친 것이라 믿을 수 있다.
+  // 고프렛 구간이 옥타브 오검출에서 온 것이면 배치를 고쳐도 소용없다 — 검출을 고쳐야 한다.
+  if (Q[1]) {
+    const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const gt = [];
+    const txt = await (await fetch(Q[1])).text();
+    let pend = null;
+    for (const ln of txt.split(/\r?\n/)) {
+      if (/^\s*#/.test(ln) || !ln.trim()) continue;
+      const tok = ln.trim().split(/\s+/);
+      if (tok.every(t => /^\d+\.\d+$/.test(t))) { pend = tok.map(Number); continue; }
+      if (pend && tok.every(t => /^[A-G]#?-?\d+$/.test(t)) && tok.length === pend.length) {
+        for (let i = 0; i < tok.length; i++) {
+          const m = /^([A-G]#?)(-?\d+)$/.exec(tok[i]);
+          gt.push({ start: pend[i], midi: (Number(m[2]) + 1) * 12 + NN.indexOf(m[1]) });
+        }
+        pend = null;
+      }
+    }
+    // 정답지 시각은 100초 위에서 백의 자리가 잘려 있다. 순서가 어긋난 곳부터는 버린다.
+    let cut = gt.length;
+    for (let i = 1; i < gt.length; i++) if (gt[i].start < gt[i - 1].start) { cut = i; break; }
+    const g = gt.slice(0, cut);
+    say(`\n5) 옥타브 오검출과 고프렛의 관계 (정답지 앞 ${g.length}음 · 시각이 성한 구간만)`);
+
+    let hiOct = 0, hiOk = 0, loOct = 0, loOk = 0;
+    for (const n of placed) {
+      if (n.start > g[g.length - 1].start) break;
+      let bi = -1, bd = 0.3;
+      for (let i = 0; i < g.length; i++) {
+        const d = Math.abs(g[i].start - n.start);
+        if (d < bd) { bd = d; bi = i; }
+      }
+      if (bi < 0) continue;
+      const oct = n.midi !== g[bi].midi && ((n.midi - g[bi].midi) % 12 === 0);
+      if (n.fret > 12) oct ? hiOct++ : hiOk++; else oct ? loOct++ : loOk++;
+    }
+    say(`   12프렛 위 ${hiOct + hiOk}음 중 옥타브 오검출 ${hiOct} (${(100 * hiOct / Math.max(1, hiOct + hiOk)).toFixed(0)}%)`);
+    say(`   12프렛 아래 ${loOct + loOk}음 중 옥타브 오검출 ${loOct} (${(100 * loOct / Math.max(1, loOct + loOk)).toFixed(0)}%)`);
+    say('   위쪽 비율이 아래쪽보다 훨씬 높으면 고프렛은 배치가 아니라 검출 탓이다.');
+  }
+
+  // ── 6. 가중치 훑기 ──────────────────────────────────────
+  // 손으로 고르면 눈으로 판단하는 것이고, 그러면 지금까지 세 번 한 실수를 또 한다.
+  // 네 값을 한 줄에 놓고 본다. 이동 불가는 0 이어야 하고 나머지는 작을수록 좋다.
+  say('\n6) 가중치 훑기  (불가 이동 · 흩어진 음정/노트 · 12프렛위% · 이동수)');
+  say('   lowString  highRate      불가   흩어짐        12프렛위   이동');
+  const measure = (tune) => {
+    const p = transcribe(mono, audio.sampleRate, { tuning: '4', tune }).notes.filter(n => n.fret != null);
+    const s = shifts(p);
+    const bm = new Map();
+    for (const n of p) {
+      if (!bm.has(n.midi)) bm.set(n.midi, new Set());
+      bm.get(n.midi).add(`${n.string}:${n.fret}`);
+    }
+    let sp = 0, spn = 0;
+    for (const [midi, set] of bm) if (set.size > 1) { sp++; spn += p.filter(n => n.midi === midi).length; }
+    return {
+      bad: s.filter(x => x.gap < needTime(x.dist)).length,
+      split: sp, splitN: spn, shifts: s.length,
+      hi: 100 * p.filter(n => n.fret > 12).length / p.length,
+    };
+  };
+  for (const ls of [0.50, 0.12]) {
+    for (const hr of [0, 0.10, 0.20]) {
+      const m = measure({ lowString: ls, highRate: hr });
+      say(`   ${ls.toFixed(2).padStart(6)}  ${hr.toFixed(2).padStart(7)}   ${String(m.bad).padStart(6)}`
+        + `   ${String(m.split).padStart(3)}/${String(m.splitN).padStart(3)}`
+        + `   ${m.hi.toFixed(1).padStart(9)}%   ${String(m.shifts).padStart(4)}`
+        + (ls === 0.50 && hr === 0 ? '   <- 옛 기본값' : ''));
+    }
+  }
+
+} catch (e) {
+  say('실패: ' + (e && e.stack || e));
+}
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>

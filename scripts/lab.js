@@ -80,8 +80,9 @@ app.whenReady().then(async () => {
   process.exit(rr.status == null ? 1 : rr.status);
 }
 
-if (!want || (!htmlTools.includes(want) && want !== 'synth-score')) {
-  console.log('도구:', ['synth', 'synth-score', 'annotate', ...htmlTools].join(' · '));
+const EXTRA = ['synth-score', 'onsets-synth'];
+if (!want || (!htmlTools.includes(want) && !EXTRA.includes(want))) {
+  console.log('도구:', ['synth', 'annotate', ...EXTRA, ...htmlTools].join(' · '));
   console.log('예)  npm run lab -- synth-score\n');
   const b = manifest.baseline.yin;
   console.log('실제 곡 기준선 (정답지의 시각은 검출기에서 파생 — 음정만 유효):');
@@ -90,10 +91,17 @@ if (!want || (!htmlTools.includes(want) && want !== 'synth-score')) {
 }
 
 // ── 입력 고르기 ─────────────────────────────────────────
-const useSynth = want === 'synth-score';
-const tool = useSynth ? 'score' : want;
-const bass = useSynth ? path.join(SYNTH, 'bass.wav') : path.join(ROOT, sample.audio.bass);
-const gt = useSynth ? path.join(SYNTH, 'bass.gt.txt') : path.join(LAB, sample.groundTruth);
+const useSynth = want === 'synth-score' || want === 'onsets-synth';
+const tool = want === 'synth-score' ? 'score' : want === 'onsets-synth' ? 'onsets' : want;
+// 두 번째 인자로 다른 오디오를 줄 수 있다 —  npm run lab -- playable bass_sample_2.wav
+// 한 곡에서 고른 값이 그 곡의 습관인지 아닌지는 다른 곡에 대고 재봐야만 안다.
+const override = process.argv[3] ? path.resolve(process.argv[3]) : null;
+const bass = override || (useSynth ? path.join(SYNTH, 'bass.wav') : path.join(ROOT, sample.audio.bass));
+// onsets 도구만 다른 정답지를 본다 — 손으로 찍은 온셋이라 시각을 믿을 수 있는 유일한 것이다.
+// 나머지 도구가 쓰는 탭 악보는 검출기에서 파생돼 음정만 유효하다 (README 를 보라).
+const gt = useSynth ? path.join(SYNTH, 'bass.gt.txt')
+  : tool === 'onsets' ? path.join(LAB, 'ground-truth', 'bass_sample.onsets.txt')
+  : path.join(LAB, sample.groundTruth);
 
 const lacking = [[bass, '베이스 오디오'], [gt, '정답지']].filter(([p]) => !fs.existsSync(p));
 if (lacking.length) {
@@ -110,9 +118,16 @@ const stem = (kind) => {
   return fs.existsSync(f) ? f : null;
 };
 
-const parts = tool === 'score'
-  ? [bass, gt, stem('drums'), stem('other'), stem('vocals')].filter(Boolean)
-  : [bass, stem('drums'), stem('other'), stem('vocals')].filter(Boolean);
+const parts = tool === 'octscore'
+  ? [bass, path.join(LAB, 'ground-truth',
+      path.basename(bass).replace(/\.wav$/i, '') + '.events.txt')]
+  : tool === 'playable'
+  ? [bass, gt]                       // 판정은 물리로 한다. 정답지는 마지막 절(옥타브 대조)에만 쓴다
+  : tool === 'onsets'
+  ? [bass, gt]                       // 시각만 본다 — 박자 격자도 스템도 쓰지 않는다
+  : tool === 'score'
+    ? [bass, gt, stem('drums'), stem('other'), stem('vocals')].filter(Boolean)
+    : [bass, stem('drums'), stem('other'), stem('vocals')].filter(Boolean);
 
 console.log(`도구 ${want} · 입력 ${parts.length}개`);
 if (useSynth) console.log('  합성 음원 — 시각·음정이 검출기와 무관하다');
@@ -141,7 +156,7 @@ app.whenReady().then(async () => {
     if (done) return;
     try { console.log(await win.webContents.executeJavaScript("document.getElementById('out')?.textContent || ''")); } catch {}
     app.exit(0);
-  }, 180000);
+  }, 900000);   // 훑기 도구는 transcribe 를 열 번 넘게 돌린다 — 3분으로는 중간에 잘린다
 });
 `, 'utf8');
 

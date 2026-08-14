@@ -1,0 +1,133 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>온셋 채점 (손 정답지)</title>
+<!-- npm run lab -- onsets  로 연다
+     ?q=<베이스>|<손 온셋 정답지>|<드럼>|<기타>|<보컬>
+
+     기존 score.html 과 다른 점: 정답지가 검출기에서 파생되지 않은 손 표기라서
+     놓침·잉여·타이밍을 처음으로 실제로 잴 수 있다. 대신 음정은 없다 — 시각만 본다. -->
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe } from './workers/tab-core.js';
+
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const [WAV, GT] = Q;
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+
+/** 손 표기 파일 — 숫자만 있는 줄이 전부다 */
+function parseOnsets(text) {
+  const out = [];
+  for (const ln of text.split(/\r?\n/)) {
+    if (!ln.trim() || /^\s*#/.test(ln)) continue;
+    for (const t of ln.trim().split(/\s+/)) {
+      const v = Number(t);
+      if (Number.isFinite(v)) out.push(v);
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * 시각만 보는 1:1 짝짓기. 가까운 짝부터 확정한다 — 하나의 검출이 여러 정답을 덮지 못하게
+ * 해야 놓침과 잉여가 각각 제 뜻을 갖는다.
+ */
+function match(gt, det, tol) {
+  const cand = [];
+  let j = 0;
+  for (let i = 0; i < gt.length; i++) {
+    while (j < det.length && det[j] < gt[i] - tol) j++;
+    for (let k = j; k < det.length && det[k] <= gt[i] + tol; k++) {
+      cand.push([Math.abs(det[k] - gt[i]), i, k]);
+    }
+  }
+  cand.sort((a, b) => a[0] - b[0]);
+  const gUsed = new Uint8Array(gt.length), dUsed = new Uint8Array(det.length);
+  const diffs = [];
+  for (const [, i, k] of cand) {
+    if (gUsed[i] || dUsed[k]) continue;
+    gUsed[i] = dUsed[k] = 1;
+    diffs.push(det[k] - gt[i]);
+  }
+  return { hit: diffs.length, miss: gt.length - diffs.length, extra: det.length - diffs.length, diffs };
+}
+
+const med = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+const iqr = (a) => { if (a.length < 4) return 0; const s = [...a].sort((x, y) => x - y);
+                     return s[(s.length * 3) >> 2] - s[s.length >> 2]; };
+
+try {
+  const gt = parseOnsets(await (await fetch(GT)).text());
+  say(`손 정답지 ${gt.length}개 · ${gt[0].toFixed(2)}s ~ ${gt[gt.length - 1].toFixed(2)}s`);
+
+  const audio = await new AudioContext().decodeAudioData(await (await fetch(WAV)).arrayBuffer());
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+  const sr = audio.sampleRate;
+  say(`오디오 ${(mono.length / sr).toFixed(1)}초 · ${sr}Hz\n`);
+
+  const run = (opts) => transcribe(mono, sr, { tuning: '4', ...opts }).notes.map(n => n.start);
+
+  // ── 1. 기본값이 지금 어디에 있나 ────────────────────────
+  const base = run({});
+  say('허용오차별 — 기본값 (onsetWinMs 0 · onsetThresh 기본)');
+  say('  허용   검출  일치  놓침  잉여   재현율  정밀도    F1');
+  for (const tol of [0.05, 0.08, 0.12, 0.20]) {
+    const m = match(gt, base, tol);
+    const rec = m.hit / gt.length, pre = m.hit / base.length;
+    const f1 = rec + pre ? 2 * rec * pre / (rec + pre) : 0;
+    say(`  ${String(Math.round(tol * 1000)).padStart(3)}ms  ${String(base.length).padStart(4)}`
+      + `  ${String(m.hit).padStart(4)}  ${String(m.miss).padStart(4)}  ${String(m.extra).padStart(4)}`
+      + `   ${(rec * 100).toFixed(1).padStart(5)}%  ${(pre * 100).toFixed(1).padStart(5)}%  ${(f1 * 100).toFixed(1).padStart(5)}%`);
+  }
+  {
+    const m = match(gt, base, 0.12);
+    say(`  검출 - 정답 시간차: 중앙 ${med(m.diffs) >= 0 ? '+' : ''}${med(m.diffs).toFixed(3)}s · IQR폭 ${iqr(m.diffs).toFixed(3)}s`);
+  }
+
+  // ── 2. 보류해 둔 결정: 짧은 온셋 창을 켤 것인가 ──────────
+  // 합성 음원에서는 20ms 가 62% → 88% 였다. 스템에서는 잉여가 26 → 156 으로 뛰어 보였지만,
+  // 그 "잉여" 는 검출기에서 파생된 정답지가 만든 허수였다. 이제 진짜로 잰다.
+  // 검출기와 손 표기 사이에는 상수만큼의 밀림이 있다(검출기가 이르다). 상수는 빼면 그만이므로,
+  // 설정끼리 견줄 때는 각 설정의 중앙 시간차를 빼고 다시 짝지어 잰다. 그러지 않으면
+  // "밀림이 얼마나 큰가" 가 "온셋을 얼마나 잘 찾는가" 를 가려 버린다.
+  const evalAt = (det, tol) => {
+    const rough = match(gt, det, 0.15);
+    const off = med(rough.diffs);
+    const m = match(gt, det.map(t => t - off), tol);
+    const rec = m.hit / gt.length, pre = det.length ? m.hit / det.length : 0;
+    return { ...m, off, f1: rec + pre ? 2 * rec * pre / (rec + pre) : 0 };
+  };
+
+  const THRESHES = [0.02, 0.08, 0.12, 0.18];
+  for (const TOL of [0.05, 0.08]) {
+    say(`\n창 x 문턱 훑기 — 밀림 보정 후 · 허용오차 ${TOL * 1000}ms (일치/놓침/잉여 F1)`);
+    say('  창\\문턱 ' + THRESHES.map(t => String(t).padStart(16)).join(''));
+    for (const w of [0, 20, 46]) {
+      let row = '  ' + (w === 0 ? '피치창' : `${w}ms`).padEnd(7);
+      for (const th of THRESHES) {
+        const e = evalAt(run({ onsetWinMs: w, onsetThresh: th }), TOL);
+        row += `${e.hit}/${e.miss}/${e.extra} ${(e.f1 * 100).toFixed(0)}%`.padStart(16);
+      }
+      say(row);
+    }
+  }
+  say('  칸 = 일치/놓침/잉여 F1');
+
+  // 이긴 설정의 밀림과 흔들림을 따로 적어 둔다 — 밀림은 상수 보정으로 없앨 수 있고,
+  // 흔들림은 못 없앤다. 제품에서 고칠 값이 어느 쪽인지 여기서 갈린다.
+  say('\n설정별 밀림(중앙 시간차)과 흔들림(IQR폭)');
+  for (const [w, th] of [[0, 0.08], [20, 0.08], [20, 0.12], [20, 0.18]]) {
+    const det = run({ onsetWinMs: w, onsetThresh: th });
+    const m = match(gt, det, 0.15);
+    say(`  창 ${String(w === 0 ? '피치' : w).padStart(4)} · 문턱 ${String(th).padEnd(5)}`
+      + ` 밀림 ${med(m.diffs) >= 0 ? '+' : ''}${med(m.diffs).toFixed(3)}s · IQR폭 ${iqr(m.diffs).toFixed(3)}s`);
+  }
+
+} catch (e) {
+  say('실패: ' + (e && e.stack || e));
+}
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>

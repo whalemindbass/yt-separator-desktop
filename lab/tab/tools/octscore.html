@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>옥타브 주법 채점</title>
+<!-- npm run lab -- octscore <wav>
+     ?q=<베이스>|<사건 정답지>
+
+     정답지는 tools/octave.py 가 배음렬 점수로 뽑은 것이다 — YIN 과 방식이 달라 독립이고,
+     생성 시 무작위 40개를 스펙트럼으로 되짚어 39/40 이 맞는 것을 확인했다.
+
+     여기서 보는 것은 하나다: 디스코 옥타브 주법의 "위쪽 음"을 잡는가.
+     그 음은 길이 중앙 90ms 라, 놓치는 것과 한 옥타브 아래로 접는 것을 나눠 세야 한다. -->
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe } from './workers/tab-core.js';
+
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+
+const TOL = 0.10;   // 이 곡은 8분음표가 250ms 다. 100ms 면 이웃 음과 안 섞인다.
+
+function parseEvents(text) {
+  const out = [];
+  for (const ln of text.split(/\r?\n/)) {
+    if (!ln.trim() || ln.startsWith('#')) continue;
+    const [t, m, d] = ln.trim().split(/\s+/).map(Number);
+    if (Number.isFinite(t) && Number.isFinite(m)) out.push({ start: t, midi: m, dur: d });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** 시각으로 1:1 짝짓고 음정은 따로 본다 — 가까운 짝부터 확정한다. */
+function pair(gt, det, tol) {
+  const cand = [];
+  let j = 0;
+  for (let i = 0; i < gt.length; i++) {
+    while (j < det.length && det[j].start < gt[i].start - tol) j++;
+    for (let k = j; k < det.length && det[k].start <= gt[i].start + tol; k++) {
+      cand.push([Math.abs(det[k].start - gt[i].start), i, k]);
+    }
+  }
+  cand.sort((a, b) => a[0] - b[0]);
+  const gU = new Uint8Array(gt.length), dU = new Uint8Array(det.length);
+  const pairs = [];
+  for (const [, i, k] of cand) {
+    if (gU[i] || dU[k]) continue;
+    gU[i] = dU[k] = 1;
+    pairs.push([i, k]);
+  }
+  return { pairs, gU, dU };
+}
+
+try {
+  const audio = await new AudioContext().decodeAudioData(await (await fetch(Q[0])).arrayBuffer());
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+
+  const gt = parseEvents(await (await fetch(Q[1])).text());
+  // 앞 음보다 정확히 한 옥타브 위인 음 = 옥타브 주법의 "위쪽 음"
+  const isUp = gt.map((g, i) => i > 0 && g.midi - gt[i - 1].midi === 12);
+  say(`정답지 ${gt.length}음 · 그중 옥타브 위쪽 음 ${isUp.filter(Boolean).length}개`);
+
+  const report = (label, det) => {
+    const { pairs, gU, dU } = pair(gt, det, TOL);
+    const bucket = (want) => {
+      let hit = 0, octLo = 0, octHi = 0, other = 0, miss = 0, total = 0;
+      for (let i = 0; i < gt.length; i++) {
+        if (isUp[i] !== want) continue;
+        total++;
+        if (!gU[i]) { miss++; continue; }
+        const k = pairs.find(p => p[0] === i)[1];
+        const d = det[k].midi - gt[i].midi;
+        if (d === 0) hit++;
+        else if (d === -12) octLo++;
+        else if (d === 12) octHi++;
+        else other++;
+      }
+      return { hit, octLo, octHi, other, miss, total };
+    };
+    const fmt = (b) => `${String(b.hit).padStart(3)}/${b.total}`
+      + ` (${(100 * b.hit / Math.max(1, b.total)).toFixed(0).padStart(3)}%)`
+      + ` · 아래로접힘 ${String(b.octLo).padStart(3)} · 위로 ${String(b.octHi).padStart(2)}`
+      + ` · 딴음 ${String(b.other).padStart(3)} · 놓침 ${String(b.miss).padStart(3)}`;
+    const up = bucket(true), rest = bucket(false);
+    say(`\n${label}   검출 ${det.length} · 잉여 ${det.length - pairs.length}`);
+    say(`  옥타브 위쪽 음  ${fmt(up)}`);
+    say(`  나머지 음      ${fmt(rest)}`);
+    return up;
+  };
+
+  report('[현재값]', transcribe(mono, audio.sampleRate, { tuning: '4' }).notes);
+
+  // 위로 올리는 문턱 훑기. 0 이면 옛 동작(아래로 접기만) 이다.
+  say('\noctUpRatio 훑기 — 3배음이 2배음의 이 비율보다 작으면 한 옥타브 올린다');
+  for (const [r, h2] of [[0.25,1.0],[0.25,1.1],[0.25,1.2],[0.35,1.0],[0.35,1.2],[0.5,1.2],[0.7,1.2]]) {
+    report(`  up ${r} h2 ${h2}`, transcribe(mono, audio.sampleRate, { tuning: '4', octUpRatio: r, octUpH2: h2 }).notes);
+  }
+
+} catch (e) {
+  say('실패: ' + (e && e.stack || e));
+}
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>

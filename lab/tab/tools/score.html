@@ -141,6 +141,18 @@ try {
   // 막다른 길 표에는 "임계값을 낮추면 얻는 음 1개당 잔음 6개"로 적혀 있다. 그 판정은
   // 검출기에서 파생된 정답지로 잰 것이라 새 검출이 무조건 잉여로 보였다 — 다시 재야 한다.
   // 정답지가 독립적일 때만 이 표가 뜻을 갖는다.
+  // 위쪽 옥타브 보정 스윕. 이 값은 다른 곡(디스코 옥타브 주법)을 위해 넣은 것이라,
+  // 이 곡의 음정을 깎지 않는지 반드시 같이 봐야 한다. 한 곡에서 고른 값은 그 곡의 습관일 수 있다.
+  say('');
+  say('# octUpRatio 스윕 — 옥타브 오류가 늘지 않는지');
+  for (const [r, h2] of [[0.25,1.0],[0.25,1.1],[0.25,1.2],[0.35,1.0],[0.35,1.2],[0.5,1.2],[0.7,1.2]]) {
+    const det = transcribe(mono, sr, { tuning: '4', octUpRatio: r, octUpH2: h2 }).notes;
+    const s = score(gt, det);
+    say(`#   up ${String(r).padEnd(5)} h2 ${String(h2).padEnd(4)} 일치 ${String(s.hit).padStart(3)} (${String(s.pct).padStart(2)}%)`
+      + ` · 음정오류 ${String(s.pitchWrong).padStart(3)} · 놓침 ${String(s.miss).padStart(2)}`
+      + ` · 옥타브무시 ${score(gt, det, 0.25, true).pct}%`);
+  }
+
   say('');
   say('# 온셋 임계값 스윕 — 얻는 음 대비 잉여');
   const base = score(gt, transcribe(mono, sr, { tuning: '4' }).notes);

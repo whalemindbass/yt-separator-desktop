@@ -204,6 +204,7 @@ function stop() {
   draw();
 }
 el('play').onclick = () => playing ? stop() : play();
+el('save').onclick = () => save();   // 버튼이 죽어 있으면 한 시간짜리 표기가 조용히 사라진다
 
 // ── 표기 ────────────────────────────────────────────────
 const sortMarks = () => { const cur = marks[sel]; marks.sort((a, b) => a - b); sel = marks.indexOf(cur); };

@@ -17,20 +17,122 @@
       "stems": {
         "where": "%APPDATA%/yt-separator-desktop/downloads/stems/",
         "prefix": "버스커 버스커 - 첫사랑 [가사Lyrics]-8b7046",
-        "need": ["drums", "other", "vocals"],
+        "need": [
+          "drums",
+          "other",
+          "vocals"
+        ],
         "why": "박자 검출은 드럼 스템을 쓰고, 실패하면 나머지를 합쳐 믹스를 만든다"
+      }
+    },
+    {
+      "id": "bass_sample_2",
+      "title": "디스코 옥타브 주법 곡",
+      "seconds": 240.5,
+      "tuning": "E A D G",
+      "groundTruth": "ground-truth/bass_sample_2.events.txt",
+      "notes": 787,
+      "audio": {
+        "bass": "bass_sample_2.wav",
+        "where": "저장소 루트 (gitignore 됨)",
+        "bytes": 42426412
+      },
+      "why": "근음과 그 한 옥타브 위를 번갈아 치는 곡. 옥타브 위쪽 음이 길이 중앙 90ms 라, 낮은 음의 잔향에 묻혀 YIN 이 아래로 접는 것이 여기서만 드러난다.",
+      "groundTruthMadeBy": "tools/octave.py — 배음렬 점수. YIN 과 방식이 달라 독립이고, 생성 시 무작위 40개를 스펙트럼으로 되짚어 39/40 확인.",
+      "baseline": {
+        "howToReproduce": "npm run lab -- octscore bass_sample_2.wav",
+        "octaveUpNotes": 226,
+        "yin": {
+          "octaveUpHit": 155,
+          "octaveUpPct": 69,
+          "restHit": 495,
+          "restPct": 88
+        },
+        "before": {
+          "note": "octUpRatio 0 (위로 올리는 길이 없던 시절)",
+          "octaveUpHit": 32,
+          "octaveUpPct": 14,
+          "restPct": 85
+        }
       }
     }
   ],
   "baseline": {
     "measuredAt": "2026-08-13",
     "howToReproduce": "npm run lab -- score",
-    "yin": { "detected": 600, "hit": 529, "pct": 86, "pitchWrong": 45, "miss": 43, "extra": 26, "octaveLenientPct": 88 },
-    "basicPitch": { "detected": 507, "hit": 22, "pct": 4, "octaveLenientPct": 6 },
-    "comment": "이 숫자를 넘지 못하면 바꾼 것이 개선이 아니다. 바꿀 때마다 같은 명령으로 다시 잰다."
+    "yin": {
+      "detected": 693,
+      "hit": 543,
+      "pct": 88,
+      "pitchWrong": 41,
+      "miss": 33,
+      "extra": 109,
+      "octaveLenientPct": 90
+    },
+    "basicPitch": {
+      "detected": 507,
+      "hit": 22,
+      "pct": 4,
+      "octaveLenientPct": 6
+    },
+    "extraIsMeaningless": "이 정답지에 대한 '잉여' 는 읽지 마라. 정답지가 옛 검출기 출력에서 파생돼 그때의 잉여를 0 으로 고정했다. 새로 찾은 음은 옳든 그르든 전부 잉여로 세어진다. 진짜 잉여는 handOnsets 기준으로 잰다.",
+    "onsets": {
+      "howToReproduce": "npm run lab -- onsets",
+      "against": "handOnsets 670개 · 밀림 보정 후 · 허용오차 50ms",
+      "yin": {
+        "hit": 573,
+        "miss": 97,
+        "extra": 117,
+        "f1": 84
+      },
+      "before": {
+        "note": "onsetWinMs 0 · onsetThresh 0.08 이던 시절",
+        "hit": 488,
+        "miss": 182,
+        "extra": 112,
+        "f1": 77
+      }
+    },
+    "comment": "이 숫자를 넘지 못하면 바꾼 것이 개선이 아니다. 바꿀 때마다 같은 명령으로 다시 잰다.",
+    "playable": {
+      "howToReproduce": "npm run lab -- playable",
+      "note": "정답지를 쓰지 않는다. 연주 가능성은 물리라 (시각·현·프렛) 만으로 판정된다.",
+      "impossibleShifts": 2,
+      "scatteredPitches": "9/24",
+      "aboveFret12Pct": 2.6,
+      "handShifts": 31,
+      "before": {
+        "note": "lowString 0.50 · 프렛높이 꺾임점 없음",
+        "impossibleShifts": 0,
+        "scatteredPitches": "11/23",
+        "aboveFret12Pct": 8.4,
+        "handShifts": 70
+      }
+    }
+  },
+  "handOnsets": {
+    "file": "ground-truth/bass_sample.onsets.txt",
+    "marks": 670,
+    "madeAt": "2026-08-13",
+    "how": "npm run lab -- annotate — 확대한 파형을 보고 어택 자리를 손으로 찍었다. 도구는 tab-core 를 import 하지 않는다.",
+    "why": "탭 악보 정답지의 시각은 검출기에서 파생돼 온셋·타이밍·헛노트를 잴 수 없다. 이 파일은 그것과 무관하게 만들어진 유일한 실제 곡 기준이다. 대신 음정은 없다 — 시각만 적혀 있다.",
+    "validated": [
+      "역행 0 · 완전중복 0 · 30초 구간마다 초당 2.0~3.9개로 고르다 (앞부분만 하다 만 것이 아니다)",
+      "검출기 덤프와 어긋난 부호가 반대다 — 파생이라면 나올 수 없는 모양이다",
+      "오디오의 실제 에너지 상승 지점보다 약 50ms 늦다. 상수이므로 채점할 때 밀림 보정으로 걷어낸다.",
+      "확인 도구: lab/tab/tools/onsetcheck.py · align.py"
+    ],
+    "howToScore": "npm run lab -- onsets  (정답이 정확한 합성 음원 대조는 onsets-synth)"
   },
   "resolvedDiscrepancy": {
-    "documented": { "detected": 580, "hit": 537, "pct": 87, "pitchWrong": 41, "miss": 37, "extra": 0 },
+    "documented": {
+      "detected": 580,
+      "hit": 537,
+      "pct": 87,
+      "pitchWrong": 41,
+      "miss": 37,
+      "extra": 0
+    },
     "where": "ARCHITECTURE.md 의 '베이스 TAB — 보류' 절",
     "answer": "코드를 돌린 값이 아니라 저장된 덤프 파일(ground-truth/bass_sample.raw-dump.txt, 580음)을 채점한 값이었다. 그 파일을 지금 채점하면 일치 539(87%) · 음정오류 41 · 놓침 37 · 잉여 0 으로 문서와 맞는다. 코드(tab-core.js)는 그때와 바이트 단위로 동일하다.",
     "checkedAndCleared": "정답지의 시각 복원(백의 자리 잘림)은 정확하다 — 617음, 복원 범위 0.7~207.8s, 100 을 더한 지점 2곳(100초·200초 경계), 역행 0."
