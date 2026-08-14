@@ -861,6 +861,28 @@ function wireHeroResize() {
   });
 }
 
+/**
+ * 영상 접기/펴기.
+ *
+ * 끌어서 정한 높이는 인라인 style 로 들어간다. 인라인은 클래스 선택자를 언제나 이기므로
+ * `.video-collapsed { height: 28px }` 가 먹지 않는다 — 영상만 사라지고 영역은 그대로 남았다.
+ * 접을 때 인라인 값을 비워 CSS 에 넘기고, 펼 때 기억해 둔 높이로 되돌린다.
+ */
+function setVideoCollapsed(on) {
+  const hero = document.getElementById('daw-hero');
+  if (!hero) return;
+  hero.classList.toggle('video-collapsed', on);
+  if (on) {
+    hero.style.height = '';
+  } else {
+    let saved = 0;
+    try { saved = Number(localStorage.getItem(HERO_H_KEY)) || 0; } catch {}
+    if (saved > 0) setHeroHeight(saved, false);   // 없으면 CSS 기본값(46vh) 그대로
+  }
+  syncHeroState();
+  layout();
+}
+
 function syncHeroState() {   // hero 클래스에 도구 오픈 여부 반영 — 접힘 + 도구 열림 = 도구가 hero 전체 폭 채움
   const hero = document.getElementById('daw-hero'); if (!hero) return;
   const toolsOpen = !document.getElementById('daw-tools')?.hidden;
@@ -3092,8 +3114,8 @@ function wire() {
   $('st-tools-toggle').addEventListener('click', () => { const d = $('daw-tools'); d.hidden = !d.hidden; syncHeroState(); });
   $('st-tools-close').addEventListener('click', () => { $('daw-tools').hidden = true; syncHeroState(); });
   // 영상 접기/펴기
-  $('daw-video-collapse').addEventListener('click', () => { $('daw-hero').classList.add('video-collapsed'); syncHeroState(); });
-  $('daw-hero-expand').addEventListener('click', () => { $('daw-hero').classList.remove('video-collapsed'); syncHeroState(); layout(); });
+  $('daw-video-collapse').addEventListener('click', () => setVideoCollapsed(true));
+  $('daw-hero-expand').addEventListener('click', () => setVideoCollapsed(false));
   syncHeroState();
   wireHeroResize();
   const selectTool = (name) => {

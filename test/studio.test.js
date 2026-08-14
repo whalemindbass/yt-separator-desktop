@@ -64,13 +64,24 @@ const { bootRenderer, expect, near, section, wait, finish } = require('./harness
   near('기본 복귀    ', Math.round(await heroH()), Math.round(base), 4);
   expect('저장값 삭제  ', await js('localStorage.getItem("yss:studio-hero-h")'), null);
 
-  section('5) 영상 접으면 손잡이도 사라진다');
+  section('5) 영상 접기');
+  // 손잡이 display 만 재면 안 된다. 끌어서 정한 높이는 인라인 style 로 들어가서 클래스
+  // 선택자를 이기므로, 접어도 영상만 사라지고 영역은 그대로 남는 일이 실제로 있었다.
+  // 그때 이 절은 통과했다 — 높이를 안 봤기 때문이다.
+  await drag(150);
+  const dragged = Math.round(await heroH());
   await js('document.getElementById("daw-video-collapse").click(); true');
   await wait(300);
-  expect('숨김         ', await js('getComputedStyle(document.getElementById("daw-hero-resize")).display'), 'none');
+  expect('손잡이 숨김  ', await js('getComputedStyle(document.getElementById("daw-hero-resize")).display'), 'none');
+  expect('영역도 접힘  ', Math.round(await heroH()) < 40, true);
+  expect('타임라인 넓어짐', await js(`(()=>{const c=document.querySelector('.daw-content').getBoundingClientRect();
+    const h=document.getElementById('daw-hero').getBoundingClientRect();
+    return Math.round(c.height - h.height) > ${dragged};})()`), true);
+
   await js('document.getElementById("daw-hero-expand").click(); true');
   await wait(300);
-  expect('펴면 복귀    ', await js('getComputedStyle(document.getElementById("daw-hero-resize")).display !== "none"'), true);
+  expect('펴면 손잡이  ', await js('getComputedStyle(document.getElementById("daw-hero-resize")).display !== "none"'), true);
+  near('펴면 그 높이 ', Math.round(await heroH()), dragged, 4);
 
   section('6) 기억한 높이로 다시 뜬다');
   await js('localStorage.setItem("yss:studio-hero-h","520"); true');
