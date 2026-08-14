@@ -889,7 +889,7 @@ loopReset?.addEventListener('click', () => {
   refreshLoopUI();
 });
 
-// ── 재생 속도 (5% 단위, 50% ~ 200%) ────────────────
+// ── 재생 속도 (1% 단위, 10% ~ 200%) ────────────────
 const speedSlider = $('speed-slider');
 const speedVal    = $('speed-val');
 const speedDown   = $('speed-down');
@@ -897,7 +897,7 @@ const speedUp     = $('speed-up');
 const speedReset  = $('speed-reset');
 
 function applySpeed(pct) {
-  pct = Math.max(10, Math.min(200, Math.round(pct / 5) * 5));   // 5% 스냅, 10%~200%
+  pct = Math.max(10, Math.min(200, Math.round(pct)));   // 1% 스냅, 10%~200%
   speedSlider.value = pct;
   speedVal.textContent = pct + '%';
   if (playerVideo) {
@@ -908,8 +908,8 @@ function applySpeed(pct) {
 }
 function resetSpeedUI() { applySpeed(100); }
 speedSlider?.addEventListener('input', () => applySpeed(Number(speedSlider.value)));
-speedDown  ?.addEventListener('click', () => applySpeed(Number(speedSlider.value) - 5));
-speedUp    ?.addEventListener('click', () => applySpeed(Number(speedSlider.value) + 5));
+speedDown  ?.addEventListener('click', () => applySpeed(Number(speedSlider.value) - 1));
+speedUp    ?.addEventListener('click', () => applySpeed(Number(speedSlider.value) + 1));
 speedReset ?.addEventListener('click', () => applySpeed(100));
 
 // ── 오디오 소스 토글 (스템 / 원본) ────────────────
