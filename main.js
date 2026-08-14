@@ -32,19 +32,28 @@ function projectFromArgv(argv) {
   return (argv || []).find(a => typeof a === 'string' && a.toLowerCase().endsWith('.yssproj')) || null;
 }
 
-/** 창이 있으면 바로 보내고, 없으면 준비될 때까지 들고 있는다 */
+// 렌더러가 project:open-file 수신을 등록했는가. 등록 전에 보낸 것은 아무도 받지 못하고
+// 사라지므로, 그때까지는 pendingProject 에 들고 있는다.
+let rendererOpenReady = false;
+
+/** 렌더러가 받을 준비가 됐고 창이 살아 있으면 보낸다. 아니면 들고 있는다. */
+function flushPendingProject() {
+  if (!pendingProject || !rendererOpenReady) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const payload = pendingProject;
+  pendingProject = null;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  mainWindow.webContents.send('project:open-file', payload);
+}
+
+/** 준비돼 있으면 바로 보내고, 아니면 준비될 때까지 들고 있는다 */
 function deliverProject(file) {
   if (!file) return;
   try {
     if (!fs.existsSync(file)) return;
-    const payload = { path: file, data: fs.readFileSync(file, 'utf8') };
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-      mainWindow.webContents.send('project:open-file', payload);
-    } else {
-      pendingProject = payload;
-    }
+    pendingProject = { path: file, data: fs.readFileSync(file, 'utf8') };
+    flushPendingProject();
   } catch { /* 못 읽으면 조용히 넘어간다 — 앱은 평소대로 뜬다 */ }
 }
 
@@ -205,15 +214,14 @@ function createMainWindow() {
     if (mainWindow) mainWindow.show();
     if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
   });
-  // 파일을 더블클릭해 실행한 경우 — 화면이 자리를 잡은 뒤에 건넨다
+  // 파일을 더블클릭해 실행한 경우 — 렌더러가 "받을 준비가 됐다"고 말할 때 건넨다.
+  // did-finish-load 는 화면이 그려졌다는 뜻일 뿐 수신 등록이 끝났다는 뜻이 아니다.
+  rendererOpenReady = false;   // 창을 새로 만들면 다시 기다린다
   mainWindow.webContents.once('did-finish-load', () => {
-    const p = pendingProject || (() => {
-      const f = projectFromArgv(process.argv);
-      if (!f) return null;
-      try { return { path: f, data: fs.readFileSync(f, 'utf8') }; } catch { return null; }
-    })();
-    pendingProject = null;
-    if (p) setTimeout(() => mainWindow?.webContents.send('project:open-file', p), 400);
+    if (pendingProject) return;                      // 이미 들고 있으면 그대로 둔다
+    const f = projectFromArgv(process.argv);
+    if (!f) return;
+    try { pendingProject = { path: f, data: fs.readFileSync(f, 'utf8') }; } catch { /* 못 읽으면 평소대로 뜬다 */ }
   });
   // F12 로 DevTools 토글 (패키지 빌드에서도 디버깅 가능)
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -831,6 +839,14 @@ ipcMain.handle('shell:openExternal', async (_ev, url) => {
   await shell.openExternal(url);
   return true;
 });
+// 렌더러가 project:open-file 수신을 등록했다. 들고 있던 것이 있으면 지금 보낸다.
+ipcMain.on('project:open-ready', (ev) => {
+  if (mainWindow && !mainWindow.isDestroyed() && ev.sender === mainWindow.webContents) {
+    rendererOpenReady = true;
+    flushPendingProject();
+  }
+});
+
 ipcMain.handle('shell:openPath', async (_ev, p) => {
   if (typeof p !== 'string') return false;
   await shell.openPath(p);

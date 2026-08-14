@@ -41,9 +41,20 @@ const PROJECT = {
   const file = path.join(app.getPath('temp'), '연결시험.yssproj');
   fs.writeFileSync(file, JSON.stringify(PROJECT), 'utf8');
 
+  // 렌더러가 수신을 등록하기 전에 보내면 그 메시지는 아무도 받지 못하고 사라진다.
+  // 실제 앱은 렌더러가 준비를 알린 뒤에 보내지만(main.js 의 project:open-ready),
+  // 여기서는 창에 직접 넣으므로 탭 버튼이 그려진 것을 먼저 확인한다.
+  for (let i = 0; i < 40; i++) {
+    if (await js(`!!document.querySelector('.tab[data-view="studio"]')`)) break;
+    await wait(250);
+  }
   // main 이 보내는 것과 같은 모양으로 넣는다
   win.webContents.send('project:open-file', { path: file, data: fs.readFileSync(file, 'utf8') });
-  await wait(3500);
+  for (let i = 0; i < 40; i++) {   // 열리는 데 걸리는 시간은 기계마다 다르다
+    if (await js(`document.querySelector('main.view:not([hidden])')?.dataset.view`) === 'studio') break;
+    await wait(250);
+  }
+  await wait(600);   // 로드 뒤 늦게 오는 엔진 이벤트까지 받아 본다
 
   const st = await js(`({
     화면: document.querySelector('main.view:not([hidden])')?.dataset.view,

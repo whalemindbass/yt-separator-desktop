@@ -70,8 +70,11 @@ contextBridge.exposeInMainWorld('yssApi', {
     // 닫기 전 저장 요청 → 끝나면 결과를 돌려준다
     onSaveRequest: (fn) => ipcRenderer.on('project:save-request', () => fn()),
     saveResult:    (ok) => ipcRenderer.send('project:save-result', !!ok),
-    // .yssproj 를 더블클릭해 들어온 경우
-    onOpenFile:    (fn) => ipcRenderer.on('project:open-file', (_e, p) => fn(p)),
+    // .yssproj 를 더블클릭해 들어온 경우.
+    // 수신을 등록한 그 자리에서 main 에 알린다 — 등록 전에 보낸 것은 아무도 받지 못하고
+    // 그대로 사라진다. 예전에는 화면 로드 후 400ms 를 기다려 보냈는데, 느린 컴퓨터에서는
+    // 그 사이에 등록이 안 끝나 더블클릭이 아무 일도 하지 않는 것처럼 보였다.
+    onOpenFile:    (fn) => { ipcRenderer.on('project:open-file', (_e, p) => fn(p)); ipcRenderer.send('project:open-ready'); },
   },
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
