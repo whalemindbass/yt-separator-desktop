@@ -125,14 +125,22 @@ function engine() {
 
   console.log('2) 레이트가 같으면 그대로다');
   e.send({ cmd: 'setDevice', sampleRate: 44100 });
-  await e.on('devices');
-  const out2 = path.join(TMP, 'out44.wav');
-  e.send({ cmd: 'export', file: out2, format: 'wav', bitDepth: 24, mineOnly: false, startSec: 0, endSec: 0 });
-  await e.on('exportDone', 60000);
-  const b = analyse(out2);
-  expect('출력 레이트  ', b.sr, 44100);
-  near('길이(초)     ', Number(b.seconds.toFixed(4)), 4.0, 0.01);
-  expect('음정 보존    ', b.mag(1000) > b.mag(1088.4) * 100, true);
+  const dev44 = await e.on('devices');
+  // 44.1kHz 로 못 여는 기계가 있다. 하드웨어가 못 해서가 아니라, Windows Audio 공유 모드는
+  // Windows 사운드 설정에 잡힌 레이트 하나만 열어 주기 때문이다 (그 값이 48k 면 48k 만 열린다).
+  // 그때 이 절은 재려던 것(같은 레이트면 변환하지 않는가)과 무관한 이유로 실패한다.
+  if (Math.round(dev44.sampleRate) !== 44100) {
+    console.log(`  건너뜀 — 이 기계는 44.1kHz 로 열리지 않는다 (지금 ${Math.round(dev44.sampleRate)}Hz`
+      + `, 열 수 있는 값 ${JSON.stringify(dev44.rates || [])}). Windows 사운드 설정이 그 레이트로 잡혀 있으면 잰다.`);
+  } else {
+    const out2 = path.join(TMP, 'out44.wav');
+    e.send({ cmd: 'export', file: out2, format: 'wav', bitDepth: 24, mineOnly: false, startSec: 0, endSec: 0 });
+    await e.on('exportDone', 60000);
+    const b = analyse(out2);
+    expect('출력 레이트  ', b.sr, 44100);
+    near('길이(초)     ', Number(b.seconds.toFixed(4)), 4.0, 0.01);
+    expect('음정 보존    ', b.mag(1000) > b.mag(1088.4) * 100, true);
+  }
 
   e.send({ cmd: 'quit' });
   await wait(700); e.kill();
