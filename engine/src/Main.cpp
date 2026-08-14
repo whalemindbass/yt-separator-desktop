@@ -569,7 +569,18 @@ public:
         s.useDefaultInputChannels = true;
         s.useDefaultOutputChannels = true;
         const String err = devmgr->setAudioDeviceSetup (s, true);
-        if (err.isNotEmpty()) std::cerr << "[engine] setDevice: " << err << "\n";
+        // 실패를 stderr 로만 보내면 사용자는 아무것도 못 본다. 게다가 실패한 자리에서는
+        // 장치가 닫힌 채 남아 재생조차 되지 않는다 — 화면상으로는 엔진이 켜져 있는데도.
+        // 알리고, 열린 장치가 없으면 기본 장치로 되돌린다.
+        if (err.isNotEmpty())
+        {
+            std::cerr << "[engine] setDevice: " << err << "\n";
+            auto* e = ev ("error");
+            e->setProperty ("msg", "device: " + err);
+            emit (var (e));
+        }
+        if (devmgr->getCurrentAudioDevice() == nullptr)
+            devmgr->initialiseWithDefaultDevices (2, 2);
         listDevices();
     }
 
@@ -2106,8 +2117,30 @@ int main (int argc, char* argv[])
     const String err = dm.initialiseWithDefaultDevices (2, 2);
     if (err.isNotEmpty()) { auto* e = ev ("error"); e->setProperty ("msg", "audio init: " + err); emit (var (e)); std::cerr << "audio init: " << err << "\n"; return 1; }
 
+    // ASIO 가 있으면 그쪽을 쓴다 — 지연이 훨씬 낮다.
+    //
+    // 다만 갈아탄 결과를 반드시 확인해야 한다. ASIO 드라이버가 깔려만 있고 기기가 꺼져
+    // 있거나 다른 앱(DAW·회의 프로그램)이 물고 있으면 여는 데 실패하는데, 그 순간 방금
+    // 잘 열린 기본 장치까지 함께 닫힌다. 그러면 입력도 출력도 0채널이 되고, 엔진은 켜져
+    // 있으니 사용자에게는 "재생 버튼을 눌러도 아무 일도 안 일어난다"로만 보인다.
+    // 되돌리지 않으면 설정 창을 직접 열어 장치를 고르기 전까지 앱이 아무 소리도 못 낸다.
+    const String prevType = dm.getCurrentAudioDeviceType();
     for (auto* type : dm.getAvailableDeviceTypes())
-        if (type->getTypeName() == "ASIO") { dm.setCurrentAudioDeviceType ("ASIO", true); break; }
+    {
+        if (type->getTypeName() != "ASIO") continue;
+        dm.setCurrentAudioDeviceType ("ASIO", true);
+        if (dm.getCurrentAudioDevice() == nullptr)
+        {
+            dm.setCurrentAudioDeviceType (prevType, true);
+            if (dm.getCurrentAudioDevice() == nullptr)
+                dm.initialiseWithDefaultDevices (2, 2);
+            auto* e = ev ("deviceFallback");
+            e->setProperty ("from", "ASIO");
+            e->setProperty ("to", dm.getCurrentAudioDeviceType());
+            emit (var (e));
+        }
+        break;
+    }
 
     Engine engine;
     engine.setDeviceManager (&dm);

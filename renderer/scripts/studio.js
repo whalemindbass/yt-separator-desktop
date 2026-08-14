@@ -2692,12 +2692,18 @@ function onEngineEvent(m) {
     }
     case 'take':
       clearRecLive();
+      // 이미 가지고 있는 id 면 새로 녹음된 것이 아니라 다시 실은 것이다.
+      // 장치 레이트가 프로젝트와 다르면 repushForSampleRate() 가 클립을 전부 다시 싣는데,
+      // 그것까지 녹음으로 치면 방금 연 프로젝트가 "변경됨"이 되고 실행취소 스택에도
+      // 하지 않은 녹음이 클립 수만큼 쌓인다.
+      const reloaded = _takes.some(t => t.id === m.id);
       // 녹음된 클립이 타임라인에 나타나는 것이 곧 확인이다. 파일 경로는 알림으로 띄울 정보가 아니다.
       (async () => {
         await renderTake(m.file, m.timelineStart || 0, m.id, m.trackId);
+        if (reloaded) return;
         const tk = _takes.find(t => t.id === m.id);
         if (tk) {
-          const snap = { ...tk };   // undo용 스냅샷 (파형·start·트림·페이드 유지)
+          const snap = { ...tk };   // undo용 스냅샷 (파형·트림·페이드 유지)
           pushUndo(() => removeClipById(m.id), () => reAddClip(snap), tr('studio.lbl.record'));
         }
         markDirty();
@@ -2716,6 +2722,9 @@ function onEngineEvent(m) {
       setEnabled(false);
       break;
     case 'error': setEngineStatus('error'); break;
+    // ASIO 로 못 갈아타서 되돌아왔다. 조용히 넘어가면 사용자는 왜 지연이 큰지,
+    // 왜 자기 오인페가 안 잡히는지 알 방법이 없다.
+    case 'deviceFallback': flashTake(tr('studio.m.asioFallback')); break;
     case 'log':
       // 엔진 로그는 개발자용 영문이라 사용자에게 띄우지 않는다.
       // (녹음 준비·파일 쓰기 같은 정상 동작까지 걸려 알림으로 새어 나왔다)

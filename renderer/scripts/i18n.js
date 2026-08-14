@@ -330,6 +330,7 @@ const LOCALES = {
     // ── 스튜디오 동적 문자열 (studio.js) ──
     'studio.m.startAudioFirst': '먼저 상단 “오디오 시작”을 누르세요.',
     'studio.m.addRecTrackFirst': '먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하세요.',
+    'studio.m.asioFallback': 'ASIO 장치를 열지 못해 기본 오디오 장치로 시작했습니다. 오디오 인터페이스가 켜져 있는지, 다른 프로그램이 쓰고 있지 않은지 확인한 뒤 설정에서 다시 고르세요.',
     'studio.m.addRecTrackAndArm': '먼저 “＋ 녹음 트랙”으로 녹음 트랙을 추가하고 R로 대상을 지정하세요.',
     'studio.m.selectRecTrack': '먼저 녹음 트랙을 선택하세요.',
     'studio.m.selectTrack': '트랙을 선택하세요.',
@@ -914,6 +915,7 @@ const LOCALES = {
     // ── 스튜디오 동적 문자열 (studio.js) ──
     'studio.m.startAudioFirst': 'Turn on audio first (top bar).',
     'studio.m.addRecTrackFirst': 'Add a recording track first with “＋ Recording track”.',
+    'studio.m.asioFallback': 'Could not open the ASIO device, so the default audio device is in use. Check that your interface is on and not held by another program, then pick it again in settings.',
     'studio.m.addRecTrackAndArm': 'Add a recording track, then press R to arm it.',
     'studio.m.selectRecTrack': 'Select a recording track first.',
     'studio.m.selectTrack': 'Select a track.',
