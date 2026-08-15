@@ -1072,8 +1072,7 @@ function layout() {
   // 글자·선이 서로 붙지 않을 만큼 벌어졌을 때만 켠다.
   const sbeat = secPerBeat();
   const beatPx = sbeat * _pxPerSec;
-  const showBeats = beatPx >= 22;              // 박 눈금(2·3·4번째 박)
-  const showBeatLabel = beatPx >= 34;           // 그 눈금에 "마디.박" 글자
+  const showBeats = beatPx >= 22;              // 박 눈금(2·3·4번째 박) — 숫자 없이 선만
   const show16th = beatPx >= 140;               // 16분음표 눈금(스냅 격자와 같은 촘촘함)
   $('daw-lanes').classList.toggle('show-beat-grid', showBeats);
   $('daw-lanes').style.setProperty('--gridb', beatPx + 'px');
@@ -1086,8 +1085,7 @@ function layout() {
     const tk = document.createElement('span');
     tk.className = 'tk' + (isLabel ? '' : ' minor');
     tk.style.left = (s * _pxPerSec) + 'px';
-    // 박까지 보일 땐 다운비트도 "마디.1" 로 적어 나머지 박(.2 .3 .4)과 한 줄로 읽힌다.
-    if (isLabel) tk.textContent = showBeatLabel ? `${bar}.1` : bar;
+    if (isLabel) tk.textContent = bar;
     ruler.appendChild(tk);
 
     if (!showBeats) continue;
@@ -1101,7 +1099,6 @@ function layout() {
         const btk = document.createElement('span');
         btk.className = 'tk beat';
         btk.style.left = (bs * _pxPerSec) + 'px';
-        if (showBeatLabel) btk.textContent = `${bar}.${bt + 1}`;
         ruler.appendChild(btk);
       }
       if (!show16th) continue;

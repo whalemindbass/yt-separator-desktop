@@ -2488,7 +2488,7 @@ body { display: flex; flex-direction: column; }
 .daw-ruler .tk.minor { height: 7px; top: 17px; border-left-color: var(--border); }   /* 라벨 없는 마디 = 짧은 눈금 */
 /* 박 눈금 — 확대해서 한 박이 넉넉히 벌어졌을 때만 그려진다(layout() 의 showBeats). 글자는
    그보다 더 벌어졌을 때만(showBeatLabel) — 좁은데 글자까지 넣으면 서로 겹친다. */
-.daw-ruler .tk.beat { height: 13px; top: 11px; border-left-color: var(--border); font: 600 8.5px/13px var(--mono); color: var(--tx-4); padding-left: 3px; }
+.daw-ruler .tk.beat { height: 13px; top: 11px; border-left-color: var(--border); }   /* 글자 없이 선만 */
 .daw-ruler .tk.beat16 { height: 5px; top: 19px; border-left-color: color-mix(in srgb, var(--border) 60%, transparent); }
 .daw-ruler-wrap { cursor: ew-resize; }
 /* 룰러 좌측 코너 — 토글 영역(트랙 컨트롤 위, 룰러 안 보임) */
