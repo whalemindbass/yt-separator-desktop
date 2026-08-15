@@ -558,25 +558,38 @@ public:
     void setDevice (const var& c)
     {
         if (devmgr == nullptr) return;
-        const String type = c["type"].toString();
-        if (type.isNotEmpty() && type != devmgr->getCurrentAudioDeviceType())
-            devmgr->setCurrentAudioDeviceType (type, true);
-        AudioDeviceManager::AudioDeviceSetup s; devmgr->getAudioDeviceSetup (s);
-        if (! c["output"].isVoid())     s.outputDeviceName = c["output"].toString();
-        if (! c["input"].isVoid())      s.inputDeviceName  = c["input"].toString();
-        if (! c["sampleRate"].isVoid()) s.sampleRate = (double) c["sampleRate"];
-        if (! c["bufferSize"].isVoid()) s.bufferSize = (int) c["bufferSize"];
-        s.useDefaultInputChannels = true;
-        s.useDefaultOutputChannels = true;
-        const String err = devmgr->setAudioDeviceSetup (s, true);
-        // 실패를 stderr 로만 보내면 사용자는 아무것도 못 본다. 게다가 실패한 자리에서는
-        // 장치가 닫힌 채 남아 재생조차 되지 않는다 — 화면상으로는 엔진이 켜져 있는데도.
-        // 알리고, 열린 장치가 없으면 기본 장치로 되돌린다.
-        if (err.isNotEmpty())
+        // 다른 프로그램이 물고 있는 드라이버로 갈아타려 하면 벤더에 따라 값이 아니라
+        // 예외로 실패가 온다. 아래는 값으로 온 실패만 잡으므로, 예외는 통째로 감싸 잡는다 —
+        // 안 잡으면 엔진이 죽고, 그 뒤로는 사용자가 설정 창에서 무엇을 골라도 소용없다.
+        try
         {
-            std::cerr << "[engine] setDevice: " << err << "\n";
+            const String type = c["type"].toString();
+            if (type.isNotEmpty() && type != devmgr->getCurrentAudioDeviceType())
+                devmgr->setCurrentAudioDeviceType (type, true);
+            AudioDeviceManager::AudioDeviceSetup s; devmgr->getAudioDeviceSetup (s);
+            if (! c["output"].isVoid())     s.outputDeviceName = c["output"].toString();
+            if (! c["input"].isVoid())      s.inputDeviceName  = c["input"].toString();
+            if (! c["sampleRate"].isVoid()) s.sampleRate = (double) c["sampleRate"];
+            if (! c["bufferSize"].isVoid()) s.bufferSize = (int) c["bufferSize"];
+            s.useDefaultInputChannels = true;
+            s.useDefaultOutputChannels = true;
+            const String err = devmgr->setAudioDeviceSetup (s, true);
+            // 실패를 stderr 로만 보내면 사용자는 아무것도 못 본다. 게다가 실패한 자리에서는
+            // 장치가 닫힌 채 남아 재생조차 되지 않는다 — 화면상으로는 엔진이 켜져 있는데도.
+            // 알리고, 열린 장치가 없으면 기본 장치로 되돌린다.
+            if (err.isNotEmpty())
+            {
+                std::cerr << "[engine] setDevice: " << err << "\n";
+                auto* e = ev ("error");
+                e->setProperty ("msg", "device: " + err);
+                emit (var (e));
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            std::cerr << "[engine] setDevice threw: " << ex.what() << "\n";
             auto* e = ev ("error");
-            e->setProperty ("msg", "device: " + err);
+            e->setProperty ("msg", String ("device: ") + ex.what());
             emit (var (e));
         }
         if (devmgr->getCurrentAudioDevice() == nullptr)
@@ -2124,22 +2137,39 @@ int main (int argc, char* argv[])
     // 잘 열린 기본 장치까지 함께 닫힌다. 그러면 입력도 출력도 0채널이 되고, 엔진은 켜져
     // 있으니 사용자에게는 "재생 버튼을 눌러도 아무 일도 안 일어난다"로만 보인다.
     // 되돌리지 않으면 설정 창을 직접 열어 장치를 고르기 전까지 앱이 아무 소리도 못 낸다.
-    const String prevType = dm.getCurrentAudioDeviceType();
-    for (auto* type : dm.getAvailableDeviceTypes())
+    // 다른 앱이 이미 물고 있는 드라이버를 열려고 하면, 일부 ASIO 벤더 드라이버는 실패를
+    // 값으로 돌려주지 않고 예외를 던진다(제보 사례: Topping 인터페이스를 다른 DAW 로 쓰는 중
+    // Dr.studio 를 켰더니 그 뒤로 재시작·포터블 재설치를 해도 ASIO 가 목록에서 사라짐 —
+    // 엔진이 여기서 죽고 "충돌 후 자동 복구"가 열려서 재시작했다는 뜻이다). 위 되돌리기 코드는
+    // 실패가 값으로 돌아올 때만 작동하므로, 예외로 오는 실패는 통째로 감싸 잡는다.
+    try
     {
-        if (type->getTypeName() != "ASIO") continue;
-        dm.setCurrentAudioDeviceType ("ASIO", true);
-        if (dm.getCurrentAudioDevice() == nullptr)
+        const String prevType = dm.getCurrentAudioDeviceType();
+        for (auto* type : dm.getAvailableDeviceTypes())
         {
-            dm.setCurrentAudioDeviceType (prevType, true);
+            if (type->getTypeName() != "ASIO") continue;
+            dm.setCurrentAudioDeviceType ("ASIO", true);
             if (dm.getCurrentAudioDevice() == nullptr)
-                dm.initialiseWithDefaultDevices (2, 2);
-            auto* e = ev ("deviceFallback");
-            e->setProperty ("from", "ASIO");
-            e->setProperty ("to", dm.getCurrentAudioDeviceType());
-            emit (var (e));
+            {
+                dm.setCurrentAudioDeviceType (prevType, true);
+                if (dm.getCurrentAudioDevice() == nullptr)
+                    dm.initialiseWithDefaultDevices (2, 2);
+                auto* e = ev ("deviceFallback");
+                e->setProperty ("from", "ASIO");
+                e->setProperty ("to", dm.getCurrentAudioDeviceType());
+                emit (var (e));
+            }
+            break;
         }
-        break;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[engine] ASIO open threw: " << ex.what() << "\n";
+        if (dm.getCurrentAudioDevice() == nullptr) dm.initialiseWithDefaultDevices (2, 2);
+        auto* e = ev ("deviceFallback");
+        e->setProperty ("from", "ASIO");
+        e->setProperty ("to", dm.getCurrentAudioDeviceType());
+        emit (var (e));
     }
 
     Engine engine;

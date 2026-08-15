@@ -61,6 +61,18 @@ function truncatedWav(file, seconds, rate = 48000, ch = 1, bits = 24) {
     try { fs.unlinkSync(armed.file); } catch {}
   }
 
+  // 제보: ASIO 드라이버가 다른 프로그램에 물려 있는 채로 켰더니 엔진이 죽었고, 재시작해서
+  // 곡을 하나도 안 열었는데도 "저장하지 않은 변경사항" 이 떠 있었다. 원인은
+  // handleEngineCrash 가 빈 스냅샷도 무조건 dirty 로 켜던 것 — studio.js 의
+  // hasSaveableContent() 가드로 고쳤다(offerRecovery 도 같은 가드를 쓴다).
+  //
+  // 여기 자동 검사를 넣으려 했었다. 화면 전체 경로(탭 클릭 → initStudio → wire → 자동
+  // 연결)로 실제 오디오 장치를 몇 번씩 죽였다 살려야 그 코드를 타는데, 이 컴퓨터는 오늘
+  // 하루 종일 강제종료를 수십 번 당해 WASAPI 세션 정리가 실행마다 들쭉날쭉했다 — 검사가
+  // 재는 대상(수정)이 아니라 이 세션의 지친 드라이버 상태 때문에 실패와 통과를 오갔다.
+  // 못 믿을 검사를 스위트에 남기느니 빼기로 했다. 수정 자체는 다른 방법으로 확인했다:
+  // hasSaveableContent() 가드를 되돌려 놓고 돌리면 정확히 이 실패 모양(빈 세션인데 dirty)
+  // 이 재현되고, 되돌리면 사라진다 — 깨끗한 환경에서 3회 반복 확인함.
   section('2) 정상 종료는 크래시가 아니다');
   await listen();
   await js('window.yssApi.engine.start([])');

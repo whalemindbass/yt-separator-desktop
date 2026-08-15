@@ -2011,9 +2011,14 @@ function updateProjectLabel() {
   el.title = (_projectPath ? name : tr('studio.lbl.notSavedYet'))
     + (_dirty ? tr('studio.lbl.hasUnsaved') : tr('studio.lbl.savedSuffix')) + ' (Ctrl+S)';
 }
+// 스템도 클립도 녹음 트랙도 없으면 저장할 것이 없다 — 저장 가드와 충돌 복구가 같이 쓴다.
+// 이게 갈라져 있던 탓에, 빈 상태로 엔진이 재시작하면 복구는 dirty 를 켰는데
+// 저장은 "저장할 게 없다"며 끄지 않아 사용자가 저장 안내에 갇혔다.
+const hasSaveableContent = () => !!(_stemPaths || _takes.length || _recTracks.length);
+
 // 저장: 경로 있으면 덮어쓰기, 없으면 새로 저장(다이얼로그)
 async function saveProjectSmart() {
-  if (!_stemPaths && !_takes.length && !_recTracks.length) { flashTake(tr('studio.m.nothingToSave')); return; }
+  if (!hasSaveableContent()) { flashTake(tr('studio.m.nothingToSave')); return; }
   const obj = await buildProjectObject();
   const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || tr('studio.lbl.project'), _projectPath || undefined);
   if (r && r.ok) { _projectPath = r.path; _songName = baseName(r.path); markClean(); flashTake(tr('studio.m.savedTo') + r.path); }
@@ -2069,7 +2074,10 @@ async function handleEngineCrash(m) {
 
     if (snap) {
       await applyProject(snap);
-      markDirty();                            // 되살린 상태는 아직 파일에 저장된 것이 아니다
+      // 곡을 열기도 전에 엔진이 죽었다 살아난 경우(예: 드라이버 충돌) 는 되살릴 것이 없다.
+      // 그때도 무조건 dirty 를 켜면, 저장 버튼은 "저장할 게 없다"며 아무 일도 안 하는데
+      // 종료할 때는 계속 저장하라고 붙잡는 모순이 생긴다.
+      if (hasSaveableContent()) markDirty();
     }
     if (m.take && m.take.file) offerCrashTake(m.take);
     else flashTake(tr('studio.crash.restored'));
@@ -2132,7 +2140,7 @@ async function offerRecovery() {
         await applyProject(obj);
         _projectPath = r.meta?.projectPath || null;
         _songName = r.meta?.name || _songName;
-        markDirty();                      // 복구본은 아직 파일에 저장된 상태가 아니다
+        if (hasSaveableContent()) markDirty();   // 복구본은 아직 파일에 저장된 상태가 아니다
         flashTake(tr('studio.rec.restored'));
       } catch {
         flashTake(tr('studio.rec.failed'));
