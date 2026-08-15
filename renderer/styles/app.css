@@ -2479,6 +2479,10 @@ body { display: flex; flex-direction: column; }
 .daw-ruler { height: 24px; position: relative; will-change: transform; }
 .daw-ruler .tk { position: absolute; top: 0; height: 24px; border-left: 1px solid var(--border-mid); font: 600 9.5px/24px var(--mono); color: var(--tx-3); padding-left: 5px; }
 .daw-ruler .tk.minor { height: 7px; top: 17px; border-left-color: var(--border); }   /* 라벨 없는 마디 = 짧은 눈금 */
+/* 박 눈금 — 확대해서 한 박이 넉넉히 벌어졌을 때만 그려진다(layout() 의 showBeats). 글자는
+   그보다 더 벌어졌을 때만(showBeatLabel) — 좁은데 글자까지 넣으면 서로 겹친다. */
+.daw-ruler .tk.beat { height: 13px; top: 11px; border-left-color: var(--border); font-size: 8.5px; color: var(--tx-4); }
+.daw-ruler .tk.beat16 { height: 5px; top: 19px; border-left-color: color-mix(in srgb, var(--border) 60%, transparent); }
 .daw-ruler-wrap { cursor: ew-resize; }
 /* 룰러 좌측 코너 — 토글 영역(트랙 컨트롤 위, 룰러 안 보임) */
 .daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 172px; height: 24px; z-index: 6; display: flex; align-items: stretch; gap: 0; padding: 0; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
@@ -2923,8 +2927,17 @@ body { display: flex; flex-direction: column; }
 .daw-ruler { font-variant-numeric: tabular-nums; }
 
 /* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
-/* 마디 그리드(테마 대응) — 마디 선만 (박 세분선 제거) */
+/* 마디 그리드(테마 대응) — 기본은 마디 선만. 예전엔 박 세분선을 항상 켜 뒀다가
+   확대 배율과 무관하게 촘촘해져 지저분해서 뺐다(a80864d). 지금은 layout() 이 확대했을
+   때만 .show-beat-grid 를 붙이므로, 그때만 두 번째 층(박 선)이 겹쳐 그려진다. */
 .daw-lane .daw-area { background-image: linear-gradient(90deg, color-mix(in srgb, var(--tx-1) 8%, transparent) 0 1px, transparent 1px); background-size: var(--grid, 60px) 100%; background-position: var(--grid-off, 0) 0; }
+.daw-lanes.show-beat-grid .daw-lane .daw-area {
+  background-image:
+    linear-gradient(90deg, color-mix(in srgb, var(--tx-1) 8%, transparent) 0 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--tx-1) 4%, transparent) 0 1px, transparent 1px);
+  background-size: var(--grid, 60px) 100%, var(--gridb, 15px) 100%;
+  background-position: var(--grid-off, 0) 0, var(--gridb-off, 0) 0;
+}
 /* 트랙 헤더 좌측 컬러 스트립 — 얇게(2px), glow 없음 */
 .daw-head::before { width: 2px; box-shadow: none; }
 .daw-head .nm i { box-shadow: none; }

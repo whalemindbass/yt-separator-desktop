@@ -1066,6 +1066,19 @@ function layout() {
   $('daw-lanes').style.setProperty('--grid', barPx + 'px');   // 마디마다 그리드선
   $('daw-lanes').style.setProperty('--grid-off', (phase * _pxPerSec) + 'px');   // 다운비트 정렬
   const lblEvery = barPx >= 60 ? 1 : barPx >= 30 ? 2 : barPx >= 15 ? 4 : 8;   // 라벨 간격(마디)
+
+  // 박·16분음표 세부선 — 칼박 편집은 확대해서 박 경계를 눈으로 봐야 맞출 수 있는데,
+  // 지금까진 마디선만 있어서 한 마디 안에서는 감으로 놓아야 했다.
+  // 글자·선이 서로 붙지 않을 만큼 벌어졌을 때만 켠다.
+  const sbeat = secPerBeat();
+  const beatPx = sbeat * _pxPerSec;
+  const showBeats = beatPx >= 22;              // 박 눈금(2·3·4번째 박)
+  const showBeatLabel = beatPx >= 34;           // 그 눈금에 "마디.박" 글자
+  const show16th = beatPx >= 140;               // 16분음표 눈금(스냅 격자와 같은 촘촘함)
+  $('daw-lanes').classList.toggle('show-beat-grid', showBeats);
+  $('daw-lanes').style.setProperty('--gridb', beatPx + 'px');
+  $('daw-lanes').style.setProperty('--gridb-off', ((phase % sbeat) * _pxPerSec) + 'px');
+
   const end = fullSec();
   let bar = Math.round((phase - _gridOffset) / spb) + 1;   // 첫 선의 마디 번호
   for (let s = phase; s <= end + 0.001; s += spb, bar++) {
@@ -1073,8 +1086,35 @@ function layout() {
     const tk = document.createElement('span');
     tk.className = 'tk' + (isLabel ? '' : ' minor');
     tk.style.left = (s * _pxPerSec) + 'px';
-    if (isLabel) tk.textContent = bar;
+    // 박까지 보일 땐 다운비트도 "마디.1" 로 적어 나머지 박(.2 .3 .4)과 한 줄로 읽힌다.
+    if (isLabel) tk.textContent = showBeatLabel ? `${bar}.1` : bar;
     ruler.appendChild(tk);
+
+    if (!showBeats) continue;
+    // bt 는 이 마디 안의 박 경계(1~BEATS_PER_BAR-1)에 더해, 마지막 박의 16분음표를 재려고
+    // BEATS_PER_BAR(= 다음 마디선)까지 한 번 더 돈다 — 거기엔 눈금을 새로 안 그린다,
+    // 다음 마디의 bar 눈금이 이미 그 자리를 그린다.
+    for (let bt = 1; bt <= BEATS_PER_BAR; bt++) {
+      const bs = s + bt * sbeat;
+      if (bs > end + 0.001) break;
+      if (bt < BEATS_PER_BAR) {
+        const btk = document.createElement('span');
+        btk.className = 'tk beat';
+        btk.style.left = (bs * _pxPerSec) + 'px';
+        if (showBeatLabel) btk.textContent = `${bar}.${bt + 1}`;
+        ruler.appendChild(btk);
+      }
+      if (!show16th) continue;
+      const beatStart = bs - sbeat;   // 이 박의 시작(= 앞 눈금)
+      for (let q = 1; q < 4; q++) {
+        const qs = beatStart + q * (sbeat / 4);
+        if (qs > end + 0.001) continue;
+        const qtk = document.createElement('span');
+        qtk.className = 'tk beat16';
+        qtk.style.left = (qs * _pxPerSec) + 'px';
+        ruler.appendChild(qtk);
+      }
+    }
   }
   ensurePlayhead();   // 재생선을 lanes 안에 유지(헤드보다 아래 z → 컨트롤 컬럼에 안 비침)
   ensureExportEls(); renderExportRange();
