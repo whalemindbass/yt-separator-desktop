@@ -30,6 +30,10 @@ const STEM_LABEL_KEY = { vocals: 'studio.stem.vocals', drums: 'studio.stem.drums
 const stemLabel = (k) => (STEM_LABEL_KEY[k] ? tr(STEM_LABEL_KEY[k]) : k);
 
 let _wired = false, _started = false;
+// 엔진이 (재)연결될 때마다 녹음 트랙 목록을 한 번 스스로 알려온다(초기 동기화) — 사용자가
+// 아무것도 안 해도 오는 이 첫 메시지까지 '변경'으로 세면, 스튜디오에 들어가기만 해도
+// 닫을 때 저장하라고 뜬다. 그다음부터 오는 recTracks 는 추가·삭제 같은 실제 편집이다.
+let _recTracksBaseline = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
 
 // 시간은 초로 들고 다니고, 엔진 경계에서만 샘플로 바꾼다.
@@ -2577,6 +2581,7 @@ function onEngineEvent(m) {
   switch (m.ev) {
     case 'ready':
       _started = true;
+      _recTracksBaseline = true;   // 이 연결에서 처음 오는 recTracks 는 편집이 아니라 동기화다
       // device 이벤트가 먼저 오는 경우가 있다 — 이미 장치명을 받았으면 그걸 유지한다
       if (_engStatus.kind !== 'device') setEngineStatus('ready');
       showBoot('hide');   // 여기서부터 실제로 조작 가능 → 막 걷기
@@ -2695,7 +2700,7 @@ function onEngineEvent(m) {
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
         selectTrack(a != null ? a : null);
       } else { syncSelection(); updateFxPanel(); }
-      markDirty();
+      if (_recTracksBaseline) _recTracksBaseline = false; else markDirty();
       break;
     }
     case 'take':
