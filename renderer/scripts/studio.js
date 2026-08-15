@@ -255,6 +255,14 @@ function grabPan(e) {
 }
 const contentW = () => Math.max(1, _dur * _pxPerSec);
 
+// ── 파형 해상도 ───────────────────────────────────
+// 예전엔 클립 하나당 고정 1400개 점으로 그려서, 확대해도 그 점을 SVG 가 넓게 늘려 보여줄
+// 뿐 실제로는 안 뜯렸다(막힌 폴리곤이 뭉개져 보이는 이유). 화면에 실제로 차지하는
+// 픽셀 수에 맞춰 다시 그리면 확대할수록 그 안에 있던 디테일이 진짜로 드러난다.
+const waveN = (durationSec) => Math.max(300, Math.min(8000, Math.round(Math.max(1, durationSec) * _pxPerSec)));
+let _stemBuffers = null;   // renderWaves 가 마지막으로 받은 채널 버퍼 — 확대 시 다시 그리려고 들고 있는다
+let _waveZoomAt = 0;       // 스템 파형을 마지막으로 그린 _pxPerSec — 바뀌었을 때만 다시 그린다
+
 // ── 파형 SVG ──────────────────────────────────────
 
 // ── 렌더 ──────────────────────────────────────────
@@ -980,13 +988,17 @@ function wireReorder(e, rt, lane) {
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function renderWaves(buffers) {
+  if (buffers) _stemBuffers = buffers;   // 확대할 때 다시 그리려고 들고 있는다
+  if (!_stemBuffers) return;
+  const n = waveN(_dur);
   _tracks.forEach((t) => {
     if (t.key === 'mine') return;
     const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`);
     const clip = lane && lane.querySelector('.daw-clip');
-    const ch = buffers && buffers[t.key];
-    if (clip && ch) clip.innerHTML = buildWaveSvg(ch, resolveColor(t.color));
+    const ch = _stemBuffers[t.key];
+    if (clip && ch) clip.innerHTML = buildWaveSvg(ch, resolveColor(t.color), n);
   });
+  _waveZoomAt = _pxPerSec;
 }
 
 function ensurePlayhead() {
@@ -1117,6 +1129,7 @@ function layout() {
   ensureExportEls(); renderExportRange();
   renderTakes();
   repositionStems();
+  if (_stemBuffers && _pxPerSec !== _waveZoomAt) renderWaves();   // 확대·축소 때만 다시 그린다
   updatePlayhead(_lastSec);
   const zv = $('st-zoom-val'); if (zv) zv.textContent = Math.round(_pxPerSec) + ' px/s';
   const te = $('daw-tracks-empty'); if (te) te.hidden = _tracks.length > 0 || _recTracks.length > 0;
@@ -1467,7 +1480,7 @@ async function pickImportAudio() {
 function closeSong() {
   api.engine.loadStems([]);
   _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null; _auto = new Map();
-  _stemPaths = null; _videoPath = null;
+  _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
   renderTracks();
@@ -1555,7 +1568,9 @@ async function renderTake(file, startSamples, engineId, trackId) {
       start: samplesToSec(startSamples || 0),
       inOff: 0, srcDur, dur: srcDur,   // 트림: inOff(소스 내 시작)·dur(가시 길이)·srcDur(전체)
       fadeIn: 0, fadeOut: 0,           // 페이드(초)
-      svg: buildWaveSvg(ch, resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)')),
+      // 파형은 svg 로 굳혀 두지 않는다 — waveCh(원본 채널)를 들고 있다가, 화면에 그릴 때
+      // 지금 배율(waveAt)로 그렸는지 보고 바뀌었으면 그때 다시 그린다(renderTakes 안).
+      waveCh: ch, waveColor: resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)'), svg: null, waveAt: 0,
     });
     renderTakes();
   } catch (e) { flashTake(tr('studio.m.takeWaveFail') + (e && e.message || e)); }
@@ -1575,7 +1590,13 @@ function renderTakes() {
     el.style.left = (tk.start * _pxPerSec) + 'px';
     el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
     el.title = tk.file;
-    // 파형 슬라이스: overflow 컨테이너 안에서 전체 소스 svg 를 inOff 만큼 밀기
+    // 파형 슬라이스: overflow 컨테이너 안에서 전체 소스 svg 를 inOff 만큼 밀기.
+    // renderTakes 는 선택·드래그 같은 확대와 무관한 이유로도 자주 불린다 — 배율이 그대로면
+    // 다시 그리지 않고 굳혀 둔 svg 를 그대로 쓴다. 바뀌었을 때만 이 take 하나만 새로 그린다.
+    if (!tk.svg || tk.waveAt !== _pxPerSec) {
+      tk.svg = tk.waveCh ? buildWaveSvg(tk.waveCh, tk.waveColor, waveN(tk.srcDur)) : '';
+      tk.waveAt = _pxPerSec;
+    }
     const wave = document.createElement('div');
     wave.className = 'daw-clip-wave';
     wave.style.left = (-tk.inOff * _pxPerSec) + 'px';
@@ -2424,7 +2445,7 @@ function clearClipSelection() { if (_selClips.size) { _selClips = new Set(); _se
 function copyClips() {
   const sel = selectedTakes(); if (!sel.length) return false;
   const minStart = Math.min(...sel.map(t => t.start));
-  _clipboard = sel.map(t => ({ file: t.file, inOff: t.inOff, dur: t.dur, srcDur: t.srcDur, fadeIn: t.fadeIn, fadeOut: t.fadeOut, trackId: t.trackId, relStart: t.start - minStart, svg: t.svg }));
+  _clipboard = sel.map(t => ({ file: t.file, inOff: t.inOff, dur: t.dur, srcDur: t.srcDur, fadeIn: t.fadeIn, fadeOut: t.fadeOut, trackId: t.trackId, relStart: t.start - minStart, waveCh: t.waveCh, waveColor: t.waveColor }));
   flashTake(tr('studio.p.copied', { n: sel.length }));
   return true;
 }
@@ -2443,9 +2464,10 @@ function pasteClips() {
   const target = (_selTrack != null && _recTracks.some(r => r.id === _selTrack)) ? _selTrack : armedRecId();
   if (target == null) { flashTake(tr('studio.m.selectPasteTarget')); return; }
   const made = _clipboard.map((c) => {
+    const src = c.waveCh ? c : (_takes.find(t => t.file === c.file) || {});
     return { file: c.file, id: nextClipId(), trackId: target,
       start: at + c.relStart, inOff: c.inOff, dur: c.dur, srcDur: c.srcDur, fadeIn: c.fadeIn, fadeOut: c.fadeOut,
-      svg: c.svg || (_takes.find(t => t.file === c.file) || {}).svg || '' };
+      waveCh: src.waveCh, waveColor: src.waveColor, svg: null, waveAt: 0 };
   });
   made.forEach(reAddClip);
   _selClips = new Set(made.map(m => m.id));

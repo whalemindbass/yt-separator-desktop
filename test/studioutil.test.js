@@ -60,6 +60,16 @@ const expect = (label, got, want) => {
   expect('빈 입력      ', U.buildWaveSvg(null, '#fff'), '');
   expect('모노도 됨    ', U.buildWaveSvg([L], '#fff', 32).startsWith('<svg'), true);
 
+  // 확대해서 더 세밀하게 — N 을 키우면 실제로 좌표가 더 촘촘해져야 한다. 예전엔 클립 하나당
+  // N 이 고정(1400)이라, 확대해도 SVG 가 같은 점을 넓게 늘려 보여줄 뿐이었다(viewBox 만 커짐).
+  // 스튜디오 쪽(renderWaves/renderTakes)이 배율에 맞춰 다른 N 으로 다시 부르는 게 핵심이라
+  // 여기서는 그 바탕이 되는 buildWaveSvg 가 N 을 실제로 반영하는지만 잰다.
+  const ptsOf = (s) => (s.match(/,/g) || []).length;   // 좌표쌍 개수 ≈ 쉼표 개수
+  const coarse = U.buildWaveSvg([L, R], '#3ddc97', 64);
+  const fine = U.buildWaveSvg([L, R], '#3ddc97', 512);
+  expect('N 커지면 좌표도 늚', ptsOf(fine) > ptsOf(coarse) * 5, true);
+  expect('viewBox 도 N 따라감', fine.includes('viewBox="0 0 512 50"'), true);
+
   console.log(`\n통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
