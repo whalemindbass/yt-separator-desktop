@@ -1691,9 +1691,13 @@ function wireTrim(handle, tk, el, wave, dir) {
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.inOff, bDur = tk.dur, bStart = tk.start;
+    // 움직이는 쪽 끝점의 원래 절대 시각 — 클립 이동과 같은 방식으로 여기에 그리드 스냅을 건다.
+    // 스냅된 절대 위치에서 델타를 뽑아야, 이미 있던 경계 clamp(inOff<0 방지 등)를 그대로 쓸 수 있다.
+    const anchorAbs = dir < 0 ? bStart : bStart + bDur;
     const before = clipState(tk);
     const move = (ev) => {
-      let d = (ev.clientX - startX) / _pxPerSec;   // 초
+      const rawAbs = anchorAbs + (ev.clientX - startX) / _pxPerSec;
+      let d = snapSec(rawAbs, ev.altKey) - anchorAbs;   // 초, 그리드에 붙인 델타 (Alt = 해제)
       if (dir < 0) {   // 좌측: inOff·start·dur 동시 이동
         d = Math.max(-bIn, Math.min(bDur - MIN_CLIP, d));
         tk.inOff = bIn + d; tk.start = bStart + d; tk.dur = bDur - d;
@@ -1704,10 +1708,12 @@ function wireTrim(handle, tk, el, wave, dir) {
       el.style.left = (tk.start * _pxPerSec) + 'px';
       el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
       wave.style.left = (-tk.inOff * _pxPerSec) + 'px';
+      showDragBadge(d, ev.clientX, ev.clientY);
     };
     const up = () => {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
+      hideDragBadge();
       commitTrim(tk); layout();
       const after = clipState(tk), id = tk.id;
       if (after.inOff !== before.inOff || after.dur !== before.dur || after.start !== before.start)
@@ -1727,16 +1733,21 @@ function wireFade(handle, tk, paint, dir) {
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.fadeIn, bOut = tk.fadeOut;
+    // 페이드 안쪽 끝점(페이드가 끝나는 자리)의 절대 시각을 그리드에 붙인다 — 트림과 같은 방식.
+    const anchorAbs = dir < 0 ? tk.start + bIn : tk.start + tk.dur - bOut;
     const before = clipState(tk);
     const move = (ev) => {
-      const d = (ev.clientX - startX) / _pxPerSec;
-      if (dir < 0) tk.fadeIn  = Math.max(0, Math.min(tk.dur, bIn + d));
-      else         tk.fadeOut = Math.max(0, Math.min(tk.dur, bOut - d));
+      const rawAbs = anchorAbs + (ev.clientX - startX) / _pxPerSec;
+      const snappedAbs = snapSec(rawAbs, ev.altKey);
+      if (dir < 0) tk.fadeIn  = Math.max(0, Math.min(tk.dur, snappedAbs - tk.start));
+      else         tk.fadeOut = Math.max(0, Math.min(tk.dur, tk.start + tk.dur - snappedAbs));
       paint();
+      showDragBadge(dir < 0 ? tk.fadeIn - bIn : tk.fadeOut - bOut, ev.clientX, ev.clientY);
     };
     const up = () => {
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', up);
+      hideDragBadge();
       commitFade(tk);
       const after = clipState(tk), id = tk.id;
       if (after.fadeIn !== before.fadeIn || after.fadeOut !== before.fadeOut)
@@ -1835,6 +1846,30 @@ function openDropdown(anchor, items) {
   openDropdownAt(r.left, r.bottom + 4, items);
 }
 // ── 모달 ───────────────────────────────────────────
+// 단축키 안내. 예전엔 트랙이 비어 있을 때만 뜨는 한 줄짜리 힌트(studio.e.shortcuts)뿐이라
+// 곡을 불러온 뒤에는 다시 볼 방법이 없었고, 그마저도 Ctrl+C/X/V·Delete·Ctrl+Y·Ctrl+S 가
+// 빠져 있었다. 여기 목록은 실제 keydown 처리기(아래 document.addEventListener)와 손으로
+// 맞춰 둔 것이라 코드가 바뀌면 같이 고쳐야 한다 — 자동으로 뽑아내는 자리가 아니다.
+function openShortcutsModal() {
+  const rows = [
+    ['Space', 'studio.sc.play'],
+    ['R', 'studio.sc.record'],
+    ['S', 'studio.sc.split'],
+    ['Delete', 'studio.sc.delete'],
+    ['Ctrl+Z', 'studio.sc.undo'],
+    ['Ctrl+Y', 'studio.sc.redo'],
+    ['Ctrl+C', 'studio.sc.copy'],
+    ['Ctrl+X', 'studio.sc.cut'],
+    ['Ctrl+V', 'studio.sc.paste'],
+    ['Ctrl+S', 'studio.sc.save'],
+    [tr('studio.sc.multiSelectKey'), 'studio.sc.multiSelect'],
+    [tr('studio.sc.zoomKey'), 'studio.sc.zoom'],
+    [tr('studio.sc.noSnapKey'), 'studio.sc.noSnap'],
+  ];
+  const html = rows.map(([key, descKey]) =>
+    `<div class="daw-modal-kv"><kbd>${esc(key)}</kbd><span>${esc(tr(descKey))}</span></div>`).join('');
+  openModal(tr('studio.sc.title'), html, () => {});
+}
 function openModal(title, itemsHtml, onClick) {
   const host = $('daw-modal');
   host.innerHTML = `<div class="daw-modal-box">
@@ -3160,6 +3195,7 @@ function wire() {
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
+  $('st-shortcuts').addEventListener('click', openShortcutsModal);
   $('st-proj-name').addEventListener('click', saveProjectSmart);   // 이름 클릭 = 저장
   updateProjectLabel();
 
