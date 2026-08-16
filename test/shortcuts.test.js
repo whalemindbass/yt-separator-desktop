@@ -26,7 +26,7 @@ const { bootMain, expect, wait, finish } = require('./harness');
       rowCount: rows.length,
       hasCopy: rows.some(r => r.querySelector('kbd')?.textContent === 'Ctrl+C'),
       hasSave: rows.some(r => r.querySelector('kbd')?.textContent === 'Ctrl+S'),
-      hasRedo: rows.some(r => r.querySelector('kbd')?.textContent === 'Ctrl+Y'),
+      hasRedo: rows.some(r => r.querySelector('kbd')?.textContent === 'Ctrl+Shift+Z'),
       hasDelete: rows.some(r => r.querySelector('kbd')?.textContent === 'Delete'),
       emptyDesc: rows.some(r => !r.querySelector('span')?.textContent?.trim()),
     };

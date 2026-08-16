@@ -1857,7 +1857,7 @@ function openShortcutsModal() {
     ['S', 'studio.sc.split'],
     ['Delete', 'studio.sc.delete'],
     ['Ctrl+Z', 'studio.sc.undo'],
-    ['Ctrl+Y', 'studio.sc.redo'],
+    ['Ctrl+Shift+Z', 'studio.sc.redo'],   // Ctrl+Y 도 그대로 먹지만(위 keydown 처리기), 더 널리 쓰는 쪽을 적는다
     ['Ctrl+C', 'studio.sc.copy'],
     ['Ctrl+X', 'studio.sc.cut'],
     ['Ctrl+V', 'studio.sc.paste'],
