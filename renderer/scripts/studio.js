@@ -2657,8 +2657,19 @@ function openDevModal(d) {
     $('dv-chr-row').hidden = !st;
     $('dv-chl-lb').textContent = st ? tr('studio.lbl.leftChannel') : tr('studio.lbl.inputChannel');
   });
-  // 드라이버 변경 → 즉시 전환 후 목록 갱신
-  $('dv-type').addEventListener('change', (e) => { api.engine.setDevice({ type: e.target.value }); });
+  // 드라이버 변경 → 즉시 전환 후 목록 갱신.
+  // 타입 전환은 장치를 닫았다 다시 여는 것이라 몇백 ms ~ 몇 초 걸린다. 그 사이에 Apply 를
+  // 누르면 dv-out 이 아직 "이전 타입"의 출력 목록을 보여 준 채라 — 그중 하나가 새 타입의
+  // 목록에도 우연히 같은 이름으로 있으면(예: 서로 다른 드라이버가 같은 장치명을 쓰는 경우)
+  // 실제로 연결된 장치가 아닌 엉뚱한 이름이 저장된다. 새 'devices' 응답으로 모달이 다시
+  // 그려질 때까지 잠가서 그 경합을 없앤다(re-render 는 case 'devices' 가 이미 하고 있다).
+  $('dv-type').addEventListener('change', (e) => {
+    api.engine.setDevice({ type: e.target.value });
+    $('dv-out').disabled = true;
+    $('dv-in').disabled = true;
+    $('dv-apply').disabled = true;
+    $('dv-apply').textContent = tr('studio.x.connecting');
+  });
   $('dv-apply').addEventListener('click', () => {
     const cfg = {
       type: $('dv-type').value, output: $('dv-out').value, input: $('dv-in').value,
