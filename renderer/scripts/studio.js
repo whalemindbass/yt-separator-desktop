@@ -130,6 +130,13 @@ let _detBpm = 0;        // 감지 당시 BPM(반올림) — ÷2/×2 보정 시 �
 let _beatInterval = 0;  // 감지된 정밀 박 간격(초) — 메트로놈 균일 그리드용
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
+let _metroOn = false;
+// 엔진에 지금 BPM·그리드 위상을 다시 밀어 넣는다 — bpm/그리드가 바뀔 때, 그리고 엔진이
+// 새로 켜졌을 때(장치 재연결 등으로 프로세스가 새로 뜨면 엔진 쪽 메트로놈 상태는 기억 못 한다)
+// 매번 호출한다. 켜져 있지 않아도 보낸다 — on=false 로 엔진 쪽을 확실히 꺼 둔다.
+function updateMetro() {
+  api.engine.metro(_metroOn, _bpm, secToSamples(_gridOffset), _beatInterval > 0 ? secToSamples(_beatInterval) : 0);
+}
 // 그리드 스냅 — 위상(_gridOffset) 기준 1/4박(16분음표) 격자에 5px 이내면 스냅.
 // 그 밖은 연속(픽셀 단위) 이동 → 세밀 배치 가능. Alt 누르면 스냅 완전 해제.
 function snapSec(sec, disable) {
@@ -1437,7 +1444,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1541,6 +1548,7 @@ async function detectSongBpm(stems, sampleRate) {
     _beats = Array.isArray(res.beats) ? res.beats.slice() : [];
     _gridOffset = 0;   // Bar 1 = time 0. 다운비트 자동 정렬은 룰러 앞쪽 빈 공간 만들어서 뺌
     layout();
+    updateMetro();
     flashTake(tr('studio.p.bpmDetected', { bpm: _bpm }));
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
 }
@@ -2316,6 +2324,7 @@ async function applyProject(p) {
   _gridOffset = p.gridOffset || 0;
   _beats = Array.isArray(p.beats) ? p.beats.slice() : [];
   _detBpm = p.detBpm || 0; _beatInterval = p.beatInterval || 0;
+  updateMetro();
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   let idMap = null;
   if (Array.isArray(p.tracks) && p.tracks.length) {
@@ -2464,7 +2473,7 @@ function reorderTracks(orderIds) {
   _recTracks.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
   renderRecLanes(); renderTakes();
 }
-function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); }
+function setBpm(v) { _bpm = v; const b = $('st-bpm'); if (b) b.value = v; layout(); updateMetro(); }
 function setStemOffset(v) { _stemOffset = Math.max(0, v); repositionStems(); api.engine.stemOffset(secToSamples(_stemOffset)); layout(); }
 // BPM 배수 보정 (감지가 ×2/÷2 로 틀릴 때)
 function adjustBpm(factor) {
@@ -2734,6 +2743,7 @@ function onEngineEvent(m) {
       $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
       setEnabled(true);
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
+      updateMetro();   // 새로 뜬 엔진 프로세스는 메트로놈 on/off 를 기억 못 한다 — 다시 밀어 넣는다
       // 장치가 여러 개면 엔진은 그중 첫 번째로 붙는다(ASIO 드라이버가 여럿일 때 특히) —
       // 저장해 둔 게 있으면 그쪽으로 다시 붙인다. 목록을 받아야 실제로 있는 장치인지
       // 확인할 수 있으므로 'devices' 응답에서 처리한다(reconnectSavedDevice). phase 는
@@ -3286,6 +3296,19 @@ function wire() {
     $('st-return').classList.toggle('on', _returnOnStop);
     $('st-return').setAttribute('aria-pressed', String(_returnOnStop));
     flashTake(_returnOnStop ? tr('studio.lbl.returnOn') : tr('studio.lbl.returnOff'));
+  });
+
+  // 메트로놈 on/off (설정 유지)
+  _metroOn = localStorage.getItem('yss:metroOn') === '1';
+  $('st-metro').classList.toggle('on', _metroOn);
+  $('st-metro').setAttribute('aria-pressed', String(_metroOn));
+  $('st-metro').addEventListener('click', () => {
+    _metroOn = !_metroOn;
+    localStorage.setItem('yss:metroOn', _metroOn ? '1' : '0');
+    $('st-metro').classList.toggle('on', _metroOn);
+    $('st-metro').setAttribute('aria-pressed', String(_metroOn));
+    updateMetro();
+    flashTake(_metroOn ? tr('studio.lbl.metroOn') : tr('studio.lbl.metroOff'));
   });
 
   // 내 소리 모니터 on/off
