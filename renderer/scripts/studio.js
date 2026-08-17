@@ -2591,6 +2591,34 @@ function openTakeSetPicker() {
 
 // ── 오디오 설정 모달 ──
 let _devOpen = false;
+// 장치를 여러 개 쓰는 사용자 — 엔진은 매번 그 타입의 "첫 번째" 장치로 붙는다(ASIO 드라이버가
+// 여럿이면 특히 눈에 띈다). 마지막으로 고른 장치를 기억해 뒀다가 다시 그쪽으로 붙인다.
+let _devReconnectPending = false;
+const DEV_CFG_KEY = 'yss.deviceConfig';
+function saveDevConfig(cfg) {
+  try { localStorage.setItem(DEV_CFG_KEY, JSON.stringify(cfg)); } catch {}
+}
+function loadDevConfig() {
+  try { return JSON.parse(localStorage.getItem(DEV_CFG_KEY) || 'null'); } catch { return null; }
+}
+// 'devices' 응답을 받은 뒤 호출된다 — 그래야 저장해 둔 장치가 지금도 실제로 있는지 확인할 수
+// 있다. 없는 장치로 억지로 붙으려 하면 (뽑아버린 인터페이스 등) setDevice 가 이미 기본 장치로
+// 되돌리는 안전장치를 갖고 있다(엔진 쪽 fallback) — 여기서는 "다를 때만" 요청해 무한 재연결을
+// 만들지 않는다.
+function reconnectSavedDevice(d) {
+  const saved = loadDevConfig();
+  if (!saved || !saved.type || !saved.output) return;
+  const already = saved.type === d.currentType && saved.output === d.output
+    && (saved.input == null || saved.input === d.input);
+  if (already) return;
+  const type = (d.types || []).find(t => t.name === saved.type);
+  if (!type || !type.outputs.includes(saved.output)) return;   // 그 타입에 그 장치가 지금 없다
+  api.engine.setDevice({
+    type: saved.type, output: saved.output,
+    input: type.inputs.includes(saved.input) ? saved.input : undefined,
+    sampleRate: saved.sampleRate, bufferSize: saved.bufferSize,
+  });
+}
 function openDevModal(d) {
   const host = $('daw-modal');
   const opts = (arr, cur) => (arr || []).map(v => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
@@ -2632,10 +2660,12 @@ function openDevModal(d) {
   // 드라이버 변경 → 즉시 전환 후 목록 갱신
   $('dv-type').addEventListener('change', (e) => { api.engine.setDevice({ type: e.target.value }); });
   $('dv-apply').addEventListener('click', () => {
-    api.engine.setDevice({
+    const cfg = {
       type: $('dv-type').value, output: $('dv-out').value, input: $('dv-in').value,
       sampleRate: Number($('dv-sr').value), bufferSize: Number($('dv-buf').value),
-    });
+    };
+    api.engine.setDevice(cfg);
+    saveDevConfig(cfg);   // 다음에 켤 때 이 장치로 다시 붙는다
     applyInputConfig({
       mode: Number($('dv-inmode').value),
       chL: Number($('dv-chl').value),
@@ -2683,6 +2713,10 @@ function onEngineEvent(m) {
       $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
       setEnabled(true);
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
+      // 장치가 여러 개면 엔진은 그중 첫 번째로 붙는다(ASIO 드라이버가 여럿일 때 특히) —
+      // 저장해 둔 게 있으면 그쪽으로 다시 붙인다. 목록을 받아야 실제로 있는 장치인지
+      // 확인할 수 있으므로 'devices' 응답에서 처리한다(reconnectSavedDevice).
+      if (loadDevConfig()) { _devReconnectPending = true; api.engine.listDevices(); }
       break;
     case 'device': {
       const prevSr = _sr;
@@ -2762,6 +2796,7 @@ function onEngineEvent(m) {
       }
       break;
     case 'devices':
+      if (_devReconnectPending) { _devReconnectPending = false; reconnectSavedDevice(m); }
       if (_devOpen) { openDevModal(m); _devOpen = false; }
       else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
       break;
