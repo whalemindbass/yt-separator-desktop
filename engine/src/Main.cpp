@@ -913,6 +913,7 @@ public:
         t->id = newId; t->type = type;
         { const ScopedLock sl (takesLock); recTracks.push_back (std::move (t)); }
         if (type == 0 && findRec (armedTrack.load()) == nullptr) armedTrack = newId;   // 녹음 트랙만 자동 arm
+        recomputeSolos();   // 다른 모든 트랙/스템 변경 지점은 이걸 부른다 — 여기만 빠져 있었다
         emitRecTracks();
     }
     void removeRecTrack (int id)
@@ -1210,20 +1211,31 @@ public:
                 sr2.autoPts = std::move (ap);
                 for (int b = 0; b < kNumBuses; ++b) sr2.send[b] = s->send[b].load();
                 panGains (s->pan.load(), sr2.panL, sr2.panR);   // 실시간과 동일한 equal-power 팬
-                {   // 스템 FX 체인도 오프라인 인스턴스로 복제 (실시간과 결과가 같아야 함)
+                {   // 스템 FX 체인도 오프라인 인스턴스로 복제 (실시간과 결과가 같아야 함).
+                    // 오프라인 인스턴스화는 실시간과 스레드·버퍼 조건이 달라, 실시간에서 멀쩡하던
+                    // 플러그인이 여기서 예외를 던지는 경우가 있다. 안 잡으면 export 전체가 아니라
+                    // 엔진 프로세스 자체가 죽는다 — 방금까지 잘 재생되던 녹음까지 통째로 사라진
+                    // 것처럼 보이는 제보(export 하면 죽는다·다시 켜면 녹음이 없어진다)가 이래서 난다.
                     const ScopedLock fl (s->fxLock);
                     for (auto& slot : s->chain)
                     {
                         if (! slot || ! slot->plugin || slot->bypass.load()) continue;
-                        String err;
-                        auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
-                        if (inst == nullptr) continue;
-                        MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                        inst->setPlayConfigDetails (2, 2, sr, block);
-                        inst->prepareToPlay (sr, block);
-                        inst->setStateInformation (mb.getData(), (int) mb.getSize());
-                        sr2.latency += jmax (0, inst->getLatencySamples());
-                        sr2.fx.push_back (std::move (inst));
+                        try
+                        {
+                            String err;
+                            auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
+                            if (inst == nullptr) continue;
+                            MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                            inst->setPlayConfigDetails (2, 2, sr, block);
+                            inst->prepareToPlay (sr, block);
+                            inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                            sr2.latency += jmax (0, inst->getLatencySamples());
+                            sr2.fx.push_back (std::move (inst));
+                        }
+                        catch (const std::exception& ex)
+                        {
+                            std::cerr << "[engine] export: stem fx threw, skipping: " << ex.what() << "\n";
+                        }
                     }
                 }
                 srs.push_back (std::move (sr2));
@@ -1246,20 +1258,28 @@ public:
                 for (int b = 0; b < kNumBuses; ++b) tk.send[b] = rt->send[b].load();
                 panGains (rt->pan.load(), tk.panL, tk.panR);
                 { const ScopedLock al (rt->autoLock); tk.autoPts = rt->autoPts; }   // 스냅샷
-                {
+                {   // 위 스템 FX 와 같은 이유로 감싼다 — 녹음 트랙 FX 가 죽으면 그 트랙만이 아니라
+                    // export 전체(스템까지 포함해 이미 쓴 파일)를 날리는 게 더 나쁘다.
                     const ScopedLock fl (rt->fxLock);
                     for (auto& slot : rt->chain)
                     {
                         if (! slot || ! slot->plugin || slot->bypass.load()) continue;
-                        String err;
-                        auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
-                        if (inst == nullptr) continue;
-                        MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                        inst->setPlayConfigDetails (2, 2, sr, block);
-                        inst->prepareToPlay (sr, block);
-                        inst->setStateInformation (mb.getData(), (int) mb.getSize());
-                        tk.latency += jmax (0, inst->getLatencySamples());
-                        tk.fx.push_back (std::move (inst));
+                        try
+                        {
+                            String err;
+                            auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
+                            if (inst == nullptr) continue;
+                            MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                            inst->setPlayConfigDetails (2, 2, sr, block);
+                            inst->prepareToPlay (sr, block);
+                            inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                            tk.latency += jmax (0, inst->getLatencySamples());
+                            tk.fx.push_back (std::move (inst));
+                        }
+                        catch (const std::exception& ex)
+                        {
+                            std::cerr << "[engine] export: track fx threw, skipping: " << ex.what() << "\n";
+                        }
                     }
                 }
                 for (auto& t : takesPlay)
@@ -1302,14 +1322,21 @@ public:
             for (auto& slot : buses[b].chain)
             {
                 if (! slot || ! slot->plugin || slot->bypass.load()) continue;
-                String err;
-                auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
-                if (inst == nullptr) continue;
-                MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                inst->setPlayConfigDetails (2, 2, sr, block);
-                inst->prepareToPlay (sr, block);
-                inst->setStateInformation (mb.getData(), (int) mb.getSize());
-                busx[b].fx.push_back (std::move (inst));
+                try
+                {
+                    String err;
+                    auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
+                    if (inst == nullptr) continue;
+                    MemoryBlock mb; slot->plugin->getStateInformation (mb);
+                    inst->setPlayConfigDetails (2, 2, sr, block);
+                    inst->prepareToPlay (sr, block);
+                    inst->setStateInformation (mb.getData(), (int) mb.getSize());
+                    busx[b].fx.push_back (std::move (inst));
+                }
+                catch (const std::exception& ex)
+                {
+                    std::cerr << "[engine] export: bus fx threw, skipping: " << ex.what() << "\n";
+                }
             }
         }
 
