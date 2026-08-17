@@ -769,6 +769,10 @@ function getEngine() {
     audioEngine = new AudioEngine();
     audioEngine.on('event', (m) => { try { mainWindow?.webContents.send('engine:event', m); } catch {} });
     audioEngine.on('log',   (s) => { try { mainWindow?.webContents.send('engine:event', { ev: 'log', msg: String(s) }); } catch {} });
+    // Node 의 EventEmitter 는 'error' 를 예약해 뒀다 — 리스너가 하나도 없으면 emit 이 조용히
+    // 무시되는 게 아니라 던져져서 이 프로세스(= 앱 전체)를 죽인다. 실제 오류 전달은 위
+    // 'event' 리스너가 이미 하고 있으니, 여기 리스너는 그 크래시를 막는 것 말고 할 일이 없다.
+    audioEngine.on('error', (e) => { console.error('[engine] error event:', e); });
     audioEngine.on('exit',  (c, crashed) => {
       // 죽었는데 녹음 중이었다면 쓰다 만 WAV 가 남아 있다. 헤더를 고쳐 되살릴 수 있게 넘긴다.
       let take = null;

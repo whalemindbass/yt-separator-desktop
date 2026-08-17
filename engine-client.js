@@ -49,7 +49,14 @@ class AudioEngine extends EventEmitter {
     this.rl.on('line', (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch { return; }   // 비-JSON 줄 무시
-      if (msg && msg.ev) { this.emit('event', msg); this.emit(msg.ev, msg); }
+      // msg.ev 를 그대로 이벤트 이름으로도 emit 하던 줄이 있었다. 아무도 안 듣는 죽은 코드였는데,
+      // 엔진이 {ev:"error", ...} 를 보내면 msg.ev 가 마침 Node 의 예약 이벤트 'error' 와 같아져서
+      // 문제가 됐다 — EventEmitter 는 'error' 를 듣는 리스너가 하나도 없으면 emit 이 그냥
+      // 무시되지 않고 던져진다. 여기엔 'error' 리스너가 없었으므로 그 순간 프로세스 전체가
+      // 죽었다(main.js 자체가). setDevice 실패를 렌더러에 알리려고 오늘 처음 emit("error") 를
+      // 추가했는데, 그게 이 죽은 줄을 처음으로 실제 위험하게 만든 것 — 알리는 통로는
+      // 'event' 하나로 충분하므로 이 줄은 지운다.
+      if (msg && msg.ev) this.emit('event', msg);
     });
     this.proc.stderr.on('data', (d) => this.emit('log', String(d)));
     // 부모가 사라져도 엔진은 살아남는다. 그러면 ASIO 장치를 계속 물고 있어
