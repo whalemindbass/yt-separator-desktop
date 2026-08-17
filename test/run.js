@@ -17,7 +17,7 @@ const ROOT = path.resolve(DIR, '..');
 
 // Electron 이 필요한 것과 Node 로 충분한 것을 나눈다.
 // samplerate 는 엔진만 쓰므로 창을 띄울 이유가 없다.
-const NODE_ONLY = new Set(['samplerate.test.js', 'i18n.test.js', 'studioutil.test.js', 'enginebuild.test.js', 'devremember.test.js']);
+const NODE_ONLY = new Set(['samplerate.test.js', 'i18n.test.js', 'studioutil.test.js', 'enginebuild.test.js', 'devremember.test.js', 'devreconnectstatus.test.js']);
 
 const filters = process.argv.slice(2).filter(a => !a.startsWith('-'));
 const files = fs.readdirSync(DIR)

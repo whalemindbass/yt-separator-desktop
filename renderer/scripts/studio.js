@@ -2593,7 +2593,14 @@ function openTakeSetPicker() {
 let _devOpen = false;
 // 장치를 여러 개 쓰는 사용자 — 엔진은 매번 그 타입의 "첫 번째" 장치로 붙는다(ASIO 드라이버가
 // 여럿이면 특히 눈에 띈다). 마지막으로 고른 장치를 기억해 뒀다가 다시 그쪽으로 붙인다.
-let _devReconnectPending = false;
+//
+// 엔진은 부팅하면서 일단 자기 기본 장치부터 연다 — 그 잠깐의 기본 장치 이름이 상태 표시줄에
+// 스쳐 지나간 뒤에야 저장해 둔 장치 이름으로 바뀐다. 사용자에겐 "왜 저장한 장치가 바로 안
+// 뜨지" 로 보인다. 그 사이엔 상태를 "저장된 장치로 연결 중…" 으로 고정해 감춘다.
+// 'idle'     — 재연결과 무관, device 이벤트가 오면 그대로 상태에 반영한다
+// 'checking' — 'ready' 는 왔지만 아직 listDevices() 응답을 못 받아 재연결이 필요한지도 모른다
+// 'switching'— 저장해 둔 장치가 지금과 달라 setDevice 를 보냈다 — 그 결과 device 이벤트를 기다린다
+let _devReconnectPhase = 'idle';
 const DEV_CFG_KEY = 'yss.deviceConfig';
 function saveDevConfig(cfg) {
   try { localStorage.setItem(DEV_CFG_KEY, JSON.stringify(cfg)); } catch {}
@@ -2605,19 +2612,21 @@ function loadDevConfig() {
 // 있다. 없는 장치로 억지로 붙으려 하면 (뽑아버린 인터페이스 등) setDevice 가 이미 기본 장치로
 // 되돌리는 안전장치를 갖고 있다(엔진 쪽 fallback) — 여기서는 "다를 때만" 요청해 무한 재연결을
 // 만들지 않는다.
+// 실제로 setDevice 를 보냈으면 true — 호출부가 그 결과 device 이벤트를 기다려야 하는지 안다.
 function reconnectSavedDevice(d) {
   const saved = loadDevConfig();
-  if (!saved || !saved.type || !saved.output) return;
+  if (!saved || !saved.type || !saved.output) return false;
   const already = saved.type === d.currentType && saved.output === d.output
     && (saved.input == null || saved.input === d.input);
-  if (already) return;
+  if (already) return false;
   const type = (d.types || []).find(t => t.name === saved.type);
-  if (!type || !type.outputs.includes(saved.output)) return;   // 그 타입에 그 장치가 지금 없다
+  if (!type || !type.outputs.includes(saved.output)) return false;   // 그 타입에 그 장치가 지금 없다
   api.engine.setDevice({
     type: saved.type, output: saved.output,
     input: type.inputs.includes(saved.input) ? saved.input : undefined,
     sampleRate: saved.sampleRate, bufferSize: saved.bufferSize,
   });
+  return true;
 }
 function openDevModal(d) {
   const host = $('daw-modal');
@@ -2717,8 +2726,9 @@ function onEngineEvent(m) {
     case 'ready':
       _started = true;
       _recTracksBaseline = true;   // 이 연결에서 처음 오는 recTracks 는 편집이 아니라 동기화다
-      // device 이벤트가 먼저 오는 경우가 있다 — 이미 장치명을 받았으면 그걸 유지한다
-      if (_engStatus.kind !== 'device') setEngineStatus('ready');
+      // device 이벤트가 먼저 오는 경우가 있고, 재연결 중이면 그 표시를 유지해야 한다 —
+      // 둘 다 'ready' 보다 더 정확한 상태이므로 덮어쓰지 않는다.
+      if (_engStatus.kind !== 'device' && _devReconnectPhase !== 'checking') setEngineStatus('ready');
       showBoot('hide');   // 여기서부터 실제로 조작 가능 → 막 걷기
       $('st-engine-dot').classList.add('on');
       $('st-engine-start').hidden = true; $('st-engine-stop').hidden = false;
@@ -2726,8 +2736,9 @@ function onEngineEvent(m) {
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
       // 장치가 여러 개면 엔진은 그중 첫 번째로 붙는다(ASIO 드라이버가 여럿일 때 특히) —
       // 저장해 둔 게 있으면 그쪽으로 다시 붙인다. 목록을 받아야 실제로 있는 장치인지
-      // 확인할 수 있으므로 'devices' 응답에서 처리한다(reconnectSavedDevice).
-      if (loadDevConfig()) { _devReconnectPending = true; api.engine.listDevices(); }
+      // 확인할 수 있으므로 'devices' 응답에서 처리한다(reconnectSavedDevice). phase 는
+      // startEngine() 에서 이미 'checking' 으로 잠가 뒀다 — 여기서는 실제 요청만 보낸다.
+      if (_devReconnectPhase === 'checking') api.engine.listDevices();
       break;
     case 'device': {
       const prevSr = _sr;
@@ -2743,7 +2754,11 @@ function onEngineEvent(m) {
       const same = (m.inMode | 0) === want.mode && (m.inChL | 0) === want.chL && (m.inChR | 0) === want.chR;
       const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
       if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
-      setEngineStatus('device', { name: m.name, ms: m.roundtripMs });
+      // 재연결 확인/전환이 끝나지 않았으면 이 device 이벤트는 아직 스쳐 지나가는 기본 장치다 —
+      // 상태 표시는 그대로 "저장된 장치로 연결 중…" 에 고정해 둔다. 'switching' 중에 온
+      // device 이벤트는 그 전환의 결과이므로 여기서 phase 를 끝낸다.
+      if (_devReconnectPhase === 'switching') _devReconnectPhase = 'idle';
+      if (_devReconnectPhase === 'idle') setEngineStatus('device', { name: m.name, ms: m.roundtripMs });
       // 레이트가 실제로 달라졌을 때만 — 같은 값으로 다시 열리는 경우가 잦다
       if (prevSr && _sr !== prevSr) repushForSampleRate();
       break;
@@ -2807,7 +2822,15 @@ function onEngineEvent(m) {
       }
       break;
     case 'devices':
-      if (_devReconnectPending) { _devReconnectPending = false; reconnectSavedDevice(m); }
+      if (_devReconnectPhase === 'checking') {
+        const switching = reconnectSavedDevice(m);
+        if (switching) {
+          _devReconnectPhase = 'switching';   // setDevice 를 보냈다 — 그 결과 device 이벤트를 기다린다
+        } else {
+          _devReconnectPhase = 'idle';   // 저장된 장치가 없거나 이미 그 장치다 — 더 기다릴 게 없다
+          if (_deviceInfo) setEngineStatus('device', { name: _deviceInfo.name, ms: _deviceInfo.roundtripMs });
+        }
+      }
       if (_devOpen) { openDevModal(m); _devOpen = false; }
       else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
       break;
@@ -2937,12 +2960,13 @@ function renderEngineStatus() {
   const el = $('st-engine-status'); if (!el) return;
   const s = _engStatus;
   el.textContent =
-    s.kind === 'device'  ? String(s.name || '')
-  : s.kind === 'ready'   ? tr('studio.lbl.audioReady')
-  : s.kind === 'connect' ? tr('studio.lbl.connecting')
-  : s.kind === 'failed'  ? tr('studio.lbl.audioOpenFail')
-  : s.kind === 'error'   ? tr('studio.lbl.audioError')
-  :                        tr('studio.lbl.audioOff');
+    s.kind === 'device'      ? String(s.name || '')
+  : s.kind === 'ready'       ? tr('studio.lbl.audioReady')
+  : s.kind === 'connect'     ? tr('studio.lbl.connecting')
+  : s.kind === 'reconnect'   ? tr('studio.lbl.reconnecting')
+  : s.kind === 'failed'      ? tr('studio.lbl.audioOpenFail')
+  : s.kind === 'error'       ? tr('studio.lbl.audioError')
+  :                            tr('studio.lbl.audioOff');
 }
 
 // ── 오디오 엔진 시작 ───────────────────────────────
@@ -2969,7 +2993,11 @@ async function startEngine(manual) {
   _engineTried = true;
   const btn = $('st-engine-start');
   if (btn) btn.disabled = true;
-  setEngineStatus('connect');
+  // 저장해 둔 장치가 있으면 엔진이 자기 기본 장치로 먼저 붙는 그 순간부터 잠가 둔다 —
+  // 그 device 이벤트가 'ready' 보다 먼저 오는 경우가 있어서(엔진이 부팅하며 곧장 여니까),
+  // 'ready' 핸들러에서 잠그면 이미 한 번 새 나간 뒤가 될 수 있다.
+  _devReconnectPhase = loadDevConfig() ? 'checking' : 'idle';
+  setEngineStatus(_devReconnectPhase === 'checking' ? 'reconnect' : 'connect');
   showBoot('loading');
   const r = await api.engine.start([]).catch(() => ({ ok: false }));
   if (!r || !r.ok) {
