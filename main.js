@@ -530,7 +530,8 @@ ipcMain.handle('settings:openUserData', async () => {
   return true;
 });
 ipcMain.handle('dialog:saveAs', async (_ev, defaultName, exts) => {
-  const filters = [{ name: 'WAV', extensions: exts || ['wav'] }];
+  const extList = exts && exts.length ? exts : ['wav'];
+  const filters = [{ name: extList.map(e => e.toUpperCase()).join('/'), extensions: extList }];
   const res = await dialog.showSaveDialog(mainWindow || null, {
     title: td('pickSaveTo'),
     defaultPath: defaultName || 'export.wav',
