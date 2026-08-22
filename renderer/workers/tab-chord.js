@@ -79,6 +79,8 @@ function chromaAt(sig, sr, center, halfWin, out) {
 //   sus4 는 뺐다. C-F-G 라 장조에서 가장 흔한 세 음을 그대로 덮어, 으뜸·버금딸림·딸림
 //   에너지를 통째로 긁어모아 진짜 3화음을 이겨버린다 — 실측에서 곡을 Csus4 로 도배했다.
 //   7화음도 뺐다. 3화음의 상위집합이라 애매할 때마다 이기고, 베이스 연주자에게 득이 적다.
+//   (자유 탐색 한정 — 근음을 고정하고 성질만 고르는 chordQualityAt() 아래엔 sus4 를 넣는다.
+//   근음까지 같이 헤매는 게 아니라 후보가 셋(장·단·sus4)뿐이라 그 도배 문제가 안 생긴다.)
 const QUALITIES = [
   { name: '',  tones: [0, 4, 7] },          // 메이저
   { name: 'm', tones: [0, 3, 7] },          // 마이너
@@ -90,18 +92,64 @@ const STATES = [];
 for (let root = 0; root < 12; root++)
   for (const q of QUALITIES) STATES.push({ root, quality: q.name, set: new Set(q.tones.map(t => (root + t) % 12)) });
 
-/** 크로마 하나에 대한 상태별 점수. 구성음은 크고 나머지는 작아야 좋다. */
-function scoreStates(ch, out) {
-  for (let i = 0; i < STATES.length; i++) {
-    const set = STATES[i].set;
-    let inSum = 0, outSum = 0;
-    for (let pc = 0; pc < 12; pc++) {
-      if (set.has(pc)) inSum += ch[pc]; else outSum += ch[pc];
-    }
-    // 음 수가 다른 종류끼리 견주므로 평균을 쓴다
-    out[i] = inSum / set.size - outSum / (12 - set.size);
+/** 화음 하나(구성음 집합)에 대한 점수. 구성음은 크고 나머지는 작아야 좋다. */
+function scoreOneState(ch, set) {
+  let inSum = 0, outSum = 0;
+  for (let pc = 0; pc < 12; pc++) {
+    if (set.has(pc)) inSum += ch[pc]; else outSum += ch[pc];
   }
+  // 음 수가 다른 종류끼리 견주므로 평균을 쓴다
+  return inSum / set.size - outSum / (12 - set.size);
+}
+
+/** 크로마 하나에 대한 상태별(근음×종류 전체) 점수 — 근음까지 자유 탐색할 때 쓴다. */
+function scoreStates(ch, out) {
+  for (let i = 0; i < STATES.length; i++) out[i] = scoreOneState(ch, STATES[i].set);
   return out;
+}
+
+// 근음 고정 스코어러(chordQualityAt) 전용 후보 — 자유 탐색용 QUALITIES 와 분리해 둔다.
+//
+// lab/tab/tools/chord-synth.js 로 9종(장·단·sus4·sus2·dim·aug·7·maj7·m7) 다 합성해서
+// 직접 재봤다(정답을 아는 화음을 만들어 chordQualityAt 에 그대로 태우는 식 — README 11절
+// CREPE 검증과 같은 방법론). 결과: 3화음 넷(장·단·sus4·sus2)은 클린·9음 얹은 것·잡음 섞은
+// 것 세 조건 다 83~100% 로 안정적이었지만, 7화음·dim·aug 는 33~83% 로 뚝 떨어졌다 —
+// 걱정했던 "상위집합이 항상 이긴다"가 아니라 반대로 7음 자체를 과소검출해서 자꾸 3화음으로
+// 뭉개졌다(예: C7 → C, Dm7 → Dm). "웬만하면 다 잡자"고 넣었다가 오히려 확신 있게 틀린
+// 라벨을 늘리는 셈이라 뺐다 — sus2 만 새로 넣고 나머지는 보류.
+const FIXED_ROOT_QUALITIES = [
+  { name: '',     tones: [0, 4, 7] },   // 메이저
+  { name: 'm',    tones: [0, 3, 7] },   // 마이너
+  { name: 'sus4', tones: [0, 5, 7] },   // 서스4
+  { name: 'sus2', tones: [0, 2, 7] },   // 서스2
+];
+
+/**
+ * 근음이 이미 정해졌을 때(베이스가 알려준다) 그 자리에서 성질(장·단·sus4)만 크로마로 고른다.
+ * detectChords() 처럼 근음까지 자유롭게 찾지 않는다 — 베이스 근음은 보컬 등 화성 아닌
+ * 신호에 안 흔들리고 곧게 잡히므로, 여기서는 그 근음을 믿고 후보 셋 중 하나만 고른다.
+ *
+ * 장·단은 3음 하나 차이(장3도 대 단3도)뿐이라, 그 3음 자체가 흐리면(파워코드 — 근음+5도만
+ * 치는 편곡, 또는 스템 분리가 덜 깨끗해 3음이 묻힌 경우) 점수가 사실상 동률로 나온다.
+ * 이때 그냥 1등을 뽑으면 배열 순서상 장조가 이긴다 — 실측(Fm7 이 F 로 나옴)에서 걸렸다.
+ * 그래서 confidence(1등−2등 점수차)도 같이 돌려주고, 낮으면 부른 쪽에서 이 결과를 믿지
+ * 말고 다른 단서(조성표 등)로 내려가게 한다.
+ * @param {Float32Array} mixMono  화성 스템만 합친 모노(HARMONY_STEMS)
+ * @param {number} sampleRate
+ * @param {number} t0 구간 시작(초)
+ * @param {number} t1 구간 끝(초)
+ * @param {number} rootPc 근음 피치클래스(0~11)
+ * @returns {{root:number, quality:string, name:string, score:number, confidence:number}|null}
+ */
+export function chordQualityAt(mixMono, sampleRate, t0, t1, rootPc) {
+  if (!mixMono || !(t1 > t0)) return null;
+  const ch = chromaAt(mixMono, sampleRate, (t0 + t1) / 2, (t1 - t0) / 2, new Float64Array(12));
+  const scored = FIXED_ROOT_QUALITIES
+    .map(q => ({ q, score: scoreOneState(ch, new Set(q.tones.map(t => (rootPc + t) % 12))) }))
+    .sort((a, b) => b.score - a.score);
+  const [best, second] = scored;
+  return { root: rootPc, quality: best.q.name, name: ROOTS[rootPc] + best.q.name,
+           score: best.score, confidence: best.score - second.score };
 }
 
 /**
@@ -198,5 +246,14 @@ export function chordAt(chords, t) {
   while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (chords[mid].at <= t) lo = mid; else hi = mid; }
   return chords[lo];
 }
+
+// 코드 검출용 — 화성(코드)을 실제로 들고 있는 스템만.
+//   드럼: 화성이 없는 잡음.
+//   베이스: 한 번에 한 음 — 화성을 못 말해준다(같은 이유로 chromaAt 도 저역을 뺀다).
+//   보컬: 이것도 한 번에 한 음(선율)이다. 코드 구성음이 아닌 경과음·꾸밈음이 섞여
+//   들어오면 크로마가 흐려진다 — 버스커 버스커 "첫사랑"(F-G-Em-Am 반복)에서 보컬을
+//   넣은 채로는 코드가 실제 진행과 무관하게 나왔다(사용자 제보). 보컬이 강한 발라드일수록
+//   영향이 클 것으로 보고 뺐다 — 반주만으로 다시 실측 확인 필요.
+export const HARMONY_STEMS = new Set(['other', 'guitar', 'piano']);
 
 export { ROOTS };

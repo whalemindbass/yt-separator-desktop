@@ -1,4 +1,6 @@
 'use strict';
+import { chordQualityAt } from './tab-chord.js';
+
 // 노트 목록 → 마디로 나눈 악보.
 //
 // 채보가 주는 것은 "몇 초에 어떤 음"이고, 악보가 주는 것은 "몇 째 마디 몇 박에 몇 분음표"다.
@@ -260,6 +262,77 @@ export function estimateKey(notes) {
 export function noteNameInKey(midi, key) {
   const names = key && FLAT_KEYS.has(`${key.tonic}:${key.mode}`) ? FLAT_NAMES : SHARP_NAMES;
   return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
+}
+
+/** 마디 안에서 근음 후보 음을 고른다 — 마디 안에서 제일 오래 붙든 음(베이스는 대개 근음을 길게 짚는다). */
+export function pickBarRootNote(items) {
+  let best = null;
+  for (const it of items || []) {
+    if (it.rest || !it.note || it.note.midi == null) continue;
+    if (!best || it.units > best.units) best = it;
+  }
+  return best ? best.note : null;
+}
+
+// 온음계 3화음 성질표. 감음(°) 자리는 표현 대상이 아니라(tab-chord.js 의 QUALITIES 와
+// 같은 이유 — 7화음은 뺐다) 단3화음으로 근사한다. 자연단음계를 쓴다 — 실제로는
+// 딸림(v)이 화성단음계라 장3화음이 되는 경우가 흔하지만(Am 곡의 E), 마디마다 갈리는
+// 문제라 표 하나로는 못 잡는다. computeBarChords() 가 오디오까지 있으면 이 표보다
+// 그쪽(크로마 실측)을 우선한다 — 이건 오디오가 없을 때만 쓰는 마지막 대비다.
+const DIATONIC_QUALITY = {
+  major: ['', 'm', 'm', '', '', 'm', 'm'],
+  minor: ['m', 'm', '', 'm', 'm', '', ''],
+};
+
+/**
+ * 마디 안 베이스 음과 곡 전체 조성만으로 코드를 어림한다(오디오 없이). 베이스가 근음을
+ * 직접 쳐 주니 근음은 곧지만, 3음을 안 쳐서 성질(장/단)은 못 재므로 곡 전체 조성의
+ * 온음계 자리에서 읽는다 — 그래서 조 밖 코드·sus4 같은 표 밖 성질에는 약하다.
+ * 오디오가 있으면 computeBarChords() 를 써라 — 이건 그게 없을 때의 대비용이다.
+ * @param {Array} items  buildScore() 의 bar.items
+ * @param {{tonic:number, mode:'major'|'minor', scale:number[]}|null} key  estimateKey() 결과
+ * @returns {{root:number, quality:string, name:string}|null}
+ */
+export function estimateBarChord(items, key) {
+  if (!key) return null;
+  const note = pickBarRootNote(items);
+  if (!note) return null;
+  const rootPc = ((note.midi % 12) + 12) % 12;
+  const deg = key.scale.indexOf(rootPc);
+  const quality = deg >= 0 ? DIATONIC_QUALITY[key.mode][deg] : '';   // 조 밖 근음은 장3화음으로 어림
+  const name = noteNameInKey(note.midi, key).replace(/-?\d+$/, '') + quality;
+  return { root: rootPc, quality, name };
+}
+
+// chordQualityAt() 의 1등-2등 점수차가 이보다 작으면 장·단이 사실상 동률이란 뜻이다
+// (파워코드처럼 3음 자체가 흐린 마디) — 배열 순서상 장조로 쏠리는 걸 막으려고 그럴 땐
+// 안 믿고 조성표로 내려간다. 값은 아직 실측 없이 잡은 첫 추정 — 실제 곡으로 더 맞춰야 한다.
+const MIN_CHORD_CONFIDENCE = 0.06;
+
+/**
+ * 마디마다 코드를 정한다 — 근음은 베이스 음에서(안 흔들린다), 성질(장·단·sus4)은 그
+ * 근음 자리의 화성 스템 크로마 실측에서. 조성표(estimateBarChord)보다 우선한다 —
+ * 표는 "이 자리는 보통 장조다" 라는 추정이고, 이건 실제로 그 마디에 뭐가 울렸는지다.
+ * 근음을 못 찾은 마디(쉼표만 있는 마디), 오디오가 없거나, 크로마 확신이 낮으면(3음이
+ * 흐린 파워코드 등) estimateBarChord() 로 내려간다.
+ * @param {{bars:Array}} score  buildScore() 결과
+ * @param {object|null} key  estimateKey() 결과
+ * @param {Float32Array|null} harmonyMono  화성 스템만 합친 모노(HARMONY_STEMS) — 없으면 조성표만 쓴다
+ * @param {number} sampleRate
+ * @returns {Array<{root:number, quality:string, name:string}|null>}  score.bars 와 같은 순서
+ */
+export function computeBarChords(score, key, harmonyMono, sampleRate) {
+  if (!score || !score.bars) return null;
+  return score.bars.map(bar => {
+    const note = pickBarRootNote(bar.items);
+    if (note && harmonyMono) {
+      const rootPc = ((note.midi % 12) + 12) % 12;
+      const q = chordQualityAt(harmonyMono, sampleRate, bar.start, bar.end, rootPc);
+      if (q && q.confidence >= MIN_CHORD_CONFIDENCE) return q;
+      return estimateBarChord(bar.items, key) || q;
+    }
+    return estimateBarChord(bar.items, key);
+  });
 }
 
 /** 박 번호 → 시각. 배열 밖은 마지막 간격으로 연장한다. */

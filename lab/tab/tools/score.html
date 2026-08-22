@@ -6,8 +6,9 @@
      드럼부터는 없어도 된다 — 있으면 박자 격자에 붙인 결과도 같이 잰다. -->
 <body><pre id="out">running…</pre>
 <script type="module">
-import { transcribe } from './workers/tab-core.js';
+import { transcribe, transcribeCrepe } from './workers/tab-core.js';
 import { runBasicPitch } from './workers/bp-run.js';
+import { runCrepe } from './workers/crepe-run.js';
 import { detectBeats } from './scripts/beat-detect.js';
 
 const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
@@ -88,12 +89,18 @@ function whereMissed(gt, s) {
   return L;
 }
 
+const prog = (s) => console.log('###PROGRESS### ' + s);   // pYIN 시간 진단용 — 임시
+
 try {
+  prog('정답지 로드 중…');
   const gt = parseGt(await (await fetch(GT)).text());
   say(`정답지 ${gt.length}음 · ${gt[0].start}s ~ ${gt[gt.length-1].start}s`);
 
+  prog('오디오 fetch 중…');
   const ab = await (await fetch(WAV)).arrayBuffer();
+  prog(`오디오 ${(ab.byteLength / 1048576).toFixed(1)}MB 받음 — 디코드 중…`);
   const audio = await new AudioContext().decodeAudioData(ab);
+  prog(`디코드 끝 — ${(audio.length / audio.sampleRate).toFixed(1)}초`);
   const L = audio.getChannelData(0);
   const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
   const mono = new Float32Array(L.length);
@@ -109,8 +116,26 @@ try {
     return s;
   };
 
+  prog('YIN 채보 중…');
   const yin = transcribe(mono, sr, { tuning: '4' }).notes;
   fmt('[YIN]', yin, true);
+  // pYIN 실험(lab/tab/README.md 10번 절) — 기본은 꺼져 있다. 여기서만 켜서 견준다.
+  prog('pYIN 채보 중(전체 곡 Viterbi — 시간이 더 걸린다)…');
+  const t0 = performance.now();
+  const pyinNotes = transcribe(mono, sr, { tuning: '4', pitchTracker: 'pyin' },
+    (pct) => { if (pct % 10 === 0) prog(`  pYIN ${pct}%`); }).notes;
+  prog(`pYIN 끝 — ${((performance.now() - t0) / 1000).toFixed(1)}초 걸림`);
+  fmt('[pYIN]', pyinNotes, true);
+
+  // CREPE 실험(lab/tab/README.md 11번 절) — ONNX 추론이 비동기라 transcribe() 가 아니라
+  // runCrepe() 로 먼저 살리언스를 뽑고 transcribeCrepe() 에 넘긴다.
+  prog('CREPE 살리언스 추론 중(ONNX, 처음엔 모델 로드도 포함)…');
+  const t1 = performance.now();
+  const { frames: crepeSal, hopSec: crepeHop, ep: crepeEp } = await runCrepe(mono, sr, new URL('./', location.href).href, 10,
+    (() => { let last = -1; return (pct) => { if (pct !== last && pct % 5 === 0) { last = pct; prog(`  CREPE 추론 ${pct}%`); } }; })());
+  prog(`CREPE 추론 끝 — ${((performance.now() - t1) / 1000).toFixed(1)}초 · 프레임 ${crepeSal.length}개 · 실행 ${crepeEp}`);
+  const crepeNotes = transcribeCrepe(crepeSal, crepeHop, mono, sr, { tuning: '4' }).notes;
+  fmt('[CREPE]', crepeNotes, true);
 
   // 박자를 줄 수 있으면 격자에 붙인 결과도 같이 잰다.
   // 문서에 남은 87%/잉여 0 이 이 구성에서 나온 것인지 여기서 갈린다.

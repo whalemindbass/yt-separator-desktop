@@ -9,6 +9,8 @@ const STRING_LABELS = {
   '4':  ['E', 'A', 'D', 'G'],
   '5':  ['B', 'E', 'A', 'D', 'G'],
   '5H': ['E', 'A', 'D', 'G', 'C'],
+  '4b': ['Eb', 'Ab', 'Db', 'Gb'],
+  '4d': ['D', 'A', 'D', 'G'],
 };
 
 let _worker = null;

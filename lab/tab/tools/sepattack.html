@@ -1,0 +1,303 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>분리가 어택을 얼마나 지우는가</title>
+<!-- npm run lab -- sepattack  로 연다
+     ?q=<합성 믹스>|<합성 베이스(정답)>|<정답지>|<분리 모델 .onnx>|<믹스 안에서의 베이스 진폭>
+
+     synth.js 로 만든 bass.wav 는 시각·음정이 우리가 정한 그대로다(검출기와 무관).
+     synth-mix.js 가 거기에 드럼·패드를 더해 mix.wav 를 만든다. 이 페이지는 mix.wav 를
+     실제 제품과 같은 htdemucs 분리기에 통과시켜 베이스 스템을 뽑고, 그것을 원본 bass.wav 와
+     같은 시각에서 견준다 — 정답이 알려져 있으므로 "분리가 어택을 얼마나 지우는가"를
+     처음으로 직접 잴 수 있다(lab/tab/README.md 의 "다음 과제" 1번).
+
+     드럼·패드는 mix.wav 안에도 있지만 여기서는 안 쓴다 — 우리가 보려는 것은 베이스
+     스템 하나가 분리를 통과하며 얼마나 상하는가이지, 다른 스템의 품질이 아니다.
+
+     다섯 번째 인자(bass-as-mixed.wav)가 필요한 이유 — 클리핑 방지를 위해 mix.wav 를 만들 때
+     전체를 한 번 더 정규화한다(synth-mix.js 의 g). 그 배율만큼 베이스도 이미 작아진 채로
+     믹스에 들어갔으므로, 어택 "손실"을 재려면 원본 bass.wav 가 아니라 그 배율까지 적용된
+     이 파일과 견줘야 한다 — 안 그러면 내 정규화 자체를 분리 손실로 잘못 읽는다. 채보 점수
+     (천장 vs 실전)는 음 내용을 보는 것이라 절대 진폭과 무관하므로 원본 bass.wav 를 그대로 쓴다.
+
+     여섯~여덟 번째 인자(진짜 드럼·기타류·보컬, sepattack-real 에서만 채워짐) — README 9번
+     절 "다음으로 볼 만한 것". low·conf·rms·onset-margin 넷 다 잉여를 못 갈랐다. 다음 후보는
+     베이스 스템 안이 아니라 밖 — 잉여가 난 그 순간 원본 다른 악기에도 진짜 활동이 있었는지.
+     분리를 한 번 더 하지 않고 synth-mix-real.js 가 애초에 믹스에 넣었던 원본과 바로 견준다
+     (같은 30초 skip · 같은 길이로 다시 잘라야 시각이 맞는다 — 아래 loadTrimmed 참고). -->
+<body><pre id="out">running…</pre>
+<script type="module">
+import { transcribe, transcribeCrepe } from './workers/tab-core.js';
+import { runCrepe } from './workers/crepe-run.js';
+
+const Q = decodeURIComponent((location.search.match(/[?&]q=([^&]*)/) || [])[1] || '').split('|');
+const [MIX, BASS, GT, MODEL, LEVELREF, DRUMS, OTHER, VOCALS] = Q;
+const lines = [];
+const say = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+const prog = (s) => console.log('###PROGRESS### ' + s);   // 오프스크린 창 밖으로 실시간 진행 알림
+
+
+// ── 정답지 파싱 · 채점 (score.html 과 동일한 형식/로직) ──
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function nameToMidi(s) {
+  const m = /^([A-G]#?)(-?\d+)$/.exec(s);
+  if (!m) return null;
+  const i = NOTE_NAMES.indexOf(m[1]);
+  return i < 0 ? null : (Number(m[2]) + 1) * 12 + i;
+}
+function parseGt(text) {
+  const times = [], names = [];
+  for (const ln of text.split(/\r?\n/)) {
+    if (/^\s*#/.test(ln)) continue;
+    const tok = ln.trim().split(/\s+/).filter(Boolean);
+    if (!tok.length) continue;
+    if (tok.every(t => /^\d+(\.\d+)?$/.test(t))) times.push(...tok.map(Number));
+    else if (tok.every(t => /^[A-G]#?-?\d+$/.test(t))) names.push(...tok.map(nameToMidi));
+  }
+  const n = Math.min(times.length, names.length);
+  return times.slice(0, n).map((t, i) => ({ start: t, midi: names[i] }));
+}
+function score(gt, det, tol = 0.25) {
+  const used = new Set();
+  let hit = 0, pitchWrong = 0;
+  for (const g of gt) {
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < det.length; i++) {
+      if (used.has(i)) continue;
+      const d = Math.abs(det[i].start - g.start);
+      if (d < bd && d <= tol) { bd = d; best = i; }
+    }
+    if (best < 0) continue;
+    used.add(best);
+    if (det[best].midi === g.midi) hit++; else pitchWrong++;
+  }
+  const miss = gt.length - hit - pitchWrong;
+  const extraIdx = det.map((_, i) => i).filter(i => !used.has(i));
+  return { hit, pitchWrong, miss, extra: extraIdx.length, pct: Math.round(hit / gt.length * 100),
+    matchedIdx: [...used], extraIdx };
+}
+const fmtScore = (label, gt, det) => {
+  const s = score(gt, det);
+  return `${label.padEnd(18)} 검출 ${String(det.length).padStart(3)} · 일치 ${String(s.hit).padStart(3)} (${s.pct}%)`
+    + ` · 음정오류 ${String(s.pitchWrong).padStart(2)} · 놓침 ${String(s.miss).padStart(2)} · 잉여 ${String(s.extra).padStart(2)}`;
+};
+
+// ── 오디오 로드 ──
+async function loadMono(url) {
+  const ab = await (await fetch(url)).arrayBuffer();
+  const audio = await new AudioContext().decodeAudioData(ab);
+  const L = audio.getChannelData(0);
+  const R = audio.numberOfChannels > 1 ? audio.getChannelData(1) : L;
+  const mono = new Float32Array(L.length);
+  for (let i = 0; i < L.length; i++) mono[i] = (L[i] + R[i]) * 0.5;
+  return { mono, L, R, sr: audio.sampleRate };
+}
+
+/** 정답 온셋 시각에서 20ms 창 RMS — 검출기의 onsetRms(tab-core.js)와 같은 정의 */
+function attackRmsAt(mono, sr, t, winMs = 20) {
+  const a = Math.max(0, Math.round(t * sr));
+  const b = Math.min(mono.length, a + Math.round(sr * winMs / 1000));
+  let e = 0;
+  for (let i = a; i < b; i++) e += mono[i] * mono[i];
+  return Math.sqrt(e / Math.max(1, b - a));
+}
+
+/** synth-mix-real.js 와 똑같이 앞 30초(또는 남는 만큼)를 건너뛰고 n 샘플만 자른다 —
+ *  시각이 mix.wav/gt 와 어긋나면 비교 자체가 무의미해진다. */
+async function loadTrimmedMono(url, n) {
+  const full = await loadMono(url);
+  const skip = Math.min(30 * full.sr, Math.max(0, full.mono.length - n));
+  return { mono: full.mono.subarray(skip, skip + n), sr: full.sr };
+}
+
+const med = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+
+try {
+  const gt = parseGt(await (await fetch(GT)).text());
+  say(`정답지 ${gt.length}음 · ${gt[0].start}s ~ ${gt[gt.length - 1].start}s\n`);
+
+  prog('오디오 로드 중…');
+  const bass = await loadMono(BASS);           // 분리 전(정답) — 채보 점수용, 절대 진폭 무관
+  const mix  = await loadMono(MIX);             // 이걸 분리기에 태운다
+  const levelRef = LEVELREF ? await loadMono(LEVELREF) : bass;   // 어택 손실 비교용 — 믹스 안 진폭 기준
+  say(`베이스(정답) ${(bass.mono.length / bass.sr).toFixed(1)}초 · 믹스 ${(mix.mono.length / mix.sr).toFixed(1)}초`);
+  if (bass.sr !== mix.sr) throw new Error(`샘플레이트 불일치: 베이스 ${bass.sr} vs 믹스 ${mix.sr}`);
+
+  // ── 실제 제품과 같은 htdemucs 분리 ──
+  prog('분리 모델 로드 중…');
+  const modelBuf = await (await fetch(MODEL)).arrayBuffer();
+
+  const worker = new Worker(new URL('./workers/stem-worker.js', import.meta.url), { type: 'module' });
+  const runtimeUrl = new URL('./', import.meta.url).href;
+
+  const once = (type) => new Promise((resolve, reject) => {
+    const onMsg = (e) => {
+      if (e.data.type === type) { worker.removeEventListener('message', onMsg); resolve(e.data); }
+      else if (String(e.data.type).endsWith('_ERROR')) { worker.removeEventListener('message', onMsg); reject(new Error(e.data.error)); }
+    };
+    worker.addEventListener('message', onMsg);
+  });
+
+  worker.postMessage({ type: 'INIT', runtimeUrl });
+  await once('INIT_OK');
+
+  worker.postMessage({ type: 'LOAD_MODEL', modelBuffer: modelBuf, executionProvider: 'wasm', sources: 4 }, [modelBuf]);
+  await once('MODEL_OK');
+
+  prog('분리 중 — 몇 분 걸릴 수 있다 (WASM)…');
+  const left = new Float32Array(mix.L), right = new Float32Array(mix.R);
+  worker.addEventListener('message', (e) => { if (e.data.type === 'PROGRESS') prog(`분리 진행 ${(e.data.value * 100).toFixed(0)}%`); });
+  worker.postMessage(
+    { type: 'PROCESS', left, right, totalSamples: mix.mono.length, stemOrder: ['drums', 'bass', 'other', 'vocals'] },
+    [left.buffer, right.buffer]
+  );
+  const { stems } = await once('PROCESS_OK');
+  worker.terminate();
+
+  const [sepL, sepR] = stems.bass;
+  const sepMono = new Float32Array(sepL.length);
+  for (let i = 0; i < sepMono.length; i++) sepMono[i] = (sepL[i] + sepR[i]) * 0.5;
+  say(`분리된 베이스 ${(sepMono.length / mix.sr).toFixed(1)}초 (믹스와 길이차 ${sepMono.length - mix.mono.length}샘플)\n`);
+
+  // ── 1. 채보 점수 — 분리 전(천장) vs 분리 후(실전), YIN vs pYIN vs CREPE ──
+  say('# 채보 점수 — 같은 정답지, 분리를 거쳤는가·검출기가 다르다');
+  say(fmtScore('[YIN 분리전(천장)]', gt, transcribe(bass.mono, bass.sr, { tuning: '4' }).notes));
+  say(fmtScore('[pYIN 분리전(천장)]', gt, transcribe(bass.mono, bass.sr, { tuning: '4', pitchTracker: 'pyin' }).notes));
+  const sepDet = transcribe(sepMono, mix.sr, { tuning: '4' }).notes;
+  const sepScore = score(gt, sepDet);
+  say(`[YIN 분리후(실전)]  검출 ${String(sepDet.length).padStart(3)} · 일치 ${String(sepScore.hit).padStart(3)} (${sepScore.pct}%)`
+    + ` · 음정오류 ${String(sepScore.pitchWrong).padStart(2)} · 놓침 ${String(sepScore.miss).padStart(2)} · 잉여 ${String(sepScore.extra).padStart(2)}`);
+  say(fmtScore('[pYIN 분리후(실전)]', gt, transcribe(sepMono, mix.sr, { tuning: '4', pitchTracker: 'pyin' }).notes));
+
+  // CREPE(11번 절) — 분리 전(천장)·분리 후(실전) 둘 다 잰다. ONNX 추론이 비동기라
+  // runCrepe() 로 먼저 살리언스를 뽑고 transcribeCrepe() 에 넘긴다.
+  prog('CREPE 추론 중(분리 전)…');
+  const crepeClean = await runCrepe(bass.mono, bass.sr, runtimeUrl, 10,
+    (() => { let last = -1; return (pct) => { if (pct !== last && pct % 10 === 0) { last = pct; prog(`  CREPE(분리전) ${pct}%`); } }; })());
+  prog(`CREPE(분리전) 실행: ${crepeClean.ep}`);
+  say(fmtScore('[CREPE 분리전(천장)]', gt, transcribeCrepe(crepeClean.frames, crepeClean.hopSec, bass.mono, bass.sr, { tuning: '4' }).notes));
+  prog('CREPE 추론 중(분리 후)…');
+  const crepeSep = await runCrepe(sepMono, mix.sr, runtimeUrl, 10,
+    (() => { let last = -1; return (pct) => { if (pct !== last && pct % 10 === 0) { last = pct; prog(`  CREPE(분리후) ${pct}%`); } }; })());
+  prog(`CREPE(분리후) 실행: ${crepeSep.ep}`);
+  say(fmtScore('[CREPE 분리후(실전)]', gt, transcribeCrepe(crepeSep.frames, crepeSep.hopSec, sepMono, mix.sr, { tuning: '4' }).notes));
+  say('');
+
+  // ── 1b. 진짜 베이스 음(일치+음정오류) vs 잉여(다른 악기가 샌 것) — 이미 계산해 두고
+  // 안 쓰는 값들이 실제로 가르는지부터 잰다. tab-core.js 의 segment() 는 note 마다
+  // low(저역 에너지 비율 · "누수 판별용" 주석 있음), conf(YIN CMND 확신도), rms 를 이미
+  // 남겨 두지만 dropGhosts·detectTechniques·assignFrets 어디서도 읽지 않는다.
+  const trueIdx = new Set([...sepScore.matchedIdx]);
+  const bucket = (field) => ({
+    t: sepDet.filter((_, i) => trueIdx.has(i)).map(n => n[field]),
+    e: sepScore.extraIdx.map(i => sepDet[i][field]),
+  });
+  const thresholdSweep = (label, vals, threshes, dir) => {
+    // dir 'ge' = 문턱 이상을 진짜로 본다(예: conf) · 'lt' = 문턱 미만을 진짜로 본다
+    say(`# ${label} — 진짜 vs 잉여 · 문턱 걸었을 때 (제거율 / 피해율)`);
+    say(`  진짜 ${vals.t.length}개 중앙값 ${med(vals.t).toFixed(3)} · 잉여 ${vals.e.length}개 중앙값 ${med(vals.e).toFixed(3)}`);
+    for (const th of threshes) {
+      const keep = dir === 'ge' ? (v) => v >= th : (v) => v < th;
+      const extraLeft = vals.e.filter(keep).length;
+      const trueHurt = vals.t.filter(v => !keep(v)).length;
+      say(`  문턱 ${String(th).padEnd(6)} 잉여 남음 ${String(extraLeft).padStart(3)}/${vals.e.length}`
+        + ` (${Math.round(100 * (1 - extraLeft / Math.max(1, vals.e.length)))}% 제거)`
+        + `   진짜 중 피해 ${String(trueHurt).padStart(3)}/${vals.t.length} (${Math.round(100 * trueHurt / Math.max(1, vals.t.length))}%)`);
+    }
+    say('');
+  };
+  thresholdSweep('note.low(저역 에너지 비율)', bucket('low'), [0.3, 0.4, 0.5, 0.6, 0.7], 'ge');
+  thresholdSweep('note.conf(YIN 확신도)', bucket('conf'), [0.5, 0.6, 0.7, 0.8, 0.9], 'ge');
+  thresholdSweep('note.rms(세기)', bucket('rms'), [0.002, 0.004, 0.008, 0.016, 0.032], 'ge');
+
+  // ── 1c. 잉여가 정말 "딴 소리"인가, 아니면 진짜 음이 쪼개진 조각인가 ──
+  // 셋 다 못 가른다면 다음 후보는 스펙트럼 특징이 아니라 분절이다 — 같은 음이 온셋 과다
+  // 검출로 둘로 잘려 하나는 정답과 맞고 하나는 "잉여"로 세어졌을 수 있다.
+  const order = sepDet.map((_, i) => i).sort((a, b) => sepDet[a].start - sepDet[b].start);
+  const posOf = new Map(order.map((idx, pos) => [idx, pos]));
+  let sameNoteAdjacent = 0;
+  const gapsMs = [];
+  for (const i of sepScore.extraIdx) {
+    const pos = posOf.get(i);
+    const neighborIdx = [order[pos - 1], order[pos + 1]].filter(x => x != null);
+    const hit = neighborIdx.find(j => trueIdx.has(j) && sepDet[j].midi === sepDet[i].midi);
+    if (hit == null) continue;
+    sameNoteAdjacent++;
+    const a = sepDet[i], b = sepDet[hit];
+    const gap = a.start < b.start ? (b.start - (a.start + a.dur)) : (a.start - (b.start + b.dur));
+    gapsMs.push(gap * 1000);
+  }
+  say(`# 잉여 ${sepScore.extraIdx.length}개 중 — 바로 옆이 같은 음정의 "진짜" 음인 것 ${sameNoteAdjacent}개`);
+  say('  (많으면 딴 악기가 아니라 진짜 음이 온셋 과다검출로 쪼개진 것 — 분절 문제)');
+  if (gapsMs.length) {
+    say(`  그 ${gapsMs.length}쌍의 간격(ms) — 지금 gapMs=45 를 얼마나 넘는가`);
+    const within = gapsMs.filter(g => g <= 45).length;
+    say(`  45ms 이내(지금 병합 대상인데 안 붙었다) ${within}개 · 초과 ${gapsMs.length - within}개`);
+    say(`  중앙값 ${med(gapsMs).toFixed(0)}ms · 최소 ${Math.min(...gapsMs).toFixed(0)}ms · 최대 ${Math.max(...gapsMs).toFixed(0)}ms`);
+  }
+  say('');
+
+  // ── 1d. mergeOnsetMargin 훑기 — 애매한 온셋을 얼마나 걸러야 이 쪼개짐이 줄어드는가 ──
+  // 반대 위험: 너무 올리면 진짜 빠른 반복 타현(정답지 안에도 있다)까지 하나로 합쳐 놓침이
+  // 늘어난다. hit/miss/extra 를 같이 보면 그 상쇄가 그대로 드러난다 — 표에서 직접 고른다.
+  say('# mergeOnsetMargin 훑기 — 분리 후(실전) 조건에서');
+  say('  margin   검출   일치(%)      음정오류  놓침  잉여');
+  for (const m of [0, 0.02, 0.05, 0.08, 0.12, 0.18, 0.25, 0.35]) {
+    const det = transcribe(sepMono, mix.sr, { tuning: '4', mergeOnsetMargin: m }).notes;
+    const s = score(gt, det);
+    say(`  ${String(m).padEnd(8)} ${String(det.length).padStart(3)}   ${String(s.hit).padStart(3)} (${String(s.pct).padStart(2)}%)`
+      + `      ${String(s.pitchWrong).padStart(2)}      ${String(s.miss).padStart(2)}    ${String(s.extra).padStart(2)}`);
+  }
+  say('');
+
+  // ── 1e. 잉여가 난 순간, 원본 다른 악기(드럼·기타류·보컬)에도 진짜 활동이 있었는가 ──
+  // low·conf·rms·onset-margin 넷 다 베이스 스템 안에서는 못 갈랐다(1b·1d). 다음 후보는
+  // 스템 밖 — 진짜 재타현은 베이스 혼자 튀고, 분리 아티팩트는 원래 거기 있던 다른 악기의
+  // 누수/잔향일 수 있어 원본 쪽에도 흔적이 남을 수 있다. 분리를 한 번 더 하지 않고
+  // synth-mix-real.js 가 애초에 믹스에 넣었던 원본과 바로 견준다.
+  if (DRUMS && OTHER && VOCALS) {
+    prog('원본 드럼·기타류·보컬 로드 중…');
+    const [drums, other, vocals] = await Promise.all([DRUMS, OTHER, VOCALS].map(u => loadTrimmedMono(u, bass.mono.length)));
+    const otherActivityAt = (t) => Math.max(
+      attackRmsAt(drums.mono, drums.sr, t), attackRmsAt(other.mono, other.sr, t), attackRmsAt(vocals.mono, vocals.sr, t));
+    const trueOther = sepDet.filter((_, i) => trueIdx.has(i)).map(n => otherActivityAt(n.start));
+    const extraOther = sepScore.extraIdx.map(i => otherActivityAt(sepDet[i].start));
+    say('# 잉여가 난 순간 원본(드럼+기타류+보컬 중 최댓값) 활동 — 진짜 vs 잉여');
+    say(`  진짜 ${trueOther.length}개 중앙값 ${med(trueOther).toFixed(4)} · 잉여 ${extraOther.length}개 중앙값 ${med(extraOther).toFixed(4)}`);
+    for (const th of [0.01, 0.02, 0.04, 0.08, 0.16]) {
+      const extraLeft = extraOther.filter(v => v < th).length;   // 문턱 미만 = 다른 악기 활동 없음 = 진짜로 추정
+      const trueHurt = trueOther.filter(v => v >= th).length;
+      say(`  문턱 ${String(th).padEnd(6)} 잉여 남음 ${String(extraLeft).padStart(3)}/${extraOther.length}`
+        + ` (${Math.round(100 * (1 - extraLeft / Math.max(1, extraOther.length)))}% 제거)`
+        + `   진짜 중 피해 ${String(trueHurt).padStart(3)}/${trueOther.length} (${Math.round(100 * trueHurt / Math.max(1, trueOther.length))}%)`);
+    }
+    say('  (제거율은 높고 피해율은 낮아야 쓸 만하다 — low/conf/rms/margin 은 전부 실패했다)');
+  } else {
+    say('# 원본 드럼·기타류·보컬 없음 — sepattack-real 로 돌려야 이 절이 나온다');
+  }
+  say('');
+
+  // ── 2. 정답 온셋 각각에서 어택 에너지가 얼마나 남았는가 ──
+  // 반복 타현(직전과 같은 음정)은 지금 검출기가 특히 놓치는 자리 — 따로 갈라서 본다.
+  const ratios = [], ratiosRepeat = [], ratiosFresh = [];
+  for (let i = 0; i < gt.length; i++) {
+    const clean = attackRmsAt(levelRef.mono, levelRef.sr, gt[i].start);
+    const sep   = attackRmsAt(sepMono, mix.sr, gt[i].start);
+    const r = clean > 1e-6 ? sep / clean : (sep > 1e-6 ? Infinity : 1);
+    ratios.push(r);
+    (i > 0 && gt[i - 1].midi === gt[i].midi ? ratiosRepeat : ratiosFresh).push(r);
+  }
+  const lossPct = (arr, cut) => Math.round(100 * arr.filter(r => r < cut).length / Math.max(1, arr.length));
+  say('# 정답 온셋에서 어택 에너지 생존율 (분리 후 / 분리 전, 20ms 창)');
+  say(`  전체 ${gt.length}개 — 중앙값 ${med(ratios).toFixed(2)}배 · 50%이상 사라짐 ${lossPct(ratios, 0.5)}% · 80%이상 사라짐 ${lossPct(ratios, 0.2)}%`);
+  say(`  반복 타현(직전과 같은 음정) ${ratiosRepeat.length}개 — 중앙값 ${med(ratiosRepeat).toFixed(2)}배 · 50%이상 사라짐 ${lossPct(ratiosRepeat, 0.5)}%`);
+  say(`  새 음(직전과 다른 음정)   ${ratiosFresh.length}개 — 중앙값 ${med(ratiosFresh).toFixed(2)}배 · 50%이상 사라짐 ${lossPct(ratiosFresh, 0.5)}%`);
+  say('');
+  say('# 읽는 법');
+  say('  반복 타현의 생존율이 새 음보다 뚜렷이 낮으면 — README 가 짚은 "분리 스템에서 반복');
+  say('  타현을 놓친다"는 실패 모드가 분리 자체의 물리적 한계라는 뜻이다. 검출기를 아무리');
+  say('  고쳐도 없는 신호는 못 찾는다. 비슷하면 — 분리는 크게 안 가리고, 남은 문제는');
+  say('  검출기(온셋 문턱·분절) 쪽에 있다는 뜻이다.');
+
+} catch (e) { say('ERROR: ' + (e && (e.stack || e.message) || e)); }
+console.log('###RESULT###\n' + lines.join('\n'));
+</script>

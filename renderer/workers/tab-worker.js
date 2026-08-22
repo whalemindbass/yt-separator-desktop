@@ -7,7 +7,7 @@
 // 사용자 수정 정답지(617음) 대비 실측에서 YIN 87% · basic-pitch 18% (옥타브 무시 90% vs 29%)로
 // 격차가 커서, 불일치는 신뢰도 신호가 아니라 basic-pitch 의 오답이었다. 표시하면 맞는 음이 흐려진다.
 
-import { transcribe, assignFrets } from './tab-core.js';
+import { transcribe, transcribeCrepe, assignFrets } from './tab-core.js';
 
 self.addEventListener('message', async (e) => {
   const d = e.data || {};
@@ -15,6 +15,9 @@ self.addEventListener('message', async (e) => {
   const { id, sampleRate, opts, baseUrl } = d;
   const post = (pct, phase) => self.postMessage({ id, type: 'progress', pct, phase });
   const cross = !!(opts && opts.crossCheck === true && baseUrl);
+  // CREPE(lab/tab/README.md 11번 절) — 클린·분리 후 둘 다 YIN 을 이긴 유일한 경로.
+  // 아직 옵트인이라 opts.pitchTracker === 'crepe' 를 명시해야만 이 경로를 탄다.
+  const useCrepe = !!(opts && opts.pitchTracker === 'crepe' && baseUrl);
 
   try {
     const mono = new Float32Array(d.audio);
@@ -22,10 +25,18 @@ self.addEventListener('message', async (e) => {
     // 1단계 — 자체 검출. 교차 확인을 켰을 때만 뒤에 자리를 남겨 둔다.
     const span = cross ? 0.7 : 1;
     let last = -1;
-    const r = transcribe(mono, sampleRate, opts, (pct) => {
-      const p = Math.round(pct * span);
-      if (p !== last) { last = p; post(p, 'yin'); }
-    });
+    let r;
+    if (useCrepe) {
+      const { runCrepe } = await import('./crepe-run.js');
+      const { frames, hopSec } = await runCrepe(mono, sampleRate, baseUrl, 10,
+        (pct) => { const p = Math.round(pct * 0.9 * span); if (p !== last) { last = p; post(p, 'crepe'); } });
+      r = transcribeCrepe(frames, hopSec, mono, sampleRate, opts);
+    } else {
+      r = transcribe(mono, sampleRate, opts, (pct) => {
+        const p = Math.round(pct * span);
+        if (p !== last) { last = p; post(p, 'yin'); }
+      });
+    }
 
     let notes = r.notes;
 
