@@ -6,8 +6,9 @@ import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
-import { buildScore, beatAccents, estimateKey } from '../workers/tab-score.js';
-import { detectChords, phaseFromChords } from '../workers/tab-chord.js';
+import { StaffView } from './staffview.js';
+import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
+import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -153,17 +154,18 @@ function groupSort(a, b) {
   return (b.createdAt || 0) - (a.createdAt || 0);
 }
 
-/** videoPath 기준 중복 제거 — 같은 영상의 4/6-stem 중 대표 하나만 반환
- *  선택된 항목이 있으면 그것을 대표로, 없으면 최신 createdAt. */
+/** videoPath 기준 중복 제거 — 같은 영상의 4-stem/4-stem+/6-stem 변형 중 대표 하나만 반환.
+ *  항상 "최초에 분리한" 변형(createdAt 가장 이른 것)을 대표로 삼는다 — 지금 어느 모델을
+ *  듣고 있든 목록에서의 위치·표시(정렬 기준 createdAt, 즐겨찾기 등)는 흔들리지 않게.
+ *  예전엔 선택된 변형을 대표로 썼는데, 그러면 모델 전환(player-model-toggle)마다 대표가
+ *  바뀌어 정렬 순서가 널뛰고 — 새로 만든 변형은 즐겨찾기를 안 물려받아(아래 main.js
+ *  library:register 참고) 대표가 그쪽으로 넘어가면 별이 풀린 것처럼도 보였다(사용자 제보). */
 function representativeItems() {
   const byVideo = new Map();
   for (const it of items) {
     const key = it.videoPath || it.id;
     const cur = byVideo.get(key);
-    if (!cur) { byVideo.set(key, it); continue; }
-    if (it.id === selectedId)  { byVideo.set(key, it); continue; }
-    if (cur.id === selectedId) { continue; }
-    if ((it.createdAt || 0) > (cur.createdAt || 0)) byVideo.set(key, it);
+    if (!cur || (it.createdAt || 0) < (cur.createdAt || 0)) byVideo.set(key, it);
   }
   return [...byVideo.values()];
 }
@@ -189,6 +191,11 @@ function renderList() {
   const sorted = filtered.sort(sortFn);
   const useGroupHeaders = _sortMode === 'group';
 
+  // 지금 재생 중인 항목이 대표(representativeItems)와 다른 모델 변형이어도(player-model-toggle
+  // 로 전환한 경우) 그 videoPath 의 목록 행은 계속 활성으로 보여야 한다 — id 로만 비교하면
+  // 대표가 아닌 변형을 듣고 있을 때 활성 표시가 사라진다.
+  const selectedVideoPath = currentItem()?.videoPath || null;
+
   const isEn = getLocale() === 'en';
   let lastHeader = null;
   const addHeader = (label, groupName) => {
@@ -212,7 +219,7 @@ function renderList() {
     }
 
     const li = document.createElement('li');
-    li.className = 'lib-item' + (it.id === selectedId ? ' on' : '');
+    li.className = 'lib-item' + (it.id === selectedId || (selectedVideoPath && it.videoPath === selectedVideoPath) ? ' on' : '');
     li.dataset.id = it.id;
     li.innerHTML = `
       <div class="lib-item-row">
@@ -233,6 +240,9 @@ function renderList() {
       // 별/이름 편집 중 클릭은 무시
       if (e.target.closest('.lib-fav')) return;
       if (e.target.closest('.lib-item-rename')) return;
+      // 이미 이 영상이 켜져 있으면(플레이어에서 다른 모델로 전환해 둔 상태라도) 대표(최초
+      // 분리본) id 로 되돌리지 않는다 — 안 그러면 행을 다시 클릭할 때마다 모델 전환이 풀린다.
+      if (selectedVideoPath && it.videoPath === selectedVideoPath) return;
       selectItem(it.id);
     });
     titleEl.addEventListener('dblclick', (e) => {
@@ -523,8 +533,9 @@ async function mountPlayer(item) {
     }
     currentPlayer = new Player(playerVideo, videoUrl, stems, sampleRate, stemUrls);
 
-    // 베이스 TAB — 곡이 바뀌면 이전 결과를 비우고, 이번 곡의 베이스 스템을 쥐고 있는다
-    setTabSource(stems, sampleRate);
+    // 베이스 TAB — 곡이 바뀌면 이전 결과를 비우고, 이번 곡의 베이스 스템을 쥐고 있는다.
+    // 예전에 이 곡을 채보해 뒀으면(item.tab) 재채보 없이 바로 보여준다.
+    setTabSource(stems, sampleRate, item);
 
     // 파형 peaks 계산 (스템 합산 진폭)
     computeWavePeaks(stems);
@@ -752,24 +763,25 @@ const reseparateLabelEl  = $('player-reseparate-label');
 const reseparateMenu     = $('reseparate-menu');
 const modelToggle        = $('player-model-toggle');
 
-function siblingItem(item) {
-  if (!item?.videoPath) return null;
-  const curKey = item.modelKey || '4stem';
-  return items.find(x =>
-    x.id !== item.id &&
-    x.videoPath === item.videoPath &&
-    (x.modelKey || '4stem') !== curKey
-  );
+/** 같은 videoPath 를 공유하는 모든 변형(자기 자신 포함) — 지금은 4stem/4stem-2/6stem 최대 셋 */
+function siblingItems(item) {
+  if (!item?.videoPath) return [];
+  return items.filter(x => x.videoPath === item.videoPath);
 }
 
 function updateReseparateAndToggle(item) {
   const cur = item?.modelKey || '4stem';
-  const sib = siblingItem(item);
+  const variants = siblingItems(item);
+  const keysHave = new Set(variants.map(x => x.modelKey || '4stem'));
   // 재분리 버튼은 항상 노출 (같은/다른 모델 선택 가능)
-  if (sib) {
-    // 두 모델 다 있음 → 토글 표시
+  if (variants.length > 1) {
+    // 둘 이상 모델 보유 → 토글 표시. 아직 안 갈린 모델은 버튼은 두되 비활성으로 — 있는 것끼리만 즉시 전환.
     modelToggle.hidden = false;
-    modelToggle.querySelectorAll('.model-tog-btn').forEach(b => b.classList.toggle('on', b.dataset.key === cur));
+    modelToggle.querySelectorAll('.model-tog-btn').forEach(b => {
+      const k = b.dataset.key;
+      b.classList.toggle('on', k === cur);
+      b.classList.toggle('unavailable', !keysHave.has(k));
+    });
   } else {
     modelToggle.hidden = true;
   }
@@ -783,20 +795,19 @@ function updateReseparateAndToggle(item) {
 
 modelToggle?.addEventListener('click', (e) => {
   const btn = e.target.closest('.model-tog-btn');
-  if (!btn || btn.classList.contains('on')) return;
+  if (!btn || btn.classList.contains('on') || btn.classList.contains('unavailable')) return;
   const targetKey = btn.dataset.key;
   const it = currentItem();
   if (!it) return;
-  const sib = siblingItem(it);
-  if (sib && (sib.modelKey || '4stem') === targetKey) {
-    selectItem(sib.id);
-  }
+  const sib = siblingItems(it).find(x => (x.modelKey || '4stem') === targetKey);
+  if (sib) selectItem(sib.id);
 });
 function triggerReseparation(targetModel) {
   const it = currentItem();
   if (!it) return;
   const isEn = getLocale() === 'en';
-  const label = targetModel === '6stem' ? '6-stem' : '4-stem';
+  const menuLi = reseparateMenu?.querySelector(`li[data-model="${targetModel}"]`);
+  const label = (menuLi && menuLi.textContent.trim()) || targetModel;
   const msg = isEn
     ? `Reseparate this video with the ${label} model.\n\nThe "New" tab will be opened and prepared. Continue?`
     : `이 영상을 ${label} 모델로 다시 분리합니다.\n\n"새 분리" 탭으로 이동하고 준비 상태로 세팅됩니다. 계속할까요?`;
@@ -1405,47 +1416,139 @@ function addCheckpoint() {
 
 // ── 베이스 TAB ──────────────────────────────────────────────
 let _tabView = null;
+let _staffView = null;    // 오선보 프로토타입 — TAB 과 같은 buildScore() 결과를 그린다
 let _tabBass = null;      // [L, R] — 현재 곡의 베이스 스템
 let _tabDrums = null;     // [L, R] — 박자 감지용 드럼 스템
 let _tabMix = null;       // [L, R] — 스템을 전부 합친 것. 드럼만으로 템포가 안 잡힐 때 쓴다
+let _tabHarmonyMix = null; // [L, R] — 화성 스템(보컬·other·기타·피아노)만 합친 것. 코드 검출용
 let _tabSr = 44100;
 let _tabBusy = false;
 // 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
 let _tabNotes = null, _tabTuning = '4', _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
 let _tabPhase = null;     // null = 자동 판정
+let _tabKey = null;       // estimateKey() 결과 — 오선보 음이름 표기(#/b)에 쓴다
+let _tabChords = null;    // detectChords() 결과 — 마디 첫 박 판정(phaseFromChords)에 쓴다
+let _tabBarChords = null; // computeBarChords() 결과 — 오선보 마디 위 코드 표시
 
 function tabEls() {
   return {
     view: $('lib-tab-view'), status: $('lib-tab-status'), run: $('lib-tab-run'),
     tuning: $('lib-tab-tuning'), barPrev: $('lib-tab-bar-prev'), barNext: $('lib-tab-bar-next'),
+    staffView: $('lib-staff-view'),
   };
 }
 
-function setTabSource(stems, sampleRate) {
+// 베이스 TAB 패널 — 영상 위에 반투명 오버레이로 띄운다(사용자 요청). 아래로 밀어내는
+// 방식은 영상 크기를 두 번이나 건드려서(레이아웃 다툼) 별도 레이어로 완전히 뺐다.
+const libTabPanel = $('lib-tab-panel');
+function toggleTabOverlay(open) {
+  if (!libTabPanel) return;
+  const willOpen = open != null ? open : !libTabPanel.classList.contains('open');
+  libTabPanel.classList.toggle('open', willOpen);
+  $('player-tab-jump')?.classList.toggle('on', willOpen);
+}
+$('player-tab-jump')?.addEventListener('click', () => toggleTabOverlay());
+$('lib-tab-close')?.addEventListener('click', () => toggleTabOverlay(false));
+
+// 두께(높이) 조절 — 위 손잡이를 드래그. 다음에 열 때도 같은 높이가 되도록 기억해 둔다.
+(() => {
+  const handle = $('lib-tab-resize');
+  if (!handle || !libTabPanel) return;
+  const MIN_H = 120, MAX_MARGIN = 90;   // max-height: calc(100% - 90px) 와 맞춘다(CSS)
+  const saved = Number(localStorage.getItem('yss:lib-tab-h'));
+  if (saved > 0) libTabPanel.style.height = saved + 'px';
+
+  let startY = 0, startH = 0, dragging = false;
+  handle.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    handle.classList.add('dragging');
+    startY = e.clientY;
+    startH = libTabPanel.getBoundingClientRect().height;
+    try { handle.setPointerCapture(e.pointerId); } catch { /* 캡처 실패해도 드래그 자체는 계속한다 */ }
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const wrap = $('player-video-wrap');
+    const maxH = wrap ? wrap.clientHeight - MAX_MARGIN : 600;
+    // 손잡이가 패널 위쪽에 있다 — 위로 끌면(clientY 감소) 높이가 커져야 한다
+    const h = Math.max(MIN_H, Math.min(maxH, startH - (e.clientY - startY)));
+    libTabPanel.style.height = h + 'px';
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    try { handle.releasePointerCapture(e.pointerId); } catch {}
+    localStorage.setItem('yss:lib-tab-h', String(Math.round(libTabPanel.getBoundingClientRect().height)));
+  };
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+})();
+
+/** TAB/오선보 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 저장된 결과 복원 때도 필요해 공용으로 뺐다. */
+function ensureLibraryTabViews() {
+  const { view, staffView } = tabEls();
+  if (view && !_tabView) _tabView = new TabView(view, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
+  if (staffView && !_staffView) _staffView = new StaffView(staffView, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
+}
+
+function setTabSource(stems, sampleRate, item) {
   _tabBass = (stems && stems.bass) || null;
   _tabDrums = (stems && stems.drums) || null;
   _tabSr = sampleRate || 44100;
-  _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null;
+  _tabNotes = null; _tabTuning = '4'; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null; _tabKey = null; _tabChords = null; _tabBarChords = null;
 
   // 스템 합 = 원본 믹스. 드럼만으로 템포가 안 잡히는 곡이 있어 폴백으로 준다.
-  _tabMix = null;
+  _tabMix = null; _tabHarmonyMix = null;
   if (stems) {
+    const sum = (list) => {
+      if (!list.length) return null;
+      const n = Math.min(...list.map(p => p[0].length));
+      const L = new Float32Array(n), R = new Float32Array(n);
+      for (const p of list) for (let i = 0; i < n; i++) { L[i] += p[0][i]; R[i] += p[1][i]; }
+      return [L, R];
+    };
     const parts = Object.values(stems).filter(s => s && s[0] && s[1]);
     if (parts.length > 1) {
-      const n = Math.min(...parts.map(p => p[0].length));
-      const L = new Float32Array(n), R = new Float32Array(n);
-      for (const p of parts) for (let i = 0; i < n; i++) { L[i] += p[0][i]; R[i] += p[1][i]; }
-      _tabMix = [L, R];
+      _tabMix = sum(parts);
+      // 코드는 화성을 가진 스템에서만 읽는다 — 없으면(2-스템 분리 등) 원본 믹스로 내려간다.
+      const harmonyParts = Object.entries(stems).filter(([k, s]) => HARMONY_STEMS.has(k) && s && s[0] && s[1]).map(([, s]) => s);
+      _tabHarmonyMix = sum(harmonyParts) || _tabMix;
     }
   }
 
   const { status, run } = tabEls();
   if (_tabView) _tabView.clear();
+  if (_staffView) _staffView.clear();
   if (run) run.disabled = !_tabBass || _tabBusy;
   updateTabBarButtons();
+
+  // 이 곡을 예전에 채보해 뒀으면(라이브러리에 저장돼 있으면) 재채보 없이 바로 보여준다.
+  if (item && item.tab && Array.isArray(item.tab.notes) && item.tab.notes.length && _tabBass) {
+    ensureLibraryTabViews();
+    _tabNotes = item.tab.notes; _tabTuning = item.tab.tuning || '4';
+    _tabBeats = Array.isArray(item.tab.beats) ? item.tab.beats : null;
+    _tabAccent = Array.isArray(item.tab.accent) ? item.tab.accent : null;
+    _tabPhase = item.tab.phase != null ? item.tab.phase : null;
+    _tabBarPhase = item.tab.barPhase != null ? item.tab.barPhase : null;
+    _tabView.setNotes(_tabNotes, _tabTuning);
+    const key = estimateKey(_tabNotes);
+    _tabKey = key;
+    const score = _tabBeats ? buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase }) : null;
+    _tabView.setScore(score);
+    const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
+    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr);
+    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    updateTabBarButtons();
+    if (run) run.textContent = t('tab.rerun');
+    if (status) { status.classList.remove('err'); status.textContent = t('tab.doneKey', { n: _tabNotes.length, key: key ? key.name : '' }); }
+    return;
+  }
+
   if (status) {
     status.classList.remove('err');
-    status.textContent = _tabBass ? t('tab.hintLibrary') : t('tab.noBass');
+    status.textContent = _tabBass ? '' : t('tab.noBass');
   }
 }
 
@@ -1462,7 +1565,24 @@ function shiftTabBars(delta) {
   const sc = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase });
   const base = _tabPhase != null ? _tabPhase : (sc ? sc.phase : 0);
   _tabPhase = ((base + delta) % 4 + 4) % 4;
-  _tabView.setScore(buildScore(_tabNotes, _tabBeats, { phase: _tabPhase }));
+  const score = buildScore(_tabNotes, _tabBeats, { phase: _tabPhase });
+  _tabView.setScore(score);
+  const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
+  _tabBarChords = computeBarChords(score, _tabKey, harmonyMono, _tabSr);
+  if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+  persistTabToLibrary();
+}
+
+/** 채보 결과를 라이브러리 항목에 저장 — 다음에 이 곡을 열 때 재채보 없이 바로 보이게. */
+function persistTabToLibrary() {
+  const it = currentItem();
+  if (!it) return;
+  const tab = { notes: _tabNotes, tuning: _tabTuning, beats: _tabBeats, accent: _tabAccent, phase: _tabPhase, barPhase: _tabBarPhase };
+  // 디스크에 쓰는 것과 별개로 지금 들고 있는 items 배열도 바로 고쳐 둔다 — 안 그러면
+  // 저장은 됐는데 재시작 전까진(refresh() 다시 안 부르는 한) 같은 세션에서 이 곡을
+  // 벗어났다 돌아와도 여전히 옛 값(tab 없음)을 보고 재채보하라고 뜬다(사용자 제보).
+  it.tab = tab;
+  api.library.setTab(it.id, tab).catch(() => {});
 }
 
 async function runTabTranscribe() {
@@ -1475,7 +1595,7 @@ async function runTabTranscribe() {
   if (status) { status.classList.remove('err'); status.textContent = t('tab.working', { pct: 0 }); }
 
   try {
-    if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
+    ensureLibraryTabViews();
     const mono = toMono(_tabBass[0], _tabBass[1]);
     const tun = tuning ? tuning.value : '4';
     // 드럼 스템이 있으면 박자를 먼저 잡아 노트를 격자에 붙이고 마디를 나눈다
@@ -1486,7 +1606,8 @@ async function runTabTranscribe() {
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
       } catch { /* 박자 감지 실패 — 격자도 마디도 없이 진행 */ }
     }
-    const r = await transcribeBass(mono, _tabSr, { tuning: tun, beats },
+    // CREPE(lab/tab/README.md 11번 절) — studio.js 의 runStudioTab() 과 같은 이유로 시험 삼아 켜 둔다.
+    const r = await transcribeBass(mono, _tabSr, { tuning: tun, beats, pitchTracker: 'crepe' },
       (pct, phase) => {
         if (status) status.textContent = t(phase === 'bp' ? 'tab.workingBp' : 'tab.working', { pct });
       });
@@ -1495,24 +1616,33 @@ async function runTabTranscribe() {
     // 마디 — 박이 있을 때만. 첫 박은 드럼 킥으로 추정하고, 틀리면 사용자가 옮긴다.
     _tabNotes = r.notes; _tabTuning = r.tuning; _tabBeats = beats; _tabPhase = null;
     _tabAccent = beats && _tabDrums ? beatAccents(toMono(_tabDrums[0], _tabDrums[1]), _tabSr, beats) : null;
-    // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다
-    _tabBarPhase = null;
-    if (beats && _tabMix) {
+    // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다.
+    // 코드열 자체도 오선보 마디 위 표시에 그대로 재활용한다.
+    _tabBarPhase = null; _tabChords = null;
+    if (beats && _tabHarmonyMix) {
       try {
-        const ph = phaseFromChords(detectChords(toMono(_tabMix[0], _tabMix[1]), _tabSr, beats));
+        const chords = detectChords(toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]), _tabSr, beats);
+        _tabChords = chords;
+        const ph = phaseFromChords(chords);
         if (ph) _tabBarPhase = ph.phase;
       } catch { /* 코드 검출 실패 — 킥·베이스 단서로 내려간다 */ }
     }
-    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null);
-    updateTabBarButtons();
     // 조성 — 표기(F#/Gb)에 쓴다. 정확도에는 쓰지 않는다: 실측에서 조 밖 음 15개는
     // 하나도 틀리지 않았고, 오검출 41개는 전부 조 안이었다(옥타브 오류는 정의상 조 안이다).
     const key = estimateKey(r.notes);
+    _tabKey = key;
+    const score = beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null;
+    _tabView.setScore(score);
+    const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
+    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr);
+    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? t('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
       : (key ? t('tab.doneKey', { n: r.notes.length, key: key.name })
              : t('tab.done', { n: r.notes.length }));
     if (run) run.textContent = t('tab.rerun');
+    persistTabToLibrary();
   } catch (e) {
     if (status) { status.textContent = t('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
   } finally {
@@ -1531,6 +1661,7 @@ function initTabPanel() {
   // 캔버스가 없으면 일찍 반환하므로 거기에 얹으면 같이 죽는다.
   const tick = () => {
     if (_tabView) _tabView.setTime(playerVideo.currentTime || 0);
+    if (_staffView) _staffView.setTime(playerVideo.currentTime || 0);
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -1852,6 +1983,10 @@ export const Library = {
   selectItem,
   getSelected: () => currentItem(),
   getItems: () => items.slice(),
+  // studio.js 가 채보를 저장한 뒤 여기 items 배열도 바로 고쳐 두려고 쓴다 — 안 그러면
+  // 다음에 같은 곡을 studio.js 의 loadSong() 이 다시 열 때(같은 세션 안에서) 아직
+  // refresh() 를 안 불러 옛 값(tab 없음)을 보고 재채보하라고 뜬다.
+  patchTab: (id, tab) => { const it = items.find(x => x.id === id); if (it) it.tab = tab; },
 };
 
 // 뷰 첫 진입 시 자동 로드

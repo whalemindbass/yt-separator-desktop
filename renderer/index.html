@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep: https://ytseparator.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com;" />
+    content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep: https://ytseparator.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com;" />
   <title>Dr.studio</title>
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
@@ -295,6 +295,7 @@
         <span class="settings-label" data-i18n="sep.label.model">모델</span>
         <div class="pill-row" id="model-pills">
           <button class="pill on" data-model="4stem">4-stem</button>
+          <button class="pill" data-model="4stem-2" data-i18n-title="model.4stem2.hint" title="분리 정확도가 더 높지만 시간이 더 걸립니다">4-stem+</button>
           <button class="pill" data-model="6stem">6-stem</button>
         </div>
         <span id="model-status" class="settings-hint"></span>
@@ -430,8 +431,10 @@
             <span class="player-name-hint" data-i18n="player.name.hint">Enter로 저장</span>
           </div>
           <div class="player-meta">
+            <button id="player-tab-jump" class="btn" type="button" data-i18n="tab.title" hidden>베이스 TAB</button>
             <div class="model-toggle" id="player-model-toggle" hidden>
               <button class="model-tog-btn" data-key="4stem">4-stem</button>
+              <button class="model-tog-btn" data-key="4stem-2" data-i18n-title="model.4stem2.hint" title="분리 정확도가 더 높지만 시간이 더 걸립니다">4-stem+</button>
               <button class="model-tog-btn" data-key="6stem">6-stem</button>
             </div>
             <span id="player-provider" class="settings-hint"></span>
@@ -454,6 +457,7 @@
               </button>
               <ul id="reseparate-menu" class="group-menu" hidden>
                 <li data-model="4stem">4-stem</li>
+                <li data-model="4stem-2" data-i18n="model.4stem2.menuLabel">4-stem+ (정확도 우선, 느림)</li>
                 <li data-model="6stem">6-stem</li>
               </ul>
             </div>
@@ -500,6 +504,32 @@
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>
             </button>
           </div>
+
+          <!-- 베이스 TAB 채보 — 영상 위에 반투명 오버레이로 띄운다. 아래로 밀어내면
+               영상 크기 자체가 흔들리기 쉬워서(레이아웃 다툼) 별도 레이어로 뺐다.
+               "베이스 TAB" 버튼으로 토글, 위쪽 손잡이로 두께 조절. -->
+          <section class="tab-panel tab-panel-overlay" id="lib-tab-panel">
+            <div class="tab-panel-resize" id="lib-tab-resize" title="드래그해서 높이 조절"></div>
+            <header class="tab-head">
+              <span class="tab-title" data-i18n="tab.title">베이스 TAB</span>
+              <select id="lib-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
+                <option value="4">E A D G</option>
+                <option value="4b">하프다운 (Eb Ab Db Gb)</option>
+                <option value="4d">드랍 D (D A D G)</option>
+                <option value="5">B E A D G</option>
+                <option value="5H">E A D G C</option>
+              </select>
+              <span class="tab-bars">
+                <button id="lib-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
+                <button id="lib-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
+              </span>
+              <button id="lib-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+              <button id="lib-tab-close" class="btn btn-sm btn-icon" title="닫기" aria-label="닫기">✕</button>
+            </header>
+            <div class="tab-status" id="lib-tab-status"></div>
+            <div class="tab-view" id="lib-tab-view"></div>
+            <div class="staff-view" id="lib-staff-view"></div>
+          </section>
         </div>
 
         <aside id="checkpoint-panel" class="checkpoint-panel" hidden>
@@ -522,27 +552,6 @@
     </section>
 
     <aside class="lib-right">
-      <!-- 베이스 TAB 채보 — 아직 화면에서 뺀다. 검출은 나아졌지만(lab/tab/README.md 6·7번 절)
-           같은 음이 곡 안에서 여러 자리로 흩어지는 문제가 남아 연습 보조로도 읽기 불편하다.
-           코드와 측정은 남겨 둔다. 되살리려면 이 hidden 과 아래 도구 탭 버튼의 hidden 을 지운다. -->
-      <section class="tab-panel" id="lib-tab-panel" hidden>
-        <header class="tab-head">
-          <span class="tab-title" data-i18n="tab.title">베이스 TAB</span>
-          <select id="lib-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
-            <option value="4">E A D G</option>
-            <option value="5">B E A D G</option>
-            <option value="5H">E A D G C</option>
-          </select>
-          <span class="tab-bars">
-            <button id="lib-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
-            <button id="lib-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
-          </span>
-          <button id="lib-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
-        </header>
-        <div class="tab-status" id="lib-tab-status" data-i18n="tab.hintLibrary">베이스 스템에서 TAB 을 만듭니다.</div>
-        <div class="tab-view" id="lib-tab-view"></div>
-      </section>
-
       <div class="mixer">
         <div class="mixer-inline-row">
           <!-- Row 1: 마스터 / 오디오 -->
@@ -646,6 +655,11 @@
         <button id="st-engine-stop" class="btn" hidden data-i18n="studio.engine.stop">오디오 종료</button>
         <button id="st-load-song" class="btn pri" disabled title="오디오 시작 후 사용 가능" data-i18n-title="studio.h.needAudio" data-i18n="studio.loadSong">곡 불러오기</button>
         <button id="st-close-song" class="btn" disabled title="불러온 스템 곡 닫기(내 녹음·임포트는 유지)" data-i18n-title="studio.h.closeSongTitle" data-i18n="studio.h.closeSong">곡 닫기</button>
+        <div class="model-toggle" id="st-model-toggle" hidden>
+          <button class="model-tog-btn" data-key="4stem">4-stem</button>
+          <button class="model-tog-btn" data-key="4stem-2" data-i18n-title="model.4stem2.hint" title="분리 정확도가 더 높지만 시간이 더 걸립니다">4-stem+</button>
+          <button class="model-tog-btn" data-key="6stem">6-stem</button>
+        </div>
         <button id="st-file-menu" class="btn" disabled title="오디오 임포트 · 프로젝트 열기/저장" data-i18n-title="studio.h.fileTitle" data-i18n="studio.h.file">파일 ▾</button>
         <span class="daw-sp"></span>
         
@@ -775,22 +789,6 @@
                 </div>
               </div>
             </div>
-            <div class="daw-tool tab-panel" id="tool-tab" data-tool="tab" hidden>
-              <header class="tab-head">
-                <select id="st-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
-                  <option value="4">E A D G</option>
-                  <option value="5">B E A D G</option>
-                  <option value="5H">E A D G C</option>
-                </select>
-                <span class="tab-bars">
-                  <button id="st-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
-                  <button id="st-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
-                </span>
-                <button id="st-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
-              </header>
-              <div class="tab-status" id="st-tab-status" data-i18n="tab.hintStudio">곡을 불러오면 베이스 스템에서 TAB 을 만듭니다.</div>
-              <div class="tab-view" id="st-tab-view"></div>
-            </div>
             <div class="daw-tool-empty" id="tool-empty" data-i18n="studio.h.pickTool">위에서 도구를 선택하세요</div>
           </div>
         </aside>
@@ -801,12 +799,35 @@
       <div id="daw-hero-resize" class="daw-hero-resize" role="separator" aria-orientation="horizontal"
            tabindex="0" title="영상 높이 조절 (더블클릭: 기본값)" data-i18n-title="studio.h.heroResize"></div>
 
+      <!-- 베이스 TAB — 도구 사이드바(290px) 대신 항상 영상 폭 전체로, 영상 바로 아래 고정.
+           넓은 화면에서 오른쪽 좁은 칸에 낑겨 있던 걸 사용자가 지적했다. -->
+      <div class="daw-tool tab-panel tab-panel-below" id="tool-tab" data-tool="tab" hidden>
+        <header class="tab-head">
+          <select id="st-tab-tuning" class="tab-tuning" data-i18n-title="tab.tuning" title="튜닝">
+            <option value="4">E A D G</option>
+            <option value="4b">하프다운 (Eb Ab Db Gb)</option>
+            <option value="4d">드랍 D (D A D G)</option>
+            <option value="5">B E A D G</option>
+            <option value="5H">E A D G C</option>
+          </select>
+          <span class="tab-bars">
+            <button id="st-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
+            <button id="st-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
+          </span>
+          <button id="st-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+        </header>
+        <div class="tab-status" id="st-tab-status"></div>
+        <div class="tab-view" id="st-tab-view"></div>
+        <div class="staff-view" id="st-staff-view"></div>
+      </div>
+
       <!-- 트랙 -->
       <div class="daw-tracks">
         <div id="daw-ruler-wrap" class="daw-ruler-wrap">
           <div class="daw-ruler-ctrl">
             <button id="st-add-rec" class="daw-rtog" disabled title="녹음 트랙 추가" data-i18n-title="studio.lbl.addRecTrack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
             <button id="st-range-mode" class="daw-rtog" disabled title="영역 선택 모드 — 룰러를 드래그해 내보내기 구간 지정" data-i18n-title="studio.h.rangeModeTitle" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg></button>
+            <button id="st-magnet" class="daw-rtog on" disabled title="자석 스냅 — 그리드·다른 클립 경계에 붙기 (Alt = 순간 반대로)" data-i18n-title="studio.h.magnetTitle" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v6a4 4 0 0 0 8 0V2"/><path d="M2.3 2h3.4"/><path d="M10.3 2h3.4"/></svg></button>
           </div>
           <div id="daw-ruler" class="daw-ruler"></div>
         </div>
@@ -896,6 +917,7 @@
         </div>
         <div class="pill-row" id="s-model-pills">
           <button class="pill" data-model="4stem">4-stem</button>
+          <button class="pill" data-model="4stem-2" data-i18n-title="model.4stem2.hint" title="분리 정확도가 더 높지만 시간이 더 걸립니다">4-stem+</button>
           <button class="pill" data-model="6stem">6-stem</button>
         </div>
       </div>
@@ -1045,6 +1067,7 @@
     </section>
   </main>
 
+  <script src="./lib/vexflow/vexflow.js"></script>
   <script type="module" src="./scripts/app.js"></script>
 </body>
 </html>

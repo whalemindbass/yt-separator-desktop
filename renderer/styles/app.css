@@ -522,6 +522,8 @@ body { display: flex; flex-direction: column; }
   color: var(--tx-3);
   margin-left: auto;
 }
+/* 4-stem+ 처럼 "고르면 오래 걸린다" 같은 주의가 필요한 상태 — 에러는 아니라 danger 색은 안 쓴다 */
+.settings-hint.hint-warn { color: #c98a2b; }
 .pill-row {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -880,6 +882,8 @@ body { display: flex; flex-direction: column; }
 }
 /* 재생 항목 미선택 시 우측 컨트롤 패널 숨김 */
 .library-body:not(:has(#player-section:not([hidden]))) .lib-right { display: none; }
+/* 베이스 TAB(lib-tab-panel) 은 이제 영상 위 오버레이라(player-video-wrap 안) 곡 선택
+   전엔 아예 player-section 째로 hidden 이라 따로 안 숨겨도 된다 — .open 클래스만 JS 가 토글. */
 .library-body:not(:has(#player-section:not([hidden]))) {
   grid-template-columns: 260px 1fr;
   grid-template-areas: "side center";
@@ -1628,6 +1632,12 @@ body { display: flex; flex-direction: column; }
   border-radius: 0;
   display: flex; flex-direction: column;
   gap: 0;
+  /* 영상 영역 크기는 베이스 TAB 이 생기기 전과 완전히 같아야 한다(사용자 요구) — flex 로
+     TAB 패널과 공간을 나눠 갖게 했더니 좁은 화면에서 영상이 찌그러졌다. 그래서 원래대로
+     height:100% · flex:none 으로 되돌린다 — 영상은 항상 lib-center 높이 그대로를 꽉
+     채우고, 그 아래 TAB 패널만큼 넘치는 부분은 lib-center 의 스크롤(overflow-y:auto)로
+     내려가서 본다. 영상 크기 자체는 절대 안 건드린다. */
+  flex: none;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -1900,7 +1910,7 @@ body { display: flex; flex-direction: column; }
 }
 .player-meta svg { flex-shrink: 0; }
 
-/* 4-stem / 6-stem 세그먼트 토글 (같은 영상 두 모델 모두 처리 시 표시) */
+/* 4-stem / 4-stem+ / 6-stem 세그먼트 토글 (같은 영상을 둘 이상 모델로 처리했을 때 표시) */
 .model-toggle {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -1927,6 +1937,9 @@ body { display: flex; flex-direction: column; }
   color: var(--accent-fg);
   font-weight: 700;
 }
+/* 이 영상은 아직 이 모델로 안 갈렸다 — 눌러도 안 바뀐다("다시 분리" 메뉴를 써야 한다) */
+.model-tog-btn.unavailable { opacity: .35; cursor: default; }
+.model-tog-btn.unavailable:hover { color: var(--tx-2); background: transparent; }
 
 .mixer {
   display: flex; flex-direction: column;
@@ -2870,6 +2883,8 @@ body { display: flex; flex-direction: column; }
 
 /* 드래그 이동량 배지 (+0:07) */
 .daw-drag-badge { position: fixed; z-index: 300; background: var(--accent); color: #fff; font: 700 11px/1 var(--mono); padding: 4px 7px; border-radius: 4px; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,.5); white-space: nowrap; }
+/* 클립 자석 스냅선 — 붙은 경계를 트랙 전체 높이로 보여준다(어느 클립에 맞았는지 한눈에) */
+.daw-snap-line { position: fixed; z-index: 299; width: 0; border-left: 1.5px dashed var(--accent); pointer-events: none; }
 
 /* 도구 탭 (하나씩) */
 .daw-tool-tabs { display: flex; gap: 6px; padding: 8px 10px 0; }
@@ -3028,10 +3043,54 @@ body { background: var(--bg) !important; }
 
 /* ── 베이스 TAB 채보 ─────────────────────────────────────────── */
 .tab-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.lib-right > .tab-panel {
-  padding: 14px 0 12px;
-  border-bottom: 1px solid var(--border);
+/* 스튜디오 — 290px 도구 사이드바 대신 영상 바로 밑에 영상 폭 그대로 깐다(사용자 요청).
+   넓은 화면에서 오른쪽 좁은 칸에 낑겨 있던 문제를 없앤다. */
+.tab-panel-below {
+  padding: 12px 16px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex: none;
 }
+/* 라이브러리 — 영상 위에 반투명하게 띄운다. 아래로 밀어내는 방식은 영상 크기를 건드리기
+   쉬웠다(레이아웃 다툼 — 사용자가 두 번 잡아냄) — 그래서 별도 레이어로 완전히 분리했다.
+   오선보는 흰 배경에 촘촘히 그려서 진짜 반투명(영상이 그대로 비침)이면 장면 밝기에 따라
+   가독성이 들쭉날쭉해진다 — 그래서 "반투명"이라도 거의 불투명에 가깝게(92%) 잡는다.
+   video-controls(컨트롤 바)가 항상 바닥에 붙어 있어 그 위(bottom: 64px)부터 띄운다. */
+.tab-panel-overlay {
+  position: absolute;
+  left: 0; right: 0; bottom: 64px;
+  z-index: 8;
+  height: 240px;
+  min-height: 120px;
+  max-height: calc(100% - 90px);
+  padding: 4px 16px 12px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.35);
+  overflow-y: auto;
+  display: none;
+}
+.tab-panel-overlay.open { display: flex; }
+/* 위쪽 손잡이 — 드래그로 두께(높이) 조절 */
+.tab-panel-resize {
+  flex: none;
+  height: 14px;
+  margin: -4px 0 -4px;
+  cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none;
+}
+.tab-panel-resize::before {
+  content: '';
+  width: 40px; height: 3px; border-radius: 2px;
+  background: var(--border-mid);
+  transition: background .12s;
+}
+.tab-panel-resize:hover::before, .tab-panel-resize.dragging::before { background: var(--accent); }
+#lib-tab-close { margin-left: auto; }
+#player-tab-jump.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .tab-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tab-title {
   font-size: var(--fs-sm); font-weight: 600; color: var(--tx-2);
@@ -3040,8 +3099,16 @@ body { background: var(--bg) !important; }
 .tab-tuning {
   font: 500 11px/1 var(--mono); color: var(--tx-2);
   background: var(--input); border: 1px solid var(--border-mid);
-  border-radius: var(--r-sm); padding: 4px 6px; flex: none;
+  border-radius: var(--r-sm); padding: 0 8px; flex: none;
+  height: 28px; box-sizing: border-box; display: inline-flex; align-items: center;
 }
+/* .btn 기본은 큼직한 primary 버튼 기준이다 — .tab-head 처럼 촘촘히 늘어놓는 자리엔
+   맞지 않아 따로 축소판을 둔다. tab-tuning 과 높이(28px)를 맞춰 한 줄에서 안 들쭉날쭉하게. */
+.btn.btn-sm {
+  padding: 0 10px; font-size: 12px;
+  height: 28px; box-sizing: border-box; display: inline-flex; align-items: center;
+}
+.btn.btn-sm.btn-icon { padding: 0; width: 28px; justify-content: center; }
 .tab-status { font-size: var(--fs-sm); color: var(--tx-3); }
 .tab-status.err { color: var(--err-tx); }
 
@@ -3110,6 +3177,37 @@ body { background: var(--bg) !important; }
 /* 두 검출기가 합의하지 않은 음 — 지우지 않고 확신도만 낮춰 보여준다 */
 .tabv-note.unsure { opacity: .45; border-style: dashed; }
 .tabv-note.unsure.now { opacity: .8; }
+
+/* 오선보 — 따뜻한 종이톤 위 VexFlow SVG(인쇄 악보 느낌, 순백은 어두운 UI 위에서 너무
+   쨍해 보인다). TAB 과 같은 흐르는-재생선 구조: flow 가 재생선 밑을 지나가고,
+   재생선 자체는 화면에 고정된다. */
+.staff-view {
+  --staff-playhead: 30%;
+  position: relative;
+  overflow: hidden;
+  height: 190px;
+  background: #f7f3ea;
+  border-radius: 12px;
+  margin-top: 10px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06) inset, 0 6px 18px rgba(0,0,0,.28);
+}
+.staff-view:empty { display: none; }
+.staff-view-flow {
+  position: absolute; left: var(--staff-playhead); top: 0; bottom: 0;
+  will-change: transform;
+}
+.staff-playhead {
+  position: absolute; top: 0; bottom: 0; left: var(--staff-playhead);
+  width: 1px; background: var(--accent); z-index: 2;
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), .5);
+}
+.staff-playhead::before {
+  content: ''; position: absolute; top: 0; left: -3px;
+  border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
+  border-top: 5px solid var(--accent);
+}
+/* 지금 울리는 음표만 강조한다 */
+.staffv-now, .staffv-now * { fill: var(--accent) !important; stroke: var(--accent) !important; }
 
 /* 마디 시작 옮기기 — 자동 판정이 틀렸을 때 사람이 맞춘다 */
 .tab-bars { display: inline-flex; gap: 2px; margin-left: auto; }

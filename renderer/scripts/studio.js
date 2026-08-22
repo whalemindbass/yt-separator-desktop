@@ -8,10 +8,11 @@ import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
          METER_BLOCKS, METER_FLOOR_DB, METER_GATE } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
-import { t as tr, onLocaleChange } from './i18n.js';
+import { t as tr, getLocale, onLocaleChange } from './i18n.js';
 import { TabView, transcribeBass, toMono } from './tabview.js';
-import { buildScore, beatAccents, estimateKey } from '../workers/tab-score.js';
-import { detectChords, phaseFromChords } from '../workers/tab-chord.js';
+import { StaffView } from './staffview.js';
+import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
+import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -48,6 +49,7 @@ let _playing = false, _recArmed = false;
 let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
 let _rangeMode = false;     // 영역 선택 모드(룰러 드래그 = 내보내기 구간)
+let _magnetOn = true;       // 자석 스냅(그리드 + 클립 경계) — Alt 는 이 상태를 순간적으로 뒤집는다
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -118,6 +120,7 @@ let _songKey = null;
 let _stemPaths = null;     // 현재 스템 경로맵 {key:path} — 프로젝트 저장용
 let _songName = '';        // 현재 곡/프로젝트 이름
 let _videoPath = null;     // 현재 영상 경로 (프로젝트 저장용)
+let _modelKey = null;      // 현재 곡을 분리한 모델 — 4stem/4stem-2/6stem 전환 토글용
 
 const HEAD_W = 172;
 const DEFAULT_LANE_H = 82;   // CSS .daw-lane 기본 높이 — pan/meter 2번째 줄 수용
@@ -144,6 +147,28 @@ function snapSec(sec, disable) {
   const g = secPerBeat() / 4;   // 16분음표 격자(촘촘)
   const near = _gridOffset + Math.round((sec - _gridOffset) / g) * g;
   return Math.abs(near - sec) * _pxPerSec <= 5 ? Math.max(0, near) : Math.max(0, sec);
+}
+// 툴바 자석 버튼 상태(_magnetOn)에 Alt 를 곱해 그 드래그 한 번만 뒤집는다 — 평소 켜져
+// 있으면 Alt 로 잠깐 끄고, 버튼으로 꺼 뒀으면 Alt 로 잠깐 켠다(그래야 버튼이 늘 최신을
+// 반영하면서도 Alt 단축키가 여전히 "순간 반대로" 라는 익숙한 의미를 유지한다).
+function magnetActiveFor(ev) { return _magnetOn !== !!(ev && ev.altKey); }
+// 클립 마그넷 — 이동 중인 클립의 시작/끝이 다른 클립(트랙 안 가리고 전부)의 시작/끝에
+// 가까우면 거기 붙는다. 격자 스냅과 같은 5px 문턱. 격자보다 우선한다 — 사용자가 실제로
+// 맞추려는 대상은 대개 옆 클립이지 그리드가 아니다. 반환값의 edgeAt 은 내 경계와 상대
+// 경계가 겹치는 절대 시각 — 스냅선(showSnapLine)을 그 자리에 그리는 데 쓴다.
+function snapClipStart(startCandidate, dur, excludeIds) {
+  const endCandidate = startCandidate + dur;
+  let bestStart = null, bestEdge = null, bestPx = 5;
+  for (const t of _takes) {
+    if (excludeIds.has(t.id)) continue;
+    for (const edge of [t.start, t.start + t.dur]) {
+      const dStart = Math.abs(startCandidate - edge) * _pxPerSec;
+      if (dStart < bestPx) { bestPx = dStart; bestStart = edge; bestEdge = edge; }
+      const dEnd = Math.abs(endCandidate - edge) * _pxPerSec;
+      if (dEnd < bestPx) { bestPx = dEnd; bestStart = edge - dur; bestEdge = edge; }
+    }
+  }
+  return bestStart != null ? { start: bestStart, edgeAt: bestEdge } : null;
 }
 // 오류 제보에 붙일 스튜디오 상태 — 파일 경로·곡 제목 같은 개인 정보는 담지 않는다
 export function studioDiagnostics() {
@@ -331,7 +356,7 @@ function renderTracks() {
       const base = _stemOffset;
       const autoBase = snapshotStemAuto();   // 자동화 곡선도 스템과 같이 움직인다
       dragClip(e, (dSec, cx, cy) => {
-        _stemOffset = snapSec(base + dSec, e.altKey); repositionStems();   // 0:00 뒤로 못 감 + 그리드 스냅
+        _stemOffset = snapSec(base + dSec, !magnetActiveFor(e)); repositionStems();   // 0:00 뒤로 못 감 + 그리드 스냅
         shiftStemAuto(autoBase, _stemOffset - base);
         showDragBadge(_stemOffset - base, cx, cy);
       }, (moved) => {
@@ -694,7 +719,7 @@ function buildAutoLane(selId, label, color) {
     const t = Math.max(0, (e.clientX - r.left) / _pxPerSec);
     const v = valFromY(e.clientY - r.top, r.height);
     const before = a.pts.map(p => ({ ...p }));
-    a.pts.push({ t: snapSec(t, e.altKey), v });
+    a.pts.push({ t: snapSec(t, !magnetActiveFor(e)), v });
     a.pts.sort((x, y) => x.t - y.t);
     if (!a.on) { a.on = true; }   // 첫 점을 찍으면 자동으로 켬
     autoPush(selId); renderAutoLane(selId); markDirty();
@@ -756,7 +781,7 @@ function renderAutoLaneInto(row, selId) {
       const r = area.getBoundingClientRect();
       const move = (ev) => {
         const t = Math.max(0, (ev.clientX - r.left) / _pxPerSec);
-        a.pts[i].t = snapSec(t, ev.altKey);
+        a.pts[i].t = snapSec(t, !magnetActiveFor(ev));
         a.pts[i].v = valFromY(ev.clientY - r.top, r.height);
         a.pts.sort((x, y) => x.t - y.t);
         renderAutoLane(selId);
@@ -953,6 +978,27 @@ function showDragBadge(deltaSec, cx, cy) {
   b.style.left = (cx + 14) + 'px'; b.style.top = (cy - 26) + 'px';
 }
 function hideDragBadge() { document.getElementById('daw-drag-badge')?.remove(); }
+
+// ── 클립 자석 스냅선 — 어느 클립 경계에 붙었는지 트랙 전체 높이로 보여준다 ──
+// 시각(초) → 화면 clientX. dragExportEdge()/seekToClientX() 와 같은 변환식(반대 방향) —
+// 커서 위치(ev.clientX)를 그대로 쓰면 안 된다. 클립은 보통 왼쪽 끝이 아니라 몸통 아무
+// 데서나 잡고 끄는데, 커서 기준으로 계산하면 그 잡은 위치만큼 선이 항상 어긋난다.
+function timeToClientX(sec) {
+  const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
+  if (!wrap || !sc) return null;
+  return wrap.getBoundingClientRect().left + HEAD_W - sc.scrollLeft + sec * _pxPerSec;
+}
+function showSnapLine(sec) {
+  const x = timeToClientX(sec);
+  const sc = $('daw-tscroll'); if (x == null || !sc) return;
+  const r = sc.getBoundingClientRect();
+  let l = document.getElementById('daw-snap-line');
+  if (!l) { l = document.createElement('div'); l.id = 'daw-snap-line'; l.className = 'daw-snap-line'; document.body.appendChild(l); }
+  l.style.left = x + 'px';
+  l.style.top = r.top + 'px';
+  l.style.height = r.height + 'px';
+}
+function hideSnapLine() { document.getElementById('daw-snap-line')?.remove(); }
 
 function updateSoloDim() {
   const anySolo = [...document.querySelectorAll('.daw-ms[data-m="solo"].on')].length > 0;
@@ -1151,11 +1197,19 @@ function tracksHeight() {
 }
 // ── 베이스 TAB (도구 탭) ─────────────────────────────────────
 let _tabView = null;
+let _staffView = null;     // 오선보 프로토타입 — TAB 과 같은 buildScore() 결과를 그린다
 let _tabBusy = false;
 let _tabSongKey = null;    // 어느 곡의 결과인지 — 곡이 바뀌면 비운다
 // 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
-let _tabNotes = null, _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
+let _tabNotes = null, _tabTuning = '4', _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
 let _tabPhase = null;      // null = 자동 판정
+let _tabKey = null;        // estimateKey() 결과 — 오선보 음이름 표기(#/b)에 쓴다
+let _tabChords = null;     // detectChords() 결과 — 마디 첫 박 판정(phaseFromChords)에 쓴다
+// computeBarChords() 용 화성 스템 모노 — 마디 옮길 때(shiftTabBars) 다시 디코드하지
+// 않으려고 들고 있는다. 원본 오디오라 스템 경로별로 남기지 않고 통째로 하나만 든다.
+let _tabHarmonyMono = null, _tabHarmonySr = 44100;
+let _tabBarChords = null;  // computeBarChords() 결과 — 오선보 마디 위 코드 표시
+let _libraryItemId = null; // 현재 곡의 라이브러리 id — 채보 결과를 여기 저장/복원한다(api.library.setTab)
 
 function updateTabBarButtons() {
   const on = !!(_tabBeats && _tabNotes);
@@ -1170,7 +1224,19 @@ function shiftTabBars(delta) {
   const auto = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase });
   const base = _tabPhase != null ? _tabPhase : (auto ? auto.phase : 0);
   _tabPhase = ((base + delta) % 4 + 4) % 4;
-  _tabView.setScore(buildScore(_tabNotes, _tabBeats, { phase: _tabPhase }));
+  const score = buildScore(_tabNotes, _tabBeats, { phase: _tabPhase });
+  _tabView.setScore(score);
+  _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr);
+  if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+  persistTabToLibrary();
+}
+
+/** 채보 결과를 라이브러리 항목에 저장 — 다음에 이 곡을 열 때 재채보 없이 바로 보이게. */
+function persistTabToLibrary() {
+  if (!_libraryItemId) return;
+  const tab = { notes: _tabNotes, tuning: _tabTuning, beats: _tabBeats, accent: _tabAccent, phase: _tabPhase, barPhase: _tabBarPhase };
+  Library.patchTab(_libraryItemId, tab);   // 같은 세션 안에서 바로 반영 — disk 저장과 별개
+  api.library.setTab(_libraryItemId, tab).catch(() => {});
 }
 
 function refreshTabPanel() {
@@ -1178,16 +1244,99 @@ function refreshTabPanel() {
   const bass = _stemPaths && _stemPaths.bass;
   if (_tabSongKey && _tabSongKey !== (_stemPaths && _stemPaths.bass)) {
     if (_tabView) _tabView.clear();
+    if (_staffView) _staffView.clear();
     _tabSongKey = null;
-    _tabNotes = null; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null;
+    _tabNotes = null; _tabTuning = '4'; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null; _tabKey = null; _tabChords = null;
+    _tabHarmonyMono = null; _tabBarChords = null;
     updateTabBarButtons();
     if (run) run.textContent = tr('tab.run');
   }
   if (run) run.disabled = !bass || _tabBusy;
   if (status && !_tabBusy) {
     status.classList.remove('err');
-    status.textContent = !_stemPaths ? tr('tab.noSong') : (bass ? tr('tab.hintStudio') : tr('tab.noBass'));
+    status.textContent = !_stemPaths ? tr('tab.noSong') : (bass ? '' : tr('tab.noBass'));
   }
+}
+
+/** TAB/오선보 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 프로젝트 복원 때도 필요해 공용으로 뺐다. */
+function ensureTabViews() {
+  const view = $('st-tab-view');
+  if (view && !_tabView) _tabView = new TabView(view, { onSeek: (sec) => {
+    if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
+    const t = Math.max(0, Math.min(fullSec(), sec));
+    api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
+  } });
+  const staffEl = $('st-staff-view');
+  if (staffEl && !_staffView) _staffView = new StaffView(staffEl, { onSeek: (sec) => {
+    if (_recArmed) return;
+    const t = Math.max(0, Math.min(fullSec(), sec));
+    api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
+  } });
+}
+
+/**
+ * 베이스 TAB 상태를 저장해 둔 데이터로 되돌린다(재채보 안 함) — 프로젝트 파일 복원, 그리고
+ * 라이브러리 곡을 다시 열었을 때(loadSong) 둘 다 여기를 쓴다. tab 이 없거나 비어 있으면
+ * 그냥 비운다 — 이전에 열려 있던 다른 곡의 채보가 남아 보이는 걸 막는다.
+ * @param {{notes:Array, tuning?:string, beats?:number[], accent?:number[], phase?:number, barPhase?:number}|null} tab
+ */
+function restoreTabData(tab) {
+  if (_tabView) _tabView.clear();
+  if (_staffView) _staffView.clear();
+  _tabNotes = null; _tabTuning = '4'; _tabBeats = null; _tabAccent = null; _tabPhase = null;
+  _tabBarPhase = null; _tabKey = null; _tabChords = null; _tabHarmonyMono = null; _tabBarChords = null;
+  _tabSongKey = null;
+  updateTabBarButtons();
+  if (!(tab && Array.isArray(tab.notes) && tab.notes.length && _stemPaths)) return;
+
+  ensureTabViews();
+  _tabNotes = tab.notes; _tabTuning = tab.tuning || '4';
+  _tabBeats = Array.isArray(tab.beats) ? tab.beats : null;
+  _tabAccent = Array.isArray(tab.accent) ? tab.accent : null;
+  _tabPhase = tab.phase != null ? tab.phase : null;
+  _tabBarPhase = tab.barPhase != null ? tab.barPhase : null;
+  _tabSongKey = _stemPaths.bass || null;
+  _tabView.setNotes(_tabNotes, _tabTuning);
+  const key = estimateKey(_tabNotes);
+  _tabKey = key;
+  const score = _tabBeats ? buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase }) : null;
+  _tabView.setScore(score);
+  if (_staffView) _staffView.render(score, key, null);   // 코드 라벨은 아래서 비동기로 채운다
+  updateTabBarButtons();
+  const run = $('st-tab-run'); if (run) run.textContent = tr('tab.rerun');
+  recomputeTabChordsAsync();
+}
+
+/**
+ * 마디 위 코드 라벨만 다시 만든다 — 프로젝트 복원 직후 쓴다. 채보(notes)는 이미 저장돼
+ * 있어 그대로 쓰고, 코드는 원본 오디오가 있어야만 나오니 화성 스템만 가볍게 디코드한다.
+ * 화성 스템이 하나도 없으면(2-스템 분리 등) 조용히 포기한다 — 코드 라벨 없이도 TAB·
+ * 오선보 자체는 이미 복원돼 있다.
+ */
+async function recomputeTabChordsAsync() {
+  if (!_stemPaths || !_tabBeats || !_tabNotes) return;
+  try {
+    const decode = async (p) => {
+      const rr = await fetch(toYtsepUrl(p));
+      const c = new AudioContext();
+      try { return await c.decodeAudioData(await rr.arrayBuffer()); } finally { try { c.close(); } catch {} }
+    };
+    const decoded = [];
+    for (const [k, p] of Object.entries(_stemPaths)) {
+      if (!HARMONY_STEMS.has(k) || !p) continue;
+      const a2 = await decode(p);
+      const aL = a2.getChannelData(0);
+      decoded.push({ L: aL, R: a2.numberOfChannels > 1 ? a2.getChannelData(1) : aL, sr: a2.sampleRate });
+    }
+    if (!decoded.length) return;
+    const n = Math.min(...decoded.map(p => p.L.length));
+    const mL = new Float32Array(n), mR = new Float32Array(n);
+    for (const p of decoded) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
+    _tabHarmonyMono = toMono(mL, mR); _tabHarmonySr = decoded[0].sr;
+    const score = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase });
+    _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr);
+    if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+  } catch { /* 코드 라벨은 부가 정보다 — 실패해도 채보 자체는 이미 복원돼 있다 */ }
 }
 
 async function runStudioTab() {
@@ -1201,11 +1350,7 @@ async function runStudioTab() {
   if (run) run.disabled = true;
   if (status) { status.classList.remove('err'); status.textContent = tr('tab.working', { pct: 0 }); }
   try {
-    if (!_tabView) _tabView = new TabView(view, { onSeek: (sec) => {
-      if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
-      const t = Math.max(0, Math.min(fullSec(), sec));
-      api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
-    } });
+    ensureTabViews();
     // 스템은 파일로만 들고 있으므로 여기서 디코드한다
     const res = await fetch(toYtsepUrl(bassPath));
     const buf = await res.arrayBuffer();
@@ -1223,6 +1368,7 @@ async function runStudioTab() {
       try { return await c.decodeAudioData(await rr.arrayBuffer()); } finally { try { c.close(); } catch {} }
     };
     let beats = null, drumsMono = null, drumsSr = audio.sampleRate;
+    _tabChords = null; _tabHarmonyMono = null;
     if (_stemPaths.drums) {
       try {
         const daudio = await decode(_stemPaths.drums);
@@ -1231,34 +1377,52 @@ async function runStudioTab() {
         drumsMono = toMono(dL, dR); drumsSr = daudio.sampleRate;
 
         // 드럼만으로 템포가 안 잡히는 곡이 있다 — 스템을 합쳐 원본 믹스를 폴백으로 준다
-        let mix = null;
+        let mix = null, harmonyMix = null;
         try {
-          const parts = [[L, R], [dL, dR]];
+          const decoded = [];
           for (const [k, p] of Object.entries(_stemPaths)) {
             if (k === 'drums' || k === 'bass' || !p) continue;
             const a2 = await decode(p);
             const aL = a2.getChannelData(0);
-            parts.push([aL, a2.numberOfChannels > 1 ? a2.getChannelData(1) : aL]);
+            decoded.push({ k, L: aL, R: a2.numberOfChannels > 1 ? a2.getChannelData(1) : aL });
           }
-          const n = Math.min(...parts.map(p => p[0].length));
-          const mL = new Float32Array(n), mR = new Float32Array(n);
-          for (const p of parts) for (let i = 0; i < n; i++) { mL[i] += p[0][i]; mR[i] += p[1][i]; }
-          mix = [mL, mR];
+          const sum = (list) => {
+            if (!list.length) return null;
+            const n = Math.min(...list.map(p => p.L.length));
+            const mL = new Float32Array(n), mR = new Float32Array(n);
+            for (const p of list) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
+            return [mL, mR];
+          };
+          mix = sum([{ L, R }, { L: dL, R: dR }, ...decoded]);
+          // 코드는 화성을 가진 스템에서만 읽는다 — 드럼은 화성이 없는 잡음이고 베이스는
+          // (chromaAt 이 저역을 이미 빼긴 하지만) 애초에 한 번에 한 음이라 화성을 안 말해준다.
+          // 갈라진 화성 스템이 하나도 없으면(2-스템 분리 등) 원본 믹스로 내려간다.
+          harmonyMix = sum(decoded.filter(d => HARMONY_STEMS.has(d.k))) || mix;
         } catch { /* 믹스를 못 만들면 드럼만으로 시도한다 */ }
 
         const b = await detectBeats(dL, dR, daudio.sampleRate, mix);
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
-        // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다
-        if (beats && mix) {
+        // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다.
+        // 코드열 자체도 오선보 마디 위 표시에 그대로 재활용한다.
+        if (harmonyMix) {
+          _tabHarmonyMono = toMono(harmonyMix[0], harmonyMix[1]);
+          _tabHarmonySr = daudio.sampleRate;
+        }
+        if (beats && harmonyMix) {
           try {
-            const ph = phaseFromChords(detectChords(toMono(mix[0], mix[1]), daudio.sampleRate, beats));
+            const chords = detectChords(_tabHarmonyMono, _tabHarmonySr, beats);
+            _tabChords = chords;
+            const ph = phaseFromChords(chords);
             if (ph) _tabBarPhase = ph.phase;
           } catch { /* 코드 검출 실패 — 킥·베이스 단서로 내려간다 */ }
         }
       } catch { /* 박자 감지 실패 — 격자도 마디도 없이 진행 */ }
     }
 
-    const r = await transcribeBass(mono, audio.sampleRate, { tuning: tuningSel ? tuningSel.value : '4', beats },
+    // CREPE(lab/tab/README.md 11번 절) — 클린·분리 후 둘 다 YIN 을 이긴 유일한 경로라
+    // 지금 시험 삼아 기본으로 켜 둔다. 아직 한 곡·튜닝 전 상수 기준이라 이 상태로
+    // 굳히기 전에 실제 화면에서 한 번 보는 것이 이번 확인의 목적이다.
+    const r = await transcribeBass(mono, audio.sampleRate, { tuning: tuningSel ? tuningSel.value : '4', beats, pitchTracker: 'crepe' },
       (pct, phase) => {
         if (status) status.textContent = tr(phase === 'bp' ? 'tab.workingBp' : 'tab.working', { pct });
       });
@@ -1266,18 +1430,24 @@ async function runStudioTab() {
     _tabSongKey = bassPath;
 
     // 마디 — 박이 있을 때만. 첫 박은 드럼 킥으로 추정하고, 틀리면 사용자가 옮긴다.
-    _tabNotes = r.notes; _tabBeats = beats; _tabPhase = null;
+    _tabNotes = r.notes; _tabTuning = r.tuning; _tabBeats = beats; _tabPhase = null;
     _tabAccent = beats && drumsMono ? beatAccents(drumsMono, drumsSr, beats) : null;
-    _tabView.setScore(beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null);
-    updateTabBarButtons();
     // 조성 — 표기(F#/Gb)에 쓴다. 정확도에는 쓰지 않는다: 실측에서 조 밖 음 15개는
     // 하나도 틀리지 않았고, 오검출 41개는 전부 조 안이었다(옥타브 오류는 정의상 조 안이다).
     const key = estimateKey(r.notes);
+    _tabKey = key;
+    const score = beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null;
+    _tabView.setScore(score);
+    _tabBarChords = computeBarChords(score, key, _tabHarmonyMono, _tabHarmonySr);
+    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? tr('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
       : (key ? tr('tab.doneKey', { n: r.notes.length, key: key.name })
              : tr('tab.done', { n: r.notes.length }));
     if (run) run.textContent = tr('tab.rerun');
+    // 다음에 이 곡을 열 때 재채보 없이 바로 보이게 — CREPE 가 제일 오래 걸리는 부분이다.
+    persistTabToLibrary();
   } catch (e) {
     if (status) { status.textContent = tr('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
   } finally {
@@ -1289,6 +1459,7 @@ async function runStudioTab() {
 function updatePlayhead(sec) {
   _lastSec = sec; _phEmitTs = performance.now(); _phEmitSec = sec;
   if (_tabView) _tabView.setTime(sec);
+  if (_staffView) _staffView.setTime(sec);
   const ph = $('daw-playhead');
   if (!ph) return;
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
@@ -1310,6 +1481,7 @@ function _phTick(ts) {
     const p = $('st-pos'); if (p) p.textContent = fmtTC(sec);
   }
   if (_tabView) _tabView.setTime(sec);   // 엔진 pos 는 20Hz — 여기서 보간해야 부드럽다
+  if (_staffView) _staffView.setTime(sec);
   requestAnimationFrame(_phTick);
 }
 
@@ -1444,7 +1616,7 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1487,11 +1659,13 @@ async function pickImportAudio() {
 function closeSong() {
   api.engine.loadStems([]);
   _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null; _auto = new Map();
-  _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0;
+  _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0; _modelKey = null; _libraryItemId = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
   renderTracks();
   updateCloseSongBtn();
+  updateStudioModelToggle();
+  restoreTabData(null);
   flashTake(tr('studio.m.songClosed'));
 }
 
@@ -1507,6 +1681,8 @@ async function loadSong(item, opts) {
   _loadingSong = true;
   _songKey = String(it.videoPath || it.id);
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
+  _modelKey = it.modelKey || '4stem';
+  _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
   _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
 
@@ -1514,6 +1690,9 @@ async function loadSong(item, opts) {
   _tracks = keys.map((k, i) => ({ key: k, label: stemLabel(k), color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
   renderTracks();
   updateCloseSongBtn();
+  updateStudioModelToggle();
+  // 베이스 TAB — 이 곡을 예전에 채보해 뒀으면(라이브러리에 저장돼 있으면) 재채보 없이 바로 보여준다.
+  restoreTabData(it.tab);
 
   const v = $('daw-video');
   $('daw-video-empty').hidden = true;
@@ -1533,6 +1712,59 @@ async function loadSong(item, opts) {
   } catch (e) { flashTake(tr('studio.p.waveDecodeFail', { err: (e && e.message) || e })); }
   finally { _loadingSong = false; }
 }
+/** 같은 videoPath 를 공유하는 모든 변형(자기 자신 포함) — library.js 의 siblingItems() 와 같은 발상 */
+function siblingItemsFor(videoPath) {
+  if (!videoPath) return [];
+  return Library.getItems().filter(x => x.videoPath === videoPath);
+}
+
+/** 상단 4stem/4stem-2/6stem 토글 — 이미 갈린 변형끼리는 즉시 전환, 안 갈린 건 재분리로 보낸다 */
+function updateStudioModelToggle() {
+  const toggle = $('st-model-toggle');
+  if (!toggle) return;
+  const variants = siblingItemsFor(_videoPath);
+  if (!_videoPath || variants.length <= 1) { toggle.hidden = true; return; }
+  const keysHave = new Set(variants.map(x => x.modelKey || '4stem'));
+  toggle.hidden = false;
+  toggle.querySelectorAll('.model-tog-btn').forEach(b => {
+    const k = b.dataset.key;
+    b.classList.toggle('on', k === _modelKey);
+    b.classList.toggle('unavailable', !keysHave.has(k));
+  });
+}
+
+$('st-model-toggle')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.model-tog-btn');
+  if (!btn || btn.classList.contains('on')) return;
+  const targetKey = btn.dataset.key;
+  if (btn.classList.contains('unavailable')) {
+    // 이 영상은 아직 이 모델로 안 갈렸다 — library.js 재분리와 같은 흐름으로 "새 분리" 탭에 준비해 둔다.
+    const label = btn.textContent.trim();
+    const isEn = getLocale() === 'en';
+    const msg = isEn
+      ? `Reseparate this video with the ${label} model.\n\nThe "New" tab will be opened and prepared. Continue?`
+      : `이 영상을 ${label} 모델로 다시 분리합니다.\n\n"새 분리" 탭으로 이동하고 준비 상태로 세팅됩니다. 계속할까요?`;
+    if (!confirm(msg)) return;
+    document.dispatchEvent(new CustomEvent('yss:preload-separation', {
+      detail: {
+        videoPath: _videoPath,
+        baseName: (_videoPath || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, ''),
+        probe: {
+          id: 'local-' + Math.random().toString(36).slice(2, 8),
+          title: _songName,
+          uploader: isEn ? '(studio reseparate)' : '(스튜디오 재분리)',
+          duration: 0,
+          thumbnail: null,
+        },
+        modelKey: targetKey,
+      },
+    }));
+    return;
+  }
+  const sib = siblingItemsFor(_videoPath).find(x => (x.modelKey || '4stem') === targetKey);
+  if (sib) loadSong(sib);
+});
+
 // 곡 로드 후 drums stem 에서 BPM·다운비트 감지 → 그리드·스냅 정렬
 async function detectSongBpm(stems, sampleRate) {
   try {
@@ -1595,6 +1827,7 @@ function renderTakes() {
     const area = areas[tid]; if (!area) continue;
     const el = document.createElement('div');
     el.className = 'daw-take-clip' + (_selClips.has(tk.id) ? ' sel' : '');
+    el.dataset.clipId = String(tk.id);   // 선택 시 renderTakes() 가 DOM 을 통째로 새로 만들어서, 그 뒤에 이 요소를 다시 찾아야 한다
     el.style.left = (tk.start * _pxPerSec) + 'px';
     el.style.width = Math.max(3, tk.dur * _pxPerSec) + 'px';
     el.title = tk.file;
@@ -1643,22 +1876,37 @@ function renderTakes() {
         _selClipId = tk.id; selectTrack(tk.trackId); renderTakes();
         return;   // Ctrl-클릭은 선택만
       }
-      if (!_selClips.has(tk.id)) { _selClips = new Set([tk.id]); renderTakes(); }
+      // renderTakes() 는 DOM 을 통째로 지우고 새로 만든다 — 방금 그게 불렸다면 el 은 이미
+      // 문서에서 떨어져 나간 죽은 노드다(el.style.left 를 계속 써도 화면엔 안 보이고,
+      // el.closest(...) 는 항상 null). 새로 그려진 같은 클립 요소를 다시 찾아 그걸 쓴다.
+      let liveEl = el;
+      if (!_selClips.has(tk.id)) {
+        _selClips = new Set([tk.id]); renderTakes();
+        liveEl = document.querySelector(`.daw-take-clip[data-clip-id="${tk.id}"]`) || el;
+      }
       _selClipId = tk.id; selectTrack(tk.trackId);
       const multi = _selClips.size > 1;
       const startX = e.clientX, base = tk.start;
       // 그룹 이동 대상 + 이전 상태 스냅샷
       const group = multi ? _takes.filter(t => _selClips.has(t.id)) : [tk];
       const befores = group.map(t => ({ id: t.id, st: clipState(t), base: t.start }));
-      const srcLane = el.closest('.daw-lane-rec');
+      const excludeIds = new Set(group.map(t => t.id));   // 자기 자신·같이 끄는 클립엔 안 붙는다
+      const srcLane = liveEl.closest('.daw-lane-rec');
       let target = srcLane, dragging = false;
       const move = (ev) => {
         if (!dragging && Math.abs(ev.clientX - startX) < 4) return;   // 임계값 전엔 클릭으로 취급
         dragging = true;
-        const dSnap = snapSec(base + (ev.clientX - startX) / _pxPerSec, ev.altKey) - base;   // 스냅된 델타(주 클립 기준)
+        const rawStart = base + (ev.clientX - startX) / _pxPerSec;
+        // 대표(anchor) 클립 기준으로 자석을 계산하고, 그룹 전체엔 같은 델타를 적용한다
+        // (격자 스냅도 원래 이 방식 — 델타 하나로 그룹을 같이 옮긴다).
+        const active = magnetActiveFor(ev);
+        const clipSnap = active ? snapClipStart(rawStart, tk.dur, excludeIds) : null;
+        const dSnap = (clipSnap ? clipSnap.start : snapSec(rawStart, !active)) - base;
         group.forEach((t, i) => { t.start = Math.max(0, befores[i].base + dSnap); });
+        if (clipSnap) showSnapLine(clipSnap.edgeAt);
+        else hideSnapLine();
         if (multi) renderTakes();
-        else el.style.left = (tk.start * _pxPerSec) + 'px';   // 단일은 가볍게
+        else liveEl.style.left = (tk.start * _pxPerSec) + 'px';   // 단일은 가볍게
         // 단일 선택만 상하 트랙 이동 허용
         if (!multi) {
           const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.daw-lane-rec');
@@ -1672,6 +1920,7 @@ function renderTakes() {
         document.removeEventListener('pointerup', up);
         document.removeEventListener('pointercancel', up);
         hideDragBadge();
+        hideSnapLine();
         document.querySelectorAll('.daw-lane-rec.drop-target').forEach(l => l.classList.remove('drop-target'));
         if (!dragging) { if (!_recArmed) seekToClientX(startX); return; }   // 클릭 = 재생선 이동(클립 위에서도)
         const sr = deviceSr();
@@ -1705,7 +1954,7 @@ function wireTrim(handle, tk, el, wave, dir) {
     const before = clipState(tk);
     const move = (ev) => {
       const rawAbs = anchorAbs + (ev.clientX - startX) / _pxPerSec;
-      let d = snapSec(rawAbs, ev.altKey) - anchorAbs;   // 초, 그리드에 붙인 델타 (Alt = 해제)
+      let d = snapSec(rawAbs, !magnetActiveFor(ev)) - anchorAbs;   // 초, 그리드에 붙인 델타 (Alt = 해제)
       if (dir < 0) {   // 좌측: inOff·start·dur 동시 이동
         d = Math.max(-bIn, Math.min(bDur - MIN_CLIP, d));
         tk.inOff = bIn + d; tk.start = bStart + d; tk.dur = bDur - d;
@@ -1746,7 +1995,7 @@ function wireFade(handle, tk, paint, dir) {
     const before = clipState(tk);
     const move = (ev) => {
       const rawAbs = anchorAbs + (ev.clientX - startX) / _pxPerSec;
-      const snappedAbs = snapSec(rawAbs, ev.altKey);
+      const snappedAbs = snapSec(rawAbs, !magnetActiveFor(ev));
       if (dir < 0) tk.fadeIn  = Math.max(0, Math.min(tk.dur, snappedAbs - tk.start));
       else         tk.fadeOut = Math.max(0, Math.min(tk.dur, tk.start + tk.dur - snappedAbs));
       paint();
@@ -2089,9 +2338,15 @@ async function buildProjectObject(opts = {}) {
       fx: (_chainByTrack[sid] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })) };
   });
   const stems = _stemPaths ? { paths: _stemPaths, offset: Math.round(_stemOffset * sr), videoPath: _videoPath || null, mix: stemMix } : null;
+  // 베이스 TAB — 채보(CREPE)가 제일 오래 걸리는 부분이라 그 결과(notes)만은 반드시 남긴다.
+  // 마디 위 코드 라벨(_tabBarChords)은 원본 오디오가 있어야 다시 만들 수 있어 여기 안 남기고
+  // 로드 후 재계산한다(가벼운 편이라 다시 하는 게 용량을 불리는 것보다 낫다).
+  const tab = (_tabNotes && _tabNotes.length)
+    ? { notes: _tabNotes, tuning: _tabTuning, beats: _tabBeats, accent: _tabAccent, phase: _tabPhase, barPhase: _tabBarPhase }
+    : null;
   // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
   // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
-  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes };
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes, tab };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -2130,6 +2385,18 @@ async function saveProjectSmart() {
   else if (!r || !r.canceled) flashTake(tr('studio.m.saveFail'));
 }
 const saveProject = saveProjectSmart;   // 드롭다운 tr('studio.d.saveProjectShort') 도 동일 로직
+
+// 프로젝트 닫기 — closeSong() 은 스템만 비우고 녹음 트랙·클립·버스·되돌리기 기록은 남긴다.
+// 이건 그 전부를 빈 상태로 되돌린다. 빈 프로젝트를 applyProject() 로 "여는" 경로를 그대로
+// 타면 recTracksReset 무조건 호출 등 이미 검증된 초기화 로직을 새로 만들 필요가 없다
+// (사용자 제보: 프로젝트 이동 시 드라이버 충돌 — 원인은 이 리셋이 조건부였던 탓, 이미 수정됨).
+async function closeProject() {
+  if (!hasSaveableContent() && !_projectPath) { flashTake(tr('studio.m.nothingToClose')); return; }
+  await applyProject({ kind: 'yssproj', version: 2, bpm: 120, gridOffset: 0, beats: [], detBpm: 0, beatInterval: 0, master: 1, buses: [], stems: null, tracks: [], takes: [], tab: null });
+  _projectPath = null; _songName = '';
+  markClean();
+  flashTake(tr('studio.m.projectClosed'));
+}
 
 // ── 자동 저장 · 복구 ──────────────────────────────────────────
 // 사용자가 고른 .yssproj 는 절대 자동으로 덮어쓰지 않는다. 별도 스냅샷만 남기고,
@@ -2320,19 +2587,26 @@ async function applyProject(p) {
     closeSong();
   }
   _songName = p.name || '';
+  // 베이스 TAB 복원 — 프로젝트 파일에 저장해 둔 채보를 그대로 쓴다(재채보 안 함).
+  restoreTabData(p.tab);
   if (p.bpm) { _bpm = p.bpm; const b = $('st-bpm'); if (b) b.value = p.bpm; }
   _gridOffset = p.gridOffset || 0;
   _beats = Array.isArray(p.beats) ? p.beats.slice() : [];
   _detBpm = p.detBpm || 0; _beatInterval = p.beatInterval || 0;
   updateMetro();
   // 2) 녹음/오디오 트랙 레이아웃 + FX
+  // recTracksReset 은 항상 부른다 — 예전엔 새 프로젝트에 트랙이 하나도 없으면 이 블록
+  // 전체를 건너뛰어서, 엔진 쪽에 이전 프로젝트의 녹음 트랙이 그대로 남아 있었다(사용자
+  // 제보: 프로젝트 이동 시 "드라이버 충돌"). 빈 배열이라도 넘겨서 엔진을 확실히 비운다.
   let idMap = null;
-  if (Array.isArray(p.tracks) && p.tracks.length) {
+  {
     _recTracks = [];
     const gen = ++_recTracksGenReq;
-    api.engine.recTracksReset(p.tracks.map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] })), gen);
+    api.engine.recTracksReset((p.tracks || []).map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] })), gen);
     const ok = await waitRecTracks(gen);
     if (!ok) { _suppressDirty = false; flashTake(tr('studio.m.trackRestoreTimeout')); return; }
+  }
+  if (Array.isArray(p.tracks) && p.tracks.length) {
     idMap = {};
     p.tracks.forEach((t, i) => { if (_recTracks[i]) idMap[t.id] = _recTracks[i].id; });
     applyTrackMeta(p.tracks);   // 이름·색·높이
@@ -3181,6 +3455,7 @@ function wire() {
       { label: tr('studio.d.importAudio'), fn: pickImportAudio },
       { label: tr('studio.d.openProject'), fn: openProject },
       { label: tr('studio.d.saveProject'), fn: saveProject },
+      { label: tr('studio.d.closeProject'), fn: closeProject },
     ]);
   });
   $('st-undo').addEventListener('click', doUndo);
@@ -3296,6 +3571,18 @@ function wire() {
     $('st-return').classList.toggle('on', _returnOnStop);
     $('st-return').setAttribute('aria-pressed', String(_returnOnStop));
     flashTake(_returnOnStop ? tr('studio.lbl.returnOn') : tr('studio.lbl.returnOff'));
+  });
+
+  // 자석 스냅 on/off (설정 유지) — Alt 는 이 상태와 무관하게 그 드래그 한 번만 뒤집는다
+  _magnetOn = localStorage.getItem('yss:magnetOn') !== '0';
+  $('st-magnet').classList.toggle('on', _magnetOn);
+  $('st-magnet').setAttribute('aria-pressed', String(_magnetOn));
+  $('st-magnet').addEventListener('click', () => {
+    _magnetOn = !_magnetOn;
+    localStorage.setItem('yss:magnetOn', _magnetOn ? '1' : '0');
+    $('st-magnet').classList.toggle('on', _magnetOn);
+    $('st-magnet').setAttribute('aria-pressed', String(_magnetOn));
+    flashTake(_magnetOn ? tr('studio.lbl.magnetOn') : tr('studio.lbl.magnetOff'));
   });
 
   // 메트로놈 on/off (설정 유지)
