@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     deleteOrphan:    (p)               => ipcRenderer.invoke('library:deleteOrphan', p),
     setFavorite:     (id, fav)         => ipcRenderer.invoke('library:setFavorite', id, fav),
     setGroup:        (id, group)       => ipcRenderer.invoke('library:setGroup', id, group),
+    setTab:          (id, tab)         => ipcRenderer.invoke('library:setTab', id, tab),
   },
 
   // 실시간 오디오 엔진 (JUCE 사이드카)

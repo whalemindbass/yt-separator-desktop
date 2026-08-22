@@ -1077,6 +1077,17 @@ const MODELS = {
     size:     115343360,
     url:      'https://github.com/whalemindbass/yt-separator-releases/releases/download/models-v1/htdemucs_6s.onnx',
   },
+  // SCNet(10.6M 파라미터, MUSDB18 학습, MIT) 기반 4-stem 대안 모델. htdemucs 대비
+  // SDR +17%(10.51 vs 9.00 dB) — 정확도 우선용. 대신 htdemucs보다 느리다(실측 확인됨).
+  '4stem-2': {
+    key:      '4stem-2',
+    label:    '4-stem+ (정확도 우선)',
+    file:     'scnet_base.onnx',
+    sources:  4,
+    stems:    ['drums', 'bass', 'other', 'vocals'],
+    size:     44516685,
+    url:      'https://github.com/whalemindbass/yt-separator-releases/releases/download/models-v1/scnet_base.onnx',
+  },
 };
 const DEFAULT_MODEL_KEY = '4stem';
 
@@ -1388,11 +1399,22 @@ ipcMain.handle('library:register', (_ev, entry) => {
     meta: entry.meta || {},
   };
   // 같은 videoPath + 같은 modelKey 조합만 덮어쓰기.
-  // videoPath 같아도 modelKey 다르면 새 항목 (4-stem/6-stem 동시 보유).
+  // videoPath 같아도 modelKey 다르면 새 항목 (4-stem/4-stem+/6-stem 동시 보유).
   const recKey = rec.modelKey || '4stem';
   const idx = items.findIndex(it => it.videoPath === rec.videoPath && (it.modelKey || '4stem') === recKey);
-  if (idx >= 0) items[idx] = { ...items[idx], ...rec, createdAt: items[idx].createdAt || rec.createdAt };
-  else items.push(rec);
+  if (idx >= 0) {
+    items[idx] = { ...items[idx], ...rec, createdAt: items[idx].createdAt || rec.createdAt };
+  } else {
+    // 새로 만드는 변형 — 같은 영상의 기존 변형이 있으면 즐겨찾기·그룹을 물려받는다.
+    // 안 그러면 새 모델로 재분리한 순간 그 자리에서만 별이 꺼진 것처럼 보인다(라이브러리
+    // 목록은 최초 변형을 대표로 쓰지만, 재생 중인 변형 자체의 데이터는 이걸 따로 들고 있다).
+    const sibling = items.find(it => it.videoPath === rec.videoPath);
+    if (sibling) {
+      if (sibling.favorite) rec.favorite = true;
+      if (sibling.group) rec.group = sibling.group;
+    }
+    items.push(rec);
+  }
   writeLibrary(items);
   return { ok: true, id: rec.id };
 });
@@ -1435,6 +1457,20 @@ ipcMain.handle('library:setGroup', (_ev, id, group) => {
   for (const i of siblingIndices(items, items[idx].videoPath)) {
     if (g) items[i].group = g; else delete items[i].group;
   }
+  writeLibrary(items);
+  return { ok: true };
+});
+
+/**
+ * 베이스 채보(TAB) 결과 저장 — CREPE 가 제일 오래 걸리는 부분이라, 같은 곡을 다시 열 때마다
+ * 재채보하지 않게 이 항목에 붙여 둔다. 즐겨찾기·그룹과 달리 형제 변형(4-stem/6-stem 등)에
+ * 동기화하지 않는다 — 변형마다 베이스 스템 오디오 자체가 달라 채보 결과도 따로다.
+ */
+ipcMain.handle('library:setTab', (_ev, id, tab) => {
+  const items = readLibrary();
+  const idx = items.findIndex(it => it.id === id);
+  if (idx < 0) return { ok: false, error: 'not found' };
+  if (tab) items[idx].tab = tab; else delete items[idx].tab;
   writeLibrary(items);
   return { ok: true };
 });

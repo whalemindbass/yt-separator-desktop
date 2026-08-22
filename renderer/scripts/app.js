@@ -393,8 +393,9 @@ const providerStatus = $('provider-status');
     providerStatus.textContent = pref === 'auto' ? t('prov.auto') : (pref === 'webgpu' ? t('prov.webgpu') : t('prov.cpu'));
   }
 })();
-// ── 모델 선택 (4-stem / 6-stem) ────────────────
+// ── 모델 선택 (4-stem / 4-stem+ / 6-stem) ────────────────
 const modelPills   = document.querySelectorAll('#model-pills .pill');
+const MODEL_KEYS   = [...modelPills].map(b => b.dataset.model);   // pill 목록에서 그대로 뽑는다 — 하드코딩 안 함
 const modelStatus  = $('model-status');
 const modelDlDialog= $('model-dl-dialog');
 const modelDlTitle = $('model-dl-title');
@@ -418,9 +419,12 @@ async function refreshModelStatus() {
 }
 function updateModelStatusLabel() {
   const info = modelsInfo[currentModelKey];
-  if (!info) { modelStatus.textContent = ''; return; }
-  if (info.downloaded) modelStatus.textContent = t('model.state.ready');
-  else modelStatus.textContent = t('model.state.willDl', { size: (info.size/1024/1024).toFixed(0) });
+  if (!info) { modelStatus.textContent = ''; modelStatus.classList.remove('hint-warn'); return; }
+  let s = info.downloaded ? t('model.state.ready') : t('model.state.willDl', { size: (info.size/1024/1024).toFixed(0) });
+  // 4-stem+ 는 정확도 대신 시간을 쓴다 — pill 을 고른 그 자리에서 바로 보여야 나중에 놀라지 않는다
+  modelStatus.classList.toggle('hint-warn', currentModelKey === '4stem-2');
+  if (currentModelKey === '4stem-2') s += ' · ' + t('model.4stem2.hint');
+  modelStatus.textContent = s;
 }
 refreshModelStatus();
 
@@ -440,7 +444,7 @@ async function ensureModelBeforeSeparation(modelKey) {
   if (info && info.downloaded) return true;
 
   const isEn = getLocale() === 'en';
-  const kLabel = modelKey === '6stem' ? '6-stem' : '4-stem';
+  const kLabel = (info && info.label) || modelKey;
   modelDlTitle.textContent = isEn ? `${kLabel} model download` : `${kLabel} 모델 다운로드`;
   const mb = info ? (info.size / 1024 / 1024).toFixed(0) : '?';
   modelDlBody.textContent = isEn
@@ -947,7 +951,7 @@ document.addEventListener('yss:preload-separation', (ev) => {
   currentBaseName  = baseName;
   currentProbe     = probe;
   // 모델 pill 설정
-  if (modelKey && ['4stem', '6stem'].includes(modelKey)) {
+  if (modelKey && MODEL_KEYS.includes(modelKey)) {
     currentModelKey = modelKey;
     localStorage.setItem('modelKey', modelKey);
     modelPills.forEach(b => b.classList.toggle('on', b.dataset.model === modelKey));
