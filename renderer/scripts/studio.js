@@ -244,6 +244,7 @@ let _pdcMs = 0;
 let _stemOffset = 0;   // 스템 전체 오프셋(초)
 let _recTracks = [];   // 녹음 트랙 목록(엔진 동기) [{id,gain,mute,solo,armed}]
 let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토큰
+let _recTracksWaiters = [];   // waitRecTracks() 대기자 — recTracks 이벤트가 오면 폴링 없이 바로 깨운다
 let _exporting = false, _exportMp3 = null, _exportTmp = null;   // export 진행 상태
 // 녹음 대상 = 녹음(type 0) 트랙만
 const armedRecId = () => (_recTracks.find(r => r.armed && r.type !== 1) || _recTracks.find(r => r.type !== 1) || {}).id;
@@ -2214,12 +2215,26 @@ function persistTakeSet(name, tracks, takes) {
   const a = getTakeSets(); a.push({ id: 't' + Date.now(), name, sampleRate: deviceSr(), tracks, takes }); setTakeSets(a);
   flashTake(tr('studio.m.takeSetSaved') + name);
 }
-function waitRecTracks(gen) {   // recTracksReset 후 새 트랙 목록(generation 에코)까지 대기
-  return new Promise(res => {
-    const t0 = Date.now();
-    const iv = setInterval(() => {
-      if (_recTracksGen === gen || Date.now() - t0 > 2500) { clearInterval(iv); res(_recTracksGen === gen); }
-    }, 20);
+// recTracksReset 후 새 트랙 목록(generation 에코)까지 대기 — setInterval 폴링이 아니라
+// recTracks 이벤트가 직접 깨운다. 창이 포커스를 잃으면(예: 파일 연결로 다른 프로그램 위에
+// 열렸을 때) 크로미움이 배경 탭의 setInterval/setTimeout 을 강하게 죽인다 — 20ms 폴링은
+// 몇 틱 돌다 그대로 멈춰서(실측: 601ms/30틱에서 멈춤) 이 함수가 사실상 영원히 응답이
+// 없어 보였다. 엔진 IPC 메시지 도착은 이 타이머 제한을 안 타므로, 이벤트로 직접 풀면
+// 창 포커스와 무관하게 즉시 풀린다. 폴백 setTimeout 도 마찬가지로 느려질 수 있지만,
+// 정상 상황(엔진이 실제로 응답)에서는 그 폴백에 의존할 일이 없다.
+function waitRecTracks(gen) {
+  if (_recTracksGen === gen) return Promise.resolve(true);
+  return new Promise((res) => {
+    const w = { gen, done: false };
+    w.resolve = (ok) => {
+      if (w.done) return;
+      w.done = true;
+      clearTimeout(w.timer);
+      _recTracksWaiters = _recTracksWaiters.filter(x => x !== w);
+      res(ok);
+    };
+    w.timer = setTimeout(() => w.resolve(_recTracksGen === gen), 2500);
+    _recTracksWaiters.push(w);
   });
 }
 let _loadingTakeSet = false;
@@ -3140,7 +3155,10 @@ function onEngineEvent(m) {
     case 'recTracks': {
       const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
       _recTracks = (m.list || []).map(r => { const p = prevMeta.get(r.id); return p ? { ...r, ...p } : r; });   // 렌더러 전용 메타(이름·색·높이) id로 보존
-      if (m.gen != null) _recTracksGen = m.gen;
+      if (m.gen != null) {
+        _recTracksGen = m.gen;
+        _recTracksWaiters.filter(w => w.gen === m.gen).forEach(w => w.resolve(true));
+      }
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       renderRecLanes(); updateSoloDim();
       if (!selValid(_selTrack)) {   // 스템 선택은 유지
