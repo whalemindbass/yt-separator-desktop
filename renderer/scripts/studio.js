@@ -1487,7 +1487,11 @@ function _phTick(ts) {
 }
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
-function updatePlayIcon() { const el = $('daw-vplay'); if (el) el.hidden = _playing; }
+function updatePlayIcon() {
+  const el = $('daw-vplay'); if (el) el.hidden = _playing;
+  const pb = $('st-play');
+  if (pb) { pb.classList.toggle('on', _playing); pb.setAttribute('aria-pressed', String(_playing)); }
+}
 function playStudio() {
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
@@ -1523,8 +1527,14 @@ let _recStartSec = null;
 // 표본 개수와 픽셀 폭이 서로 다른 속도로 늘어나다 보니 그 나누는 경계가 매 프레임 조금씩
 // 밀려서 이미 그린 막대까지 값이 바뀌어 자글자글 흔들려 보였다(사용자 제보). 열을 한 번
 // 쓰면 고정해 두면 그 흔들림이 없다.
+// 시작값을 1e-6 처럼 0에 가깝게 두면, 아직 아무 소리도 안 났을 때(잡음 바닥 수준의
+// peak) 조차 "지금까지 본 최댓값" 대비로는 거의 1(꽉 참)이 되어 아무것도 안 쳤는데
+// 막대가 꽉 차 보였다(사용자 제보). 실제로 뭔가 들리는 소리다 싶은 문턱(대략 -26dBFS)
+// 아래로는 이 최댓값이 못 내려가게 바닥을 둔다 — 진짜 큰 소리가 나기 전까진 조용한
+// 구간이 조용하게 보이고, 큰 소리가 나면 그때부터 그 소리 기준으로 상대 스케일이 켜진다.
+const REC_LIVE_MAX_FLOOR = 0.05;
 let _recLiveCols = [];
-let _recLiveMax = 1e-6;
+let _recLiveMax = REC_LIVE_MAX_FLOOR;
 function pushRecLivePeak(elapsedSec, peak) {
   const col = Math.max(0, Math.floor(elapsedSec * _pxPerSec));
   if (peak > (_recLiveCols[col] || 0)) _recLiveCols[col] = peak;
@@ -1557,7 +1567,7 @@ function updateRecLive(t) {
   el.style.width = wPx + 'px';
   el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor('var(--danger)'));
 }
-function clearRecLive() { _recStartSec = null; _recLiveCols = []; _recLiveMax = 1e-6; document.querySelector('.daw-rec-live')?.remove(); }
+function clearRecLive() { _recStartSec = null; _recLiveCols = []; _recLiveMax = REC_LIVE_MAX_FLOOR; document.querySelector('.daw-rec-live')?.remove(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
 function syncVideo(t) {
@@ -1698,6 +1708,7 @@ function closeSong() {
   _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0; _modelKey = null; _libraryItemId = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
+  const vp = $('daw-vplay'); if (vp) vp.hidden = true;   // 곡 없이도 재생 버튼이 남아 있던 것(사용자 제보)
   renderTracks();
   updateCloseSongBtn();
   updateStudioModelToggle();
