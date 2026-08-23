@@ -1277,9 +1277,10 @@ playerDel.addEventListener('click', async () => {
     : `"${item.name}" 을(를) 라이브러리에서 제거하시겠습니까?\n\n원본 파일(영상, 스템 wav)도 함께 삭제됩니다.`);
   if (!yes) return;
   await api.library.remove(selectedId, true);
-  // 형제(4/6-stem sibling)가 없으면 이 videoPath의 저장 설정도 제거
-  const sib = siblingItem(item);
-  if (!sib) {
+  // 형제(4/6-stem sibling)가 없으면 이 videoPath의 저장 설정도 제거 — items 배열은 아직
+  // refresh() 전이라 방금 지운 item 자신도 그대로 들어 있으므로, 그 자신은 빼고 센다.
+  const sib = siblingItems(item).filter(x => x.id !== item.id);
+  if (!sib.length) {
     const k = songKeyOf(item);
     if (k) { try { localStorage.removeItem(k); } catch {} }
   }
