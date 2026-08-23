@@ -1512,6 +1512,28 @@ function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
 
 // ── 동기 ──────────────────────────────────────────
 let _recStartSec = null;
+// 녹음 중 실시간 파형 — 엔진이 이미 20Hz 로 스트리밍하는 입력 peak('level' 이벤트, 튜너·VU
+// 미터가 쓰는 바로 그 값)를 시간순으로 쌓아 뒀다가, 화면에 그릴 때 그 순간의 배율(_pxPerSec)
+// 기준 픽셀 폭만큼 버킷으로 나눠 그린다. 원본 PCM 은 녹음이 끝나야 파일에서 읽을 수 있어
+// (renderTake) 이 동안은 이 peak 스트림이 얻을 수 있는 전부다 — 정밀한 파형은 아니지만
+// 녹음되고 있다는 것과 대략의 레벨은 실시간으로 보여준다.
+let _recLivePeaks = [];
+function buildLiveWaveSvg(peaks, cols, color) {
+  const n = Math.max(1, cols);
+  const head = `<svg width="100%" height="100%" viewBox="0 0 ${n} 24" preserveAspectRatio="none">`;
+  if (!peaks.length) return head + '</svg>';
+  const bucket = peaks.length / n;
+  let a = '', b = '';
+  for (let i = 0; i < n; i++) {
+    const start = Math.floor(i * bucket), end = Math.max(start + 1, Math.floor((i + 1) * bucket));
+    let p = 0;
+    for (let j = start; j < end && j < peaks.length; j++) if (peaks[j] > p) p = peaks[j];
+    const h = Math.min(1, p) * 11;   // 0..1 절대 스케일(디지털 풀스케일 기준) — 녹음 중 레벨이 계속 커 보였다 작아 보였다 하지 않게
+    a += `${i},${(12 - h).toFixed(1)} `;
+    b += `${i},${(12 + h).toFixed(1)} `;
+  }
+  return `${head}<polygon points="${a}${b}" fill="${color}" fill-opacity=".85"/></svg>`;
+}
 function updateRecLive(t) {
   const lane = document.querySelector(`.daw-lane-rec[data-recid="${armedRecId()}"]`) || document.querySelector('.daw-lane-rec');
   const area = lane && lane.querySelector('.daw-area');
@@ -1519,10 +1541,12 @@ function updateRecLive(t) {
   if (_recStartSec == null) _recStartSec = t;
   let el = area.querySelector('.daw-rec-live');
   if (!el) { el = document.createElement('div'); el.className = 'daw-rec-live'; area.appendChild(el); }
+  const wPx = Math.max(2, (t - _recStartSec) * _pxPerSec);
   el.style.left = (_recStartSec * _pxPerSec) + 'px';
-  el.style.width = Math.max(2, (t - _recStartSec) * _pxPerSec) + 'px';
+  el.style.width = wPx + 'px';
+  el.innerHTML = buildLiveWaveSvg(_recLivePeaks, Math.round(wPx), resolveColor('var(--danger)'));
 }
-function clearRecLive() { _recStartSec = null; document.querySelector('.daw-rec-live')?.remove(); }
+function clearRecLive() { _recStartSec = null; _recLivePeaks = []; document.querySelector('.daw-rec-live')?.remove(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
 function syncVideo(t) {
@@ -3134,7 +3158,10 @@ function onEngineEvent(m) {
       else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
       break;
     case 'pos': onPos(m.samples); break;
-    case 'level': updateVU(m.peak); updateInputChannelMeters(m.chans); break;
+    case 'level':
+      updateVU(m.peak); updateInputChannelMeters(m.chans);
+      if (_recArmed && _playing) _recLivePeaks.push(m.peak || 0);   // 녹음 중 실시간 파형용 — 아래 updateRecLive() 참고
+      break;
     case 'pitch': updateTuner(m.freq); break;
     case 'trackMeter': onTrackMeter(m.list || []); break;
     case 'pdc': {   // 플러그인 지연 보정 — 보정할 지연이 있을 때만 표시. 클릭으로 on/off

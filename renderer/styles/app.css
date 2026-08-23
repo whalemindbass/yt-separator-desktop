@@ -2741,7 +2741,8 @@ body { display: flex; flex-direction: column; }
 .daw-fx-slot:hover .ed, .daw-fx-slot:hover .del,
 .daw-fx-slot .ed:focus-visible, .daw-fx-slot .del:focus-visible { width: 24px; margin-left: 0; opacity: 1; border-width: 1px; }
 .daw-fx-slot:hover .ed:disabled { opacity: .3; }
-.daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); pointer-events: none; }
+.daw-rec-live { position: absolute; top: 6px; bottom: 6px; border-radius: 6px; background: color-mix(in srgb, var(--danger) 24%, transparent); border: 1px solid var(--danger); pointer-events: none; overflow: hidden; }
+.daw-rec-live svg { display: block; }
 .daw-take-clip { position: absolute; top: 0; bottom: 0; overflow: hidden; background: color-mix(in srgb, var(--danger) 16%, var(--elev)); cursor: pointer; }
 .daw-clip-wave { position: absolute; top: 0; bottom: 0; }
 .daw-take-clip svg { width: 100%; height: 100%; display: block; }
