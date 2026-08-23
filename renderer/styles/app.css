@@ -761,15 +761,18 @@ body { display: flex; flex-direction: column; }
   line-height: 1.5;
 }
 .batch-item {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; flex-direction: column; gap: 6px;
   padding: 8px 10px;
   background: var(--elev);
   border-radius: var(--r-sm);
   border-left: 2px solid var(--border-mid);
   font-size: 12.5px;
 }
+.batch-item-row { display: flex; align-items: center; gap: 10px; }
 .batch-item-label { flex: 1; min-width: 0; color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.batch-item-status { font-family: var(--mono); font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
+.batch-item-status { font-family: var(--mono); font-size: 11px; color: var(--tx-3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.batch-item-bar { height: 3px; background: var(--input); border-radius: 2px; overflow: hidden; }
+.batch-item-bar-fill { height: 100%; background: var(--accent); transition: width .2s; border-radius: 2px; }
 .batch-item-remove {
   border: 0; background: transparent; color: var(--tx-4); cursor: pointer;
   width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;

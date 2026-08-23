@@ -981,16 +981,19 @@ function renderBatchQueue() {
   for (const item of batchQueue) {
     const li = document.createElement('li');
     li.className = 'batch-item st-' + item.status;
+    const row = document.createElement('div');
+    row.className = 'batch-item-row';
     const label = document.createElement('span');
     label.className = 'batch-item-label';
     label.textContent = item.title + (item.existing ? ' · ' + t('sep.batch.dupTag') : '');
-    li.appendChild(label);
+    row.appendChild(label);
     const st = document.createElement('span');
     st.className = 'batch-item-status';
+    const hasPct = typeof item.progress === 'number' && (item.status === 'downloading' || item.status === 'separating');
     st.textContent = item.status === 'error'
       ? t('sep.batch.st.error') + (item.error ? ': ' + item.error : '')
-      : t('sep.batch.st.' + item.status);
-    li.appendChild(st);
+      : t('sep.batch.st.' + item.status) + (hasPct ? ` ${item.progress}%` : '');
+    row.appendChild(st);
     // 도는 중엔 빼기 버튼을 숨긴다 — runBatchQueue() 의 for...of 는 시작 시점의 배열을
     // 그대로 들고 도므로, 도중에 여기서 배열을 필터링해 봐야 이미 시작된 순회에는 반영이
     // 안 된다(목록에선 사라져 보이는데 뒤에서 계속 처리되다가 결국 라이브러리에 등록되는
@@ -1000,7 +1003,15 @@ function renderBatchQueue() {
       rm.className = 'batch-item-remove'; rm.type = 'button';
       rm.title = t('sep.batch.remove.title'); rm.textContent = '✕';
       rm.addEventListener('click', () => { batchQueue = batchQueue.filter(x => x.id !== item.id); renderBatchQueue(); });
-      li.appendChild(rm);
+      row.appendChild(rm);
+    }
+    li.appendChild(row);
+    if (hasPct) {
+      const bar = document.createElement('div'); bar.className = 'batch-item-bar';
+      const fill = document.createElement('div'); fill.className = 'batch-item-bar-fill';
+      fill.style.width = Math.max(0, Math.min(100, item.progress)) + '%';
+      bar.appendChild(fill);
+      li.appendChild(bar);
     }
     batchListEl.appendChild(li);
   }
@@ -1092,7 +1103,7 @@ async function runBatchQueue() {
     for (const item of batchQueue) {
       if (item.status !== 'pending') continue;
       if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
-      item.status = 'downloading'; renderBatchQueue();
+      item.status = 'downloading'; item.progress = 0; renderBatchQueue();
       try {
         let videoPath, baseName;
         let meta = item.probeInfo || {};
@@ -1100,8 +1111,13 @@ async function runBatchQueue() {
           if (!meta.id) {   // addBatchLink 를 거치지 않고 들어온 경우를 위한 보험(정상 경로는 이미 프로브됨)
             try { const probe = await api.ytdlp.probe(item.source); if (probe?.ok && probe.info) meta = probe.info; } catch {}
           }
-          const dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality });
-          if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
+          let unsubBatchDl = api.ytdlp.onProgress((p) => {
+            if (typeof p.ratio === 'number') { item.progress = Math.round(p.ratio * 100); renderBatchQueue(); }
+          });
+          let dl;
+          try { dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality }); }
+          finally { unsubBatchDl?.(); unsubBatchDl = null; }
+          if (batchCancelRequested) { item.status = 'canceled'; item.progress = null; renderBatchQueue(); continue; }
           if (!dl || !dl.ok) throw new Error(dl?.error || 'download failed');
           videoPath = dl.filePath;
           baseName = dl.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
@@ -1109,10 +1125,12 @@ async function runBatchQueue() {
           videoPath = item.source;
           baseName = item.title;
         }
-        item.status = 'separating'; renderBatchQueue();
+        item.status = 'separating'; item.progress = 0; renderBatchQueue();
         await ensureModelBeforeSeparation(currentModelKey);
-        const result = await separatePipeline(videoPath, baseName, () => {}, { modelKey: currentModelKey });
-        if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
+        const result = await separatePipeline(videoPath, baseName, (phase, ratio) => {
+          if (typeof ratio === 'number') { item.progress = Math.round(ratio * 100); renderBatchQueue(); }
+        }, { modelKey: currentModelKey });
+        if (batchCancelRequested) { item.status = 'canceled'; item.progress = null; renderBatchQueue(); continue; }
         await api.library.register({
           name: meta.title || baseName,
           videoPath, stemPaths: result.stemPaths, outDir: result.outDir,
@@ -1128,6 +1146,7 @@ async function runBatchQueue() {
           ? 'canceled' : 'error';
         if (item.status === 'error') item.error = (e && e.message) || String(e);
       }
+      item.progress = null;   // 끝났으면(완료·실패·취소) 퍼센트 표시는 그만
       renderBatchQueue();
     }
   } finally {
