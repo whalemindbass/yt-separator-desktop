@@ -930,16 +930,41 @@ openStemsBtn.addEventListener('click', async () => {
   if (dir) await api.openPath(dir);
 });
 
+// ── 단일 / 일괄 처리 방식 전환 ──────────────────────
+// 두 방식은 화면 구성이 아예 달라(단일=진행률·완료 카드, 일괄=대기열 목록) 한 화면에
+// 같이 두면 지금 뭘 보고 있는지 헷갈린다 — 고른 쪽만 보인다.
+const modeSingleBtn = $('mode-single');
+const modeBatchBtn  = $('mode-batch');
+const singleModePanel  = $('single-mode-panel');
+const singleModeExtras = $('single-mode-extras');
+const batchModePanel   = $('batch-mode-panel');
+function setSepMode(mode) {
+  const isBatch = mode === 'batch';
+  modeSingleBtn.classList.toggle('on', !isBatch);
+  modeSingleBtn.setAttribute('aria-pressed', String(!isBatch));
+  modeBatchBtn.classList.toggle('on', isBatch);
+  modeBatchBtn.setAttribute('aria-pressed', String(isBatch));
+  // single-mode-panel/extras 는 hidden 을 강제로 껐다 켰다 하지 않는다 — 그 안 카드들은
+  // (프로브 성공/완료 등) 각자 독립적인 hidden 상태를 갖고 있어서, 여기서 false 로 덮으면
+  // 아직 안 떠야 할 카드까지 보여버린다. 부모만 감춰서 자손의 hidden 은 그대로 존중한다.
+  singleModePanel.hidden = isBatch;
+  singleModeExtras.hidden = isBatch;
+  batchModePanel.hidden = !isBatch;
+}
+modeSingleBtn.addEventListener('click', () => setSepMode('single'));
+modeBatchBtn.addEventListener('click', () => setSepMode('batch'));
+
 // ── 일괄 처리 대기열 ──────────────────────────────
 // 링크 여러 개 또는 파일 여러 개를 모아 뒀다가 순서대로 자동으로 다운로드→분리한다.
 // 위쪽 단일 처리 흐름(다운로드/분리 버튼)과는 별도 상태를 쓴다 — currentVideoPath 등을
 // 같이 쓰면, 배치 도는 중에 사용자가 단일 처리를 건드릴 때 서로 덮어쓴다. 대신 배치가 도는
 // 동안은 단일 처리 버튼을 잠가서 다운로드/취소 같은 전역 상태가 부딪히지 않게 한다.
+const batchUrlInput    = $('batch-url');
 const batchAddLinkBtn  = $('batch-add-link');
 const batchAddFilesBtn = $('batch-add-files');
-const batchPanel       = $('batch-panel');
 const batchCountEl     = $('batch-count');
 const batchListEl      = $('batch-list');
+const batchEmptyEl     = $('batch-empty');
 const batchStartBtn    = $('batch-start');
 const batchClearBtn    = $('batch-clear');
 
@@ -948,8 +973,9 @@ let batchRunning = false;
 let batchSeq = 0;
 
 function renderBatchQueue() {
-  batchPanel.hidden = batchQueue.length === 0;
   batchCountEl.textContent = t('sep.batch.count', { n: batchQueue.length });
+  batchListEl.hidden = batchQueue.length === 0;
+  batchEmptyEl.hidden = batchQueue.length !== 0;
   batchListEl.innerHTML = '';
   for (const item of batchQueue) {
     const li = document.createElement('li');
@@ -978,15 +1004,17 @@ function renderBatchQueue() {
   batchClearBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'done' || x.status === 'error');
 }
 
-batchAddLinkBtn.addEventListener('click', () => {
-  const url = urlInput.value.trim();
+function addBatchLink() {
+  const url = batchUrlInput.value.trim();
   if (!url) { setError(t('sep.batch.needUrl')); return; }
   if (!isValidUrl(url)) { setError(t('sep.batch.badUrl')); return; }
   batchQueue.push({ id: ++batchSeq, kind: 'link', source: url, title: url, status: 'pending' });
-  urlInput.value = ''; urlInput.dispatchEvent(new Event('input'));
+  batchUrlInput.value = '';
   setError('');
   renderBatchQueue();
-});
+}
+batchAddLinkBtn.addEventListener('click', addBatchLink);
+batchUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBatchLink(); });
 
 batchAddFilesBtn.addEventListener('click', async () => {
   const res = await api.dialog.pickMediaFiles();
@@ -1058,6 +1086,7 @@ async function runBatchQueue() {
     renderBatchQueue();
   }
 }
+renderBatchQueue();   // 카운트·빈 상태 표시를 초기값으로 맞춰 둔다
 
 goLibraryBtn.addEventListener('click', async () => {
   switchView('library');
