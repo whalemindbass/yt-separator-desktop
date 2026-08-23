@@ -782,6 +782,7 @@ body { display: flex; flex-direction: column; }
 .batch-item.st-done .batch-item-status { color: var(--ok); }
 .batch-item.st-error { border-left-color: var(--danger); }
 .batch-item.st-error .batch-item-status { color: var(--danger); }
+.batch-item.st-canceled { border-left-color: var(--border-mid); opacity: .6; }
 
 /* Settings view */
 .settings-body {

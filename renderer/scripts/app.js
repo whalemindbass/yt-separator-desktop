@@ -968,8 +968,9 @@ const batchEmptyEl     = $('batch-empty');
 const batchStartBtn    = $('batch-start');
 const batchClearBtn    = $('batch-clear');
 
-let batchQueue = [];   // [{ id, kind:'link'|'file', source, title, status, error }]
+let batchQueue = [];   // [{ id, kind:'link'|'file', source, title, status, error, probeInfo?, existing? }]
 let batchRunning = false;
+let batchCancelRequested = false;
 let batchSeq = 0;
 
 function renderBatchQueue() {
@@ -982,7 +983,7 @@ function renderBatchQueue() {
     li.className = 'batch-item st-' + item.status;
     const label = document.createElement('span');
     label.className = 'batch-item-label';
-    label.textContent = item.title;
+    label.textContent = item.title + (item.existing ? ' · ' + t('sep.batch.dupTag') : '');
     li.appendChild(label);
     const st = document.createElement('span');
     st.className = 'batch-item-status';
@@ -990,7 +991,11 @@ function renderBatchQueue() {
       ? t('sep.batch.st.error') + (item.error ? ': ' + item.error : '')
       : t('sep.batch.st.' + item.status);
     li.appendChild(st);
-    if (item.status === 'pending') {
+    // 도는 중엔 빼기 버튼을 숨긴다 — runBatchQueue() 의 for...of 는 시작 시점의 배열을
+    // 그대로 들고 도므로, 도중에 여기서 배열을 필터링해 봐야 이미 시작된 순회에는 반영이
+    // 안 된다(목록에선 사라져 보이는데 뒤에서 계속 처리되다가 결국 라이브러리에 등록되는
+    // 앞뒤가 안 맞는 상태가 됐었다). 안전하게 도는 동안은 못 빼게 막는다.
+    if (item.status === 'pending' && !batchRunning) {
       const rm = document.createElement('button');
       rm.className = 'batch-item-remove'; rm.type = 'button';
       rm.title = t('sep.batch.remove.title'); rm.textContent = '✕';
@@ -999,22 +1004,55 @@ function renderBatchQueue() {
     }
     batchListEl.appendChild(li);
   }
-  batchStartBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'pending');
-  batchStartBtn.textContent = batchRunning ? t('sep.batch.running') : t('sep.batch.start');
-  batchClearBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'done' || x.status === 'error');
+  // 도는 중엔 "시작" 버튼이 "취소" 버튼으로 바뀐다(같은 자리, 같은 버튼 — 새로 안 만든다).
+  batchStartBtn.disabled = !batchRunning && !batchQueue.some(x => x.status === 'pending');
+  batchStartBtn.textContent = batchRunning ? t('common.cancel') : t('sep.batch.start');
+  batchStartBtn.classList.toggle('primary', !batchRunning);
+  batchClearBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'done' || x.status === 'error' || x.status === 'canceled');
+  batchAddLinkBtn.disabled = batchRunning;
+  batchAddFilesBtn.disabled = batchRunning;
 }
 
-function addBatchLink() {
+// 대기열에 넣기 전에 실제로 그 영상이 맞는지 확인(프로브)하고, 이미 분리해 둔 영상이면
+// 물어본다 — 단일 처리가 다운로드 전에 프로브·중복 배너로 확인시키는 것과 같은 안전장치를
+// 여기도 넣는다. URL 문자열만 덜렁 큐에 넣던 예전 방식은 오타·엉뚱한 링크를 그대로
+// 다운로드해 버릴 때까지 아무도 몰랐다.
+async function addBatchLink() {
   const url = batchUrlInput.value.trim();
   if (!url) { setError(t('sep.batch.needUrl')); return; }
   if (!isValidUrl(url)) { setError(t('sep.batch.badUrl')); return; }
-  batchQueue.push({ id: ++batchSeq, kind: 'link', source: url, title: url, status: 'pending' });
-  batchUrlInput.value = '';
   setError('');
-  renderBatchQueue();
+  batchAddLinkBtn.disabled = true;
+  batchAddLinkBtn.textContent = t('sep.probing');
+  try {
+    const probe = await api.ytdlp.probe(url);
+    if (!probe || !probe.ok) {
+      const isEn = getLocale() === 'en';
+      setError((isEn ? 'Could not fetch video info: ' : '영상 정보를 가져오지 못했습니다: ') + (probe?.error || '?'));
+      return;
+    }
+    const info = probe.info;
+    let existing = null;
+    if (info?.id) {
+      existing = await api.library.findByVideoId(info.id);
+      if (existing) {
+        const when = new Date(existing.createdAt).toLocaleDateString();
+        if (!confirm(t('sep.batch.dupConfirm', { name: existing.name, when }))) return;
+      }
+    }
+    batchQueue.push({
+      id: ++batchSeq, kind: 'link', source: url,
+      title: info?.title || url, status: 'pending', probeInfo: info, existing: !!existing,
+    });
+    batchUrlInput.value = '';
+  } finally {
+    batchAddLinkBtn.disabled = false;
+    batchAddLinkBtn.textContent = t('sep.batch.addLink');
+    renderBatchQueue();
+  }
 }
-batchAddLinkBtn.addEventListener('click', addBatchLink);
-batchUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBatchLink(); });
+batchAddLinkBtn.addEventListener('click', () => { addBatchLink().catch(console.error); });
+batchUrlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBatchLink().catch(console.error); });
 
 batchAddFilesBtn.addEventListener('click', async () => {
   const res = await api.dialog.pickMediaFiles();
@@ -1027,34 +1065,43 @@ batchAddFilesBtn.addEventListener('click', async () => {
 });
 
 batchClearBtn.addEventListener('click', () => {
-  batchQueue = batchQueue.filter(x => x.status !== 'done' && x.status !== 'error');
+  batchQueue = batchQueue.filter(x => x.status !== 'done' && x.status !== 'error' && x.status !== 'canceled');
   renderBatchQueue();
 });
 
-batchStartBtn.addEventListener('click', () => { runBatchQueue().catch(console.error); });
+batchStartBtn.addEventListener('click', () => {
+  if (batchRunning) {
+    // 지금 도는 항목까지 바로 멈춘다 — 다음 항목으로 안 넘기고 끝나기를 기다리는 게 아니라,
+    // 진행 중인 다운로드/분리 자체를 취소한다(둘 다 안 도는 중이면 아무 효과 없이 조용히 넘어간다).
+    batchCancelRequested = true;
+    api.ytdlp.cancel().catch(() => {});
+    cancelSeparation();
+    batchStartBtn.disabled = true;
+    return;
+  }
+  runBatchQueue().catch(console.error);
+});
 
 async function runBatchQueue() {
   if (batchRunning) return;
   batchRunning = true;
+  batchCancelRequested = false;
   dlBtn.disabled = true; probeBtn.disabled = true; separateBtn.disabled = true;
   renderBatchQueue();
   try {
     for (const item of batchQueue) {
       if (item.status !== 'pending') continue;
+      if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
       item.status = 'downloading'; renderBatchQueue();
       try {
         let videoPath, baseName;
-        let meta = {};
+        let meta = item.probeInfo || {};
         if (item.kind === 'link') {
-          try {
-            const probe = await api.ytdlp.probe(item.source);
-            if (probe && probe.ok && probe.info) {
-              meta = probe.info;
-              item.title = meta.title || item.title;
-              renderBatchQueue();
-            }
-          } catch { /* 제목만 못 얻는 것 — 다운로드는 그대로 시도 */ }
+          if (!meta.id) {   // addBatchLink 를 거치지 않고 들어온 경우를 위한 보험(정상 경로는 이미 프로브됨)
+            try { const probe = await api.ytdlp.probe(item.source); if (probe?.ok && probe.info) meta = probe.info; } catch {}
+          }
           const dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality });
+          if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
           if (!dl || !dl.ok) throw new Error(dl?.error || 'download failed');
           videoPath = dl.filePath;
           baseName = dl.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
@@ -1065,6 +1112,7 @@ async function runBatchQueue() {
         item.status = 'separating'; renderBatchQueue();
         await ensureModelBeforeSeparation(currentModelKey);
         const result = await separatePipeline(videoPath, baseName, () => {}, { modelKey: currentModelKey });
+        if (batchCancelRequested) { item.status = 'canceled'; renderBatchQueue(); continue; }
         await api.library.register({
           name: meta.title || baseName,
           videoPath, stemPaths: result.stemPaths, outDir: result.outDir,
@@ -1076,12 +1124,15 @@ async function runBatchQueue() {
         });
         item.status = 'done';
       } catch (e) {
-        item.status = 'error'; item.error = (e && e.message) || String(e);
+        item.status = (e && e.message === '취소됨') || (e && e.message === 'Canceled') || batchCancelRequested
+          ? 'canceled' : 'error';
+        if (item.status === 'error') item.error = (e && e.message) || String(e);
       }
       renderBatchQueue();
     }
   } finally {
     batchRunning = false;
+    batchCancelRequested = false;
     dlBtn.disabled = false; probeBtn.disabled = false; separateBtn.disabled = false;
     renderBatchQueue();
   }
