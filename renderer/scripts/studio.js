@@ -1488,7 +1488,10 @@ function _phTick(ts) {
 
 // ── 트랜스포트 (모듈 스코프 — 어디서든 호출 가능) ──
 function updatePlayIcon() {
-  const el = $('daw-vplay'); if (el) el.hidden = _playing;
+  // _playing 만 보고 껐다 켰다 하면, 영상 없이 내 트랙만 녹음/재생하는 세션에서도 정지할
+  // 때마다 오버레이가 다시 나타났다(사용자 제보) — 애초에 영상이 없으면 재생 상태와
+  // 무관하게 계속 숨어 있어야 한다.
+  const el = $('daw-vplay'); if (el) el.hidden = _playing || !_videoPath;
   const pb = $('st-play');
   if (pb) { pb.classList.toggle('on', _playing); pb.setAttribute('aria-pressed', String(_playing)); }
 }
@@ -1527,29 +1530,26 @@ let _recStartSec = null;
 // 표본 개수와 픽셀 폭이 서로 다른 속도로 늘어나다 보니 그 나누는 경계가 매 프레임 조금씩
 // 밀려서 이미 그린 막대까지 값이 바뀌어 자글자글 흔들려 보였다(사용자 제보). 열을 한 번
 // 쓰면 고정해 두면 그 흔들림이 없다.
-// 시작값을 1e-6 처럼 0에 가깝게 두면, 아직 아무 소리도 안 났을 때(잡음 바닥 수준의
-// peak) 조차 "지금까지 본 최댓값" 대비로는 거의 1(꽉 참)이 되어 아무것도 안 쳤는데
-// 막대가 꽉 차 보였다(사용자 제보). 실제로 뭔가 들리는 소리다 싶은 문턱(대략 -26dBFS)
-// 아래로는 이 최댓값이 못 내려가게 바닥을 둔다 — 진짜 큰 소리가 나기 전까진 조용한
-// 구간이 조용하게 보이고, 큰 소리가 나면 그때부터 그 소리 기준으로 상대 스케일이 켜진다.
-const REC_LIVE_MAX_FLOOR = 0.05;
+//
+// 높이는 "지금까지 본 최댓값" 대비 상대 스케일이 아니라 고정 기준(REC_LIVE_REF_PEAK)
+// 대비로 잰다. 상대 스케일은 두 번 실패했다 — 최댓값을 0 가까이서 시작하면 잡음까지
+// 꽉 차 보였고(1차 수정으로 바닥을 뒀었다), 바닥을 둬도 녹음 내내 더 큰 소리가 나올
+// 때마다 이미 그린 막대들까지 전부 비율이 다시 줄어들어 계속 출렁였다(사용자 제보:
+// "상대적 크기로 유동적으로 변화해"). 고정 기준이면 한 번 그린 막대는 무슨 일이 있어도
+// 다신 안 바뀐다 — 대신 녹음이 끝나 실제 파형(그 클립 자신의 최댓값 기준)으로 바뀔 때
+// 크기가 살짝 달라질 순 있는데, 그 정도 1회성 전환은 녹음 내내 계속 출렁이는 것보다 낫다.
+const REC_LIVE_REF_PEAK = 0.35;   // 대략 -9dBFS — 적당히 게인 잡은 녹음의 흔한 피크 수준
 let _recLiveCols = [];
-let _recLiveMax = REC_LIVE_MAX_FLOOR;
 function pushRecLivePeak(elapsedSec, peak) {
   const col = Math.max(0, Math.floor(elapsedSec * _pxPerSec));
   if (peak > (_recLiveCols[col] || 0)) _recLiveCols[col] = peak;
-  if (peak > _recLiveMax) _recLiveMax = peak;
 }
 function buildLiveWaveSvg(cols, widthPx, color) {
   const n = Math.max(1, Math.round(widthPx));
   const head = `<svg width="100%" height="100%" viewBox="0 0 ${n} 24" preserveAspectRatio="none">`;
   if (!cols.length) return head + '</svg>';
-  // 완성된 파형(buildWaveSvg)은 그 클립 안 가장 큰 소리를 기준으로 꽉 채워 그린다 — 녹음
-  // 중에도 지금까지 본 최댓값 기준으로 같은 방식으로 맞춰야, 녹음이 끝나 진짜 파형으로
-  // 바뀌는 순간 갑자기 커 보이지 않는다(사용자 제보: 완료 후 더 큰 폭으로 변함).
-  const mx = _recLiveMax;
   const heights = new Array(n);
-  for (let i = 0; i < n; i++) heights[i] = Math.min(1, (cols[i] || 0) / mx) * 11;
+  for (let i = 0; i < n; i++) heights[i] = Math.min(1, (cols[i] || 0) / REC_LIVE_REF_PEAK) * 11;
   let a = '', b = '';
   for (let i = 0; i < n; i++) a += `${i},${(12 - heights[i]).toFixed(1)} `;
   for (let i = n - 1; i >= 0; i--) b += `${i},${(12 + heights[i]).toFixed(1)} `;
@@ -1567,7 +1567,7 @@ function updateRecLive(t) {
   el.style.width = wPx + 'px';
   el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor('var(--danger)'));
 }
-function clearRecLive() { _recStartSec = null; _recLiveCols = []; _recLiveMax = REC_LIVE_MAX_FLOOR; document.querySelector('.daw-rec-live')?.remove(); }
+function clearRecLive() { _recStartSec = null; _recLiveCols = []; document.querySelector('.daw-rec-live')?.remove(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
 function syncVideo(t) {
