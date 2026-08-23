@@ -80,6 +80,7 @@ const DIALOG_TEXT = {
     pickSaveTo: '저장 위치 선택', pickFolder: '폴더 선택',
     projectSave: '프로젝트 저장', projectOpen: '프로젝트 열기',
     pickMedia: '분리할 영상/오디오 파일 선택',
+    pickMediaFiles: '분리할 영상/오디오 파일 선택 (여러 개 가능)',
     importAudio: '오디오 파일 임포트', importVideo: '영상 파일 임포트',
     fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fAll: '모든 파일', fProject: 'YSS 프로젝트',
   },
@@ -91,6 +92,7 @@ const DIALOG_TEXT = {
     pickSaveTo: 'Choose where to save', pickFolder: 'Choose a folder',
     projectSave: 'Save project', projectOpen: 'Open project',
     pickMedia: 'Choose a video or audio file to separate',
+    pickMediaFiles: 'Choose video/audio files to separate (multiple allowed)',
     importAudio: 'Import audio file', importVideo: 'Import video file',
     fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fAll: 'All files', fProject: 'YSS project',
   },
@@ -652,6 +654,19 @@ ipcMain.handle('dialog:pickMedia', async () => {
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0] };
+});
+// 새 분리: 영상/오디오 파일 여러 개 (일괄 처리 대기열에 한 번에 추가)
+ipcMain.handle('dialog:pickMediaFiles', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: td('pickMediaFiles'),
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: td('fMedia'), extensions: ['mp4','mkv','webm','mov','avi','m4a','mp3','wav','flac','aac','ogg'] },
+      { name: td('fAll'), extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePaths: res.filePaths };
 });
 // 스튜디오: 오디오 파일 여러 개 임포트 (트랙 클립)
 ipcMain.handle('dialog:pickAudioFiles', async () => {

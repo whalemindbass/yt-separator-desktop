@@ -930,6 +930,135 @@ openStemsBtn.addEventListener('click', async () => {
   if (dir) await api.openPath(dir);
 });
 
+// ── 일괄 처리 대기열 ──────────────────────────────
+// 링크 여러 개 또는 파일 여러 개를 모아 뒀다가 순서대로 자동으로 다운로드→분리한다.
+// 위쪽 단일 처리 흐름(다운로드/분리 버튼)과는 별도 상태를 쓴다 — currentVideoPath 등을
+// 같이 쓰면, 배치 도는 중에 사용자가 단일 처리를 건드릴 때 서로 덮어쓴다. 대신 배치가 도는
+// 동안은 단일 처리 버튼을 잠가서 다운로드/취소 같은 전역 상태가 부딪히지 않게 한다.
+const batchAddLinkBtn  = $('batch-add-link');
+const batchAddFilesBtn = $('batch-add-files');
+const batchPanel       = $('batch-panel');
+const batchCountEl     = $('batch-count');
+const batchListEl      = $('batch-list');
+const batchStartBtn    = $('batch-start');
+const batchClearBtn    = $('batch-clear');
+
+let batchQueue = [];   // [{ id, kind:'link'|'file', source, title, status, error }]
+let batchRunning = false;
+let batchSeq = 0;
+
+function renderBatchQueue() {
+  batchPanel.hidden = batchQueue.length === 0;
+  batchCountEl.textContent = t('sep.batch.count', { n: batchQueue.length });
+  batchListEl.innerHTML = '';
+  for (const item of batchQueue) {
+    const li = document.createElement('li');
+    li.className = 'batch-item st-' + item.status;
+    const label = document.createElement('span');
+    label.className = 'batch-item-label';
+    label.textContent = item.title;
+    li.appendChild(label);
+    const st = document.createElement('span');
+    st.className = 'batch-item-status';
+    st.textContent = item.status === 'error'
+      ? t('sep.batch.st.error') + (item.error ? ': ' + item.error : '')
+      : t('sep.batch.st.' + item.status);
+    li.appendChild(st);
+    if (item.status === 'pending') {
+      const rm = document.createElement('button');
+      rm.className = 'batch-item-remove'; rm.type = 'button';
+      rm.title = t('sep.batch.remove.title'); rm.textContent = '✕';
+      rm.addEventListener('click', () => { batchQueue = batchQueue.filter(x => x.id !== item.id); renderBatchQueue(); });
+      li.appendChild(rm);
+    }
+    batchListEl.appendChild(li);
+  }
+  batchStartBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'pending');
+  batchStartBtn.textContent = batchRunning ? t('sep.batch.running') : t('sep.batch.start');
+  batchClearBtn.disabled = batchRunning || !batchQueue.some(x => x.status === 'done' || x.status === 'error');
+}
+
+batchAddLinkBtn.addEventListener('click', () => {
+  const url = urlInput.value.trim();
+  if (!url) { setError(t('sep.batch.needUrl')); return; }
+  if (!isValidUrl(url)) { setError(t('sep.batch.badUrl')); return; }
+  batchQueue.push({ id: ++batchSeq, kind: 'link', source: url, title: url, status: 'pending' });
+  urlInput.value = ''; urlInput.dispatchEvent(new Event('input'));
+  setError('');
+  renderBatchQueue();
+});
+
+batchAddFilesBtn.addEventListener('click', async () => {
+  const res = await api.dialog.pickMediaFiles();
+  if (!res.ok || !res.filePaths?.length) return;
+  for (const p of res.filePaths) {
+    const name = p.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+    batchQueue.push({ id: ++batchSeq, kind: 'file', source: p, title: name, status: 'pending' });
+  }
+  renderBatchQueue();
+});
+
+batchClearBtn.addEventListener('click', () => {
+  batchQueue = batchQueue.filter(x => x.status !== 'done' && x.status !== 'error');
+  renderBatchQueue();
+});
+
+batchStartBtn.addEventListener('click', () => { runBatchQueue().catch(console.error); });
+
+async function runBatchQueue() {
+  if (batchRunning) return;
+  batchRunning = true;
+  dlBtn.disabled = true; probeBtn.disabled = true; separateBtn.disabled = true;
+  renderBatchQueue();
+  try {
+    for (const item of batchQueue) {
+      if (item.status !== 'pending') continue;
+      item.status = 'downloading'; renderBatchQueue();
+      try {
+        let videoPath, baseName;
+        let meta = {};
+        if (item.kind === 'link') {
+          try {
+            const probe = await api.ytdlp.probe(item.source);
+            if (probe && probe.ok && probe.info) {
+              meta = probe.info;
+              item.title = meta.title || item.title;
+              renderBatchQueue();
+            }
+          } catch { /* 제목만 못 얻는 것 — 다운로드는 그대로 시도 */ }
+          const dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality });
+          if (!dl || !dl.ok) throw new Error(dl?.error || 'download failed');
+          videoPath = dl.filePath;
+          baseName = dl.filePath.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
+        } else {
+          videoPath = item.source;
+          baseName = item.title;
+        }
+        item.status = 'separating'; renderBatchQueue();
+        await ensureModelBeforeSeparation(currentModelKey);
+        const result = await separatePipeline(videoPath, baseName, () => {}, { modelKey: currentModelKey });
+        await api.library.register({
+          name: meta.title || baseName,
+          videoPath, stemPaths: result.stemPaths, outDir: result.outDir,
+          sampleRate: result.sampleRate, modelKey: currentModelKey,
+          meta: {
+            title: meta.title || baseName, uploader: meta.uploader,
+            duration: meta.duration, id: meta.id, thumbnail: meta.thumbnail,
+          },
+        });
+        item.status = 'done';
+      } catch (e) {
+        item.status = 'error'; item.error = (e && e.message) || String(e);
+      }
+      renderBatchQueue();
+    }
+  } finally {
+    batchRunning = false;
+    dlBtn.disabled = false; probeBtn.disabled = false; separateBtn.disabled = false;
+    renderBatchQueue();
+  }
+}
+
 goLibraryBtn.addEventListener('click', async () => {
   switchView('library');
   await Library.refresh();

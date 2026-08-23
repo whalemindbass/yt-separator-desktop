@@ -291,6 +291,23 @@
         <button id="reset-btn" class="btn" data-i18n="sep.reset" data-i18n-title="sep.reset.title" title="입력·진행·완료 상태 초기화">초기화</button>
       </div>
 
+      <!-- 일괄 처리 — 링크 여러 개(위 입력창에 하나씩 채워 "대기열에 추가") 또는 파일 여러 개를
+           모아 뒀다가 순서대로 자동으로 다운로드→분리한다. 기존 단일 처리 흐름(위)과는 독립적 —
+           여기 대기열이 비어 있으면 이 섹션 자체가 숨는다. -->
+      <div class="batch-row">
+        <button id="batch-add-link" class="btn btn-sm" type="button" data-i18n="sep.batch.addLink">+ 링크를 대기열에 추가</button>
+        <button id="batch-add-files" class="btn btn-sm" type="button" data-i18n="sep.batch.addFiles">+ 파일 여러 개 추가…</button>
+      </div>
+      <div id="batch-panel" class="batch-panel" hidden>
+        <div class="batch-head">
+          <span data-i18n="sep.batch.title">일괄 처리 대기열</span>
+          <span id="batch-count" class="batch-count"></span>
+          <button id="batch-start" class="btn btn-sm primary" type="button" data-i18n="sep.batch.start">일괄 처리 시작</button>
+          <button id="batch-clear" class="btn btn-sm" type="button" data-i18n="sep.batch.clearDone">완료 항목 지우기</button>
+        </div>
+        <ul id="batch-list" class="batch-list"></ul>
+      </div>
+
       <div class="settings-row">
         <span class="settings-label" data-i18n="sep.label.model">모델</span>
         <div class="pill-row" id="model-pills">

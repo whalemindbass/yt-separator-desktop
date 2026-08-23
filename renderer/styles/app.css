@@ -738,6 +738,44 @@ body { display: flex; flex-direction: column; }
   word-break: break-word;
 }
 
+/* 일괄 처리 대기열 */
+.batch-row { display: flex; gap: 8px; margin-top: 12px; }
+.batch-panel {
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.batch-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.batch-head > span:first-child { font-size: 13px; font-weight: 600; color: var(--tx-1); }
+.batch-count { font-family: var(--mono); font-size: 11.5px; color: var(--tx-3); }
+.batch-head .btn { margin-left: auto; }
+.batch-head .btn + .btn { margin-left: 0; }
+.batch-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.batch-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  background: var(--elev);
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--border-mid);
+  font-size: 12.5px;
+}
+.batch-item-label { flex: 1; min-width: 0; color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-item-status { font-family: var(--mono); font-size: 11px; color: var(--tx-3); flex-shrink: 0; }
+.batch-item-remove {
+  border: 0; background: transparent; color: var(--tx-4); cursor: pointer;
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 11px; line-height: 1;
+}
+.batch-item-remove:hover { color: var(--tx-1); background: var(--border); }
+.batch-item.st-downloading, .batch-item.st-separating { border-left-color: var(--accent); }
+.batch-item.st-downloading .batch-item-status, .batch-item.st-separating .batch-item-status { color: var(--accent); }
+.batch-item.st-done { border-left-color: var(--ok); }
+.batch-item.st-done .batch-item-status { color: var(--ok); }
+.batch-item.st-error { border-left-color: var(--danger); }
+.batch-item.st-error .batch-item-status { color: var(--danger); }
+
 /* Settings view */
 .settings-body {
   max-width: 860px;

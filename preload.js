@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('yssApi', {
   // 로컬 파일/폴더 선택 · 저장
   dialog: {
     pickMedia:  ()               => ipcRenderer.invoke('dialog:pickMedia'),
+    pickMediaFiles: ()           => ipcRenderer.invoke('dialog:pickMediaFiles'),
     pickAudioFiles: ()           => ipcRenderer.invoke('dialog:pickAudioFiles'),
     pickVideoFile:  ()           => ipcRenderer.invoke('dialog:pickVideoFile'),
     saveAs:     (name, exts)     => ipcRenderer.invoke('dialog:saveAs', name, exts),
