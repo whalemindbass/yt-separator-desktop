@@ -1517,22 +1517,29 @@ let _recStartSec = null;
 // 기준 픽셀 폭만큼 버킷으로 나눠 그린다. 원본 PCM 은 녹음이 끝나야 파일에서 읽을 수 있어
 // (renderTake) 이 동안은 이 peak 스트림이 얻을 수 있는 전부다 — 정밀한 파형은 아니지만
 // 녹음되고 있다는 것과 대략의 레벨은 실시간으로 보여준다.
-let _recLivePeaks = [];
-function buildLiveWaveSvg(peaks, cols, color) {
-  const n = Math.max(1, cols);
+// _recLiveCols[i] = 그 픽셀 열에서 지금까지 본 최대 peak — 열 번호는 "녹음 시작부터 몇
+// 픽셀째냐"로 한 번 정해지면 그 열은 다시 안 건드린다(같은 열에 또 peak 이 오면 더 큰
+// 값으로만 갱신). 예전엔 매번 전체 peak 배열을 통째로 다시 n 개 구간으로 나눠 그렸는데,
+// 표본 개수와 픽셀 폭이 서로 다른 속도로 늘어나다 보니 그 나누는 경계가 매 프레임 조금씩
+// 밀려서 이미 그린 막대까지 값이 바뀌어 자글자글 흔들려 보였다(사용자 제보). 열을 한 번
+// 쓰면 고정해 두면 그 흔들림이 없다.
+let _recLiveCols = [];
+let _recLiveMax = 1e-6;
+function pushRecLivePeak(elapsedSec, peak) {
+  const col = Math.max(0, Math.floor(elapsedSec * _pxPerSec));
+  if (peak > (_recLiveCols[col] || 0)) _recLiveCols[col] = peak;
+  if (peak > _recLiveMax) _recLiveMax = peak;
+}
+function buildLiveWaveSvg(cols, widthPx, color) {
+  const n = Math.max(1, Math.round(widthPx));
   const head = `<svg width="100%" height="100%" viewBox="0 0 ${n} 24" preserveAspectRatio="none">`;
-  if (!peaks.length) return head + '</svg>';
-  const bucket = peaks.length / n;
+  if (!cols.length) return head + '</svg>';
+  // 완성된 파형(buildWaveSvg)은 그 클립 안 가장 큰 소리를 기준으로 꽉 채워 그린다 — 녹음
+  // 중에도 지금까지 본 최댓값 기준으로 같은 방식으로 맞춰야, 녹음이 끝나 진짜 파형으로
+  // 바뀌는 순간 갑자기 커 보이지 않는다(사용자 제보: 완료 후 더 큰 폭으로 변함).
+  const mx = _recLiveMax;
   const heights = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const start = Math.floor(i * bucket), end = Math.max(start + 1, Math.floor((i + 1) * bucket));
-    let p = 0;
-    for (let j = start; j < end && j < peaks.length; j++) if (peaks[j] > p) p = peaks[j];
-    heights[i] = Math.min(1, p) * 11;   // 0..1 절대 스케일(디지털 풀스케일 기준) — 녹음 중 레벨이 계속 커 보였다 작아 보였다 하지 않게
-  }
-  // 위 가장자리는 왼→오, 아래 가장자리는 반드시 오→왼으로 되짚어야 폴리곤이 안쪽에서
-  // 안 닫힌다 — 같은 방향으로 두 줄을 이으면 마지막 점(오른쪽 끝)에서 다음 시작점(왼쪽
-  // 끝)까지 대각선이 그어져 왼쪽 끝~녹음 위치를 가로지르는 삼각형이 생겼다(사용자 제보).
+  for (let i = 0; i < n; i++) heights[i] = Math.min(1, (cols[i] || 0) / mx) * 11;
   let a = '', b = '';
   for (let i = 0; i < n; i++) a += `${i},${(12 - heights[i]).toFixed(1)} `;
   for (let i = n - 1; i >= 0; i--) b += `${i},${(12 + heights[i]).toFixed(1)} `;
@@ -1548,9 +1555,9 @@ function updateRecLive(t) {
   const wPx = Math.max(2, (t - _recStartSec) * _pxPerSec);
   el.style.left = (_recStartSec * _pxPerSec) + 'px';
   el.style.width = wPx + 'px';
-  el.innerHTML = buildLiveWaveSvg(_recLivePeaks, Math.round(wPx), resolveColor('var(--danger)'));
+  el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor('var(--danger)'));
 }
-function clearRecLive() { _recStartSec = null; _recLivePeaks = []; document.querySelector('.daw-rec-live')?.remove(); }
+function clearRecLive() { _recStartSec = null; _recLiveCols = []; _recLiveMax = 1e-6; document.querySelector('.daw-rec-live')?.remove(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
 function syncVideo(t) {
@@ -3164,7 +3171,7 @@ function onEngineEvent(m) {
     case 'pos': onPos(m.samples); break;
     case 'level':
       updateVU(m.peak); updateInputChannelMeters(m.chans);
-      if (_recArmed && _playing) _recLivePeaks.push(m.peak || 0);   // 녹음 중 실시간 파형용 — 아래 updateRecLive() 참고
+      if (_recArmed && _playing && _recStartSec != null) pushRecLivePeak(_lastSec - _recStartSec, m.peak || 0);   // 녹음 중 실시간 파형용 — 아래 updateRecLive() 참고
       break;
     case 'pitch': updateTuner(m.freq); break;
     case 'trackMeter': onTrackMeter(m.list || []); break;
