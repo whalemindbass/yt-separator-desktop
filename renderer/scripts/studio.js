@@ -1523,15 +1523,19 @@ function buildLiveWaveSvg(peaks, cols, color) {
   const head = `<svg width="100%" height="100%" viewBox="0 0 ${n} 24" preserveAspectRatio="none">`;
   if (!peaks.length) return head + '</svg>';
   const bucket = peaks.length / n;
-  let a = '', b = '';
+  const heights = new Array(n);
   for (let i = 0; i < n; i++) {
     const start = Math.floor(i * bucket), end = Math.max(start + 1, Math.floor((i + 1) * bucket));
     let p = 0;
     for (let j = start; j < end && j < peaks.length; j++) if (peaks[j] > p) p = peaks[j];
-    const h = Math.min(1, p) * 11;   // 0..1 절대 스케일(디지털 풀스케일 기준) — 녹음 중 레벨이 계속 커 보였다 작아 보였다 하지 않게
-    a += `${i},${(12 - h).toFixed(1)} `;
-    b += `${i},${(12 + h).toFixed(1)} `;
+    heights[i] = Math.min(1, p) * 11;   // 0..1 절대 스케일(디지털 풀스케일 기준) — 녹음 중 레벨이 계속 커 보였다 작아 보였다 하지 않게
   }
+  // 위 가장자리는 왼→오, 아래 가장자리는 반드시 오→왼으로 되짚어야 폴리곤이 안쪽에서
+  // 안 닫힌다 — 같은 방향으로 두 줄을 이으면 마지막 점(오른쪽 끝)에서 다음 시작점(왼쪽
+  // 끝)까지 대각선이 그어져 왼쪽 끝~녹음 위치를 가로지르는 삼각형이 생겼다(사용자 제보).
+  let a = '', b = '';
+  for (let i = 0; i < n; i++) a += `${i},${(12 - heights[i]).toFixed(1)} `;
+  for (let i = n - 1; i >= 0; i--) b += `${i},${(12 + heights[i]).toFixed(1)} `;
   return `${head}<polygon points="${a}${b}" fill="${color}" fill-opacity=".85"/></svg>`;
 }
 function updateRecLive(t) {
