@@ -2427,6 +2427,33 @@ body { display: flex; flex-direction: column; }
 .metro-row .btn { flex: none; }
 .metro-row .btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .metro-bpm { width: 60px; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--tx-1); font: 600 13px/1 var(--mono); outline: none; }
+
+/* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
+   빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다). */
+.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 4px 2px 2px; }
+.pm-bpm-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 84px; }
+.pm-bpm-display input#pm-bpm {
+  width: 84px; text-align: center;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--tx-1); font: 700 26px/1.2 var(--mono); padding: 6px 0;
+  outline: none; -moz-appearance: textfield;
+}
+.pm-bpm-display input#pm-bpm::-webkit-inner-spin-button,
+.pm-bpm-display input#pm-bpm::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pm-bpm-display input#pm-bpm:focus { border-color: var(--accent); }
+.pm-bpm-lab { font-size: 10px; color: var(--tx-3); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+.pm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pm-label { font-size: 11.5px; color: var(--tx-3); flex-shrink: 0; }
+.pm-select {
+  font: 500 12px/1 var(--sans); color: var(--tx-1);
+  background: var(--input); border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm); padding: 0 8px; height: 28px; box-sizing: border-box;
+}
+.pm-vol { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.pm-actions { display: flex; gap: 8px; }
+.pm-actions .pm-play { flex: 1; }
+.pm-actions .pm-play.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .metro-bpm:focus { border-color: var(--accent); }
 .metro-unit { font-size: 11px; color: var(--tx-4); }
 .daw-content { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }

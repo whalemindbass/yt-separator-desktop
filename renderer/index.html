@@ -795,6 +795,8 @@
           <div class="daw-tool-tabs">
             <button class="daw-tool-tab" data-tool="vu" data-i18n="studio.h.inputLevel">입력 레벨</button>
             <button class="daw-tool-tab" data-tool="tuner" data-i18n="studio.h.tuner">튜너</button>
+            <!-- 연습용 메트로놈 — 곡·트랜스포트와 완전히 무관(Web Audio 로 독립 스케줄링) -->
+            <button class="daw-tool-tab" data-tool="metro-practice" data-i18n="studio.h.practiceMetro">연습 메트로놈</button>
             <!-- 베이스 TAB — 라이브러리 패널과 같이 켜고 끈다 -->
             <button class="daw-tool-tab" data-tool="tab" data-i18n="tab.title" hidden>베이스 TAB</button>
           </div>
@@ -824,6 +826,39 @@
                 <div class="tuner-ref-chips" id="st-tuner-ref">
                   <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
                 </div>
+              </div>
+            </div>
+            <!-- 연습용 메트로놈 — 곡 BPM/트랙과 무관하게 렌더러 자체 Web Audio 로 돈다.
+                 필수 기능만: BPM, 박자표(악센트용 박 수), 볼륨, 재생/정지, 탭 템포. -->
+            <div class="daw-tool pm-tool" id="tool-metro-practice" data-tool="metro-practice" hidden>
+              <div class="pm-bpm-row">
+                <button id="pm-bpm-dn5" class="btn btn-sm" type="button">-5</button>
+                <button id="pm-bpm-dn1" class="btn btn-sm" type="button">-1</button>
+                <div class="pm-bpm-display">
+                  <input id="pm-bpm" type="number" min="20" max="300" step="1" value="120" />
+                  <span class="pm-bpm-lab">BPM</span>
+                </div>
+                <button id="pm-bpm-up1" class="btn btn-sm" type="button">+1</button>
+                <button id="pm-bpm-up5" class="btn btn-sm" type="button">+5</button>
+              </div>
+              <div class="pm-row">
+                <span class="pm-label" data-i18n="studio.pm.sig">박자표</span>
+                <select id="pm-sig" class="pm-select">
+                  <option value="2">2/4</option>
+                  <option value="3">3/4</option>
+                  <option value="4" selected>4/4</option>
+                  <option value="5">5/4</option>
+                  <option value="6">6/8</option>
+                  <option value="7">7/8</option>
+                </select>
+              </div>
+              <div class="pm-row">
+                <span class="pm-label" data-i18n="studio.pm.volume">볼륨</span>
+                <input id="pm-vol" type="range" min="0" max="100" step="1" value="60" class="pm-vol" />
+              </div>
+              <div class="pm-actions">
+                <button id="pm-tap" class="btn btn-sm" type="button" data-i18n="studio.pm.tap">탭 템포</button>
+                <button id="pm-playstop" class="btn primary pm-play" type="button" data-i18n="studio.pm.start">시작</button>
               </div>
             </div>
             <div class="daw-tool-empty" id="tool-empty" data-i18n="studio.h.pickTool">위에서 도구를 선택하세요</div>
