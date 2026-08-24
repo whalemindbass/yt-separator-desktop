@@ -3689,7 +3689,11 @@ function wire() {
   wireHeroResize();
   const selectTool = (name) => {
     document.querySelectorAll('.daw-tool-tab').forEach(b => b.classList.toggle('on', b.dataset.tool === name));
-    document.querySelectorAll('.daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
+    // #daw-tools 로 스코프 — 트레이닝 탭 도구 카드들도 같은 배경/테두리 스타일을 쓰려고
+    // .daw-tool 클래스를 그대로 재사용하는데, 스코프 없이 문서 전체를 뒤지면 그 카드들까지
+    // 여기 딸려서 hidden 처리된다(스튜디오를 처음 열 때 selectTool(null) 이 모든 .daw-tool
+    // 을 숨기면서 트레이닝 쪽 메트로놈/BPM 트레이너 카드까지 사라지던 버그의 원인).
+    document.querySelectorAll('#daw-tools .daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
     const empty = $('tool-empty'); if (empty) empty.hidden = !!name;
     // 피치 검출은 무거우므로 튜너가 열려 있을 때만 돌린다
     api.engine.tuner(name === 'tuner');
