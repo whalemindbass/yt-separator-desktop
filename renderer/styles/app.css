@@ -2466,13 +2466,15 @@ body { display: flex; flex-direction: column; }
   content: ''; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
   width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.training-main { overflow-y: auto; padding: 32px; }
+/* 도구 카드는 폭이 고정이라(340px) 남는 공간에 왼쪽으로 붙어 있으면 붕 떠 보인다 —
+   가로로 가운데 정렬. 세로는 위쪽에 붙여서(align-items 기본값) 스크롤 생겨도 안 어색하게. */
+.training-main { overflow-y: auto; padding: 32px; display: flex; justify-content: center; }
 .training-panel { display: none; }
 .training-panel.on { display: block; }
 
 /* 트레이닝 도구 공통 카드 뼈대 — 메트로놈(pm-*)은 이미 나온 전용 클래스를 그대로 두고,
-   그 뒤로 추가되는 도구(드론노트 등)는 여기 공유 클래스를 쓴다. 매번 카드 폭·라벨 칸
-   폭을 새로 정의하면 도구마다 미묘하게 다른 정렬이 생긴다. */
+   그 뒤로 추가되는 도구는 여기 공유 클래스를 쓴다. 매번 카드 폭·라벨 칸 폭을 새로
+   정의하면 도구마다 미묘하게 다른 정렬이 생긴다. */
 .tool-card { display: flex; flex-direction: column; gap: 20px; padding: 22px 24px 24px; width: 340px; }
 .tool-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 12px; }
 .tool-label { font-size: 11.5px; color: var(--tx-3); }
@@ -2482,42 +2484,17 @@ body { display: flex; flex-direction: column; }
   border-radius: var(--r-sm); padding: 0 8px; height: 28px; box-sizing: border-box;
 }
 .tool-vol { width: 100%; accent-color: var(--accent); cursor: pointer; }
-.tool-step {
-  width: 34px; height: 34px; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  font: 600 14px var(--mono); border-radius: 8px;
-}
 .tool-actions { display: flex; gap: 8px; }
 .tool-actions .btn.primary { flex: 1; }
 .tool-actions .btn.primary.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-
-/* 드론 노트 — 기준음을 계속 울려서 그 위에 맞춰 부르거나 연주하는 연습용. 반음 스텝 버튼
-   두 개로만 고르게 해서(직접 타이핑 없이) 원하는 음에 빠르게 닿게 한다. 살짝 detune 된
-   보조 오실레이터를 하나 더 얹어 사인파 하나만 낼 때보다 덜 인공적으로 들리게 한다. */
-.drn-note-row { display: flex; align-items: center; justify-content: center; gap: 16px; }
-.drn-note-display { display: flex; flex-direction: column; align-items: center; min-width: 96px; }
-.drn-note-big { font: 700 34px/1.1 var(--mono); color: var(--tx-1); }
-.drn-note-lab { font-size: 10px; color: var(--tx-3); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+.tool-bignum { font: 700 34px/1.1 var(--mono); color: var(--tx-1); }
 
 /* 튜너 — 스튜디오 도구창 안에서는 daw-fx 아사이드 폭을 그대로 물려받지만, 트레이닝
-   카드는 폭을 스스로 정해야 한다. 나머지 .tuner-* 모양은 스튜디오와 완전히 같다. */
+   카드는 폭을 스스로 정해야 한다. 나머지 .tuner-* 모양은 스튜디오와 완전히 같다.
+   오디오 엔진이 꺼져 있으면 카드 대신 안내 문구 + 스튜디오로 이동 버튼만 보인다. */
 .training-panel[data-tool="tuner"] .tuner { width: 340px; }
-
-/* 이어트레이닝 — 답 12개를 3열 그리드로 늘어놓아 객관식으로 고르게 한다. 정답/오답을
-   버튼 색으로 바로 보여줘서, 맞고 틀리고를 떠나 "이게 이 음정이었구나"를 답 확인 순간에도
-   외우게 한다. */
-.et-card { width: 360px; }
-.et-card .tool-actions .btn { flex: 1; }
-.et-status { display: flex; align-items: center; justify-content: space-between; min-height: 18px; }
-.et-streak { font-size: 12px; color: var(--tx-3); }
-.et-feedback { font-size: 12.5px; font-weight: 700; color: var(--tx-3); }
-.et-feedback.ok { color: var(--ok); }
-.et-feedback.bad { color: var(--err-tx); }
-.et-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.et-choice { padding: 8px 4px; }
-.et-choice:disabled { cursor: default; opacity: .55; }
-.et-choice.correct { background: var(--ok); color: #fff; border-color: var(--ok); opacity: 1; }
-.et-choice.wrong { background: rgba(var(--danger-rgb), .16); border-color: var(--danger); color: var(--err-tx); opacity: 1; }
+.tool-notice { align-items: center; text-align: center; gap: 14px; }
+.tool-notice p { font-size: 13px; color: var(--tx-2); line-height: 1.6; margin: 0; }
 
 /* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
    빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다).

@@ -1,11 +1,13 @@
 'use strict';
-// 트레이닝 뷰 — 곡·프로젝트·오디오 엔진(JUCE 사이드카)과 완전히 무관한 연습 도구 모음.
-// 원래 스튜디오 도구창 안에 있던 연습 메트로놈을 여기로 옮겼다 — 순전히 연습만 하려는데
-// DAW 엔진까지 켜야 닿을 수 있던 게 불필요한 무게였다. 새 도구를 추가할 자리이기도 하다.
+// 트레이닝 뷰 — 곡·프로젝트와 무관한 연습 도구 모음. 원래 스튜디오 도구창 안에 있던
+// 연습 메트로놈을 여기로 옮겼다 — 순전히 연습만 하려는데 DAW 엔진까지 켜야 닿을 수
+// 있던 게 불필요한 무게였다. 새 도구를 추가할 자리이기도 하다.
+// (튜너만 예외 — 엔진의 ASIO pitch 분석을 그대로 쓰므로 엔진이 켜져 있어야 한다.)
 
 import { t } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
+const api = window.yssApi;
 
 // ── 연습 메트로놈 ──
 // 엔진 쪽 metro() 는 재생 중일 때만 울리고(playing 조건) 악센트·박자표 개념이 아예 없는
@@ -37,16 +39,16 @@ function pmEnsureCtx() {
 // 박 표시 새로 그리기 — 박자표·세분화 바뀔 때마다. 큰 점은 박(첫 박만 accent),
 // 그 사이 작은 눈금은 세분화 중간 클릭 — 소리만으론 800Hz 클릭이 1000Hz 박과
 // 헷갈리기 쉬워서 눈으로도 "지금 세분화가 실제로 더 들어가고 있다"를 보여준다.
-function pmRenderBeats() {
-  const box = $('pm-beats');
+function renderBeatDots(boxId, sig, subdiv) {
+  const box = $(boxId);
   if (!box) return;
   box.innerHTML = '';
-  for (let i = 0; i < _pmSig; i++) {
+  for (let i = 0; i < sig; i++) {
     const d = document.createElement('span');
     d.className = 'pm-beat-dot' + (i === 0 ? ' accent' : '');
     d.dataset.beat = String(i);
     box.appendChild(d);
-    for (let s = 1; s < _pmSubdiv; s++) {
+    for (let s = 1; s < subdiv; s++) {
       const tick = document.createElement('span');
       tick.className = 'pm-beat-tick';
       tick.dataset.beat = String(i);
@@ -55,6 +57,7 @@ function pmRenderBeats() {
     }
   }
 }
+function pmRenderBeats() { renderBeatDots('pm-beats', _pmSig, _pmSubdiv); }
 // AudioContext 시간에 맞춰 예약된 클릭이 실제로 울릴 때 해당 표시를 짧게 밝힌다.
 // setTimeout 이라 화면 표시는 오디오만큼 샘플-정확하진 않지만 눈으로 박자 따라가는
 // 용도로는 충분하고, 클릭 스케줄링 자체(오디오)에는 영향을 주지 않는다.
@@ -140,128 +143,19 @@ function pmTap() {
   }
 }
 
-// ── 드론 노트 ──
-// 기준음을 계속 울려서 그 위에 맞춰 노래하거나 연주하는 연습용. 미디 노트 번호를 그대로
-// idx 로 써서(A4=69, 440Hz 기준) 옥타브·음이름 계산이 표준 공식 그대로 나오게 한다.
-const DRN_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-const DRN_MIN = 36, DRN_MAX = 96;   // C2 ~ C7
-let _drnIdx = Number(localStorage.getItem('yss:drnNote'));
-if (!(_drnIdx >= DRN_MIN && _drnIdx <= DRN_MAX)) _drnIdx = 69;   // A4
-let _drnWave = localStorage.getItem('yss:drnWave') || 'sine';
-let _drnVol = Number(localStorage.getItem('yss:drnVol'));
-if (!(_drnVol >= 0 && _drnVol <= 1)) _drnVol = 0.5;
-let _drnCtx = null, _drnGain = null, _drnOsc1 = null, _drnOsc2 = null, _drnPlaying = false;
-
-function drnFreq(idx) { return 440 * Math.pow(2, (idx - 69) / 12); }
-function drnLabel(idx) { return DRN_NOTE_NAMES[((idx % 12) + 12) % 12] + (Math.floor(idx / 12) - 1); }
-function drnEnsureCtx() {
-  if (!_drnCtx) {
-    _drnCtx = new (window.AudioContext || window.webkitAudioContext)();
-    _drnGain = _drnCtx.createGain();
-    _drnGain.gain.value = 0;
-    _drnGain.connect(_drnCtx.destination);
-  }
-  if (_drnCtx.state === 'suspended') _drnCtx.resume();
-  return _drnCtx;
-}
-function drnUpdateDisplay() {
-  const el = $('drn-note'); if (el) el.textContent = drnLabel(_drnIdx);
-}
-function drnRetune() {
-  if (!_drnPlaying) return;
-  const f = drnFreq(_drnIdx);
-  const now = _drnCtx.currentTime;
-  _drnOsc1.frequency.setTargetAtTime(f, now, 0.05);
-  _drnOsc2.frequency.setTargetAtTime(f * Math.pow(2, 6 / 1200), now, 0.05);   // 6센트 detune — 순수 사인 하나보단 덜 인공적
-}
-function drnStart() {
-  if (_drnPlaying) return;
-  drnEnsureCtx();
-  _drnPlaying = true;
-  const f = drnFreq(_drnIdx);
-  _drnOsc1 = _drnCtx.createOscillator(); _drnOsc1.type = _drnWave; _drnOsc1.frequency.value = f;
-  _drnOsc2 = _drnCtx.createOscillator(); _drnOsc2.type = _drnWave; _drnOsc2.frequency.value = f * Math.pow(2, 6 / 1200);
-  _drnOsc1.connect(_drnGain); _drnOsc2.connect(_drnGain);
-  _drnOsc1.start(); _drnOsc2.start();
-  const now = _drnCtx.currentTime;
-  _drnGain.gain.cancelScheduledValues(now);
-  _drnGain.gain.setValueAtTime(0, now);
-  _drnGain.gain.linearRampToValueAtTime(_drnVol, now + 0.15);   // 클릭음 없이 서서히 켜짐
-  const btn = $('drn-playstop'); if (btn) { btn.classList.add('on'); btn.textContent = t('training.drn.stop'); }
-}
-function drnStop() {
-  if (!_drnPlaying) return;
-  _drnPlaying = false;
-  const now = _drnCtx.currentTime;
-  _drnGain.gain.cancelScheduledValues(now);
-  _drnGain.gain.setValueAtTime(_drnGain.gain.value, now);
-  _drnGain.gain.linearRampToValueAtTime(0, now + 0.12);
-  const osc1 = _drnOsc1, osc2 = _drnOsc2;
-  setTimeout(() => { osc1.stop(); osc2.stop(); }, 150);
-  const btn = $('drn-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.drn.start'); }
-}
-function drnSetIdx(v) {
-  _drnIdx = Math.max(DRN_MIN, Math.min(DRN_MAX, v));
-  localStorage.setItem('yss:drnNote', String(_drnIdx));
-  drnUpdateDisplay();
-  drnRetune();
-}
-function drnSetVol(v01) {
-  _drnVol = Math.max(0, Math.min(1, v01));
-  localStorage.setItem('yss:drnVol', String(_drnVol));
-  if (_drnPlaying) _drnGain.gain.setTargetAtTime(_drnVol, _drnCtx.currentTime, 0.05);
-}
-function drnSetWave(w) {
-  _drnWave = w;
-  localStorage.setItem('yss:drnWave', w);
-  if (_drnPlaying) { _drnOsc1.type = w; _drnOsc2.type = w; }
-}
-
 // ── 튜너 ──
-// 스튜디오 쪽 튜너는 엔진(JUCE, ASIO)이 분석해서 IPC 로 pitch 이벤트를 보내주는 방식이라
-// 여기선 못 쓴다 — 렌더러가 직접 마이크를 잡아(getUserMedia) 자기상관(autocorrelation)으로
-// 기본 주파수를 뽑는다. 노트/센트 계산과 바늘 보간은 스튜디오 튜너와 같은 공식을 쓴다
-// (studio.js updateTuner/tunerRAF 참고) — 같은 악기를 스튜디오에서 재던 트레이닝에서 재던
-// 눈금이 똑같이 읽혀야 하니까.
-let _tunCtx = null, _tunStream = null, _tunAnalyser = null, _tunBuf = null;
-let _tunTimer = null, _tunRAF = null, _tunActive = false;
+// 스튜디오 튜너는 엔진(JUCE, ASIO)이 분석한 pitch 를 IPC 로 보내주는 방식이다. 독립
+// 마이크 캡처(getUserMedia+자기상관)로 따로 구현해봤지만 ASIO 오인페가 배타 모드로 열려
+// 있으면 getUserMedia 가 신호를 못 받는 경우가 있어서, 같은 엔진 pitch 이벤트를 그대로
+// 받는 쪽으로 되돌렸다 — 그래서 오디오 엔진이 켜져 있어야만 쓸 수 있고, 꺼져 있으면
+// 안내 문구 + 스튜디오로 이동 버튼만 보여준다.
+// 노트/센트 계산과 바늘 보간 공식은 스튜디오 튜너와 동일(studio.js updateTuner/tunerRAF 참고)
+// — 같은 악기를 스튜디오에서 재던 트레이닝에서 재던 눈금이 똑같이 읽혀야 하니까.
+const TUN_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+let _engineOn = false, _tunToolActive = false, _tunRAF = null;
 let _tunRef = Number(localStorage.getItem('yss:tunerRef')) || 440;
 let _tunNeedle = 50, _tunTarget = 50, _tunSmoothBuf = [], _tunLastHit = 0;
 
-// 표준 자기상관 피치 검출 — 무음 구간을 앞뒤로 잘라내고(r1~r2) 자기상관 최댓값 위치를
-// 포물선 보간으로 다듬어 정수 샘플 단위보다 더 정확한 주기(T0)를 구한다.
-function tunAutoCorrelate(buf, sampleRate) {
-  const SIZE = buf.length;
-  let rms = 0;
-  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
-  rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.01) return -1;
-
-  let r1 = 0, r2 = SIZE - 1;
-  const thres = 0.2;
-  for (let i = 0; i < SIZE >> 1; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-  for (let i = 1; i < SIZE >> 1; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
-  const trimmed = buf.slice(r1, r2);
-  const n = trimmed.length;
-  if (n < 8) return -1;
-
-  const c = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    let sum = 0;
-    for (let j = 0; j < n - i; j++) sum += trimmed[j] * trimmed[j + i];
-    c[i] = sum;
-  }
-  let d = 0;
-  while (d < n - 1 && c[d] > c[d + 1]) d++;
-  let maxVal = -1, maxPos = -1;
-  for (let i = d; i < n; i++) if (c[i] > maxVal) { maxVal = c[i]; maxPos = i; }
-  if (maxPos <= 0) return -1;
-  let T0 = maxPos;
-  const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
-  const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
-  if (a) T0 -= b / (2 * a);
-  return T0 > 0 ? sampleRate / T0 : -1;
-}
 function tunRAFStep() {
   const needle = $('trn-tuner-needle');
   if (needle) {
@@ -296,7 +190,7 @@ function tunUpdateUI(freq) {
   const n = 69 + 12 * Math.log2(f / _tunRef);
   const nearest = Math.round(n);
   const cents = (n - nearest) * 100;
-  const name = DRN_NOTE_NAMES[((nearest % 12) + 12) % 12];
+  const name = TUN_NOTE_NAMES[((nearest % 12) + 12) % 12];
   const oct = Math.floor(nearest / 12) - 1;
   noteEl.textContent = name;
   if (octEl) octEl.textContent = oct;
@@ -310,45 +204,7 @@ function tunUpdateUI(freq) {
   needle.classList.toggle('in-tune', inTune);
   _tunTarget = Math.max(0, Math.min(100, 50 + cents));
 }
-function tunSetRef(hz) {
-  _tunRef = hz; localStorage.setItem('yss:tunerRef', String(hz));
-  document.querySelectorAll('#trn-tuner-ref button').forEach(b => b.classList.toggle('on', Number(b.dataset.hz) === hz));
-  _tunSmoothBuf.length = 0;
-}
-async function tunStart() {
-  if (_tunActive) return;
-  const btn = $('trn-tuner-toggle');
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-  } catch {
-    if (btn) btn.textContent = t('training.tun.denied');
-    return;
-  }
-  _tunStream = stream;
-  _tunCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const src = _tunCtx.createMediaStreamSource(_tunStream);
-  _tunAnalyser = _tunCtx.createAnalyser();
-  _tunAnalyser.fftSize = 2048;
-  _tunBuf = new Float32Array(_tunAnalyser.fftSize);
-  src.connect(_tunAnalyser);
-  _tunActive = true;
-  _tunTimer = setInterval(() => {
-    _tunAnalyser.getFloatTimeDomainData(_tunBuf);
-    tunUpdateUI(tunAutoCorrelate(_tunBuf, _tunCtx.sampleRate));
-  }, 50);
-  _tunRAF = requestAnimationFrame(tunRAFStep);
-  if (btn) { btn.classList.add('on'); btn.textContent = t('training.tun.stop'); }
-}
-function tunStop() {
-  if (!_tunActive) return;
-  _tunActive = false;
-  clearInterval(_tunTimer); _tunTimer = null;
-  if (_tunRAF) cancelAnimationFrame(_tunRAF); _tunRAF = null;
-  _tunStream?.getTracks().forEach(tr => tr.stop()); _tunStream = null;
-  _tunCtx?.close(); _tunCtx = null;
+function tunResetDisplay() {
   const noteEl = $('trn-tuner-note'), octEl = $('trn-tuner-oct'), centsEl = $('trn-tuner-cents'), freqEl = $('trn-tuner-freq');
   if (noteEl) noteEl.textContent = '—';
   if (octEl) octEl.textContent = '';
@@ -358,82 +214,142 @@ function tunStop() {
   $('trn-tuner-needle')?.classList.remove('in-tune');
   _tunTarget = 50; _tunNeedle = 50;
   const needle = $('trn-tuner-needle'); if (needle) needle.style.transform = 'translateX(-50%) translateX(0px)';
-  const btn = $('trn-tuner-toggle'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.tun.start'); }
+  _tunSmoothBuf.length = 0;
 }
+function tunSetRef(hz) {
+  _tunRef = hz; localStorage.setItem('yss:tunerRef', String(hz));
+  document.querySelectorAll('#trn-tuner-ref button').forEach(b => b.classList.toggle('on', Number(b.dataset.hz) === hz));
+  _tunSmoothBuf.length = 0;
+}
+function tunRenderAvailability() {
+  const card = $('tool-trn-tuner'), notice = $('trn-tuner-notice');
+  if (card) card.hidden = !_engineOn;
+  if (notice) notice.hidden = _engineOn;
+}
+function tunActivate() {
+  if (_tunRAF) return;
+  api?.engine?.tuner(true);
+  _tunRAF = requestAnimationFrame(tunRAFStep);
+}
+function tunDeactivate() {
+  if (_tunRAF) { cancelAnimationFrame(_tunRAF); _tunRAF = null; api?.engine?.tuner(false); }
+  tunResetDisplay();
+}
+// 다른 도구로 넘어갈 때(showTool)와 엔진 상태가 바뀔 때(onEvent, 화면에 없어도 이벤트는
+// 계속 온다) 양쪽에서 호출 — 지금 튜너 도구가 열려 있는지(_tunToolActive)와 엔진이
+// 켜져 있는지(_engineOn)를 조합해 안내문/카드 표시와 pitch 분석 on/off 를 맞춘다.
+function tunEnter() {
+  _tunToolActive = true;
+  tunRenderAvailability();
+  if (_engineOn) tunActivate();
+}
+function tunLeave() {
+  _tunToolActive = false;
+  tunDeactivate();
+}
+function tunOnEngineChange() {
+  tunRenderAvailability();
+  if (_tunToolActive) { if (_engineOn) tunActivate(); else tunDeactivate(); }
+}
+api?.engine?.onEvent((m) => {
+  if (m.ev === 'ready') { _engineOn = true; tunOnEngineChange(); }
+  else if (m.ev === 'exit') { _engineOn = false; tunOnEngineChange(); }
+  else if (m.ev === 'pitch' && _tunToolActive) tunUpdateUI(m.freq);
+});
 
 // ── BPM 트레이너 ──
 // 정해진 마디 수마다 템포가 자동으로 조금씩 빨라지는 연습 모드. 메트로놈과 같은 look-ahead
-// 스케줄러 패턴(PM_LOOKAHEAD_MS/PM_SCHEDULE_AHEAD 재사용)을 별도 상태로 하나 더 돌린다 —
-// 이 도구는 박자표를 고정 4/4 로만 쓰므로 pmScheduler 를 그대로 재사용하기보다
-// 템포 램프 로직이 섞이지 않게 독립적으로 둔다.
-const BT_SIG = 4;
+// 스케줄러 패턴(PM_LOOKAHEAD_MS/PM_SCHEDULE_AHEAD, 박 표시 점+세분화 눈금)을 그대로 따라
+// 별도 상태로 하나 더 돌린다. 모든 컨트롤(시작/목표/증가량/증가주기/박자표/세분화)은
+// 재생 중에도 값이 바뀌는 즉시 다음 스케줄 틱에 반영된다 — 스케줄러가 매번 module 상태를
+// 새로 읽지, 재생 시작 시점 값을 캐시해 두지 않기 때문(연습 메트로놈과 같은 방식).
 let _btStart = Number(localStorage.getItem('yss:btStart')) || 80;
 let _btTarget = Number(localStorage.getItem('yss:btTarget')) || 140;
 let _btStep = Number(localStorage.getItem('yss:btStep')) || 2;
 let _btEvery = Number(localStorage.getItem('yss:btEvery')) || 2;
+let _btSig = Number(localStorage.getItem('yss:btSig')) || 4;
+let _btSubdiv = Number(localStorage.getItem('yss:btSubdiv')) || 1;
 let _btVol = Number(localStorage.getItem('yss:btVol'));
 if (!(_btVol >= 0 && _btVol <= 1)) _btVol = 0.6;
-let _btCurBpm = _btStart, _btMeasureCount = 0, _btBeat = 0, _btPlaying = false;
+let _btCurBpm = _btStart, _btMeasureCount = 0, _btBeat = 0, _btSub = 0, _btPlaying = false;
 let _btCtx = null, _btGain = null, _btTimer = null, _btNextTime = 0;
 
-function btRenderBeats() {
-  const box = $('bt-beats');
-  if (!box) return;
-  box.innerHTML = '';
-  for (let i = 0; i < BT_SIG; i++) {
-    const d = document.createElement('span');
-    d.className = 'pm-beat-dot' + (i === 0 ? ' accent' : '');
-    d.dataset.beat = String(i);
-    box.appendChild(d);
-  }
+function btRenderBeats() { renderBeatDots('bt-beats', _btSig, _btSubdiv); }
+function btFlashEl(el, holdMs) {
+  if (!el) return;
+  el.classList.add('active');
+  clearTimeout(el._btFlashT);
+  el._btFlashT = setTimeout(() => el.classList.remove('active'), holdMs);
 }
 function btFlashBeat(beatIdx, delayMs) {
   const hold = Math.min(140, (60000 / _btCurBpm) * 0.6);
-  setTimeout(() => {
-    const dot = document.querySelector(`#bt-beats .pm-beat-dot[data-beat="${beatIdx}"]`);
-    if (!dot) return;
-    dot.classList.add('active');
-    clearTimeout(dot._btFlashT);
-    dot._btFlashT = setTimeout(() => dot.classList.remove('active'), hold);
-  }, delayMs);
+  setTimeout(() => btFlashEl(document.querySelector(`#bt-beats .pm-beat-dot[data-beat="${beatIdx}"]`), hold), delayMs);
+}
+function btFlashTick(beatIdx, subIdx, delayMs) {
+  const hold = Math.min(90, (60000 / _btCurBpm / _btSubdiv) * 0.6);
+  setTimeout(() => btFlashEl(document.querySelector(`#bt-beats .pm-beat-tick[data-beat="${beatIdx}"][data-sub="${subIdx}"]`), hold), delayMs);
 }
 function btUpdateBpmDisplay() {
   const el = $('bt-bpm-now'); if (el) el.textContent = _btCurBpm;
 }
-function btClick(time, isDownbeat, beatIdx) {
+function btClick(time, kind, beatIdx, subIdx) {
   const osc = _btCtx.createOscillator();
   const g = _btCtx.createGain();
-  osc.frequency.value = isDownbeat ? 1500 : 1000;
+  osc.frequency.value = kind === 'accent' ? 1500 : kind === 'beat' ? 1000 : 650;
+  const peak = kind === 'sub' ? 0.4 : (kind === 'accent' ? 1 : 0.6);
+  const decay = kind === 'sub' ? 0.025 : 0.05;
   g.gain.setValueAtTime(0.0001, time);
-  g.gain.exponentialRampToValueAtTime(isDownbeat ? 1 : 0.6, time + 0.002);
-  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
+  g.gain.exponentialRampToValueAtTime(peak, time + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
   osc.connect(g); g.connect(_btGain);
   osc.start(time); osc.stop(time + 0.06);
-  btFlashBeat(beatIdx, Math.max(0, (time - _btCtx.currentTime) * 1000));
+  const delayMs = Math.max(0, (time - _btCtx.currentTime) * 1000);
+  if (kind === 'sub') btFlashTick(beatIdx, subIdx, delayMs);
+  else btFlashBeat(beatIdx, delayMs);
 }
 function btScheduler() {
   while (_btNextTime < _btCtx.currentTime + PM_SCHEDULE_AHEAD) {
-    btClick(_btNextTime, _btBeat === 0, _btBeat);
-    _btNextTime += 60 / _btCurBpm;
-    _btBeat = (_btBeat + 1) % BT_SIG;
-    if (_btBeat === 0) {
-      _btMeasureCount++;
-      if (_btMeasureCount % _btEvery === 0 && _btCurBpm < _btTarget) {
-        _btCurBpm = Math.min(_btTarget, _btCurBpm + _btStep);
-        btUpdateBpmDisplay();
+    const isBeat = _btSub === 0;
+    const isAccent = isBeat && _btBeat === 0;
+    btClick(_btNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', _btBeat, _btSub);
+    _btNextTime += (60 / _btCurBpm) / _btSubdiv;
+    _btSub = (_btSub + 1) % _btSubdiv;
+    if (_btSub === 0) {
+      _btBeat = (_btBeat + 1) % _btSig;
+      if (_btBeat === 0) {
+        _btMeasureCount++;
+        if (_btMeasureCount % _btEvery === 0 && _btCurBpm < _btTarget) {
+          _btCurBpm = Math.min(_btTarget, _btCurBpm + _btStep);
+          btUpdateBpmDisplay();
+        }
       }
     }
   }
 }
-function btReadInputs() {
-  _btStart = Math.max(20, Math.min(300, Number($('bt-start')?.value) || 80));
-  _btTarget = Math.max(_btStart, Math.min(300, Number($('bt-target')?.value) || 140));
-  _btStep = Number($('bt-step')?.value) || 2;
-  _btEvery = Number($('bt-every')?.value) || 2;
+function btSetStart(v) {
+  _btStart = Math.max(20, Math.min(300, Math.round(v) || 80));
   localStorage.setItem('yss:btStart', String(_btStart));
+  const el = $('bt-start'); if (el) el.value = _btStart;
+  if (_btPlaying) { _btCurBpm = _btStart; btUpdateBpmDisplay(); }   // 재생 중엔 "시작"을 바꾸면 그 템포로 바로 되돌아간다
+}
+function btSetTarget(v) {
+  _btTarget = Math.max(20, Math.min(300, Math.round(v) || 140));
   localStorage.setItem('yss:btTarget', String(_btTarget));
-  localStorage.setItem('yss:btStep', String(_btStep));
-  localStorage.setItem('yss:btEvery', String(_btEvery));
+  const el = $('bt-target'); if (el) el.value = _btTarget;
+}
+function btSetStep(v) { _btStep = Number(v) || 2; localStorage.setItem('yss:btStep', String(_btStep)); }
+function btSetEvery(v) { _btEvery = Number(v) || 2; localStorage.setItem('yss:btEvery', String(_btEvery)); }
+function btSetSig(v) {
+  _btSig = Number(v) || 4;
+  localStorage.setItem('yss:btSig', String(_btSig));
+  _btBeat = 0;
+  btRenderBeats();
+}
+function btSetSubdiv(v) {
+  _btSubdiv = Number(v) || 1;
+  localStorage.setItem('yss:btSubdiv', String(_btSubdiv));
+  _btSub = 0;
+  btRenderBeats();
 }
 function btSetVol(v01) {
   _btVol = Math.max(0, Math.min(1, v01));
@@ -442,7 +358,6 @@ function btSetVol(v01) {
 }
 function btStart() {
   if (_btPlaying) return;
-  btReadInputs();
   if (!_btCtx) {
     _btCtx = new (window.AudioContext || window.webkitAudioContext)();
     _btGain = _btCtx.createGain();
@@ -451,7 +366,7 @@ function btStart() {
   }
   if (_btCtx.state === 'suspended') _btCtx.resume();
   _btPlaying = true;
-  _btCurBpm = _btStart; _btMeasureCount = 0; _btBeat = 0;
+  _btCurBpm = _btStart; _btMeasureCount = 0; _btBeat = 0; _btSub = 0;
   btUpdateBpmDisplay();
   _btNextTime = _btCtx.currentTime + 0.05;
   _btTimer = setInterval(btScheduler, PM_LOOKAHEAD_MS);
@@ -461,74 +376,10 @@ function btStop() {
   if (!_btPlaying) return;
   _btPlaying = false;
   clearInterval(_btTimer); _btTimer = null;
-  document.querySelectorAll('#bt-beats .pm-beat-dot').forEach(d => {
+  document.querySelectorAll('#bt-beats .pm-beat-dot, #bt-beats .pm-beat-tick').forEach(d => {
     clearTimeout(d._btFlashT); d.classList.remove('active');
   });
   const btn = $('bt-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
-}
-
-// ── 이어트레이닝 ──
-// 음정(interval) 듣고 맞히기. 표본 음원 없이 오실레이터로 근음 + 반음수만큼 위 음을
-// 순서대로(멜로딕) 울린다. 정답을 12개 버튼 객관식으로 다 늘어놔서, 맞히지 못해도
-// 정답 버튼이 초록으로 밝혀지며 "이게 그 음정이었구나"를 매 문제마다 익히게 한다.
-let _etCtx = null, _etGain = null;
-let _etRootMidi = 60, _etIntervalSt = 7, _etStreak = 0, _etAnswered = false;
-
-function etEnsureCtx() {
-  if (!_etCtx) {
-    _etCtx = new (window.AudioContext || window.webkitAudioContext)();
-    _etGain = _etCtx.createGain();
-    _etGain.gain.value = 0.5;
-    _etGain.connect(_etCtx.destination);
-  }
-  if (_etCtx.state === 'suspended') _etCtx.resume();
-}
-function etPlayNote(midi, time, dur) {
-  const freq = 440 * Math.pow(2, (midi - 69) / 12);
-  const osc = _etCtx.createOscillator();
-  const g = _etCtx.createGain();
-  osc.type = 'sine'; osc.frequency.value = freq;
-  g.gain.setValueAtTime(0.0001, time);
-  g.gain.exponentialRampToValueAtTime(1, time + 0.02);
-  g.gain.setValueAtTime(1, time + dur - 0.08);
-  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-  osc.connect(g); g.connect(_etGain);
-  osc.start(time); osc.stop(time + dur + 0.02);
-}
-function etPlayQuestion() {
-  etEnsureCtx();
-  const now = _etCtx.currentTime + 0.05;
-  etPlayNote(_etRootMidi, now, 0.45);
-  etPlayNote(_etRootMidi + _etIntervalSt, now + 0.55, 0.45);
-}
-function etUpdateStreak() {
-  const el = $('et-streak'); if (el) el.textContent = t('training.et.streak') + ' ' + _etStreak;
-}
-function etNewQuestion(playNow) {
-  _etRootMidi = 55 + Math.floor(Math.random() * 18);   // G3~D5 근처 — 너무 낮거나 높지 않게
-  _etIntervalSt = 1 + Math.floor(Math.random() * 12);
-  _etAnswered = false;
-  const fb = $('et-feedback'); if (fb) { fb.textContent = ''; fb.className = 'et-feedback'; }
-  document.querySelectorAll('.et-choice').forEach(b => { b.disabled = false; b.classList.remove('correct', 'wrong'); });
-  if (playNow) etPlayQuestion();
-}
-function etAnswer(st) {
-  if (_etAnswered) return;
-  _etAnswered = true;
-  const correct = st === _etIntervalSt;
-  _etStreak = correct ? _etStreak + 1 : 0;
-  etUpdateStreak();
-  const fb = $('et-feedback');
-  if (fb) { fb.textContent = t(correct ? 'training.et.correct' : 'training.et.wrong'); fb.className = 'et-feedback ' + (correct ? 'ok' : 'bad'); }
-  document.querySelectorAll('.et-choice').forEach(b => {
-    b.disabled = true;
-    const bst = Number(b.dataset.st);
-    if (bst === _etIntervalSt) b.classList.add('correct');
-    else if (bst === st) b.classList.add('wrong');
-  });
-}
-function etStop() {
-  _etCtx?.close(); _etCtx = null; _etGain = null;
 }
 
 // ── 사이드바 도구 전환 ──
@@ -540,10 +391,8 @@ function showTool(name) {
   document.querySelectorAll('.training-panel[data-tool]').forEach(p =>
     p.classList.toggle('on', p.dataset.tool === name));
   if (name !== 'metro-practice') pmStop();
-  if (name !== 'drone') drnStop();
-  if (name !== 'ear-training') etStop();
-  if (name !== 'tuner') tunStop();
   if (name !== 'bpm-trainer') btStop();
+  if (name === 'tuner') tunEnter(); else tunLeave();
 }
 
 let _booted = false;
@@ -583,40 +432,49 @@ export function initTraining() {
   $('pm-tap')?.addEventListener('click', pmTap);
   $('pm-playstop')?.addEventListener('click', () => { if (_pmPlaying) pmStop(); else pmStart(); });
 
-  const drnWaveEl = $('drn-wave'), drnVolEl = $('drn-vol');
-  drnUpdateDisplay();
-  if (drnWaveEl) drnWaveEl.value = _drnWave;
-  if (drnVolEl) drnVolEl.value = String(Math.round(_drnVol * 100));
-  $('drn-dn')?.addEventListener('click', () => drnSetIdx(_drnIdx - 1));
-  $('drn-up')?.addEventListener('click', () => drnSetIdx(_drnIdx + 1));
-  drnWaveEl?.addEventListener('change', () => drnSetWave(drnWaveEl.value));
-  drnVolEl?.addEventListener('input', () => drnSetVol(Number(drnVolEl.value) / 100));
-  $('drn-playstop')?.addEventListener('click', () => { if (_drnPlaying) drnStop(); else drnStart(); });
-
   const tunRefBox = $('trn-tuner-ref');
   if (tunRefBox) {
     tunRefBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => tunSetRef(Number(b.dataset.hz))));
     tunSetRef(_tunRef);
   }
-  $('trn-tuner-toggle')?.addEventListener('click', () => { if (_tunActive) tunStop(); else tunStart(); });
+  tunRenderAvailability();
+  $('trn-tuner-goto-studio')?.addEventListener('click', () => {
+    document.querySelector('.tab[data-view="studio"]')?.click();
+  });
 
-  const btStartEl = $('bt-start'), btTargetEl = $('bt-target'), btStepEl = $('bt-step'), btEveryEl = $('bt-every'), btVolEl = $('bt-vol');
+  const btStartEl = $('bt-start'), btTargetEl = $('bt-target'), btStepEl = $('bt-step'), btEveryEl = $('bt-every'),
+        btSigEl = $('bt-sig'), btSubdivEl = $('bt-subdiv'), btVolEl = $('bt-vol');
   if (btStartEl) btStartEl.value = _btStart;
   if (btTargetEl) btTargetEl.value = _btTarget;
   if (btStepEl) btStepEl.value = String(_btStep);
   if (btEveryEl) btEveryEl.value = String(_btEvery);
+  if (btSigEl) btSigEl.value = String(_btSig);
+  if (btSubdivEl) btSubdivEl.value = String(_btSubdiv);
   if (btVolEl) btVolEl.value = String(Math.round(_btVol * 100));
   btUpdateBpmDisplay();
   btRenderBeats();
+  btStartEl?.addEventListener('change', () => btSetStart(Number(btStartEl.value)));
+  btTargetEl?.addEventListener('change', () => btSetTarget(Number(btTargetEl.value)));
+  btStepEl?.addEventListener('change', () => btSetStep(btStepEl.value));
+  btEveryEl?.addEventListener('change', () => btSetEvery(btEveryEl.value));
+  btSigEl?.addEventListener('change', () => btSetSig(btSigEl.value));
+  btSubdivEl?.addEventListener('change', () => btSetSubdiv(btSubdivEl.value));
   btVolEl?.addEventListener('input', () => btSetVol(Number(btVolEl.value) / 100));
   $('bt-playstop')?.addEventListener('click', () => { if (_btPlaying) btStop(); else btStart(); });
 
-  etUpdateStreak();
-  etNewQuestion(false);
-  $('et-replay')?.addEventListener('click', () => etPlayQuestion());
-  $('et-next')?.addEventListener('click', () => etNewQuestion(true));
-  document.getElementById('et-choices')?.addEventListener('click', (e) => {
-    const b = e.target.closest('.et-choice');
-    if (b) etAnswer(Number(b.dataset.st));
-  });
+  // 사이드바 안에서 도구를 바꿀 때는 showTool() 이 소리를 끄지만, 트레이닝 탭 자체를
+  // 벗어날 때(다른 최상단 탭 클릭)는 그걸 호출하는 곳이 없다 — app.js 는 각 뷰의 hidden
+  // 속성만 토글하지 뷰별 onLeave 훅이 없어서, 여기서 직접 그 속성 변화를 지켜본다.
+  // 이게 없으면 메트로놈/BPM 트레이너가 화면 밖에서 계속 클릭을 내고, 튜너는 엔진 pitch
+  // 분석을 계속 켜 둔 채로 남는다.
+  const trainingView = document.querySelector('main[data-view="training"]');
+  if (trainingView) {
+    new MutationObserver(() => {
+      if (trainingView.hidden) {
+        pmStop(); btStop(); tunLeave();
+      } else if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
+        tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
+      }
+    }).observe(trainingView, { attributes: true, attributeFilter: ['hidden'] });
+  }
 }
