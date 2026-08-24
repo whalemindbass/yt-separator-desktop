@@ -2493,7 +2493,11 @@ body { display: flex; flex-direction: column; }
    애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로 나눈 도넛으로
    보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 아래 상세에서 카테고리별 막대·
    분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까. */
-.log-card { width: 560px; }
+/* 연습 기록만 다른 도구 카드처럼 고정폭이 아니라 오른쪽 남는 공간을 넓게 채운다 —
+   .training-panel 자체를 늘리고(flex:1) log-card 는 그 폭을 그대로 따라간다.
+   max-width 는 초광폭 창에서 칸이 지나치게 커지는 것만 막는다. */
+.training-panel[data-tool="log"] { flex: 1; max-width: 1040px; }
+.log-card { width: 100%; }
 .log-head { display: flex; align-items: center; justify-content: space-between; }
 .log-month { font-size: 15px; font-weight: 700; color: var(--tx-1); }
 .log-month-progress { display: flex; flex-direction: column; gap: 5px; }
