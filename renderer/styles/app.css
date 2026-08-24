@@ -2491,26 +2491,28 @@ body { display: flex; flex-direction: column; }
 
 /* 연습 기록 — 다른 연습 도구(메트로놈 등)는 작은 박스 카드로 떠 있지만, 이건 달력이라
    내용 자체가 많고 옆으로도 넓어서 카드 틀에 가두면 답답하다. 다른 탭(라이브러리·설정)
-   처럼 카드 배경·테두리 없이 페이지 본문처럼 바로 펼쳐 놓는다. .training-panel 을
-   flex:1 로 늘려 오른쪽 남는 공간을 그대로 쓰고, max-width 는 초광폭 창에서 칸이
-   지나치게 커지는 것만 막는다.
+   처럼 카드 배경·테두리 없이 페이지 본문처럼 바로 펼쳐 놓는다.
+   달력(log-main)과 상세·목표 설정(log-side)을 좌우로 나눈 2열 구성 — 전부 세로로
+   쌓으면 스크롤이 길어지니, 옆으로 넓힌 만큼 세로 길이를 줄인다. max-width 는 칸이
+   지나치게 커지는 것도 같이 막는다(요청: "너무 크다").
    칸 하나하나는 애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
-   나눈 도넛으로 보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 아래 상세에서
+   나눈 도넛으로 보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 옆 상세에서
    카테고리별 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까진 못 읽으니까. */
-.training-panel[data-tool="log"] { flex: 1; max-width: 1040px; }
-.log-page { display: flex; flex-direction: column; gap: 24px; width: 100%; }
+.training-panel[data-tool="log"] { flex: 1; max-width: 860px; }
+.log-page { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 32px; align-items: start; width: 100%; }
+.log-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .log-head { display: flex; align-items: center; justify-content: space-between; }
-.log-month { font-size: 20px; font-weight: 700; color: var(--tx-1); letter-spacing: -.01em; }
+.log-month { font-size: 17px; font-weight: 700; color: var(--tx-1); letter-spacing: -.01em; }
 .log-month-progress { display: flex; flex-direction: column; gap: 6px; }
-.log-month-progress-label { font-size: 12.5px; color: var(--tx-3); }
+.log-month-progress-label { font-size: 12px; color: var(--tx-3); }
 .log-month-progress-bar { height: 6px; border-radius: 3px; background: var(--elev-2); overflow: hidden; }
 .log-month-progress-bar .fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .2s var(--ease); }
 .log-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); }
-.log-weekdays span { text-align: center; font-size: 11.5px; color: var(--tx-3); }
-.log-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
+.log-weekdays span { text-align: center; font-size: 11px; color: var(--tx-3); }
+.log-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .log-cell {
   position: relative; aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent;
-  background: transparent; color: var(--tx-2); font: 600 13px var(--mono);
+  background: transparent; color: var(--tx-2); font: 600 12.5px var(--mono);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   transition: transform .1s var(--ease);
 }
@@ -2521,10 +2523,11 @@ body { display: flex; flex-direction: column; }
 .log-cell.sel { box-shadow: 0 0 0 2px var(--accent); }
 .log-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
 .log-daynum { position: relative; z-index: 1; pointer-events: none; }
-/* 상세와 목표 설정을 나란히 — 페이지가 넓어졌으니 세로로 쌓기만 하면 오른쪽이 빈다 */
-.log-bottom { display: flex; gap: 40px; padding-top: 16px; border-top: 1px solid var(--border); }
-.log-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.log-detail-date { font-size: 13px; font-weight: 600; color: var(--tx-1); }
+/* 상세 + 목표 설정 — 오른쪽 사이드 컬럼에 세로로. 달력 옆이라 폭이 좁으니(220px) 여기
+   안에서는 계속 세로로 쌓아도 괜찮다. */
+.log-side { display: flex; flex-direction: column; gap: 22px; }
+.log-detail { display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.log-detail-date { font-size: 12.5px; font-weight: 600; color: var(--tx-1); }
 .log-detail-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--elev-2); }
 .log-detail-bar .seg { height: 100%; }
 /* 색 클래스를 studio/library/training 처럼 흔한 단어로 단독 지으면 앱 다른 곳의
@@ -2533,13 +2536,13 @@ body { display: flex; flex-direction: column; }
 .log-detail-bar .seg-studio { background: var(--accent); }
 .log-detail-bar .seg-library { background: #4f8fd1; }
 .log-detail-bar .seg-training { background: #d98e42; }
-.log-detail-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--tx-2); }
-.log-detail-val { margin-left: auto; font: 600 12px var(--mono); color: var(--tx-1); }
+.log-detail-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--tx-2); }
+.log-detail-val { margin-left: auto; font: 600 11.5px var(--mono); color: var(--tx-1); }
 .log-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .log-dot-studio { background: var(--accent); }
 .log-dot-library { background: #4f8fd1; }
 .log-dot-training { background: #d98e42; }
-.log-goals { flex: none; width: 220px; display: flex; flex-direction: column; gap: 14px; }
+.log-goals { display: flex; flex-direction: column; gap: 14px; }
 .log-goal-field { display: flex; flex-direction: column; gap: 6px; }
 .log-goal-label { font-size: 11.5px; color: var(--tx-3); }
 .log-goal-input-row { display: flex; align-items: center; gap: 8px; }
@@ -2550,6 +2553,12 @@ body { display: flex; flex-direction: column; }
 }
 .log-goal-input:focus { border-color: var(--accent); }
 .log-goal-input-row span { font-size: 11.5px; color: var(--tx-3); flex: none; }
+/* 좁은 창에서는 옆 컬럼을 둘 자리가 없으니 세로로 되돌린다 */
+@media (max-width: 700px) {
+  .log-page { grid-template-columns: minmax(0, 1fr); }
+  .log-side { flex-direction: row; gap: 32px; }
+  .log-detail { flex: 1; padding-bottom: 0; border-bottom: 0; }
+}
 
 /* 튜너 — 스튜디오 도구창 안에서는 daw-fx 아사이드 폭을 그대로 물려받지만, 트레이닝
    카드는 폭을 스스로 정해야 한다. 나머지 .tuner-* 모양은 스튜디오와 완전히 같다.

@@ -960,19 +960,21 @@
            달력으로만 그려서 보여준다(집계 로직은 이쪽에 없음 — app.js 의 usage 추적 참고). -->
       <section class="training-panel on" data-tool="log">
         <div class="log-page" id="tool-log">
-          <div class="log-head">
-            <button id="log-prev" class="btn btn-sm pm-step" type="button" aria-label="prev">‹</button>
-            <span id="log-month-label" class="log-month">—</span>
-            <button id="log-next" class="btn btn-sm pm-step" type="button" aria-label="next">›</button>
+          <div class="log-main">
+            <div class="log-head">
+              <button id="log-prev" class="btn btn-sm pm-step" type="button" aria-label="prev">‹</button>
+              <span id="log-month-label" class="log-month">—</span>
+              <button id="log-next" class="btn btn-sm pm-step" type="button" aria-label="next">›</button>
+            </div>
+            <div class="log-month-progress">
+              <div id="log-month-progress-label" class="log-month-progress-label">—</div>
+              <div class="log-month-progress-bar"><div id="log-month-progress-fill" class="fill"></div></div>
+            </div>
+            <div id="log-weekdays" class="log-weekdays"></div>
+            <div id="log-grid" class="log-grid"></div>
           </div>
-          <div class="log-month-progress">
-            <div id="log-month-progress-label" class="log-month-progress-label">—</div>
-            <div class="log-month-progress-bar"><div id="log-month-progress-fill" class="fill"></div></div>
-          </div>
-          <div id="log-weekdays" class="log-weekdays"></div>
-          <div id="log-grid" class="log-grid"></div>
 
-          <div class="log-bottom">
+          <div class="log-side">
             <div class="log-detail">
               <div id="log-detail-date" class="log-detail-date">—</div>
               <div class="log-detail-bar" id="log-detail-bar"></div>
