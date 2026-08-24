@@ -940,10 +940,6 @@
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="training.log.title">연습 기록</span>
       </button>
-      <button class="training-nav-item" data-tool="tuner" type="button">
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <span data-i18n="training.tun.title">튜너</span>
-      </button>
       <button class="training-nav-item" data-tool="metro-practice" type="button">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 17h6M8.5 17 10 4l1.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 17a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor"/></svg>
         <span data-i18n="training.pm.title">메트로놈</span>
@@ -951,6 +947,10 @@
       <button class="training-nav-item" data-tool="bpm-trainer" type="button">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 14 8.5 9.5l3 3L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span data-i18n="training.bt.title">BPM 트레이너</span>
+      </button>
+      <button class="training-nav-item" data-tool="tuner" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span data-i18n="training.tun.title">튜너</span>
       </button>
     </nav>
 
@@ -1026,40 +1026,6 @@
         </div>
       </section>
 
-      <!-- 튜너 — 스튜디오 쪽 튜너는 엔진(JUCE, ASIO)이 분석한 pitch 를 IPC 로 받는 방식이다.
-           독립 마이크 캡처(getUserMedia)로 따로 구현해봤지만 ASIO 오인페가 배타 모드로 잡혀
-           있으면 신호를 못 받아서, 여기서도 그냥 같은 엔진 pitch 이벤트를 그대로 받는 걸로
-           되돌렸다 — 그래서 오디오 엔진이 켜져 있어야만 쓸 수 있다. 꺼져 있으면 안내만 보여줌. -->
-      <section class="training-panel" data-tool="tuner">
-        <div class="daw-tool tuner" id="tool-trn-tuner" hidden>
-          <div class="tuner-card">
-            <div class="tuner-readout">
-              <span id="trn-tuner-flat" class="tuner-arrow flat">♭</span>
-              <div class="tuner-note-wrap"><span id="trn-tuner-note" class="tuner-note">—</span><sub id="trn-tuner-oct" class="tuner-oct"></sub></div>
-              <span id="trn-tuner-sharp" class="tuner-arrow sharp">♯</span>
-            </div>
-            <div id="trn-tuner-cents" class="tuner-cents">—</div>
-            <div class="tuner-meter">
-              <div class="tuner-ticks"></div>
-              <span class="tuner-center"></span>
-              <div id="trn-tuner-needle" class="tuner-needle"></div>
-            </div>
-            <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
-            <div id="trn-tuner-freq" class="tuner-freq">—</div>
-          </div>
-          <div class="tuner-ref">
-            <span class="tuner-ref-lab" data-i18n="studio.h.refA4">기준음 A4</span>
-            <div class="tuner-ref-chips" id="trn-tuner-ref">
-              <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440" class="on">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
-            </div>
-          </div>
-        </div>
-        <div class="tool-card tool-notice" id="trn-tuner-notice">
-          <p data-i18n="training.tun.needEngine">스튜디오에서 오디오 엔진을 켜면 튜너를 쓸 수 있어요.</p>
-          <button id="trn-tuner-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
-        </div>
-      </section>
-
       <!-- BPM 트레이너 — 정해진 마디마다 템포가 자동으로 조금씩 빨라지는 연습 모드.
            메트로놈과 같은 look-ahead 스케줄러 패턴을 재사용, 박자표·세분화도 메트로놈과
            동일하게 지원. 재생 중에도 컨트롤 변경이 다음 스케줄 틱에 바로 반영된다. -->
@@ -1125,6 +1091,40 @@
           <div class="tool-actions">
             <button id="bt-playstop" class="btn primary" type="button" data-i18n="training.pm.start">시작</button>
           </div>
+        </div>
+      </section>
+
+      <!-- 튜너 — 스튜디오 쪽 튜너는 엔진(JUCE, ASIO)이 분석한 pitch 를 IPC 로 받는 방식이다.
+           독립 마이크 캡처(getUserMedia)로 따로 구현해봤지만 ASIO 오인페가 배타 모드로 잡혀
+           있으면 신호를 못 받아서, 여기서도 그냥 같은 엔진 pitch 이벤트를 그대로 받는 걸로
+           되돌렸다 — 그래서 오디오 엔진이 켜져 있어야만 쓸 수 있다. 꺼져 있으면 안내만 보여줌. -->
+      <section class="training-panel" data-tool="tuner">
+        <div class="daw-tool tuner" id="tool-trn-tuner" hidden>
+          <div class="tuner-card">
+            <div class="tuner-readout">
+              <span id="trn-tuner-flat" class="tuner-arrow flat">♭</span>
+              <div class="tuner-note-wrap"><span id="trn-tuner-note" class="tuner-note">—</span><sub id="trn-tuner-oct" class="tuner-oct"></sub></div>
+              <span id="trn-tuner-sharp" class="tuner-arrow sharp">♯</span>
+            </div>
+            <div id="trn-tuner-cents" class="tuner-cents">—</div>
+            <div class="tuner-meter">
+              <div class="tuner-ticks"></div>
+              <span class="tuner-center"></span>
+              <div id="trn-tuner-needle" class="tuner-needle"></div>
+            </div>
+            <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
+            <div id="trn-tuner-freq" class="tuner-freq">—</div>
+          </div>
+          <div class="tuner-ref">
+            <span class="tuner-ref-lab" data-i18n="studio.h.refA4">기준음 A4</span>
+            <div class="tuner-ref-chips" id="trn-tuner-ref">
+              <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440" class="on">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
+            </div>
+          </div>
+        </div>
+        <div class="tool-card tool-notice" id="trn-tuner-notice">
+          <p data-i18n="training.tun.needEngine">스튜디오에서 오디오 엔진을 켜면 튜너를 쓸 수 있어요.</p>
+          <button id="trn-tuner-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
         </div>
       </section>
     </div>
