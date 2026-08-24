@@ -2430,7 +2430,11 @@ body { display: flex; flex-direction: column; }
 
 /* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
    빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다). */
-.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 4px 2px 2px; }
+/* 트레이닝 뷰 — 곡 없이 쓰는 연습 도구 카드들. 지금은 메트로놈 하나뿐이지만 다음 도구가
+   나란히 붙을 자리라 처음부터 flex-wrap 카드 목록으로 둔다. */
+.training-tools { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
+.training-card-title { font-size: 13px; font-weight: 700; color: var(--tx-1); margin: 0 0 4px; }
+.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; width: 280px; }
 .pm-bpm-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 84px; }
 .pm-bpm-display input#pm-bpm {
