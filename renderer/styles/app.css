@@ -2489,24 +2489,25 @@ body { display: flex; flex-direction: column; }
 .tool-actions .btn.primary.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .tool-bignum { font: 700 34px/1.1 var(--mono); color: var(--tx-1); }
 
-/* 연습 기록 — 트레이닝/라이브러리/스튜디오에 머문 시간을 달력으로. 칸 하나하나가
-   애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로 나눈 도넛으로
-   보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 아래 상세에서 카테고리별 막대·
-   분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까. */
-/* 연습 기록만 다른 도구 카드처럼 고정폭이 아니라 오른쪽 남는 공간을 넓게 채운다 —
-   .training-panel 자체를 늘리고(flex:1) log-card 는 그 폭을 그대로 따라간다.
-   max-width 는 초광폭 창에서 칸이 지나치게 커지는 것만 막는다. */
+/* 연습 기록 — 다른 연습 도구(메트로놈 등)는 작은 박스 카드로 떠 있지만, 이건 달력이라
+   내용 자체가 많고 옆으로도 넓어서 카드 틀에 가두면 답답하다. 다른 탭(라이브러리·설정)
+   처럼 카드 배경·테두리 없이 페이지 본문처럼 바로 펼쳐 놓는다. .training-panel 을
+   flex:1 로 늘려 오른쪽 남는 공간을 그대로 쓰고, max-width 는 초광폭 창에서 칸이
+   지나치게 커지는 것만 막는다.
+   칸 하나하나는 애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
+   나눈 도넛으로 보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 아래 상세에서
+   카테고리별 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까진 못 읽으니까. */
 .training-panel[data-tool="log"] { flex: 1; max-width: 1040px; }
-.log-card { width: 100%; }
+.log-page { display: flex; flex-direction: column; gap: 24px; width: 100%; }
 .log-head { display: flex; align-items: center; justify-content: space-between; }
-.log-month { font-size: 15px; font-weight: 700; color: var(--tx-1); }
-.log-month-progress { display: flex; flex-direction: column; gap: 5px; }
-.log-month-progress-label { font-size: 11.5px; color: var(--tx-3); }
+.log-month { font-size: 20px; font-weight: 700; color: var(--tx-1); letter-spacing: -.01em; }
+.log-month-progress { display: flex; flex-direction: column; gap: 6px; }
+.log-month-progress-label { font-size: 12.5px; color: var(--tx-3); }
 .log-month-progress-bar { height: 6px; border-radius: 3px; background: var(--elev-2); overflow: hidden; }
 .log-month-progress-bar .fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .2s var(--ease); }
 .log-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); }
-.log-weekdays span { text-align: center; font-size: 11px; color: var(--tx-3); }
-.log-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.log-weekdays span { text-align: center; font-size: 11.5px; color: var(--tx-3); }
+.log-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
 .log-cell {
   position: relative; aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent;
   background: transparent; color: var(--tx-2); font: 600 13px var(--mono);
@@ -2515,13 +2516,15 @@ body { display: flex; flex-direction: column; }
 }
 .log-cell.empty { visibility: hidden; cursor: default; }
 .log-cell.has { color: var(--tx-1); }
-.log-cell:not(.empty):hover { transform: scale(1.07); }
+.log-cell:not(.empty):hover { transform: scale(1.06); }
 .log-cell.today { border-color: var(--accent); }
 .log-cell.sel { box-shadow: 0 0 0 2px var(--accent); }
 .log-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
 .log-daynum { position: relative; z-index: 1; pointer-events: none; }
-.log-detail { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
-.log-detail-date { font-size: 12px; font-weight: 600; color: var(--tx-1); }
+/* 상세와 목표 설정을 나란히 — 페이지가 넓어졌으니 세로로 쌓기만 하면 오른쪽이 빈다 */
+.log-bottom { display: flex; gap: 40px; padding-top: 16px; border-top: 1px solid var(--border); }
+.log-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.log-detail-date { font-size: 13px; font-weight: 600; color: var(--tx-1); }
 .log-detail-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--elev-2); }
 .log-detail-bar .seg { height: 100%; }
 /* 색 클래스를 studio/library/training 처럼 흔한 단어로 단독 지으면 앱 다른 곳의
@@ -2530,16 +2533,23 @@ body { display: flex; flex-direction: column; }
 .log-detail-bar .seg-studio { background: var(--accent); }
 .log-detail-bar .seg-library { background: #4f8fd1; }
 .log-detail-bar .seg-training { background: #d98e42; }
-.log-detail-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--tx-2); }
-.log-detail-val { margin-left: auto; font: 600 11.5px var(--mono); color: var(--tx-1); }
+.log-detail-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--tx-2); }
+.log-detail-val { margin-left: auto; font: 600 12px var(--mono); color: var(--tx-1); }
 .log-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .log-dot-studio { background: var(--accent); }
 .log-dot-library { background: #4f8fd1; }
 .log-dot-training { background: #d98e42; }
-.log-goals { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; border-top: 1px solid var(--border); }
-.log-goal-field { display: flex; align-items: center; gap: 6px; }
-.log-goal-field input { width: auto; flex: 1; min-width: 0; }
-.log-goal-field span { font-size: 11.5px; color: var(--tx-3); flex: none; }
+.log-goals { flex: none; width: 220px; display: flex; flex-direction: column; gap: 14px; }
+.log-goal-field { display: flex; flex-direction: column; gap: 6px; }
+.log-goal-label { font-size: 11.5px; color: var(--tx-3); }
+.log-goal-input-row { display: flex; align-items: center; gap: 8px; }
+.log-goal-input {
+  flex: 1; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 10px;
+  background: var(--input); border: 1px solid var(--border-mid); border-radius: var(--r-sm);
+  color: var(--tx-1); font: 600 13px var(--mono); outline: none;
+}
+.log-goal-input:focus { border-color: var(--accent); }
+.log-goal-input-row span { font-size: 11.5px; color: var(--tx-3); flex: none; }
 
 /* 튜너 — 스튜디오 도구창 안에서는 daw-fx 아사이드 폭을 그대로 물려받지만, 트레이닝
    카드는 폭을 스스로 정해야 한다. 나머지 .tuner-* 모양은 스튜디오와 완전히 같다.
