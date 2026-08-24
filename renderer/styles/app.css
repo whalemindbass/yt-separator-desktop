@@ -2428,13 +2428,42 @@ body { display: flex; flex-direction: column; }
 .metro-row .btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .metro-bpm { width: 60px; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--tx-1); font: 600 13px/1 var(--mono); outline: none; }
 
+/* 트레이닝 뷰 — home-body/home-nav 와 같은 사이드바+본문 그리드. 지금은 메트로놈 하나뿐이지만
+   도구가 늘어도 왼쪽 목록에 항목만 추가하면 되는 구조로 처음부터 잡아 둔다. */
+.training-body {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 0; padding: 0; overflow: hidden;
+}
+.training-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 18px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+.training-nav-head { padding: 4px 8px 14px; }
+.training-nav-head h2 { font-size: 16px; font-weight: 700; color: var(--tx-1); margin: 0 0 4px; text-wrap: balance; }
+.training-nav-head p { font-size: 11.5px; color: var(--tx-3); line-height: 1.5; margin: 0; }
+.training-nav-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 13px; border-radius: 9px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--tx-2); font-size: 13.5px; font-weight: 550;
+  cursor: pointer; text-align: left;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.training-nav-item svg { width: 19px; height: 19px; flex: none; }
+.training-nav-item:hover { background: var(--elev); color: var(--tx-1); }
+.training-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.training-nav-item.on { background: var(--elev); color: var(--tx-1); border-color: var(--border-mid); }
+.training-main { overflow-y: auto; padding: 32px; }
+.training-panel { display: none; }
+.training-panel.on { display: block; }
+
 /* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
    빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다). */
-/* 트레이닝 뷰 — 곡 없이 쓰는 연습 도구 카드들. 지금은 메트로놈 하나뿐이지만 다음 도구가
-   나란히 붙을 자리라 처음부터 flex-wrap 카드 목록으로 둔다. */
-.training-tools { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; }
-.training-card-title { font-size: 13px; font-weight: 700; color: var(--tx-1); margin: 0 0 4px; }
-.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; width: 280px; }
+.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 18px 20px 20px; width: 320px; }
 .pm-bpm-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 84px; }
 .pm-bpm-display input#pm-bpm {
@@ -3604,6 +3633,8 @@ body { background: var(--bg) !important; }
   .home-hero { grid-template-columns: minmax(0, 1fr); }
   .home-hero-wave { display: none; }
   .home-quick { grid-template-columns: minmax(0, 1fr); }
+  .training-body { grid-template-columns: minmax(0, 1fr); }
+  .training-nav { display: none; }
 }
 
 /* ── 홈: 페이지 전환 · 게시판 ──────────────────────────────────

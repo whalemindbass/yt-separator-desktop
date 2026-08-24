@@ -89,10 +89,26 @@ function pmTap() {
   }
 }
 
+// ── 사이드바 도구 전환 ──
+// 지금은 메트로놈 하나뿐이라 없어도 동작은 같지만, home-nav 와 같은 패턴으로 미리 잡아
+// 둬서 다음 도구를 추가할 때 이 자리에 항목만 늘리면 되게 한다.
+function showTool(name) {
+  document.querySelectorAll('.training-nav-item[data-tool]').forEach(b =>
+    b.classList.toggle('on', b.dataset.tool === name));
+  document.querySelectorAll('.training-panel[data-tool]').forEach(p =>
+    p.classList.toggle('on', p.dataset.tool === name));
+  if (name !== 'metro-practice') pmStop();
+}
+
 let _booted = false;
 export function initTraining() {
   if (_booted) return;
   _booted = true;
+
+  document.querySelector('.training-nav')?.addEventListener('click', (e) => {
+    const nav = e.target.closest('.training-nav-item[data-tool]');
+    if (nav) showTool(nav.dataset.tool);
+  });
 
   const pmBpmEl = $('pm-bpm'), pmSigEl = $('pm-sig'), pmVolEl = $('pm-vol');
   if (pmBpmEl) pmBpmEl.value = _pmBpm;

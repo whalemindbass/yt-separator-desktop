@@ -927,14 +927,24 @@
 
   <!-- View: 트레이닝 — 곡·프로젝트·오디오 엔진과 완전히 무관한 연습 도구 모음.
        스튜디오 도구창 안에 있던 연습 메트로놈을 여기로 옮겼다 — 순전히 연습만 하려는데
-       DAW 엔진(JUCE 사이드카)까지 켜야 닿을 수 있던 게 불필요한 무게였다. -->
-  <main class="body view" data-view="training" hidden>
-    <section class="hero">
-      <h2 data-i18n="training.heading">연습</h2>
-      <p class="muted" data-i18n="training.subtext">곡이나 프로젝트 없이도 쓸 수 있는 연습 도구입니다.</p>
-      <div class="training-tools">
+       DAW 엔진(JUCE 사이드카)까지 켜야 닿을 수 있던 게 불필요한 무게였다.
+       사이드바 + 본문 구조는 home-nav/home-main 과 같은 패턴 — 도구가 늘어나도
+       왼쪽 목록에 항목만 추가하면 되게. -->
+  <main class="body view training-body" data-view="training" hidden>
+    <nav class="training-nav">
+      <div class="training-nav-head">
+        <h2 data-i18n="training.heading">연습</h2>
+        <p data-i18n="training.subtext">곡이나 프로젝트 없이도 쓸 수 있는 연습 도구입니다.</p>
+      </div>
+      <button class="training-nav-item on" data-tool="metro-practice" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 17h6M8.5 17 10 4l1.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 17a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor"/></svg>
+        <span data-i18n="training.pm.title">연습 메트로놈</span>
+      </button>
+    </nav>
+
+    <div class="training-main">
+      <section class="training-panel on" data-tool="metro-practice">
         <div class="daw-tool pm-tool" id="tool-metro-practice">
-          <h3 class="training-card-title" data-i18n="training.pm.title">연습 메트로놈</h3>
           <div class="pm-bpm-row">
             <button id="pm-bpm-dn5" class="btn btn-sm" type="button">-5</button>
             <button id="pm-bpm-dn1" class="btn btn-sm" type="button">-1</button>
@@ -965,8 +975,8 @@
             <button id="pm-playstop" class="btn primary pm-play" type="button" data-i18n="training.pm.start">시작</button>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   </main>
 
   <!-- View 3: 설정 -->
