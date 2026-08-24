@@ -76,12 +76,49 @@ $('theme-toggle').addEventListener('click', () => {
   localStorage.setItem('theme', next);
 });
 
+// ── 연습 기록 — 사용 시간 자동 집계 ──────────────
+// 트레이닝의 "연습 기록" 달력이 읽는 원본 데이터. 뷰를 얼마나 오래 보고 있었는지를
+// 날짜별·카테고리별(studio/library/training)로 localStorage 에 누적해 둔다. 집계 로직은
+// 여기 하나뿐 — training.js 는 이 값을 읽어서 달력만 그린다.
+const USAGE_CATS = ['studio', 'library', 'training'];
+let _usageCat = null, _usageStart = 0, _usageFlushTimer = null;
+function usageDateKey(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function usageLoad() {
+  try { return JSON.parse(localStorage.getItem('yss:usageLog') || '{}'); } catch { return {}; }
+}
+function usageFlush() {
+  if (!_usageCat) return;
+  const now = performance.now();
+  const elapsedSec = (now - _usageStart) / 1000;
+  _usageStart = now;   // 같은 카테고리에 계속 머물러 있으면 다음 flush 도 이어서 잰다
+  if (elapsedSec < 1) return;
+  const log = usageLoad();
+  const key = usageDateKey(new Date());
+  if (!log[key]) log[key] = {};
+  log[key][_usageCat] = (log[key][_usageCat] || 0) + elapsedSec;
+  localStorage.setItem('yss:usageLog', JSON.stringify(log));
+}
+function usageEnter(name) {
+  usageFlush();   // 이전 카테고리 몫부터 정산
+  if (USAGE_CATS.includes(name)) {
+    _usageCat = name; _usageStart = performance.now();
+    if (!_usageFlushTimer) _usageFlushTimer = setInterval(usageFlush, 20000);
+  } else {
+    _usageCat = null;
+    if (_usageFlushTimer) { clearInterval(_usageFlushTimer); _usageFlushTimer = null; }
+  }
+}
+window.addEventListener('beforeunload', usageFlush);
+
 // ── 탭 라우팅 ─────────────────────────────────
 const tabs = document.querySelectorAll('.tab');
 const views = document.querySelectorAll('main.view');
 function switchView(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.view === name));
   views.forEach(v => v.hidden = v.dataset.view !== name);
+  usageEnter(name);
   if (name === 'library') Library.refresh().catch(console.error);
   if (name === 'community') initCommunity().catch(console.error);
   if (name === 'studio') initStudio().catch(console.error);

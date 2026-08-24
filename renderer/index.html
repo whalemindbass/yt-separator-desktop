@@ -936,13 +936,17 @@
         <h2 data-i18n="training.heading">연습</h2>
         <p data-i18n="training.subtext">곡이나 프로젝트 없이도 쓸 수 있는 연습 도구입니다.</p>
       </div>
-      <button class="training-nav-item on" data-tool="metro-practice" type="button">
-        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 17h6M8.5 17 10 4l1.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 17a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor"/></svg>
-        <span data-i18n="training.pm.title">연습 메트로놈</span>
+      <button class="training-nav-item on" data-tool="log" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span data-i18n="training.log.title">연습 기록</span>
       </button>
       <button class="training-nav-item" data-tool="tuner" type="button">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="training.tun.title">튜너</span>
+      </button>
+      <button class="training-nav-item" data-tool="metro-practice" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 17h6M8.5 17 10 4l1.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 17a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor"/></svg>
+        <span data-i18n="training.pm.title">메트로놈</span>
       </button>
       <button class="training-nav-item" data-tool="bpm-trainer" type="button">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 14 8.5 9.5l3 3L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -951,7 +955,29 @@
     </nav>
 
     <div class="training-main">
-      <section class="training-panel on" data-tool="metro-practice">
+      <!-- 연습 기록 — 트레이닝/라이브러리/스튜디오 뷰에 머문 시간을 app.js 가 자동으로
+           날짜별·카테고리별 localStorage(yss:usageLog) 에 누적해 두고, 여기서는 그 값을
+           달력으로만 그려서 보여준다(집계 로직은 이쪽에 없음 — app.js 의 usage 추적 참고). -->
+      <section class="training-panel on" data-tool="log">
+        <div class="daw-tool tool-card log-card" id="tool-log">
+          <div class="log-head">
+            <button id="log-prev" class="btn btn-sm tool-step" type="button" aria-label="prev">‹</button>
+            <span id="log-month-label" class="log-month">—</span>
+            <button id="log-next" class="btn btn-sm tool-step" type="button" aria-label="next">›</button>
+          </div>
+          <div id="log-weekdays" class="log-weekdays"></div>
+          <div id="log-grid" class="log-grid"></div>
+          <div class="log-detail">
+            <div id="log-detail-date" class="log-detail-date">—</div>
+            <div class="log-detail-bar" id="log-detail-bar"></div>
+            <div class="log-detail-row"><span class="log-dot log-dot-studio"></span><span data-i18n="training.log.studio">스튜디오</span><span id="log-detail-studio" class="log-detail-val">—</span></div>
+            <div class="log-detail-row"><span class="log-dot log-dot-library"></span><span data-i18n="training.log.library">라이브러리</span><span id="log-detail-library" class="log-detail-val">—</span></div>
+            <div class="log-detail-row"><span class="log-dot log-dot-training"></span><span data-i18n="training.log.training">트레이닝</span><span id="log-detail-training" class="log-detail-val">—</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="training-panel" data-tool="metro-practice">
         <div class="daw-tool pm-tool" id="tool-metro-practice">
           <div class="pm-bpm-block">
             <div class="pm-bpm-row">

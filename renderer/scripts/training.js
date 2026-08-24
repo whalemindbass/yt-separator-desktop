@@ -4,10 +4,105 @@
 // 있던 게 불필요한 무게였다. 새 도구를 추가할 자리이기도 하다.
 // (튜너만 예외 — 엔진의 ASIO pitch 분석을 그대로 쓰므로 엔진이 켜져 있어야 한다.)
 
-import { t } from './i18n.js';
+import { t, getLocale } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const api = window.yssApi;
+
+// ── 연습 기록 ──
+// app.js 가 뷰별 체류 시간을 날짜별·카테고리별로 localStorage(yss:usageLog) 에 이미
+// 누적해 둔다(집계 로직은 거기 하나뿐) — 여기서는 그 값을 읽어 달력만 그린다.
+// 칸 자체는 그날 총 사용량만 accent 진하기로 보여주고(GitHub 잔디 방식), 칸을 고르면
+// 아래 상세에서 카테고리별 막대·분(分)을 보여준다 — 작은 칸에 3색을 다 넣으면 안 읽힌다.
+let _logYear = 0, _logMonth = 0;   // 0-indexed month
+function logDateKey(y, m, d) {
+  return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+function logLoad() {
+  try { return JSON.parse(localStorage.getItem('yss:usageLog') || '{}'); } catch { return {}; }
+}
+function logIntlLocale() { return getLocale() === 'en' ? 'en-US' : 'ko-KR'; }
+function logWeekdayLabels() {
+  const fmt = new Intl.DateTimeFormat(logIntlLocale(), { weekday: 'short' });
+  const labels = [];
+  for (let i = 0; i < 7; i++) labels.push(fmt.format(new Date(2023, 0, 1 + i)));   // 2023-01-01 은 일요일
+  return labels;
+}
+function logMonthLabel(y, m) {
+  return new Intl.DateTimeFormat(logIntlLocale(), { year: 'numeric', month: 'long' }).format(new Date(y, m, 1));
+}
+function logMinutes(sec) { return Math.round((sec || 0) / 60); }
+function logShowDetail(dateKey) {
+  const log = logLoad();
+  const rec = log[dateKey] || {};
+  const dateEl = $('log-detail-date'); if (dateEl) dateEl.textContent = dateKey;
+  const s = rec.studio || 0, li = rec.library || 0, tr = rec.training || 0;
+  const total = s + li + tr;
+  $('log-detail-studio').textContent = total ? logMinutes(s) + t('training.log.min') : t('training.log.none');
+  $('log-detail-library').textContent = total ? logMinutes(li) + t('training.log.min') : '';
+  $('log-detail-training').textContent = total ? logMinutes(tr) + t('training.log.min') : '';
+  const bar = $('log-detail-bar');
+  if (bar) {
+    bar.innerHTML = total
+      ? `<span class="seg seg-studio" style="width:${s / total * 100}%"></span>` +
+        `<span class="seg seg-library" style="width:${li / total * 100}%"></span>` +
+        `<span class="seg seg-training" style="width:${tr / total * 100}%"></span>`
+      : '';
+  }
+}
+function logRenderMonth() {
+  const label = $('log-month-label'); if (label) label.textContent = logMonthLabel(_logYear, _logMonth);
+  const wdBox = $('log-weekdays');
+  if (wdBox && !wdBox.childElementCount) {
+    logWeekdayLabels().forEach(w => { const s = document.createElement('span'); s.textContent = w; wdBox.appendChild(s); });
+  }
+  const grid = $('log-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const log = logLoad();
+  const firstDow = new Date(_logYear, _logMonth, 1).getDay();
+  const daysInMonth = new Date(_logYear, _logMonth + 1, 0).getDate();
+  let maxSec = 1;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const rec = log[logDateKey(_logYear, _logMonth, d)];
+    if (rec) {
+      const total = (rec.studio || 0) + (rec.library || 0) + (rec.training || 0);
+      if (total > maxSec) maxSec = total;
+    }
+  }
+  const now = new Date();
+  const todayKey = logDateKey(now.getFullYear(), now.getMonth(), now.getDate());
+  for (let i = 0; i < firstDow; i++) {
+    const empty = document.createElement('span'); empty.className = 'log-cell empty'; grid.appendChild(empty);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = logDateKey(_logYear, _logMonth, d);
+    const rec = log[key] || {};
+    const total = (rec.studio || 0) + (rec.library || 0) + (rec.training || 0);
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'log-cell' + (total > 0 ? ' has' : '') + (key === todayKey ? ' today' : '');
+    cell.dataset.date = key;
+    cell.textContent = String(d);
+    if (total > 0) cell.style.setProperty('--lvl', Math.min(1, total / maxSec).toFixed(2));
+    grid.appendChild(cell);
+  }
+  // 오늘이 지금 보고 있는 달 안에 있을 때만 자동으로 골라 보여준다 — 지난달로 넘겨 봤는데
+  // 상세는 계속 "오늘" 걸 보여주면 지금 뭘 보고 있는지 헷갈린다.
+  const isCurrentMonth = _logYear === now.getFullYear() && _logMonth === now.getMonth();
+  if (isCurrentMonth) {
+    logShowDetail(todayKey);
+    document.querySelectorAll('.log-cell').forEach(c => c.classList.toggle('sel', c.dataset.date === todayKey));
+  } else {
+    logShowDetail(logDateKey(_logYear, _logMonth, 1));
+    document.querySelectorAll('.log-cell').forEach(c => c.classList.remove('sel'));
+  }
+}
+function logEnter() {
+  const now = new Date();
+  if (!_logYear) { _logYear = now.getFullYear(); _logMonth = now.getMonth(); }
+  logRenderMonth();
+}
 
 // ── 연습 메트로놈 ──
 // 엔진 쪽 metro() 는 재생 중일 때만 울리고(playing 조건) 악센트·박자표 개념이 아예 없는
@@ -393,6 +488,7 @@ function showTool(name) {
   if (name !== 'metro-practice') pmStop();
   if (name !== 'bpm-trainer') btStop();
   if (name === 'tuner') tunEnter(); else tunLeave();
+  if (name === 'log') logEnter();
 }
 
 let _booted = false;
@@ -403,6 +499,23 @@ export function initTraining() {
   document.querySelector('.training-nav')?.addEventListener('click', (e) => {
     const nav = e.target.closest('.training-nav-item[data-tool]');
     if (nav) showTool(nav.dataset.tool);
+  });
+
+  logEnter();   // 연습 기록이 기본으로 열려 있는 도구라 첫 진입에도 바로 채워 둔다
+  $('log-prev')?.addEventListener('click', () => {
+    _logMonth--; if (_logMonth < 0) { _logMonth = 11; _logYear--; }
+    logRenderMonth();
+  });
+  $('log-next')?.addEventListener('click', () => {
+    _logMonth++; if (_logMonth > 11) { _logMonth = 0; _logYear++; }
+    logRenderMonth();
+  });
+  $('log-grid')?.addEventListener('click', (e) => {
+    const cell = e.target.closest('.log-cell:not(.empty)');
+    if (!cell) return;
+    document.querySelectorAll('.log-cell.sel').forEach(c => c.classList.remove('sel'));
+    cell.classList.add('sel');
+    logShowDetail(cell.dataset.date);
   });
 
   const pmBpmEl = $('pm-bpm'), pmSigEl = $('pm-sig'), pmSubdivEl = $('pm-subdiv'), pmVolEl = $('pm-vol');
