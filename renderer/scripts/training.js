@@ -12,7 +12,7 @@ const api = window.yssApi;
 // ── 연습 기록 ──
 // app.js 가 뷰별 체류 시간을 날짜별·카테고리별로 localStorage(yss:usageLog) 에 이미
 // 누적해 둔다(집계 로직은 거기 하나뿐) — 여기서는 그 값을 읽어 달력만 그린다.
-// 칸 하나하나가 애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
+// 칸 하나하나가 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
 // 나눈 도넛으로 보여준다(목표를 채우면 가득 참). 칸을 고르면 아래 상세에서 카테고리별
 // 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까.
 const LOG_CAT_COLORS = { studio: 'var(--accent)', library: '#4f8fd1', training: '#d98e42' };
@@ -45,7 +45,7 @@ function logMonthLabel(y, m) {
   return new Intl.DateTimeFormat(logIntlLocale(), { year: 'numeric', month: 'long' }).format(new Date(y, m, 1));
 }
 function logMinutes(sec) { return Math.round((sec || 0) / 60); }
-// 애플워치 활동 링 — 배경 원 하나 위에 카테고리별 호(arc)를 이어 그린다. 목표를 다 채우면
+// 활동 링 — 배경 원 하나 위에 카테고리별 호(arc)를 이어 그린다. 목표를 다 채우면
 // (분 합 ≥ 일일 목표) 링이 완전히 닫히고, 못 채웠으면 그만큼만 채워지고 나머지는 배경색.
 // 목표를 넘긴 카테고리 비율은 유지한 채로 전체를 1(=한 바퀴)에 맞게 눌러 담는다 — 그래야
 // 목표 초과일도 "가득 찬 링" 하나로 보이지, 링이 두 바퀴 겹쳐 지저분해지지 않는다.
