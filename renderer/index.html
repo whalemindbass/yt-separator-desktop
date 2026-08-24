@@ -940,6 +940,22 @@
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7 17h6M8.5 17 10 4l1.5 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 17a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor"/></svg>
         <span data-i18n="training.pm.title">연습 메트로놈</span>
       </button>
+      <button class="training-nav-item" data-tool="drone" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2 10c1-3 2.5-3 3.5 0s2.5 3 3.5 0 2.5-3 3.5 0 2.5 3 3.5 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="training.drn.title">드론 노트</span>
+      </button>
+      <button class="training-nav-item" data-tool="tuner" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span data-i18n="training.tun.title">튜너</span>
+      </button>
+      <button class="training-nav-item" data-tool="bpm-trainer" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 14 8.5 9.5l3 3L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="training.bt.title">BPM 트레이너</span>
+      </button>
+      <button class="training-nav-item" data-tool="ear-training" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 12v-2a5 5 0 0 1 10 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><rect x="3.5" y="11" width="3" height="5" rx="1.3" stroke="currentColor" stroke-width="1.5"/><rect x="13.5" y="11" width="3" height="5" rx="1.3" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span data-i18n="training.et.title">이어트레이닝</span>
+      </button>
     </nav>
 
     <div class="training-main">
@@ -988,6 +1004,147 @@
           <div class="pm-actions">
             <button id="pm-tap" class="btn btn-sm" type="button" data-i18n="training.pm.tap">탭 템포</button>
             <button id="pm-playstop" class="btn primary pm-play" type="button" data-i18n="training.pm.start">시작</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="training-panel" data-tool="drone">
+        <div class="daw-tool tool-card" id="tool-drone">
+          <div class="drn-note-row">
+            <button id="drn-dn" class="btn btn-sm tool-step" type="button">-</button>
+            <div class="drn-note-display">
+              <span id="drn-note" class="drn-note-big">A4</span>
+              <span class="drn-note-lab" data-i18n="training.drn.label">DRONE</span>
+            </div>
+            <button id="drn-up" class="btn btn-sm tool-step" type="button">+</button>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.drn.wave">파형</span>
+            <select id="drn-wave" class="tool-select">
+              <option value="sine" data-i18n="training.drn.wave1">사인파</option>
+              <option value="triangle" data-i18n="training.drn.wave2">트라이앵글</option>
+              <option value="sawtooth" data-i18n="training.drn.wave3">톱니파</option>
+            </select>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.pm.volume">볼륨</span>
+            <input id="drn-vol" type="range" min="0" max="100" step="1" value="50" class="tool-vol" />
+          </div>
+          <div class="tool-actions">
+            <button id="drn-playstop" class="btn primary" type="button" data-i18n="training.drn.start">시작</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 튜너 — 스튜디오 쪽은 엔진(JUCE, ASIO)이 분석한 pitch 를 IPC 로 받는 방식이라
+           여기선 못 그대로 재사용한다. 렌더러가 직접 마이크를 잡아(getUserMedia) 자기상관으로
+           기본 주파수를 뽑는다. 마크업·CSS 클래스는 스튜디오 튜너 카드와 같은 걸 그대로 써서
+           보이는 모양은 동일하게 유지. -->
+      <section class="training-panel" data-tool="tuner">
+        <div class="daw-tool tuner" id="tool-trn-tuner">
+          <div class="tuner-card">
+            <div class="tuner-readout">
+              <span id="trn-tuner-flat" class="tuner-arrow flat">♭</span>
+              <div class="tuner-note-wrap"><span id="trn-tuner-note" class="tuner-note">—</span><sub id="trn-tuner-oct" class="tuner-oct"></sub></div>
+              <span id="trn-tuner-sharp" class="tuner-arrow sharp">♯</span>
+            </div>
+            <div id="trn-tuner-cents" class="tuner-cents">—</div>
+            <div class="tuner-meter">
+              <div class="tuner-ticks"></div>
+              <span class="tuner-center"></span>
+              <div id="trn-tuner-needle" class="tuner-needle"></div>
+            </div>
+            <div class="tuner-scale"><span>♭50</span><span>0</span><span>♯50</span></div>
+            <div id="trn-tuner-freq" class="tuner-freq">—</div>
+          </div>
+          <div class="tuner-ref">
+            <span class="tuner-ref-lab" data-i18n="studio.h.refA4">기준음 A4</span>
+            <div class="tuner-ref-chips" id="trn-tuner-ref">
+              <button data-hz="432">432</button><button data-hz="435">435</button><button data-hz="438">438</button><button data-hz="440" class="on">440</button><button data-hz="442">442</button><button data-hz="444">444</button>
+            </div>
+          </div>
+          <div class="tool-actions">
+            <button id="trn-tuner-toggle" class="btn primary" type="button" data-i18n="training.tun.start">마이크 켜기</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- BPM 트레이너 — 정해진 마디마다 템포가 자동으로 조금씩 빨라지는 연습 모드.
+           메트로놈과 같은 look-ahead 스케줄러를 새로 하나 더 돌린다(박자표는 4/4 고정 —
+           이 도구의 목적은 박자 다양성이 아니라 템포 램프라 굳이 늘리지 않는다). -->
+      <section class="training-panel" data-tool="bpm-trainer">
+        <div class="daw-tool tool-card" id="tool-bpm-trainer">
+          <div class="pm-bpm-block">
+            <div class="drn-note-row">
+              <div class="pm-bpm-display">
+                <span id="bt-bpm-now" class="drn-note-big">80</span>
+                <span class="pm-bpm-lab">BPM</span>
+              </div>
+            </div>
+            <div id="bt-beats" class="pm-beats" aria-hidden="true"></div>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.bt.startBpm">시작</span>
+            <input id="bt-start" type="number" min="20" max="300" step="1" value="80" class="tool-select" />
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.bt.targetBpm">목표</span>
+            <input id="bt-target" type="number" min="20" max="300" step="1" value="140" class="tool-select" />
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.bt.step">증가량</span>
+            <select id="bt-step" class="tool-select">
+              <option value="1">+1</option>
+              <option value="2" selected>+2</option>
+              <option value="5">+5</option>
+              <option value="10">+10</option>
+            </select>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.bt.every">증가 주기</span>
+            <select id="bt-every" class="tool-select">
+              <option value="1" data-i18n="training.bt.every1">1마디</option>
+              <option value="2" selected data-i18n="training.bt.every2">2마디</option>
+              <option value="4" data-i18n="training.bt.every4">4마디</option>
+              <option value="8" data-i18n="training.bt.every8">8마디</option>
+            </select>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.pm.volume">볼륨</span>
+            <input id="bt-vol" type="range" min="0" max="100" step="1" value="60" class="tool-vol" />
+          </div>
+          <div class="tool-actions">
+            <button id="bt-playstop" class="btn primary" type="button" data-i18n="training.pm.start">시작</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 이어트레이닝 — 음정(interval) 듣고 맞히기. 표본음원 없이 오실레이터 두 음(근음 +
+           음정만큼 위)을 순서대로 울려서 합성한다. 정답을 12개 버튼으로 다 늘어놓아 객관식으로
+           고르게 하면 "어떤 음정인지 이름 자체를 모른다" 문제를 답을 보면서 익히게도 된다. -->
+      <section class="training-panel" data-tool="ear-training">
+        <div class="daw-tool tool-card et-card" id="tool-ear-training">
+          <div class="et-status">
+            <span id="et-streak" class="et-streak">연속 정답 0</span>
+            <span id="et-feedback" class="et-feedback"></span>
+          </div>
+          <div class="tool-actions">
+            <button id="et-replay" class="btn" type="button" data-i18n="training.et.replay">다시 듣기</button>
+            <button id="et-next" class="btn primary" type="button" data-i18n="training.et.next">다음 문제</button>
+          </div>
+          <div id="et-choices" class="et-choices">
+            <button class="btn btn-sm et-choice" type="button" data-st="1" data-i18n="training.et.iv.m2">단2도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="2" data-i18n="training.et.iv.M2">장2도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="3" data-i18n="training.et.iv.m3">단3도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="4" data-i18n="training.et.iv.M3">장3도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="5" data-i18n="training.et.iv.P4">완전4도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="6" data-i18n="training.et.iv.TT">트라이톤</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="7" data-i18n="training.et.iv.P5">완전5도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="8" data-i18n="training.et.iv.m6">단6도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="9" data-i18n="training.et.iv.M6">장6도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="10" data-i18n="training.et.iv.m7">단7도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="11" data-i18n="training.et.iv.M7">장7도</button>
+            <button class="btn btn-sm et-choice" type="button" data-st="12" data-i18n="training.et.iv.P8">옥타브</button>
           </div>
         </div>
       </section>
