@@ -961,9 +961,13 @@
       <section class="training-panel on" data-tool="log">
         <div class="daw-tool tool-card log-card" id="tool-log">
           <div class="log-head">
-            <button id="log-prev" class="btn btn-sm tool-step" type="button" aria-label="prev">‹</button>
+            <button id="log-prev" class="btn btn-sm pm-step" type="button" aria-label="prev">‹</button>
             <span id="log-month-label" class="log-month">—</span>
-            <button id="log-next" class="btn btn-sm tool-step" type="button" aria-label="next">›</button>
+            <button id="log-next" class="btn btn-sm pm-step" type="button" aria-label="next">›</button>
+          </div>
+          <div class="log-month-progress">
+            <div id="log-month-progress-label" class="log-month-progress-label">—</div>
+            <div class="log-month-progress-bar"><div id="log-month-progress-fill" class="fill"></div></div>
           </div>
           <div id="log-weekdays" class="log-weekdays"></div>
           <div id="log-grid" class="log-grid"></div>
@@ -973,6 +977,22 @@
             <div class="log-detail-row"><span class="log-dot log-dot-studio"></span><span data-i18n="training.log.studio">스튜디오</span><span id="log-detail-studio" class="log-detail-val">—</span></div>
             <div class="log-detail-row"><span class="log-dot log-dot-library"></span><span data-i18n="training.log.library">라이브러리</span><span id="log-detail-library" class="log-detail-val">—</span></div>
             <div class="log-detail-row"><span class="log-dot log-dot-training"></span><span data-i18n="training.log.training">트레이닝</span><span id="log-detail-training" class="log-detail-val">—</span></div>
+          </div>
+          <div class="log-goals">
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.log.goalDaily">일일 목표</span>
+              <div class="log-goal-field">
+                <input id="log-goal-daily" type="number" min="0" step="5" class="tool-select" />
+                <span data-i18n="training.log.min">분</span>
+              </div>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.log.goalMonthly">월간 목표</span>
+              <div class="log-goal-field">
+                <input id="log-goal-monthly" type="number" min="0" step="30" class="tool-select" />
+                <span data-i18n="training.log.min">분</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>

@@ -12,14 +12,27 @@ const api = window.yssApi;
 // ── 연습 기록 ──
 // app.js 가 뷰별 체류 시간을 날짜별·카테고리별로 localStorage(yss:usageLog) 에 이미
 // 누적해 둔다(집계 로직은 거기 하나뿐) — 여기서는 그 값을 읽어 달력만 그린다.
-// 칸 자체는 그날 총 사용량만 accent 진하기로 보여주고(GitHub 잔디 방식), 칸을 고르면
-// 아래 상세에서 카테고리별 막대·분(分)을 보여준다 — 작은 칸에 3색을 다 넣으면 안 읽힌다.
+// 칸 하나하나가 애플워치 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
+// 나눈 도넛으로 보여준다(목표를 채우면 가득 참). 칸을 고르면 아래 상세에서 카테고리별
+// 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까.
+const LOG_CAT_COLORS = { studio: 'var(--accent)', library: '#4f8fd1', training: '#d98e42' };
 let _logYear = 0, _logMonth = 0;   // 0-indexed month
+let _logDailyGoalMin = 30, _logMonthlyGoalMin = 600;   // 기본값 — 목표를 아직 안 정했어도 뭔가는 보여준다
 function logDateKey(y, m, d) {
   return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 }
 function logLoad() {
   try { return JSON.parse(localStorage.getItem('yss:usageLog') || '{}'); } catch { return {}; }
+}
+function logLoadGoals() {
+  try {
+    const g = JSON.parse(localStorage.getItem('yss:usageGoals') || '{}');
+    if (Number.isFinite(g.dailyMin) && g.dailyMin >= 0) _logDailyGoalMin = g.dailyMin;
+    if (Number.isFinite(g.monthlyMin) && g.monthlyMin >= 0) _logMonthlyGoalMin = g.monthlyMin;
+  } catch { /* 기본값 유지 */ }
+}
+function logSaveGoals() {
+  localStorage.setItem('yss:usageGoals', JSON.stringify({ dailyMin: _logDailyGoalMin, monthlyMin: _logMonthlyGoalMin }));
 }
 function logIntlLocale() { return getLocale() === 'en' ? 'en-US' : 'ko-KR'; }
 function logWeekdayLabels() {
@@ -32,6 +45,32 @@ function logMonthLabel(y, m) {
   return new Intl.DateTimeFormat(logIntlLocale(), { year: 'numeric', month: 'long' }).format(new Date(y, m, 1));
 }
 function logMinutes(sec) { return Math.round((sec || 0) / 60); }
+// 애플워치 활동 링 — 배경 원 하나 위에 카테고리별 호(arc)를 이어 그린다. 목표를 다 채우면
+// (분 합 ≥ 일일 목표) 링이 완전히 닫히고, 못 채웠으면 그만큼만 채워지고 나머지는 배경색.
+// 목표를 넘긴 카테고리 비율은 유지한 채로 전체를 1(=한 바퀴)에 맞게 눌러 담는다 — 그래야
+// 목표 초과일도 "가득 찬 링" 하나로 보이지, 링이 두 바퀴 겹쳐 지저분해지지 않는다.
+function logRingHTML(rec) {
+  const r = 24, cx = 28, cy = 28, sw = 5.5;
+  const C = 2 * Math.PI * r;
+  const goalSec = _logDailyGoalMin * 60;
+  const cats = ['studio', 'library', 'training'];
+  const vals = cats.map(c => rec[c] || 0);
+  const fracs = goalSec > 0 ? vals.map(v => v / goalSec) : [0, 0, 0];
+  const sum = fracs.reduce((a, b) => a + b, 0);
+  const scaled = sum > 1 ? fracs.map(f => f / sum) : fracs;
+  let acc = 0;
+  const arcs = cats.map((c, i) => {
+    const f = Math.max(0, scaled[i]);
+    const dash = `${(f * C).toFixed(2)} ${(C - f * C).toFixed(2)}`;
+    const offset = (-acc * C).toFixed(2);
+    acc += f;
+    if (f <= 0) return '';
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${LOG_CAT_COLORS[c]}" stroke-width="${sw}" stroke-dasharray="${dash}" stroke-dashoffset="${offset}" stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})"/>`;
+  }).join('');
+  return `<svg class="log-ring" viewBox="0 0 56 56" aria-hidden="true">` +
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--elev-2)" stroke-width="${sw}"/>` +
+    arcs + `</svg>`;
+}
 function logShowDetail(dateKey) {
   const log = logLoad();
   const rec = log[dateKey] || {};
@@ -50,6 +89,20 @@ function logShowDetail(dateKey) {
       : '';
   }
 }
+function logRenderMonthProgress() {
+  const daysInMonth = new Date(_logYear, _logMonth + 1, 0).getDate();
+  const log = logLoad();
+  let totalSec = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const rec = log[logDateKey(_logYear, _logMonth, d)];
+    if (rec) totalSec += (rec.studio || 0) + (rec.library || 0) + (rec.training || 0);
+  }
+  const doneMin = logMinutes(totalSec);
+  const label = $('log-month-progress-label');
+  if (label) label.textContent = t('training.log.monthProgress', { done: doneMin, goal: _logMonthlyGoalMin });
+  const fill = $('log-month-progress-fill');
+  if (fill) fill.style.width = (_logMonthlyGoalMin > 0 ? Math.min(100, doneMin / _logMonthlyGoalMin * 100) : 0) + '%';
+}
 function logRenderMonth() {
   const label = $('log-month-label'); if (label) label.textContent = logMonthLabel(_logYear, _logMonth);
   const wdBox = $('log-weekdays');
@@ -62,14 +115,6 @@ function logRenderMonth() {
   const log = logLoad();
   const firstDow = new Date(_logYear, _logMonth, 1).getDay();
   const daysInMonth = new Date(_logYear, _logMonth + 1, 0).getDate();
-  let maxSec = 1;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const rec = log[logDateKey(_logYear, _logMonth, d)];
-    if (rec) {
-      const total = (rec.studio || 0) + (rec.library || 0) + (rec.training || 0);
-      if (total > maxSec) maxSec = total;
-    }
-  }
   const now = new Date();
   const todayKey = logDateKey(now.getFullYear(), now.getMonth(), now.getDate());
   for (let i = 0; i < firstDow; i++) {
@@ -83,10 +128,10 @@ function logRenderMonth() {
     cell.type = 'button';
     cell.className = 'log-cell' + (total > 0 ? ' has' : '') + (key === todayKey ? ' today' : '');
     cell.dataset.date = key;
-    cell.textContent = String(d);
-    if (total > 0) cell.style.setProperty('--lvl', Math.min(1, total / maxSec).toFixed(2));
+    cell.innerHTML = logRingHTML(rec) + `<span class="log-daynum">${d}</span>`;
     grid.appendChild(cell);
   }
+  logRenderMonthProgress();
   // 오늘이 지금 보고 있는 달 안에 있을 때만 자동으로 골라 보여준다 — 지난달로 넘겨 봤는데
   // 상세는 계속 "오늘" 걸 보여주면 지금 뭘 보고 있는지 헷갈린다.
   const isCurrentMonth = _logYear === now.getFullYear() && _logMonth === now.getMonth();
@@ -499,6 +544,21 @@ export function initTraining() {
   document.querySelector('.training-nav')?.addEventListener('click', (e) => {
     const nav = e.target.closest('.training-nav-item[data-tool]');
     if (nav) showTool(nav.dataset.tool);
+  });
+
+  logLoadGoals();
+  const logGoalDailyEl = $('log-goal-daily'), logGoalMonthlyEl = $('log-goal-monthly');
+  if (logGoalDailyEl) logGoalDailyEl.value = _logDailyGoalMin;
+  if (logGoalMonthlyEl) logGoalMonthlyEl.value = _logMonthlyGoalMin;
+  logGoalDailyEl?.addEventListener('change', () => {
+    _logDailyGoalMin = Math.max(0, Number(logGoalDailyEl.value) || 0);
+    logSaveGoals();
+    logRenderMonth();   // 링이 일일 목표를 기준으로 그려지므로 다시 그린다
+  });
+  logGoalMonthlyEl?.addEventListener('change', () => {
+    _logMonthlyGoalMin = Math.max(0, Number(logGoalMonthlyEl.value) || 0);
+    logSaveGoals();
+    logRenderMonthProgress();
   });
 
   logEnter();   // 연습 기록이 기본으로 열려 있는 도구라 첫 진입에도 바로 채워 둔다
