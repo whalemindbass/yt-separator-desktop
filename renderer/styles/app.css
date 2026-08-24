@@ -2505,6 +2505,10 @@ body { display: flex; flex-direction: column; }
 .pm-beat-dot.accent { width: 8px; height: 8px; }
 .pm-beat-dot.active { background: var(--tx-2); transform: scale(1.15); }
 .pm-beat-dot.accent.active { background: var(--accent); transform: scale(1.5); box-shadow: 0 0 0 3px var(--accent-dim); }
+/* 세분화 중간 클릭 표시 — 박 점보다 한 단계 작게, 소리(800Hz)만으론 잘 안 갈리는 걸
+   눈으로도 확인시켜 준다 */
+.pm-beat-tick { width: 3.5px; height: 3.5px; border-radius: 50%; background: var(--elev-2); transition: background .05s linear, transform .05s linear; }
+.pm-beat-tick.active { background: var(--tx-3); transform: scale(1.7); }
 
 .pm-controls { display: flex; flex-direction: column; gap: 12px; }
 .pm-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 12px; }

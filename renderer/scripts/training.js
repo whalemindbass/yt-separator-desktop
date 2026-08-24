@@ -34,7 +34,9 @@ function pmEnsureCtx() {
   if (_pmCtx.state === 'suspended') _pmCtx.resume();
   return _pmCtx;
 }
-// 박 표시 점 새로 그리기 — 박자표 바뀔 때마다(첫 점만 강박이라 accent 클래스)
+// 박 표시 새로 그리기 — 박자표·세분화 바뀔 때마다. 큰 점은 박(첫 박만 accent),
+// 그 사이 작은 눈금은 세분화 중간 클릭 — 소리만으론 800Hz 클릭이 1000Hz 박과
+// 헷갈리기 쉬워서 눈으로도 "지금 세분화가 실제로 더 들어가고 있다"를 보여준다.
 function pmRenderBeats() {
   const box = $('pm-beats');
   if (!box) return;
@@ -42,40 +44,55 @@ function pmRenderBeats() {
   for (let i = 0; i < _pmSig; i++) {
     const d = document.createElement('span');
     d.className = 'pm-beat-dot' + (i === 0 ? ' accent' : '');
+    d.dataset.beat = String(i);
     box.appendChild(d);
+    for (let s = 1; s < _pmSubdiv; s++) {
+      const tick = document.createElement('span');
+      tick.className = 'pm-beat-tick';
+      tick.dataset.beat = String(i);
+      tick.dataset.sub = String(s);
+      box.appendChild(tick);
+    }
   }
 }
-// AudioContext 시간에 맞춰 예약된 클릭이 실제로 울릴 때 해당 박 점을 짧게 밝힌다.
+// AudioContext 시간에 맞춰 예약된 클릭이 실제로 울릴 때 해당 표시를 짧게 밝힌다.
 // setTimeout 이라 화면 표시는 오디오만큼 샘플-정확하진 않지만 눈으로 박자 따라가는
 // 용도로는 충분하고, 클릭 스케줄링 자체(오디오)에는 영향을 주지 않는다.
-function pmFlashBeat(beatIdx, delayMs) {
-  setTimeout(() => {
-    const dot = document.querySelectorAll('#pm-beats .pm-beat-dot')[beatIdx];
-    if (!dot) return;
-    dot.classList.add('active');
-    clearTimeout(dot._pmFlashT);
-    dot._pmFlashT = setTimeout(() => dot.classList.remove('active'), Math.min(140, (60000 / _pmBpm) * 0.6));
-  }, delayMs);
+function pmFlashEl(el, holdMs) {
+  if (!el) return;
+  el.classList.add('active');
+  clearTimeout(el._pmFlashT);
+  el._pmFlashT = setTimeout(() => el.classList.remove('active'), holdMs);
 }
-function pmClick(time, kind, beatIdx) {
-  // kind: 'accent'(강박) | 'beat'(보통 박) | 'sub'(세분화 중간 클릭 — 더 작고 낮은 톤)
+function pmFlashBeat(beatIdx, delayMs) {
+  const hold = Math.min(140, (60000 / _pmBpm) * 0.6);
+  setTimeout(() => pmFlashEl(document.querySelector(`#pm-beats .pm-beat-dot[data-beat="${beatIdx}"]`), hold), delayMs);
+}
+function pmFlashTick(beatIdx, subIdx, delayMs) {
+  const hold = Math.min(90, (60000 / _pmBpm / _pmSubdiv) * 0.6);
+  setTimeout(() => pmFlashEl(document.querySelector(`#pm-beats .pm-beat-tick[data-beat="${beatIdx}"][data-sub="${subIdx}"]`), hold), delayMs);
+}
+function pmClick(time, kind, beatIdx, subIdx) {
+  // kind: 'accent'(강박) | 'beat'(보통 박) | 'sub'(세분화 중간 클릭 — 더 낮고 짧은 톤)
   const osc = _pmCtx.createOscillator();
   const g = _pmCtx.createGain();
-  osc.frequency.value = kind === 'accent' ? 1500 : kind === 'beat' ? 1000 : 800;
-  const peak = kind === 'sub' ? 0.32 : (kind === 'accent' ? 1 : 0.6);
-  const decay = kind === 'sub' ? 0.03 : 0.05;
+  osc.frequency.value = kind === 'accent' ? 1500 : kind === 'beat' ? 1000 : 650;
+  const peak = kind === 'sub' ? 0.4 : (kind === 'accent' ? 1 : 0.6);
+  const decay = kind === 'sub' ? 0.025 : 0.05;
   g.gain.setValueAtTime(0.0001, time);
   g.gain.exponentialRampToValueAtTime(peak, time + 0.002);
   g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
   osc.connect(g); g.connect(_pmGain);
   osc.start(time); osc.stop(time + 0.06);
-  if (beatIdx >= 0) pmFlashBeat(beatIdx, Math.max(0, (time - _pmCtx.currentTime) * 1000));
+  const delayMs = Math.max(0, (time - _pmCtx.currentTime) * 1000);
+  if (kind === 'sub') pmFlashTick(beatIdx, subIdx, delayMs);
+  else pmFlashBeat(beatIdx, delayMs);
 }
 function pmScheduler() {
   while (_pmNextTime < _pmCtx.currentTime + PM_SCHEDULE_AHEAD) {
     const isBeat = _pmSub === 0;
     const isAccent = isBeat && _pmBeat === 0;
-    pmClick(_pmNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', isBeat ? _pmBeat : -1);
+    pmClick(_pmNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', _pmBeat, _pmSub);
     _pmNextTime += (60 / _pmBpm) / _pmSubdiv;
     _pmSub = (_pmSub + 1) % _pmSubdiv;
     if (_pmSub === 0) _pmBeat = (_pmBeat + 1) % _pmSig;
@@ -93,7 +110,7 @@ function pmStop() {
   if (!_pmPlaying) return;
   _pmPlaying = false;
   clearInterval(_pmTimer); _pmTimer = null;
-  document.querySelectorAll('#pm-beats .pm-beat-dot').forEach(d => {
+  document.querySelectorAll('#pm-beats .pm-beat-dot, #pm-beats .pm-beat-tick').forEach(d => {
     clearTimeout(d._pmFlashT); d.classList.remove('active');
   });
   const btn = $('pm-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
@@ -165,6 +182,7 @@ export function initTraining() {
     _pmSubdiv = Number(pmSubdivEl.value) || 1;
     localStorage.setItem('yss:pmSubdiv', String(_pmSubdiv));
     _pmSub = 0;
+    pmRenderBeats();
   });
   pmVolEl?.addEventListener('input', () => pmSetVol(Number(pmVolEl.value) / 100));
   $('pm-tap')?.addEventListener('click', pmTap);
