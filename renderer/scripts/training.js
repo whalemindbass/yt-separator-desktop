@@ -5,6 +5,7 @@
 // (튜너만 예외 — 엔진의 ASIO pitch 분석을 그대로 쓰므로 엔진이 켜져 있어야 한다.)
 
 import { t, getLocale } from './i18n.js';
+import { usageSetIdle } from './usage.js';
 
 const $ = (id) => document.getElementById(id);
 const api = window.yssApi;
@@ -248,6 +249,7 @@ function pmStart() {
   _pmNextTime = _pmCtx.currentTime + 0.05;
   _pmTimer = setInterval(pmScheduler, PM_LOOKAHEAD_MS);
   const btn = $('pm-playstop'); if (btn) { btn.classList.add('on'); btn.textContent = t('training.pm.stop'); }
+  syncTrainingActivity();
 }
 function pmStop() {
   if (!_pmPlaying) return;
@@ -257,6 +259,7 @@ function pmStop() {
     clearTimeout(d._pmFlashT); d.classList.remove('active');
   });
   const btn = $('pm-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
+  syncTrainingActivity();
 }
 function pmSetBpm(v) {
   _pmBpm = Math.max(20, Math.min(300, Math.round(v)));
@@ -511,6 +514,7 @@ function btStart() {
   _btNextTime = _btCtx.currentTime + 0.05;
   _btTimer = setInterval(btScheduler, PM_LOOKAHEAD_MS);
   const btn = $('bt-playstop'); if (btn) { btn.classList.add('on'); btn.textContent = t('training.pm.stop'); }
+  syncTrainingActivity();
 }
 function btStop() {
   if (!_btPlaying) return;
@@ -520,6 +524,17 @@ function btStop() {
     clearTimeout(d._btFlashT); d.classList.remove('active');
   });
   const btn = $('bt-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
+  syncTrainingActivity();
+}
+
+// 메트로놈·BPM 트레이너는 "재생 중이냐"로 실제 사용 여부를 바로 알 수 있어서, 열어만
+// 두고 재생은 안 하는 동안은 연습 기록에 안 잡히게 한다(usage.js 의 idle 신호). 튜너·
+// 연습 기록처럼 그렇게 판단하기 애매한 화면은 탭이 열려 있으면 그냥 사용중으로 친다.
+function syncTrainingActivity() {
+  const activeTool = document.querySelector('.training-nav-item.on')?.dataset.tool;
+  if (activeTool === 'metro-practice') usageSetIdle(!_pmPlaying);
+  else if (activeTool === 'bpm-trainer') usageSetIdle(!_btPlaying);
+  else usageSetIdle(false);
 }
 
 // ── 사이드바 도구 전환 ──
@@ -534,6 +549,7 @@ function showTool(name) {
   if (name !== 'bpm-trainer') btStop();
   if (name === 'tuner') tunEnter(); else tunLeave();
   if (name === 'log') logEnter();
+  syncTrainingActivity();
 }
 
 let _booted = false;
@@ -645,8 +661,11 @@ export function initTraining() {
     new MutationObserver(() => {
       if (trainingView.hidden) {
         pmStop(); btStop(); tunLeave();
-      } else if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
-        tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
+      } else {
+        if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
+          tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
+        }
+        syncTrainingActivity();
       }
     }).observe(trainingView, { attributes: true, attributeFilter: ['hidden'] });
   }
