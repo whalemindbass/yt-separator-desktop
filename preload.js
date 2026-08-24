@@ -145,6 +145,12 @@ contextBridge.exposeInMainWorld('yssApi', {
     setTab:          (id, tab)         => ipcRenderer.invoke('library:setTab', id, tab),
   },
 
+  // 연습 기록(사용 시간) — library.json 처럼 실제 파일에 저장(usageLog.json)
+  usage: {
+    load: ()     => ipcRenderer.invoke('usage:load'),
+    save: (data) => ipcRenderer.invoke('usage:save', data),
+  },
+
   // 실시간 오디오 엔진 (JUCE 사이드카)
   engine: {
     start:       (stems)  => ipcRenderer.invoke('engine:start', stems),

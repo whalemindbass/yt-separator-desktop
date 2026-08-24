@@ -5,36 +5,23 @@
 // (튜너만 예외 — 엔진의 ASIO pitch 분석을 그대로 쓰므로 엔진이 켜져 있어야 한다.)
 
 import { t, getLocale } from './i18n.js';
-import { usageSetIdle } from './usage.js';
+import { usageSetIdle, usageGetLog, usageGetGoals, usageSetGoals, usageReady } from './usage.js';
 
 const $ = (id) => document.getElementById(id);
 const api = window.yssApi;
 
 // ── 연습 기록 ──
-// app.js 가 뷰별 체류 시간을 날짜별·카테고리별로 localStorage(yss:usageLog) 에 이미
+// usage.js 가 뷰별 체류 시간을 날짜별·카테고리별로 실제 파일(usageLog.json)에 이미
 // 누적해 둔다(집계 로직은 거기 하나뿐) — 여기서는 그 값을 읽어 달력만 그린다.
 // 칸 하나하나가 활동 링처럼 그날 일일 목표 대비 진행률을 카테고리별 색으로
 // 나눈 도넛으로 보여준다(목표를 채우면 가득 참). 칸을 고르면 아래 상세에서 카테고리별
 // 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까.
 const LOG_CAT_COLORS = { studio: 'var(--accent)', library: '#4f8fd1', training: '#d98e42' };
 let _logYear = 0, _logMonth = 0;   // 0-indexed month
-let _logDailyGoalMin = 30, _logMonthlyGoalMin = 600;   // 기본값 — 목표를 아직 안 정했어도 뭔가는 보여준다
 function logDateKey(y, m, d) {
   return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 }
-function logLoad() {
-  try { return JSON.parse(localStorage.getItem('yss:usageLog') || '{}'); } catch { return {}; }
-}
-function logLoadGoals() {
-  try {
-    const g = JSON.parse(localStorage.getItem('yss:usageGoals') || '{}');
-    if (Number.isFinite(g.dailyMin) && g.dailyMin >= 0) _logDailyGoalMin = g.dailyMin;
-    if (Number.isFinite(g.monthlyMin) && g.monthlyMin >= 0) _logMonthlyGoalMin = g.monthlyMin;
-  } catch { /* 기본값 유지 */ }
-}
-function logSaveGoals() {
-  localStorage.setItem('yss:usageGoals', JSON.stringify({ dailyMin: _logDailyGoalMin, monthlyMin: _logMonthlyGoalMin }));
-}
+function logLoad() { return usageGetLog(); }
 function logIntlLocale() { return getLocale() === 'en' ? 'en-US' : 'ko-KR'; }
 function logWeekdayLabels() {
   const fmt = new Intl.DateTimeFormat(logIntlLocale(), { weekday: 'short' });
@@ -53,7 +40,7 @@ function logMinutes(sec) { return Math.round((sec || 0) / 60); }
 function logRingHTML(rec) {
   const r = 24, cx = 28, cy = 28, sw = 5.5;
   const C = 2 * Math.PI * r;
-  const goalSec = _logDailyGoalMin * 60;
+  const goalSec = usageGetGoals().dailyMin * 60;
   const cats = ['studio', 'library', 'training'];
   const vals = cats.map(c => rec[c] || 0);
   const fracs = goalSec > 0 ? vals.map(v => v / goalSec) : [0, 0, 0];
@@ -99,10 +86,11 @@ function logRenderMonthProgress() {
     if (rec) totalSec += (rec.studio || 0) + (rec.library || 0) + (rec.training || 0);
   }
   const doneMin = logMinutes(totalSec);
+  const monthlyMin = usageGetGoals().monthlyMin;
   const label = $('log-month-progress-label');
-  if (label) label.textContent = t('training.log.monthProgress', { done: doneMin, goal: _logMonthlyGoalMin });
+  if (label) label.textContent = t('training.log.monthProgress', { done: doneMin, goal: monthlyMin });
   const fill = $('log-month-progress-fill');
-  if (fill) fill.style.width = (_logMonthlyGoalMin > 0 ? Math.min(100, doneMin / _logMonthlyGoalMin * 100) : 0) + '%';
+  if (fill) fill.style.width = (monthlyMin > 0 ? Math.min(100, doneMin / monthlyMin * 100) : 0) + '%';
 }
 function logRenderMonth() {
   const label = $('log-month-label'); if (label) label.textContent = logMonthLabel(_logYear, _logMonth);
@@ -562,22 +550,26 @@ export function initTraining() {
     if (nav) showTool(nav.dataset.tool);
   });
 
-  logLoadGoals();
   const logGoalDailyEl = $('log-goal-daily'), logGoalMonthlyEl = $('log-goal-monthly');
-  if (logGoalDailyEl) logGoalDailyEl.value = _logDailyGoalMin;
-  if (logGoalMonthlyEl) logGoalMonthlyEl.value = _logMonthlyGoalMin;
+  if (logGoalDailyEl) logGoalDailyEl.value = usageGetGoals().dailyMin;
+  if (logGoalMonthlyEl) logGoalMonthlyEl.value = usageGetGoals().monthlyMin;
   logGoalDailyEl?.addEventListener('change', () => {
-    _logDailyGoalMin = Math.max(0, Number(logGoalDailyEl.value) || 0);
-    logSaveGoals();
+    usageSetGoals({ dailyMin: Math.max(0, Number(logGoalDailyEl.value) || 0) });
     logRenderMonth();   // 링이 일일 목표를 기준으로 그려지므로 다시 그린다
   });
   logGoalMonthlyEl?.addEventListener('change', () => {
-    _logMonthlyGoalMin = Math.max(0, Number(logGoalMonthlyEl.value) || 0);
-    logSaveGoals();
+    usageSetGoals({ monthlyMin: Math.max(0, Number(logGoalMonthlyEl.value) || 0) });
     logRenderMonthProgress();
   });
 
   logEnter();   // 연습 기록이 기본으로 열려 있는 도구라 첫 진입에도 바로 채워 둔다
+  // usage.js 의 파일 로드는 비동기라, 이 시점엔 아직 안 끝났을 수 있다 — 끝나면
+  // 목표값·달력을 한 번 더 정확하게 채운다(그 사이엔 빈 값으로 잠깐 보일 뿐, 안전).
+  usageReady.then(() => {
+    if (logGoalDailyEl) logGoalDailyEl.value = usageGetGoals().dailyMin;
+    if (logGoalMonthlyEl) logGoalMonthlyEl.value = usageGetGoals().monthlyMin;
+    if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'log') logRenderMonth();
+  });
   $('log-prev')?.addEventListener('click', () => {
     _logMonth--; if (_logMonth < 0) { _logMonth = 11; _logYear--; }
     logRenderMonth();

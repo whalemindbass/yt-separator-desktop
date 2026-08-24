@@ -59,6 +59,10 @@ const DEFAULT_STUBS = {
   'project:autosaveWrite': () => ({ ok: true }),
   'project:autosaveClear': () => ({ ok: true }),
   'crash:take': () => null,
+  // 연습 기록도 main 이 실제 파일(usageLog.json)로 관리한다 — 화면만 띄우는 모드에서도
+  // 트레이닝 탭이 부팅 때부터 부르므로(usage.js 모듈 최상단) 흉내를 낸다.
+  'usage:load': () => ({ log: {}, goals: {} }),
+  'usage:save': () => true,
 };
 
 async function bootRenderer(opts = {}) {

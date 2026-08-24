@@ -955,9 +955,9 @@
     </nav>
 
     <div class="training-main">
-      <!-- 연습 기록 — 트레이닝/라이브러리/스튜디오 뷰에 머문 시간을 app.js 가 자동으로
-           날짜별·카테고리별 localStorage(yss:usageLog) 에 누적해 두고, 여기서는 그 값을
-           달력으로만 그려서 보여준다(집계 로직은 이쪽에 없음 — app.js 의 usage 추적 참고). -->
+      <!-- 연습 기록 — 트레이닝/라이브러리/스튜디오 뷰에 머문 시간을 usage.js 가 자동으로
+           날짜별·카테고리별로 실제 파일(usageLog.json)에 누적해 두고, 여기서는 그 값을
+           달력으로만 그려서 보여준다(집계 로직은 usage.js 하나뿐). -->
       <section class="training-panel on" data-tool="log">
         <div class="log-page" id="tool-log">
           <div class="log-main">

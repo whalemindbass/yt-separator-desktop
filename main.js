@@ -1653,3 +1653,29 @@ function writeWav16(filePath, L, R, sampleRate) {
   }
   fs.writeFileSync(filePath, buffer);
 }
+
+// ── IPC: 연습 기록(사용 시간) ──────────────────────────
+// library.json 과 같은 이유로 localStorage 대신 실제 파일에 둔다 — localStorage 는
+// 렌더러 코드 한 줄(removeItem)로 통째로 날아갈 수 있어서(실제로 이번 개발 중 테스트
+// 스크립트가 그렇게 날려 먹었다), 그리고 브라우저 저장소는 앱 데이터로서의 보장이
+// library.json 같은 진짜 파일보다 약하다. 업데이트(NSIS)는 userData 폴더를 건드리지
+// 않으니 이 파일도 library.json 처럼 업데이트에 안전하다.
+function usageFile() {
+  return path.join(app.getPath('userData'), 'usageLog.json');
+}
+ipcMain.handle('usage:load', () => {
+  try {
+    const raw = fs.readFileSync(usageFile(), 'utf-8');
+    const j = JSON.parse(raw);
+    return {
+      log: (j.log && typeof j.log === 'object') ? j.log : {},
+      goals: (j.goals && typeof j.goals === 'object') ? j.goals : {},
+    };
+  } catch { return { log: {}, goals: {} }; }
+});
+ipcMain.handle('usage:save', (_ev, data) => {
+  try {
+    fs.writeFileSync(usageFile(), JSON.stringify({ log: data?.log || {}, goals: data?.goals || {} }));
+    return true;
+  } catch { return false; }
+});
