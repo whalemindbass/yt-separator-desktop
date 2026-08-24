@@ -948,6 +948,10 @@
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 14 8.5 9.5l3 3L17 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7h4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span data-i18n="training.bt.title">BPM 트레이너</span>
       </button>
+      <button class="training-nav-item" data-tool="groove-backing" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 12v3M6.5 8v7M10 5v10M13.5 9v6M17 11v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span data-i18n="training.gb.title">그루브 백킹</span>
+      </button>
       <button class="training-nav-item" data-tool="tuner" type="button">
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="training.tun.title">튜너</span>
@@ -1090,6 +1094,51 @@
           </div>
           <div class="tool-actions">
             <button id="bt-playstop" class="btn primary" type="button" data-i18n="training.pm.start">시작</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 그루브 백킹 — 표본 음원 없이 오실레이터·노이즈로 킥/스네어/하이햇/베이스를 합성해서
+           16비트 그루브 루프를 돌린다. 그 위에 즉흥연주·리듬감 연습용. 메트로놈과 같은
+           look-ahead 스케줄러 재사용, 16칸 표시로 지금 어느 스텝인지 보여준다. -->
+      <section class="training-panel" data-tool="groove-backing">
+        <div class="daw-tool tool-card" id="tool-groove-backing">
+          <div class="pm-bpm-block">
+            <div class="pm-bpm-row">
+              <button id="gb-bpm-dn5" class="btn btn-sm pm-step" type="button">-5</button>
+              <button id="gb-bpm-dn1" class="btn btn-sm pm-step" type="button">-1</button>
+              <div class="pm-bpm-display">
+                <input id="gb-bpm" type="number" min="40" max="220" step="1" value="90" />
+                <span class="pm-bpm-lab">BPM</span>
+              </div>
+              <button id="gb-bpm-up1" class="btn btn-sm pm-step" type="button">+1</button>
+              <button id="gb-bpm-up5" class="btn btn-sm pm-step" type="button">+5</button>
+            </div>
+            <div id="gb-steps" class="pm-beats" aria-hidden="true"></div>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.gb.style">스타일</span>
+            <select id="gb-style" class="tool-select">
+              <option value="rock" data-i18n="training.gb.style.rock">락</option>
+              <option value="funk" data-i18n="training.gb.style.funk">펑크</option>
+              <option value="hiphop" data-i18n="training.gb.style.hiphop">힙합</option>
+            </select>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.gb.key">키</span>
+            <select id="gb-key" class="tool-select">
+              <option value="0">C</option><option value="1">C#</option><option value="2">D</option>
+              <option value="3">D#</option><option value="4" selected>E</option><option value="5">F</option>
+              <option value="6">F#</option><option value="7">G</option><option value="8">G#</option>
+              <option value="9">A</option><option value="10">A#</option><option value="11">B</option>
+            </select>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label" data-i18n="training.pm.volume">볼륨</span>
+            <input id="gb-vol" type="range" min="0" max="100" step="1" value="70" class="tool-vol" />
+          </div>
+          <div class="tool-actions">
+            <button id="gb-playstop" class="btn primary" type="button" data-i18n="training.pm.start">시작</button>
           </div>
         </div>
       </section>

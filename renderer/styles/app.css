@@ -2547,15 +2547,17 @@ body { display: flex; flex-direction: column; }
   font: 600 12px var(--mono); border-radius: 8px;
 }
 .pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 96px; }
-.pm-bpm-display input#pm-bpm {
+/* id 하나(#pm-bpm)에만 묶여 있던 걸 type=number 로 넓혀서, 같은 큰 BPM 숫자 입력칸을
+   그루브 백킹 등 다른 도구에서도 그대로 재사용하게 한다. */
+.pm-bpm-display input[type="number"] {
   width: 96px; text-align: center;
   background: var(--input); border: 1px solid var(--border); border-radius: 8px;
   color: var(--tx-1); font: 700 30px/1.2 var(--mono); padding: 6px 0;
   outline: none; -moz-appearance: textfield;
 }
-.pm-bpm-display input#pm-bpm::-webkit-inner-spin-button,
-.pm-bpm-display input#pm-bpm::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.pm-bpm-display input#pm-bpm:focus { border-color: var(--accent); }
+.pm-bpm-display input[type="number"]::-webkit-inner-spin-button,
+.pm-bpm-display input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pm-bpm-display input[type="number"]:focus { border-color: var(--accent); }
 .pm-bpm-lab { font-size: 10px; color: var(--tx-3); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
 
 /* 재생 중인 박을 눈으로 따라가는 표시 — 강박(첫 박)만 크고 accent 색으로 튄다 */

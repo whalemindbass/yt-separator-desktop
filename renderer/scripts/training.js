@@ -477,6 +477,168 @@ function btStop() {
   const btn = $('bt-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
 }
 
+// ── 그루브 백킹 ──
+// 표본 음원 없이 오실레이터·노이즈로 킥/스네어/하이햇/베이스를 합성해서 16비트 그루브
+// 루프를 돌린다 — 그 위에 즉흥연주하거나 리듬감을 맞추는 연습용. 메트로놈과 같은
+// look-ahead 스케줄러(PM_LOOKAHEAD_MS/PM_SCHEDULE_AHEAD)를 16분음표 간격으로 돌린다.
+// 1=히트, 0=쉼. 정교한 채보가 아니라 "이 스타일답게 들리는" 정도의 기본 패턴.
+const GB_PATTERNS = {
+  rock: {
+    kick:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    hat:   [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+    bass:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  },
+  funk: {
+    kick:  [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    hat:   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    bass:  [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0],
+  },
+  hiphop: {
+    kick:  [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    hat:   [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1],
+    bass:  [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
+  },
+};
+let _gbCtx = null, _gbGain = null, _gbTimer = null, _gbNextTime = 0, _gbStep = 0, _gbPlaying = false;
+let _gbBpm = Number(localStorage.getItem('yss:gbBpm')) || 90;
+let _gbStyle = localStorage.getItem('yss:gbStyle') || 'rock';
+// 저장된 적 없으면 getItem 이 null → Number(null)=0 인데 0(C)도 유효한 인덱스라 range
+// 체크만으론 "저장 안 됨"과 "C 로 저장됨"을 못 가른다. null 여부를 먼저 본다.
+const _gbKeyStored = localStorage.getItem('yss:gbKey');
+let _gbKeyIdx = _gbKeyStored !== null ? Number(_gbKeyStored) : 4;   // 기본 E
+if (!(_gbKeyIdx >= 0 && _gbKeyIdx <= 11)) _gbKeyIdx = 4;
+let _gbVol = Number(localStorage.getItem('yss:gbVol'));
+if (!(_gbVol >= 0 && _gbVol <= 1)) _gbVol = 0.7;
+
+function gbBassFreq() {
+  const midi = 36 + _gbKeyIdx;   // C2 를 기준 옥타브로 — 베이스답게 낮게
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+function gbNoiseBuffer(ctx) {
+  if (ctx._gbNoiseBuf) return ctx._gbNoiseBuf;   // 히트마다 새로 만들 필요 없다 — 컨텍스트에 하나만 캐시
+  const len = Math.floor(ctx.sampleRate * 0.3);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  ctx._gbNoiseBuf = buf;
+  return buf;
+}
+function gbKick(ctx, out, time) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, time);
+  osc.frequency.exponentialRampToValueAtTime(45, time + 0.09);
+  g.gain.setValueAtTime(1, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + 0.28);
+  osc.connect(g); g.connect(out);
+  osc.start(time); osc.stop(time + 0.3);
+}
+function gbSnare(ctx, out, time) {
+  const src = ctx.createBufferSource(); src.buffer = gbNoiseBuffer(ctx);
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.9, time);
+  ng.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
+  src.connect(bp); bp.connect(ng); ng.connect(out);
+  src.start(time); src.stop(time + 0.2);
+  const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 190;   // 몸통 톤 살짝
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.5, time);
+  og.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+  osc.connect(og); og.connect(out);
+  osc.start(time); osc.stop(time + 0.13);
+}
+function gbHat(ctx, out, time) {
+  const src = ctx.createBufferSource(); src.buffer = gbNoiseBuffer(ctx);
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.5, time);
+  g.gain.exponentialRampToValueAtTime(0.001, time + 0.045);
+  src.connect(hp); hp.connect(g); g.connect(out);
+  src.start(time); src.stop(time + 0.06);
+}
+function gbBass(ctx, out, time, freq) {
+  const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = freq;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(0.7, time + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, time + 0.22);
+  osc.connect(lp); lp.connect(g); g.connect(out);
+  osc.start(time); osc.stop(time + 0.24);
+}
+function gbRenderSteps() {
+  const box = $('gb-steps');
+  if (!box) return;
+  box.innerHTML = '';
+  for (let i = 0; i < 16; i++) {
+    const d = document.createElement('span');
+    d.className = 'pm-beat-dot' + (i % 4 === 0 ? ' accent' : '');
+    d.dataset.step = String(i);
+    box.appendChild(d);
+  }
+}
+function gbFlashStep(i, delayMs) {
+  const hold = Math.min(90, (60000 / _gbBpm / 4) * 0.6);
+  setTimeout(() => {
+    const dot = document.querySelector(`#gb-steps .pm-beat-dot[data-step="${i}"]`);
+    if (!dot) return;
+    dot.classList.add('active');
+    clearTimeout(dot._gbFlashT);
+    dot._gbFlashT = setTimeout(() => dot.classList.remove('active'), hold);
+  }, delayMs);
+}
+function gbScheduler() {
+  const pat = GB_PATTERNS[_gbStyle] || GB_PATTERNS.rock;
+  while (_gbNextTime < _gbCtx.currentTime + PM_SCHEDULE_AHEAD) {
+    const i = _gbStep;
+    if (pat.kick[i]) gbKick(_gbCtx, _gbGain, _gbNextTime);
+    if (pat.snare[i]) gbSnare(_gbCtx, _gbGain, _gbNextTime);
+    if (pat.hat[i]) gbHat(_gbCtx, _gbGain, _gbNextTime);
+    if (pat.bass[i]) gbBass(_gbCtx, _gbGain, _gbNextTime, gbBassFreq());
+    gbFlashStep(i, Math.max(0, (_gbNextTime - _gbCtx.currentTime) * 1000));
+    _gbNextTime += (60 / _gbBpm) / 4;   // 16분음표 간격
+    _gbStep = (_gbStep + 1) % 16;
+  }
+}
+function gbSetBpm(v) {
+  _gbBpm = Math.max(40, Math.min(220, Math.round(v) || 90));
+  localStorage.setItem('yss:gbBpm', String(_gbBpm));
+  const el = $('gb-bpm'); if (el) el.value = _gbBpm;
+}
+function gbSetVol(v01) {
+  _gbVol = Math.max(0, Math.min(1, v01));
+  localStorage.setItem('yss:gbVol', String(_gbVol));
+  if (_gbGain) _gbGain.gain.value = _gbVol;
+}
+function gbStart() {
+  if (_gbPlaying) return;
+  if (!_gbCtx) {
+    _gbCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _gbGain = _gbCtx.createGain();
+    _gbGain.gain.value = _gbVol;
+    _gbGain.connect(_gbCtx.destination);
+  }
+  if (_gbCtx.state === 'suspended') _gbCtx.resume();
+  _gbPlaying = true; _gbStep = 0;
+  _gbNextTime = _gbCtx.currentTime + 0.05;
+  _gbTimer = setInterval(gbScheduler, PM_LOOKAHEAD_MS);
+  const btn = $('gb-playstop'); if (btn) { btn.classList.add('on'); btn.textContent = t('training.pm.stop'); }
+}
+function gbStop() {
+  if (!_gbPlaying) return;
+  _gbPlaying = false;
+  clearInterval(_gbTimer); _gbTimer = null;
+  document.querySelectorAll('#gb-steps .pm-beat-dot').forEach(d => {
+    clearTimeout(d._gbFlashT); d.classList.remove('active');
+  });
+  const btn = $('gb-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
+}
+
 // ── 사이드바 도구 전환 ──
 // home-nav 와 같은 패턴 — 다음 도구를 추가할 때 이 자리에 항목만 늘리면 되게 한다.
 // 재생 중인 도구를 벗어나면 그 도구의 소리부터 끈다(동시에 두 도구가 울리면 안 되니까).
@@ -487,6 +649,7 @@ function showTool(name) {
     p.classList.toggle('on', p.dataset.tool === name));
   if (name !== 'metro-practice') pmStop();
   if (name !== 'bpm-trainer') btStop();
+  if (name !== 'groove-backing') gbStop();
   if (name === 'tuner') tunEnter(); else tunLeave();
   if (name === 'log') logEnter();
 }
@@ -575,6 +738,22 @@ export function initTraining() {
   btVolEl?.addEventListener('input', () => btSetVol(Number(btVolEl.value) / 100));
   $('bt-playstop')?.addEventListener('click', () => { if (_btPlaying) btStop(); else btStart(); });
 
+  const gbBpmEl = $('gb-bpm'), gbStyleEl = $('gb-style'), gbKeyEl = $('gb-key'), gbVolEl = $('gb-vol');
+  if (gbBpmEl) gbBpmEl.value = _gbBpm;
+  if (gbStyleEl) gbStyleEl.value = _gbStyle;
+  if (gbKeyEl) gbKeyEl.value = String(_gbKeyIdx);
+  if (gbVolEl) gbVolEl.value = String(Math.round(_gbVol * 100));
+  gbRenderSteps();
+  gbBpmEl?.addEventListener('change', () => gbSetBpm(Number(gbBpmEl.value) || 90));
+  $('gb-bpm-dn5')?.addEventListener('click', () => gbSetBpm(_gbBpm - 5));
+  $('gb-bpm-dn1')?.addEventListener('click', () => gbSetBpm(_gbBpm - 1));
+  $('gb-bpm-up1')?.addEventListener('click', () => gbSetBpm(_gbBpm + 1));
+  $('gb-bpm-up5')?.addEventListener('click', () => gbSetBpm(_gbBpm + 5));
+  gbStyleEl?.addEventListener('change', () => { _gbStyle = gbStyleEl.value; localStorage.setItem('yss:gbStyle', _gbStyle); });
+  gbKeyEl?.addEventListener('change', () => { _gbKeyIdx = Number(gbKeyEl.value) || 0; localStorage.setItem('yss:gbKey', String(_gbKeyIdx)); });
+  gbVolEl?.addEventListener('input', () => gbSetVol(Number(gbVolEl.value) / 100));
+  $('gb-playstop')?.addEventListener('click', () => { if (_gbPlaying) gbStop(); else gbStart(); });
+
   // 사이드바 안에서 도구를 바꿀 때는 showTool() 이 소리를 끄지만, 트레이닝 탭 자체를
   // 벗어날 때(다른 최상단 탭 클릭)는 그걸 호출하는 곳이 없다 — app.js 는 각 뷰의 hidden
   // 속성만 토글하지 뷰별 onLeave 훅이 없어서, 여기서 직접 그 속성 변화를 지켜본다.
@@ -584,7 +763,7 @@ export function initTraining() {
   if (trainingView) {
     new MutationObserver(() => {
       if (trainingView.hidden) {
-        pmStop(); btStop(); tunLeave();
+        pmStop(); btStop(); gbStop(); tunLeave();
       } else if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
         tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
       }
