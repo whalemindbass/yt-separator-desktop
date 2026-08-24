@@ -2446,44 +2446,75 @@ body { display: flex; flex-direction: column; }
 .training-nav-head h2 { font-size: 16px; font-weight: 700; color: var(--tx-1); margin: 0 0 4px; text-wrap: balance; }
 .training-nav-head p { font-size: 11.5px; color: var(--tx-3); line-height: 1.5; margin: 0; }
 .training-nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 11px;
   padding: 11px 13px; border-radius: 9px;
   background: transparent; border: 1px solid transparent;
   color: var(--tx-2); font-size: 13.5px; font-weight: 550;
   cursor: pointer; text-align: left;
-  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
 }
-.training-nav-item svg { width: 19px; height: 19px; flex: none; }
-.training-nav-item:hover { background: var(--elev); color: var(--tx-1); }
+.training-nav-item svg { width: 19px; height: 19px; flex: none; transition: transform var(--dur-1) var(--ease); }
+.training-nav-item:hover { background: var(--elev); color: var(--tx-1); transform: translateX(2px); }
+.training-nav-item:hover svg { transform: scale(1.1); }
+.training-nav-item:active { transform: translateX(1px) scale(.97); }
 .training-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .training-nav-item.on { background: var(--elev); color: var(--tx-1); border-color: var(--border-mid); }
+/* 선택된 항목만 왼쪽에 accent 바 — 사이드바 자체 padding 안쪽으로 파고들어 딱 붙는다 */
+.training-nav-item.on::before {
+  content: ''; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
 .training-main { overflow-y: auto; padding: 32px; }
 .training-panel { display: none; }
 .training-panel.on { display: block; }
 
 /* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
-   빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다). */
-.pm-tool { display: flex; flex-direction: column; gap: 16px; padding: 18px 20px 20px; width: 320px; }
+   빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다).
+   아래 컨트롤 행들은 라벨 칸 폭을 고정해서(grid) "박자표"/"세분화"/"볼륨" 길이가 달라도
+   select·slider 시작 위치가 한 줄로 맞게 — 이전엔 space-between 이라 라벨 길이만큼
+   컨트롤이 들쭉날쭉 밀렸다. */
+.pm-tool { display: flex; flex-direction: column; gap: 20px; padding: 22px 24px 24px; width: 340px; }
+.pm-bpm-block { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .pm-bpm-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
-.pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 84px; }
+.pm-step {
+  width: 34px; height: 34px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font: 600 12px var(--mono); border-radius: 8px;
+}
+.pm-bpm-display { display: flex; flex-direction: column; align-items: center; min-width: 96px; }
 .pm-bpm-display input#pm-bpm {
-  width: 84px; text-align: center;
+  width: 96px; text-align: center;
   background: var(--input); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--tx-1); font: 700 26px/1.2 var(--mono); padding: 6px 0;
+  color: var(--tx-1); font: 700 30px/1.2 var(--mono); padding: 6px 0;
   outline: none; -moz-appearance: textfield;
 }
 .pm-bpm-display input#pm-bpm::-webkit-inner-spin-button,
 .pm-bpm-display input#pm-bpm::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .pm-bpm-display input#pm-bpm:focus { border-color: var(--accent); }
 .pm-bpm-lab { font-size: 10px; color: var(--tx-3); letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
-.pm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.pm-label { font-size: 11.5px; color: var(--tx-3); flex-shrink: 0; }
+
+/* 재생 중인 박을 눈으로 따라가는 표시 — 강박(첫 박)만 크고 accent 색으로 튄다 */
+.pm-beats { display: flex; align-items: center; gap: 8px; height: 12px; }
+.pm-beat-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--elev-2); border: 1px solid var(--border-mid);
+  transition: background .05s linear, transform .05s linear, box-shadow .05s linear;
+}
+.pm-beat-dot.accent { width: 8px; height: 8px; }
+.pm-beat-dot.active { background: var(--tx-2); transform: scale(1.15); }
+.pm-beat-dot.accent.active { background: var(--accent); transform: scale(1.5); box-shadow: 0 0 0 3px var(--accent-dim); }
+
+.pm-controls { display: flex; flex-direction: column; gap: 12px; }
+.pm-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 12px; }
+.pm-label { font-size: 11.5px; color: var(--tx-3); }
 .pm-select {
-  font: 500 12px/1 var(--sans); color: var(--tx-1);
+  width: 100%; font: 500 12px/1 var(--sans); color: var(--tx-1);
   background: var(--input); border: 1px solid var(--border-mid);
   border-radius: var(--r-sm); padding: 0 8px; height: 28px; box-sizing: border-box;
 }
-.pm-vol { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.pm-vol { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .pm-actions { display: flex; gap: 8px; }
 .pm-actions .pm-play { flex: 1; }
 .pm-actions .pm-play.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }

@@ -16,9 +16,10 @@ const $ = (id) => document.getElementById(id);
 const PM_LOOKAHEAD_MS = 25;
 const PM_SCHEDULE_AHEAD = 0.1;   // 초
 let _pmCtx = null, _pmGain = null, _pmTimer = null;
-let _pmNextTime = 0, _pmBeat = 0, _pmPlaying = false;
+let _pmNextTime = 0, _pmBeat = 0, _pmSub = 0, _pmPlaying = false;
 let _pmBpm = Number(localStorage.getItem('yss:pmBpm')) || 120;
 let _pmSig = Number(localStorage.getItem('yss:pmSig')) || 4;
+let _pmSubdiv = Number(localStorage.getItem('yss:pmSubdiv')) || 1;
 let _pmVol = Number(localStorage.getItem('yss:pmVol'));
 if (!(_pmVol >= 0 && _pmVol <= 1)) _pmVol = 0.6;
 let _pmTapTimes = [];
@@ -33,27 +34,57 @@ function pmEnsureCtx() {
   if (_pmCtx.state === 'suspended') _pmCtx.resume();
   return _pmCtx;
 }
-function pmClick(time, accent) {
+// 박 표시 점 새로 그리기 — 박자표 바뀔 때마다(첫 점만 강박이라 accent 클래스)
+function pmRenderBeats() {
+  const box = $('pm-beats');
+  if (!box) return;
+  box.innerHTML = '';
+  for (let i = 0; i < _pmSig; i++) {
+    const d = document.createElement('span');
+    d.className = 'pm-beat-dot' + (i === 0 ? ' accent' : '');
+    box.appendChild(d);
+  }
+}
+// AudioContext 시간에 맞춰 예약된 클릭이 실제로 울릴 때 해당 박 점을 짧게 밝힌다.
+// setTimeout 이라 화면 표시는 오디오만큼 샘플-정확하진 않지만 눈으로 박자 따라가는
+// 용도로는 충분하고, 클릭 스케줄링 자체(오디오)에는 영향을 주지 않는다.
+function pmFlashBeat(beatIdx, delayMs) {
+  setTimeout(() => {
+    const dot = document.querySelectorAll('#pm-beats .pm-beat-dot')[beatIdx];
+    if (!dot) return;
+    dot.classList.add('active');
+    clearTimeout(dot._pmFlashT);
+    dot._pmFlashT = setTimeout(() => dot.classList.remove('active'), Math.min(140, (60000 / _pmBpm) * 0.6));
+  }, delayMs);
+}
+function pmClick(time, kind, beatIdx) {
+  // kind: 'accent'(강박) | 'beat'(보통 박) | 'sub'(세분화 중간 클릭 — 더 작고 낮은 톤)
   const osc = _pmCtx.createOscillator();
   const g = _pmCtx.createGain();
-  osc.frequency.value = accent ? 1500 : 1000;   // 1박(다운비트)만 더 높은 음
+  osc.frequency.value = kind === 'accent' ? 1500 : kind === 'beat' ? 1000 : 800;
+  const peak = kind === 'sub' ? 0.32 : (kind === 'accent' ? 1 : 0.6);
+  const decay = kind === 'sub' ? 0.03 : 0.05;
   g.gain.setValueAtTime(0.0001, time);
-  g.gain.exponentialRampToValueAtTime(accent ? 1 : 0.6, time + 0.002);
-  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.05);
+  g.gain.exponentialRampToValueAtTime(peak, time + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
   osc.connect(g); g.connect(_pmGain);
   osc.start(time); osc.stop(time + 0.06);
+  if (beatIdx >= 0) pmFlashBeat(beatIdx, Math.max(0, (time - _pmCtx.currentTime) * 1000));
 }
 function pmScheduler() {
   while (_pmNextTime < _pmCtx.currentTime + PM_SCHEDULE_AHEAD) {
-    pmClick(_pmNextTime, _pmBeat === 0);
-    _pmNextTime += 60 / _pmBpm;
-    _pmBeat = (_pmBeat + 1) % _pmSig;
+    const isBeat = _pmSub === 0;
+    const isAccent = isBeat && _pmBeat === 0;
+    pmClick(_pmNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', isBeat ? _pmBeat : -1);
+    _pmNextTime += (60 / _pmBpm) / _pmSubdiv;
+    _pmSub = (_pmSub + 1) % _pmSubdiv;
+    if (_pmSub === 0) _pmBeat = (_pmBeat + 1) % _pmSig;
   }
 }
 function pmStart() {
   if (_pmPlaying) return;
   pmEnsureCtx();
-  _pmPlaying = true; _pmBeat = 0;
+  _pmPlaying = true; _pmBeat = 0; _pmSub = 0;
   _pmNextTime = _pmCtx.currentTime + 0.05;
   _pmTimer = setInterval(pmScheduler, PM_LOOKAHEAD_MS);
   const btn = $('pm-playstop'); if (btn) { btn.classList.add('on'); btn.textContent = t('training.pm.stop'); }
@@ -62,6 +93,9 @@ function pmStop() {
   if (!_pmPlaying) return;
   _pmPlaying = false;
   clearInterval(_pmTimer); _pmTimer = null;
+  document.querySelectorAll('#pm-beats .pm-beat-dot').forEach(d => {
+    clearTimeout(d._pmFlashT); d.classList.remove('active');
+  });
   const btn = $('pm-playstop'); if (btn) { btn.classList.remove('on'); btn.textContent = t('training.pm.start'); }
 }
 function pmSetBpm(v) {
@@ -110,16 +144,28 @@ export function initTraining() {
     if (nav) showTool(nav.dataset.tool);
   });
 
-  const pmBpmEl = $('pm-bpm'), pmSigEl = $('pm-sig'), pmVolEl = $('pm-vol');
+  const pmBpmEl = $('pm-bpm'), pmSigEl = $('pm-sig'), pmSubdivEl = $('pm-subdiv'), pmVolEl = $('pm-vol');
   if (pmBpmEl) pmBpmEl.value = _pmBpm;
   if (pmSigEl) pmSigEl.value = String(_pmSig);
+  if (pmSubdivEl) pmSubdivEl.value = String(_pmSubdiv);
   if (pmVolEl) pmVolEl.value = String(Math.round(_pmVol * 100));
+  pmRenderBeats();
   pmBpmEl?.addEventListener('change', () => pmSetBpm(Number(pmBpmEl.value) || 120));
   $('pm-bpm-dn5')?.addEventListener('click', () => pmSetBpm(_pmBpm - 5));
   $('pm-bpm-dn1')?.addEventListener('click', () => pmSetBpm(_pmBpm - 1));
   $('pm-bpm-up1')?.addEventListener('click', () => pmSetBpm(_pmBpm + 1));
   $('pm-bpm-up5')?.addEventListener('click', () => pmSetBpm(_pmBpm + 5));
-  pmSigEl?.addEventListener('change', () => { _pmSig = Number(pmSigEl.value) || 4; localStorage.setItem('yss:pmSig', String(_pmSig)); _pmBeat = 0; });
+  pmSigEl?.addEventListener('change', () => {
+    _pmSig = Number(pmSigEl.value) || 4;
+    localStorage.setItem('yss:pmSig', String(_pmSig));
+    _pmBeat = 0;
+    pmRenderBeats();
+  });
+  pmSubdivEl?.addEventListener('change', () => {
+    _pmSubdiv = Number(pmSubdivEl.value) || 1;
+    localStorage.setItem('yss:pmSubdiv', String(_pmSubdiv));
+    _pmSub = 0;
+  });
   pmVolEl?.addEventListener('input', () => pmSetVol(Number(pmVolEl.value) / 100));
   $('pm-tap')?.addEventListener('click', pmTap);
   $('pm-playstop')?.addEventListener('click', () => { if (_pmPlaying) pmStop(); else pmStart(); });

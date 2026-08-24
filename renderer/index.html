@@ -945,30 +945,45 @@
     <div class="training-main">
       <section class="training-panel on" data-tool="metro-practice">
         <div class="daw-tool pm-tool" id="tool-metro-practice">
-          <div class="pm-bpm-row">
-            <button id="pm-bpm-dn5" class="btn btn-sm" type="button">-5</button>
-            <button id="pm-bpm-dn1" class="btn btn-sm" type="button">-1</button>
-            <div class="pm-bpm-display">
-              <input id="pm-bpm" type="number" min="20" max="300" step="1" value="120" />
-              <span class="pm-bpm-lab">BPM</span>
+          <div class="pm-bpm-block">
+            <div class="pm-bpm-row">
+              <button id="pm-bpm-dn5" class="btn btn-sm pm-step" type="button">-5</button>
+              <button id="pm-bpm-dn1" class="btn btn-sm pm-step" type="button">-1</button>
+              <div class="pm-bpm-display">
+                <input id="pm-bpm" type="number" min="20" max="300" step="1" value="120" />
+                <span class="pm-bpm-lab">BPM</span>
+              </div>
+              <button id="pm-bpm-up1" class="btn btn-sm pm-step" type="button">+1</button>
+              <button id="pm-bpm-up5" class="btn btn-sm pm-step" type="button">+5</button>
             </div>
-            <button id="pm-bpm-up1" class="btn btn-sm" type="button">+1</button>
-            <button id="pm-bpm-up5" class="btn btn-sm" type="button">+5</button>
+            <!-- 재생 중 현재 박을 눈으로도 따라가게 — 첫 박(강박)만 더 크고 accent 색 -->
+            <div id="pm-beats" class="pm-beats" aria-hidden="true"></div>
           </div>
-          <div class="pm-row">
-            <span class="pm-label" data-i18n="training.pm.sig">박자표</span>
-            <select id="pm-sig" class="pm-select">
-              <option value="2">2/4</option>
-              <option value="3">3/4</option>
-              <option value="4" selected>4/4</option>
-              <option value="5">5/4</option>
-              <option value="6">6/8</option>
-              <option value="7">7/8</option>
-            </select>
-          </div>
-          <div class="pm-row">
-            <span class="pm-label" data-i18n="training.pm.volume">볼륨</span>
-            <input id="pm-vol" type="range" min="0" max="100" step="1" value="60" class="pm-vol" />
+          <div class="pm-controls">
+            <div class="pm-row">
+              <span class="pm-label" data-i18n="training.pm.sig">박자표</span>
+              <select id="pm-sig" class="pm-select">
+                <option value="2">2/4</option>
+                <option value="3">3/4</option>
+                <option value="4" selected>4/4</option>
+                <option value="5">5/4</option>
+                <option value="6">6/8</option>
+                <option value="7">7/8</option>
+              </select>
+            </div>
+            <div class="pm-row">
+              <span class="pm-label" data-i18n="training.pm.subdiv">세분화</span>
+              <select id="pm-subdiv" class="pm-select">
+                <option value="1" data-i18n="training.pm.subdiv1">기본</option>
+                <option value="2" data-i18n="training.pm.subdiv2">8분음표</option>
+                <option value="3" data-i18n="training.pm.subdiv3">셋잇단음표</option>
+                <option value="4" data-i18n="training.pm.subdiv4">16분음표</option>
+              </select>
+            </div>
+            <div class="pm-row">
+              <span class="pm-label" data-i18n="training.pm.volume">볼륨</span>
+              <input id="pm-vol" type="range" min="0" max="100" step="1" value="60" class="pm-vol" />
+            </div>
           </div>
           <div class="pm-actions">
             <button id="pm-tap" class="btn btn-sm" type="button" data-i18n="training.pm.tap">탭 템포</button>
