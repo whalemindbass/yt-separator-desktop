@@ -534,12 +534,23 @@ public:
         Array<var> typeList;
         for (auto* t : devmgr->getAvailableDeviceTypes())
         {
-            t->scanForDevices();
-            auto* o = new DynamicObject();
-            o->setProperty ("name", t->getTypeName());
-            o->setProperty ("outputs", strArr (t->getDeviceNames (false)));
-            o->setProperty ("inputs", strArr (t->getDeviceNames (true)));
-            typeList.add (var (o));
+            // ASIO 드라이버를 여러 개 설치해 둔 사람이 있다(예: FL Studio ASIO + MOTU ASIO).
+            // 이미 다른 드라이버가 열려 있는 상태에서 스캔하면 일부 벤더 드라이버는 예외/크래시로
+            // 반응한다 — setDevice() 에서 겪은 것과 같은 부류의 버그. 여기서 안 잡으면 엔진 전체가
+            // 조용히 죽고, 렌더러는 'devices' 응답을 영영 못 받아 설정 버튼이 먹통이 된다.
+            try
+            {
+                t->scanForDevices();
+                auto* o = new DynamicObject();
+                o->setProperty ("name", t->getTypeName());
+                o->setProperty ("outputs", strArr (t->getDeviceNames (false)));
+                o->setProperty ("inputs", strArr (t->getDeviceNames (true)));
+                typeList.add (var (o));
+            }
+            catch (const std::exception& ex)
+            {
+                std::cerr << "[engine] listDevices: " << t->getTypeName() << " scan threw: " << ex.what() << "\n";
+            }
         }
         r->setProperty ("types", var (typeList));
         r->setProperty ("currentType", devmgr->getCurrentAudioDeviceType());
