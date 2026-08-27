@@ -64,7 +64,11 @@ const DEFAULT_STUBS = {
   'usage:load': () => ({ log: {}, goals: {} }),
   'usage:save': () => true,
   // 영상 편집 탭 임포트가 파일마다 부른다(오디오 스트림 유무는 ffprobe 로 확인).
-  'video:probeAudio': () => ({ hasAudio: true }),
+  // false 가 기본값 — bootRenderer 로 도는 테스트들의 합성 mp4 픽스처(testsrc 등)는 실제로
+  // 오디오가 없다. true 로 두면(예전) 이 스텁 하나 때문에 영상/오디오 트랙 자동 분리가
+  // 모든 임포트에서 잘못 걸려버린다(진짜 main.js/ffprobe 를 쓰는 bootMain 테스트는 이
+  // 스텁 자체를 안 거친다 — 실제 값 그대로 정확히 판정된다).
+  'video:probeAudio': () => ({ hasAudio: false }),
   // 영상 편집 탭도 usage.js 처럼 탭에 들어갈 때마다 자동 저장분을 불러온다.
   'videoProject:load': () => ({ tracks: [], clips: [] }),
   'videoProject:save': () => true,

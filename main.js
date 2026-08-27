@@ -892,7 +892,9 @@ ipcMain.handle('video:export', async (event, payload) => {
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
   for (const s of segments) {
-    for (const f of (s.xfade ? [s.fileA, s.fileB] : [s.file])) {
+    const files = s.xfade ? [s.fileA, s.fileB] : [s.file];
+    if (s.audioFile) files.push(s.audioFile);   // 영상과 오디오가 서로 다른 파일(짝지어 임포트된 영상/오디오 트랙)
+    for (const f of files) {
       if (!fs.existsSync(f)) return { ok: false, error: '원본 없음: ' + f };
     }
   }
@@ -909,7 +911,10 @@ ipcMain.handle('video:export', async (event, payload) => {
   let nextInput = 0;
   const idxs = segments.map((s) => {
     if (s.xfade) { args.push('-i', s.fileA); const a = nextInput++; args.push('-i', s.fileB); const b = nextInput++; return { a, b }; }
-    args.push('-i', s.file); return { v: nextInput++ };
+    args.push('-i', s.file); const v = nextInput++;
+    // 영상 임포트가 영상/오디오 트랙을 나눠 놓은 짝 클립 — 오디오가 다른 파일(다른 -i)에서 온다.
+    if (s.audioFile && s.audioFile !== s.file) { args.push('-i', s.audioFile); return { v, aFile: nextInput++ }; }
+    return { v };
   });
   const silentIdx = nextInput;
   if (needsSilence) { args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'); nextInput++; }
@@ -942,8 +947,15 @@ ipcMain.handle('video:export', async (event, payload) => {
       else parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
     } else {
       parts.push(`[${ix.v}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
-      if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
-      else parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+      if (s.hasAudio === false) {
+        parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
+      } else if (s.audioFile) {
+        // 영상/오디오가 별도 트랙(짝지어 임포트)에서 왔다 — 오디오는 그쪽 파일·구간을 쓴다.
+        const audIx = ix.aFile != null ? ix.aFile : ix.v;
+        parts.push(`[${audIx}:a]atrim=start=${s.audioStart}:end=${s.audioEnd},asetpts=PTS-STARTPTS[a${i}]`);
+      } else {
+        parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+      }
     }
   });
   const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');

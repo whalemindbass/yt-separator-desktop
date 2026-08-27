@@ -16,13 +16,18 @@ const ROOT = path.resolve(__dirname, '..');
 const FFMPEG = path.join(ROOT, 'vendor', 'ffmpeg', 'ffmpeg.exe');
 const FFPROBE = path.join(ROOT, 'vendor', 'ffmpeg', 'ffprobe.exe');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'yss-veaudio-'));
+// mp3 를 영상보다 일부러 더 길게 둔다(6초 vs 4초) — 영상이 끝난 뒤에도 mp3 가 2초 더
+// 남는 구간이 실제로 검은 화면+오디오로 채워지는지까지 봐야 이 테스트의 원래 목적
+// (오디오 전용 구간의 검은 화면 채우기)이 제대로 걸린다. 두 파일은 이제 같은 트랙에
+// 이어붙는 게 아니라(예전 동작) 영상/오디오가 각자 트랙에서 0초부터 같이 겹쳐 놓인다
+// (Vegas 처럼 영상+배경음악을 같이 임포트하면 나란히 시작해야 자연스럽다).
 const VID = path.join(TMP, 'vid.mp4');   // 4초, 320x240
-const MP3 = path.join(TMP, 'song.mp3');  // 3초
+const MP3 = path.join(TMP, 'song.mp3');  // 6초
 const OUT = path.join(TMP, 'out.mp4');
 
 spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x240:rate=10',
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', VID], { stdio: 'ignore' });
-spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6',
   '-c:a', 'libmp3lame', MP3], { stdio: 'ignore' });
 if (!fs.existsSync(VID) || !fs.existsSync(MP3)) throw new Error('ffmpeg 로 픽스처 생성 실패');
 
@@ -77,7 +82,9 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const r = spawnSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration',
       '-show_entries', 'stream=codec_type,width,height', '-of', 'default=noprint_wrappers=1', OUT], { encoding: 'utf-8' });
     const out = r.stdout || '';
-    near('총 길이 ≈ 7초(영상4+mp3 3)', parseFloat((/duration=([\d.]+)/.exec(out) || [])[1] || 0), 7, 0.3);
+    // 영상(4초)과 mp3(6초)가 0초부터 겹쳐 놓이므로 전체 길이는 더 긴 쪽(mp3)을 따라간다 —
+    // 뒤 2초(4~6초)는 영상이 끝난 뒤라 검은 화면+mp3 오디오로 채워진 구간이다.
+    near('총 길이 ≈ 6초(mp3 가 영상보다 길어서 그만큼)', parseFloat((/duration=([\d.]+)/.exec(out) || [])[1] || 0), 6, 0.3);
     expect('비디오 스트림 있음(mp3 구간도 검은 화면으로 채워짐)', out.includes('codec_type=video'), true);
     expect('해상도가 영상 클립과 같음(320x240)', out.includes('width=320') && out.includes('height=240'), true);
     expect('오디오 스트림 있음', out.includes('codec_type=audio'), true);

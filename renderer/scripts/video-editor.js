@@ -52,9 +52,9 @@ function scheduleSave() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
-      tracks: _veTracks.map(({ id, name, color, height, hidden }) => ({ id, name, color, height, hidden })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly })),
+      tracks: _veTracks.map(({ id, name, color, height, hidden, kind }) => ({ id, name, color, height, hidden, kind })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId })),
     });
   }, 600);
 }
@@ -134,10 +134,18 @@ function ensureLayers() {
   const wanted = new Set(_veTracks.map(t => t.id));
   for (const [id, pair] of _layerEls) if (!wanted.has(id)) { pair.a.remove(); pair.b.remove(); _layerEls.delete(id); }
   // Vegas Pro 관례: 트랙 목록 맨 위(배열 0번)가 합성에서 맨 앞(최상위 레이어)이 된다.
+  // 오디오 트랙은 화면에 아무것도 안 그려야 한다(영상 트랙 위를 덮으면 안 됨) — opacity:0 으로
+  // 고정해 두고 재생/정지만 다룬다(hidden 은 안 건드린다 — display:none 이 오디오까지 멈추는
+  // 경우를 피하려고).
   _veTracks.forEach((t, i) => {
     let pair = _layerEls.get(t.id);
     if (!pair) {
-      const mk = () => { const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto'; host.appendChild(v); return v; };
+      const isAudio = t.kind === 'audio';
+      const mk = () => {
+        const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto';
+        if (isAudio) v.style.opacity = '0';
+        host.appendChild(v); return v;
+      };
       pair = { a: mk(), b: mk() };
       _layerEls.set(t.id, pair);
     }
@@ -154,35 +162,40 @@ function clipsAt(trackId, t) {
     .filter(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur)
     .sort((x, y) => x.start - y.start);
 }
-function driveLayer(el, clip, t) {
-  el.hidden = false;
+function driveLayer(el, clip, t, visual) {
+  if (visual) el.hidden = false;
+  // 영상 클립이 짝(groupId, 오디오 트랙의 오디오 클립)을 가지고 있으면 소리는 그 짝이
+  // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
+  // 짝이 없는(예전 프로젝트 등) 클립은 자기 소리를 그대로 낸다.
+  el.muted = visual && !!clip.groupId;
   if (el.dataset.loadedSrc !== clip.file) { el.src = toYtsepUrl(clip.file); el.dataset.loadedSrc = clip.file; }
   const target = Math.min(clip.inOff + (t - clip.start), (el.duration || clip.srcDur) - 0.02);
   if (Math.abs(el.currentTime - target) > 0.1) { try { el.currentTime = Math.max(0, target); } catch {} }
   if (_playing && el.paused) el.play().catch(() => {});
   if (!_playing && !el.paused) el.pause();
 }
-function hideLayer(el) { el.hidden = true; el.style.opacity = ''; if (!el.paused) el.pause(); }
+function hideLayer(el, visual) { if (visual) { el.hidden = true; el.style.opacity = ''; } if (!el.paused) el.pause(); }
 function syncPreview(t) {
   let any = false;
   for (const track of _veTracks) {
     const pair = _layerEls.get(track.id); if (!pair) continue;
     const { a, b } = pair;
-    if (track.hidden) { hideLayer(a); hideLayer(b); continue; }
+    const visual = track.kind !== 'audio';   // 영상 트랙만 화면에 그린다 — 오디오 트랙은 소리만.
+    if (track.hidden) { hideLayer(a, visual); hideLayer(b, visual); continue; }
     const here = clipsAt(track.id, t);
     if (here.length >= 2) {
       const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
-      driveLayer(a, outClip, t); a.style.opacity = String(1 - mix); a.volume = 1 - mix;
-      driveLayer(b, inClip, t); b.style.opacity = String(mix); b.volume = mix;
+      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(1 - mix); a.volume = 1 - mix;
+      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(mix); b.volume = mix;
       any = true;
     } else if (here.length === 1) {
-      driveLayer(a, here[0], t); a.style.opacity = '1'; a.volume = 1;
-      hideLayer(b);
+      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = '1'; a.volume = 1;
+      hideLayer(b, visual);
       any = true;
     } else {
-      hideLayer(a); hideLayer(b);
+      hideLayer(a, visual); hideLayer(b, visual);
     }
   }
   return any;
@@ -226,7 +239,7 @@ function layout() {
 function newVideoTrack(pushHistory = true) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
-  const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false };
+  const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false, kind: 'video' };
   // Vegas Pro 관례: 새 비디오 트랙은 목록 맨 위(= 합성 맨 앞)에 들어간다.
   _veTracks.unshift(track);
   if (pushHistory) {
@@ -239,14 +252,37 @@ function newVideoTrack(pushHistory = true) {
   renderLanes();
   return id;
 }
-function trackLabel(vt, idx) { return vt.name || tr('video.trackN', { n: idx + 1 }); }
+function newAudioTrack(pushHistory = true) {
+  const id = nextTrackId();
+  const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
+  const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false, kind: 'audio' };
+  // Vegas Pro 관례: 오디오 트랙은 영상 트랙 구역 아래(목록 맨 아래)에 자리한다.
+  _veTracks.push(track);
+  if (pushHistory) {
+    pushUndo(
+      () => { _veTracks = _veTracks.filter(t => t.id !== id); _veClips = _veClips.filter(c => c.trackId !== id); },
+      () => { _veTracks.push(track); },
+    );
+  }
+  ensureLayers();
+  renderLanes();
+  return id;
+}
+// 이름 없는 트랙의 기본 이름 — 영상/오디오 각자 자기 종류 안에서 순번을 센다
+// (Vegas 처럼 영상 트랙 구역과 오디오 트랙 구역이 따로다).
+function trackLabel(vt) {
+  if (vt.name) return vt.name;
+  const sameKind = _veTracks.filter(t => (t.kind === 'audio') === (vt.kind === 'audio'));
+  const n = sameKind.indexOf(vt) + 1;
+  return vt.kind === 'audio' ? tr('video.audioTrackN', { n }) : tr('video.trackN', { n });
+}
 
 function renderLanes() {
   const lanes = $('ve-lanes'); if (!lanes) return;
   lanes.querySelectorAll('.ve-lane').forEach(el => el.remove());
-  _veTracks.forEach((vt, idx) => {
+  _veTracks.forEach((vt) => {
     const lane = document.createElement('div');
-    lane.className = 've-lane';
+    lane.className = 've-lane' + (vt.kind === 'audio' ? ' audio' : '');
     lane.style.setProperty('--c', vt.color);
     if (vt.height) lane.style.height = vt.height + 'px';
     lane.dataset.trackId = String(vt.id);
@@ -255,7 +291,7 @@ function renderLanes() {
         <div class="nm">
           <span class="ve-reorder" data-i18n-title="video.dragReorder" title="드래그로 순서 변경">⠿</span>
           <i data-i18n-title="video.changeColor" title="색 변경"></i>
-          <span class="lbl" data-i18n-title="video.rename" title="이름 변경">${esc(trackLabel(vt, idx))}</span>
+          <span class="lbl" data-i18n-title="video.rename" title="이름 변경">${esc(trackLabel(vt))}</span>
         </div>
         <div class="ve-ctrls">
           <button class="ve-hs ve-hide${vt.hidden ? ' on' : ''}" data-i18n-title="video.hide" title="숨기기">H</button>
@@ -285,8 +321,8 @@ function renderLanes() {
     const lbl = lane.querySelector('.lbl');
     lbl.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      const val = prompt(tr('video.rename'), trackLabel(vt, idx));
-      if (val != null) { vt.name = val.trim(); lbl.textContent = trackLabel(vt, idx); }
+      const val = prompt(tr('video.rename'), trackLabel(vt));
+      if (val != null) { vt.name = val.trim(); lbl.textContent = trackLabel(vt); }
     });
     const dot = lane.querySelector('.nm i');
     dot.addEventListener('click', (e) => {
@@ -377,6 +413,12 @@ function renderClips() {
     }
   });
 }
+// 영상 임포트 시 자동으로 짝지어진 오디오 클립(Vegas Pro 관례: groupId 공유) — 그룹인
+// 클립은 이동/트림/분할/삭제가 서로 따라간다. "U" 로 그룹을 풀면 그때부턴 따로 논다.
+function groupPartner(c) {
+  if (c.groupId == null) return null;
+  return _veClips.find(x => x !== c && x.groupId === c.groupId) || null;
+}
 function snapSec(sec, excludeId) {
   const cand = [0];
   for (const c of _veClips) { if (c.id === excludeId) continue; cand.push(c.start, c.start + c.dur); }
@@ -389,6 +431,8 @@ function wireMove(e, c, el) {
   const startX = e.clientX;
   const startStart = c.start;
   const startTrackId = c.trackId;
+  const partner = groupPartner(c);
+  const partnerStart0 = partner?.start;
   const laneEls = [...document.querySelectorAll('.ve-lane')];
   _dragging = true;
   try { el.setPointerCapture(e.pointerId); } catch {}
@@ -397,6 +441,13 @@ function wireMove(e, c, el) {
     let ns = Math.max(0, snapSec(startStart + dx, c.id));
     c.start = ns;
     el.style.left = (c.start * _pxPerSec) + 'px';
+    // 짝(그룹) 클립이 있으면 같은 시작점으로 실시간으로 따라온다(Vegas 관례) — 트랙은
+    // 그대로 두고 시작 위치만 맞춘다(영상↔오디오 트랙이 다르니 트랙까지 옮기진 않는다).
+    if (partner) {
+      partner.start = ns;
+      const pEl = document.querySelector(`.ve-clip[data-clip-id="${partner.id}"]`);
+      if (pEl) pEl.style.left = (ns * _pxPerSec) + 'px';
+    }
     // 트랙 간 이동 — 포인터가 다른 레인 위에 있으면 그 트랙으로 옮긴다.
     // renderClips() 가 DOM 을 통째로 새로 그리므로, 드래그 중이던 el 은 그 순간
     // 떨어져 나간다(update 해도 화면에 안 보임) — 새로 그려진 같은 클립 엘리먼트를
@@ -418,9 +469,10 @@ function wireMove(e, c, el) {
     _dragging = false;
     if (c.start !== startStart || c.trackId !== startTrackId) {
       const endStart = c.start, endTrackId = c.trackId;
+      const endPartnerStart = partner?.start;
       pushUndo(
-        () => { c.start = startStart; c.trackId = startTrackId; layout(); },
-        () => { c.start = endStart; c.trackId = endTrackId; layout(); },
+        () => { c.start = startStart; c.trackId = startTrackId; if (partner) partner.start = partnerStart0; layout(); },
+        () => { c.start = endStart; c.trackId = endTrackId; if (partner) partner.start = endPartnerStart; layout(); },
       );
     }
     layout();
@@ -433,6 +485,10 @@ function wireTrim(handle, c, el, dir) {
     _selClipId = c.id;
     const startX = e.clientX;
     const start0 = c.start, dur0 = c.dur, inOff0 = c.inOff;
+    const partner = groupPartner(c);
+    // 소스 자체가 같은 파일·같은 트림 지점에서 갈라져 나온 짝이라 항상 start/dur/inOff 가
+    // 동일하다 — 이번에 c 에 적용한 값을 그대로 partner 에도 복사하면 된다.
+    const partnerEl = partner ? document.querySelector(`.ve-clip[data-clip-id="${partner.id}"]`) : null;
     try { handle.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
       const dx = (ev.clientX - startX) / _pxPerSec;
@@ -447,14 +503,26 @@ function wireTrim(handle, c, el, dir) {
       }
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
+      if (partner) {
+        partner.start = c.start; partner.dur = c.dur; partner.inOff = c.inOff;
+        if (partnerEl) { partnerEl.style.left = el.style.left; partnerEl.style.width = el.style.width; }
+      }
     };
     const up = () => {
       document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
       if (c.start !== start0 || c.dur !== dur0) {
         const endStart = c.start, endDur = c.dur, endInOff = c.inOff;
         pushUndo(
-          () => { c.start = start0; c.dur = dur0; c.inOff = inOff0; layout(); },
-          () => { c.start = endStart; c.dur = endDur; c.inOff = endInOff; layout(); },
+          () => {
+            c.start = start0; c.dur = dur0; c.inOff = inOff0;
+            if (partner) { partner.start = start0; partner.dur = dur0; partner.inOff = inOff0; }
+            layout();
+          },
+          () => {
+            c.start = endStart; c.dur = endDur; c.inOff = endInOff;
+            if (partner) { partner.start = endStart; partner.dur = endDur; partner.inOff = endInOff; }
+            layout();
+          },
         );
       }
       layout();
@@ -467,40 +535,83 @@ function splitAtPlayhead() {
   const c = _veClips.find(x => x.id === _selClipId); if (!c) return;
   const t = _playheadSec;
   if (t <= c.start || t >= c.start + c.dur) return;
-  const origDur = c.dur;
-  const rightDur = c.start + c.dur - t;
-  const right = { ...c, id: nextClipId(), start: t, dur: rightDur, inOff: c.inOff + (t - c.start) };
-  c.dur = t - c.start;
-  _veClips.push(right);
+  const partner = groupPartner(c);
+  // 짝이 있으면 이 지점이 짝도 덮어야 같이 자른다 — 그룹이 서로 다른 길이로 어긋나는
+  // 상황을 막는다(항상 동일한 start/dur 이어야 하는 불변조건).
+  if (partner && (t <= partner.start || t >= partner.start + partner.dur)) return;
+
+  const splitOne = (clip) => {
+    const origDur = clip.dur;
+    const rightDur = clip.start + clip.dur - t;
+    const leftDur = t - clip.start;
+    const right = { ...clip, id: nextClipId(), start: t, dur: rightDur, inOff: clip.inOff + (t - clip.start) };
+    clip.dur = leftDur;
+    _veClips.push(right);
+    return { clip, right, origDur, leftDur };
+  };
+
+  const r1 = splitOne(c);
+  let r2 = null;
+  if (partner) {
+    r2 = splitOne(partner);
+    // 오른쪽 조각끼리 새 그룹으로 묶는다(왼쪽 조각들은 원래 groupId 를 그대로 쓴다).
+    const newGroupId = r1.right.id;
+    r1.right.groupId = newGroupId; r2.right.groupId = newGroupId;
+  }
+
   pushUndo(
-    () => { c.dur = origDur; _veClips = _veClips.filter(x => x !== right); },
-    () => { c.dur = t - c.start; _veClips.push(right); },
+    () => {
+      r1.clip.dur = r1.origDur; _veClips = _veClips.filter(x => x !== r1.right);
+      if (r2) { r2.clip.dur = r2.origDur; _veClips = _veClips.filter(x => x !== r2.right); }
+    },
+    () => {
+      r1.clip.dur = r1.leftDur; _veClips.push(r1.right);
+      if (r2) { r2.clip.dur = r2.leftDur; _veClips.push(r2.right); }
+    },
   );
   layout();
 }
 function deleteSelected() {
   if (_selClipId == null) return;
   const removed = _veClips.find(c => c.id === _selClipId); if (!removed) return;
+  const partner = groupPartner(removed);
   const idx = _veClips.indexOf(removed);
+  const pIdx = partner ? _veClips.indexOf(partner) : -1;
   pushUndo(
-    () => { _veClips.splice(idx, 0, removed); },
-    () => { _veClips = _veClips.filter(c => c !== removed); },
+    () => { _veClips.splice(idx, 0, removed); if (partner) _veClips.splice(pIdx, 0, partner); },
+    () => { _veClips = _veClips.filter(c => c !== removed && c !== partner); },
   );
-  _veClips = _veClips.filter(c => c.id !== _selClipId);
+  _veClips = _veClips.filter(c => c !== removed && c !== partner);
   _selClipId = null;
   layout();
+}
+function ungroupSelected() {
+  if (_selClipId == null) return;
+  const c = _veClips.find(x => x.id === _selClipId); if (!c || c.groupId == null) return;
+  const partner = groupPartner(c);
+  const before = { cg: c.groupId, pg: partner?.groupId };
+  c.groupId = null; if (partner) partner.groupId = null;
+  pushUndo(
+    () => { c.groupId = before.cg; if (partner) partner.groupId = before.pg; },
+    () => { c.groupId = null; if (partner) partner.groupId = null; },
+  );
+  flash(tr('video.ungrouped'));
 }
 
 // ── 내보내기 ────────────────────────────────────────
 // "이 순간엔 어느 트랙이 위인가"만으로 한 줄 구간 목록을 만든다(트랙 간엔 여전히 컷 —
 // 오버레이/PIP 는 다음 단계). 같은 트랙에서 클립 둘이 겹치면 미리보기와 똑같이 그 겹친
 // 구간 전체를 크로스페이드 구간 하나로 묶어(xfade:true) 내보낸다.
+// v1 범위: 오디오 트랙은 한 번에 하나만 반영한다(여러 오디오 트랙을 동시에 믹싱하는 건
+// 다음 단계) — 임포트가 항상 영상 1개당 오디오 1개로 짝짓기만 하니 실사용에선 충분하다.
 function buildEDL() {
-  // 오디오 전용(mp3/wav 등) 구간은 영상 트랙이 없어서 내보낼 때 검은 화면을 대신 채워야
-  // 한다 — 그 검은 화면 해상도를 프로젝트 안의 실제 영상 클립 하나에서 가져온다(전부
-  // 오디오뿐이면 무난한 기본값).
+  // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
+  // 검은 화면을 대신 채워야 한다 — 해상도는 프로젝트 안의 실제 영상 클립에서 가져온다.
   const refClip = _veClips.find(c => !c.isAudioOnly && c.w && c.h);
   const refW = refClip?.w || 1280, refH = refClip?.h || 720;
+  const videoTracks = _veTracks.filter(t => t.kind !== 'audio');
+  const audioTracks = _veTracks.filter(t => t.kind === 'audio');
+
   const bounds = new Set([0]);
   for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
   const pts = [...bounds].sort((a, b) => a - b);
@@ -511,14 +622,23 @@ function buildEDL() {
     if (b - a < 0.001) continue;
     if (a < skipUntil - 0.001) continue;   // 크로스페이드 구간을 이미 통째로 넣었다
     const mid = (a + b) / 2;
+
     let winners = [];
-    for (const track of _veTracks) {   // 배열 0번 = 목록 맨 위 = 합성 맨 앞 → 우선
+    for (const track of videoTracks) {   // 배열 순서 = 목록 위→아래 = 합성 맨 앞 우선
       if (track.hidden) continue;
       const here = clipsAt(track.id, mid);
       if (here.length) { winners = here; break; }
     }
-    if (!winners.length) continue;   // 아무 트랙도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    let audioClip = null;
+    for (const track of audioTracks) {
+      if (track.hidden) continue;
+      const c = clipAt(track.id, mid);
+      if (c && c.hasAudio !== false) { audioClip = c; break; }
+    }
+
     if (winners.length >= 2) {
+      // 같은 트랙 안 크로스페이드 — 겹친 순간과 동시에 별도 오디오 트랙까지 섞는 건
+      // 다음 단계로 미룬다(흔치 않은 조합).
       const outC = winners[0], inC = winners[1];
       const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
       segs.push({
@@ -529,15 +649,44 @@ function buildEDL() {
       skipUntil = overlapEnd;
       continue;
     }
-    const winner = winners[0];
-    const segStart = winner.inOff + (a - winner.start);
-    const segEnd = winner.inOff + (b - winner.start);
+
+    if (winners.length === 1) {
+      const winner = winners[0];
+      const segStart = winner.inOff + (a - winner.start);
+      const segEnd = winner.inOff + (b - winner.start);
+      // 영상 클립 자체가 소리를 내면(예전 프로젝트, 짝 없는 임포트) 그걸 쓰고, 아니면
+      // 짝지어진(또는 그냥 같이 걸린) 오디오 트랙 클립을 대신 쓴다.
+      const useOwnAudio = winner.hasAudio !== false;
+      // 자기 오디오를 쓰는 단순한 경우만 인접 구간을 하나로 합친다(세그먼트 수를 줄여
+      // ffmpeg 입력을 아낀다) — 외부 오디오 트랙을 쓰는 경우는 그 트랙의 경계마다 이미
+      // 정확히 구간이 나뉘어 있으니 합칠 필요가 없다(억지로 합치려다 위치 계산을 틀리기
+      // 쉽다).
+      if (useOwnAudio) {
+        const last = segs[segs.length - 1];
+        if (last && !last.xfade && !last.isAudioOnly && !last.audioFile && last.hasAudio && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) {
+          last.end = segEnd;
+          continue;
+        }
+      }
+      const seg = { file: winner.file, start: segStart, end: segEnd, refW, refH };
+      if (useOwnAudio) { seg.hasAudio = true; }
+      else if (audioClip) {
+        seg.hasAudio = true;
+        seg.audioFile = audioClip.file;
+        seg.audioStart = audioClip.inOff + (a - audioClip.start);
+        seg.audioEnd = audioClip.inOff + (b - audioClip.start);
+      } else { seg.hasAudio = false; }
+      segs.push(seg);
+      continue;
+    }
+
+    // 영상 트랙엔 아무도 없다 — 오디오 트랙만 있으면 검은 화면 + 그 오디오로 채운다.
+    if (!audioClip) continue;   // 둘 다 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    const segStart = audioClip.inOff + (a - audioClip.start);
+    const segEnd = audioClip.inOff + (b - audioClip.start);
     const last = segs[segs.length - 1];
-    if (last && !last.xfade && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) last.end = segEnd;
-    else segs.push({
-      file: winner.file, start: segStart, end: segEnd, hasAudio: winner.hasAudio !== false,
-      isAudioOnly: !!winner.isAudioOnly, refW, refH,
-    });
+    if (last && last.isAudioOnly && last.file === audioClip.file && Math.abs(last.end - segStart) < 0.005) { last.end = segEnd; continue; }
+    segs.push({ isAudioOnly: true, file: audioClip.file, start: segStart, end: segEnd, hasAudio: true, refW, refH });
   }
   return segs;
 }
@@ -570,13 +719,26 @@ function probeVideo(file) {
     v.src = toYtsepUrl(file);
   });
 }
+// Vegas Pro 관례: 영상 파일(영상+오디오 둘 다 있는)을 임포트하면 영상 트랙엔 영상 클립,
+// 오디오 트랙엔 그와 짝지어진(groupId 공유) 오디오 클립이 따로 생긴다 — 기본으로 그룹이라
+// 서로 따라 움직이지만, 필요하면 U 로 그룹을 풀고 따로 삭제·편집할 수 있다.
 async function importVideoFiles(paths, trackId) {
   let tid = trackId;
-  const createdTrack = tid == null;
-  if (createdTrack) tid = newVideoTrack(false);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
-  const newTrackRef = createdTrack ? _veTracks.find(t => t.id === tid) : null;
-  let cursor = 0;
-  for (const c of _veClips.filter(x => x.trackId === tid)) cursor = Math.max(cursor, c.start + c.dur);
+  const createdVideoTrack = tid == null;
+  if (createdVideoTrack) tid = newVideoTrack(false);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
+  const videoTrackRef = createdVideoTrack ? _veTracks.find(t => t.id === tid) : null;
+  let videoCursor = 0;
+  for (const c of _veClips.filter(x => x.trackId === tid)) videoCursor = Math.max(videoCursor, c.start + c.dur);
+
+  let audioTid = null, audioTrackRef = null, createdAudioTrack = false, audioCursor = 0;
+  function ensureAudioTrack() {
+    if (audioTid != null) return;
+    const existing = _veTracks.find(t => t.kind === 'audio');
+    if (existing) { audioTid = existing.id; }
+    else { audioTid = newAudioTrack(false); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
+    for (const c of _veClips.filter(x => x.trackId === audioTid)) audioCursor = Math.max(audioCursor, c.start + c.dur);
+  }
+
   const added = [];
   for (const p of paths) {
     const meta = await probeVideo(p);
@@ -586,19 +748,41 @@ async function importVideoFiles(paths, trackId) {
     // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
     // 얹고 싶을 때를 위해 받되, 썸네일·내보내기는 이 클립엔 다르게 처리해야 한다.
     const isAudioOnly = !meta.w || !meta.h;
-    const clip = { id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio, isAudioOnly };
-    _veClips.push(clip);
-    added.push(clip);
-    cursor += meta.dur;
+
+    if (isAudioOnly) {
+      ensureAudioTrack();
+      const clip = { id: nextClipId(), trackId: audioTid, file: p, name, start: audioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
+      _veClips.push(clip); added.push(clip);
+      audioCursor += meta.dur;
+      continue;
+    }
+
+    const vClip = { id: nextClipId(), trackId: tid, file: p, name, start: videoCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false };
+    if (hasAudio) {
+      ensureAudioTrack();
+      const groupId = vClip.id;
+      vClip.groupId = groupId;
+      const aClip = { id: nextClipId(), trackId: audioTid, file: p, name, start: audioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio: true, isAudioOnly: true, groupId };
+      _veClips.push(vClip); added.push(vClip);
+      _veClips.push(aClip); added.push(aClip);
+      audioCursor += meta.dur;
+    } else {
+      _veClips.push(vClip); added.push(vClip);
+    }
+    videoCursor += meta.dur;
   }
+
+  const addedTracks = [];
+  if (createdVideoTrack) addedTracks.push(videoTrackRef);
+  if (createdAudioTrack) addedTracks.push(audioTrackRef);
   if (added.length) {
     pushUndo(
       () => {
         _veClips = _veClips.filter(c => !added.includes(c));
-        if (createdTrack) _veTracks = _veTracks.filter(t => t.id !== tid);
+        _veTracks = _veTracks.filter(t => !addedTracks.includes(t));
       },
       () => {
-        if (createdTrack) _veTracks.unshift(newTrackRef);
+        for (const t of addedTracks) { if (t.kind === 'audio') _veTracks.push(t); else _veTracks.unshift(t); }
         _veClips.push(...added);
       },
     );
@@ -611,9 +795,9 @@ async function importVideoFiles(paths, trackId) {
 async function pickImportVideo() {
   const r = await api.dialog.pickVideoFiles();
   if (!r || !r.ok || !r.filePaths?.length) return;
-  // 방금 만든(맨 위) 트랙이 아직 비어 있으면 거기로, 아니면 새 트랙을 만든다 —
+  // 방금 만든(맨 위) 영상 트랙이 아직 비어 있으면 거기로, 아니면 새 트랙을 만든다 —
   // "+트랙" 누르고 바로 "임포트" 눌렀을 때 트랙이 두 개로 늘어나지 않도록.
-  const top = _veTracks[0];
+  const top = _veTracks.find(t => t.kind !== 'audio');
   const reuse = top && !_veClips.some(c => c.trackId === top.id);
   importVideoFiles(r.filePaths, reuse ? top.id : null);
 }
@@ -632,6 +816,7 @@ function flash(msg) {
 function wire() {
   if (_wired) return; _wired = true;
   $('ve-add-track')?.addEventListener('click', () => newVideoTrack());
+  $('ve-add-audio-track')?.addEventListener('click', () => newAudioTrack());
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-undo')?.addEventListener('click', () => doUndo());
   $('ve-redo')?.addEventListener('click', () => doRedo());
@@ -655,6 +840,7 @@ function wire() {
     else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); }
     else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); doRedo(); }
     else if (e.key === 's' || e.key === 'S') splitAtPlayhead();
+    else if (e.key === 'u' || e.key === 'U') ungroupSelected();   // Vegas Pro 와 같은 단축키
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   });
   // 파일 드래그&드롭 — 빈 영역/기존 트랙 위 모두 받는다
