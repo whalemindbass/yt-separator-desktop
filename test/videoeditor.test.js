@@ -3,13 +3,23 @@
 // 실제로 동작하는지 확인한다. 진짜 파일 대화상자는 못 띄우니(automated 환경) 스텁으로 대체하고,
 // ffmpeg 로 만든 짧은 합성 mp4 두 개를 실제로 디코드시켜 duration 이 클립에 반영되는지까지 본다.
 
-const path = require('path');
-const { bootRenderer, expect, near, section, wait, finish, expectNoConsoleErrors } = require('./harness');
+const path = require('path'); const fs = require('fs'); const os = require('os');
+const { spawnSync } = require('child_process');
+const { bootRenderer, expect, near, section, wait, finish, expectNoConsoleErrors, ROOT } = require('./harness');
 
-const SCRATCH = process.env.YSS_TEST_SCRATCH
-  || 'C:\\Users\\wkq32\\AppData\\Local\\Temp\\claude\\C--Users-wkq32-Desktop----dev\\7cf29166-3d79-4119-918e-5be1964902cb\\scratchpad';
-const RED = path.join(SCRATCH, 've_test_red.mp4');    // 3초
-const BLUE = path.join(SCRATCH, 've_test_blue.mp4');  // 2초
+// 색상 패턴만 다른 짧은 합성 mp4 두 개 — 실제 h264 디코드 경로(임포트 duration 읽기 ·
+// 필름스트립 · 재생 미리보기)를 진짜로 태우려고 순수 WAV 합성 대신 ffmpeg 로 만든다.
+const FFMPEG = path.join(ROOT, 'vendor', 'ffmpeg', 'ffmpeg.exe');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'yss-ve-'));
+const RED = path.join(TMP, 've_test_red.mp4');    // 3초
+const BLUE = path.join(TMP, 've_test_blue.mp4');  // 2초
+function makeClip(file, pattern, seconds) {
+  const r = spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `${pattern}=duration=${seconds}:size=320x240:rate=15`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', file], { stdio: 'ignore' });
+  if (r.status !== 0 || !fs.existsSync(file)) throw new Error('ffmpeg 로 테스트 mp4 생성 실패: ' + file);
+}
+makeClip(RED, 'testsrc', 3);
+makeClip(BLUE, 'testsrc2', 2);
 
 (async () => {
   const { app, js, errors } = await bootRenderer({

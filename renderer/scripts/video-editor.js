@@ -367,6 +367,53 @@ function deleteSelected() {
   layout();
 }
 
+// ── 내보내기 ────────────────────────────────────────
+// v1: 컷 편집 전용. "이 순간엔 어느 트랙이 위인가"만으로 한 줄 구간 목록을 만든다 —
+// 미리보기가 아직 크로스페이드/오버레이를 안 그리니(트랙이 겹쳐도 맨 위 트랙만 보임),
+// 내보내기도 그 화면 그대로 trim+concat 만으로 재현할 수 있다(overlay 불필요).
+function buildEDL() {
+  const bounds = new Set([0]);
+  for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
+  const pts = [...bounds].sort((a, b) => a - b);
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (b - a < 0.001) continue;
+    const mid = (a + b) / 2;
+    let winner = null;
+    for (const track of _veTracks) {   // 배열 0번 = 목록 맨 위 = 합성 맨 앞 → 우선
+      if (track.hidden) continue;
+      const c = clipAt(track.id, mid);
+      if (c) { winner = c; break; }
+    }
+    if (!winner) continue;   // 아무 트랙도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    const segStart = winner.inOff + (a - winner.start);
+    const segEnd = winner.inOff + (b - winner.start);
+    const last = segs[segs.length - 1];
+    if (last && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) last.end = segEnd;
+    else segs.push({ file: winner.file, start: segStart, end: segEnd, hasAudio: winner.hasAudio !== false });
+  }
+  return segs;
+}
+async function runExport() {
+  const segs = buildEDL();
+  if (!segs.length) { flash(tr('video.needImport')); return; }
+  const r = await api.dialog.saveAs('export.mp4', ['mp4']);
+  if (!r || !r.ok) return;
+  setPlaying(false);
+  const btn = $('ve-export');
+  const label = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '0%'; }
+  const totalSec = segs.reduce((s, x) => s + (x.end - x.start), 0) || 1;
+  const off = api.video.onExportProgress(({ outTimeMs }) => {
+    if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
+  });
+  let res;
+  try { res = await api.video.export({ segments: segs, outPath: r.filePath }); }
+  finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
+  flash(res.ok ? tr('video.exportDone') : tr('video.exportFail', { err: res.error || '' }));
+}
+
 // ── 임포트 ──────────────────────────────────────────
 function probeVideo(file) {
   return new Promise((resolve) => {
@@ -386,8 +433,9 @@ async function importVideoFiles(paths, trackId) {
   for (const p of paths) {
     const meta = await probeVideo(p);
     if (!meta.dur) continue;
+    const { hasAudio } = await api.video.probeAudio(p);
     const name = p.split(/[\\/]/).pop();
-    _veClips.push({ id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h });
+    _veClips.push({ id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio });
     cursor += meta.dur;
     n++;
   }
@@ -426,7 +474,7 @@ function wire() {
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
-  $('ve-export')?.addEventListener('click', () => flash(tr('video.exportSoon')));
+  $('ve-export')?.addEventListener('click', () => runExport());
   $('ve-tscroll')?.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();

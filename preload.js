@@ -81,6 +81,15 @@ contextBridge.exposeInMainWorld('yssApi', {
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
   },
+  video: {
+    probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),
+    export: (payload) => ipcRenderer.invoke('video:export', payload),
+    onExportProgress: (fn) => {
+      const h = (_ev, data) => fn(data);
+      ipcRenderer.on('video:exportProgress', h);
+      return () => ipcRenderer.off('video:exportProgress', h);
+    },
+  },
 
   // 지난 실행이 비정상 종료했는지 — 읽으면 지워진다
   takeLastCrash: () => ipcRenderer.invoke('crash:take'),

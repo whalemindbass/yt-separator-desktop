@@ -145,6 +145,7 @@ function vendorPath(...parts) {
 const YTDLP_BIN  = vendorPath('yt-dlp', 'yt-dlp.exe');
 const FFMPEG_BIN = vendorPath('ffmpeg', 'ffmpeg.exe');
 const FFMPEG_DIR = vendorPath('ffmpeg');
+const FFPROBE_BIN = vendorPath('ffmpeg', 'ffprobe.exe');
 
 // 진단 로그 — main 프로세스 콘솔에만. 파일 기록·렌더러 전달 없음
 function dlog(...args) { console.log(...args); }
@@ -848,6 +849,77 @@ ipcMain.handle('audio:transcode', async (_ev, src, dst, opts) => {
       try { fs.unlinkSync(src); } catch {}   // 임시 WAV 정리
       if (code === 0) resolve({ ok: true, dst });
       else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-200) });
+    });
+  });
+});
+// 영상 편집 탭: 소스에 오디오 스트림이 있는지 — 브라우저 <video> 쪽에서 믿을 만하게 알 방법이
+// 없어서(오디오 트랙 목록 API 가 이 크롬 빌드엔 없다) ffprobe 로 확인한다. 실패하면 있다고
+// 본다 — 없는데 있다고 착각하면 내보내기가 에러로 죽지만, 있는데 없다고 착각하면 진짜
+// 오디오가 조용히 빠져버린다. 안전한 쪽으로 기운다.
+ipcMain.handle('video:probeAudio', async (_ev, file) => {
+  if (typeof file !== 'string' || !fs.existsSync(file)) return { hasAudio: true };
+  return await new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn(FFPROBE_BIN, ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file], { windowsHide: true });
+    } catch { return resolve({ hasAudio: true }); }
+    let out = '';
+    proc.stdout.on('data', (d) => out += d);
+    proc.on('error', () => resolve({ hasAudio: true }));
+    proc.on('close', (code) => resolve({ hasAudio: code !== 0 ? true : out.trim().length > 0 }));
+  });
+});
+// 영상 편집 탭 내보내기 — 컷 편집 전용(v1). 렌더러가 "이 순간엔 어느 트랙이 위인가"만으로
+// 미리 만든 한 줄 구간 목록(EDL)을 그대로 trim+concat 한다 — 트랙이 겹칠 때 쓰는
+// overlay/xfade 는 아직 없다(미리보기도 아직 컷 편집만 지원하니 대칭적으로 맞춘 것).
+ipcMain.handle('video:export', async (event, payload) => {
+  const { segments, outPath } = payload || {};
+  if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
+  if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
+  for (const s of segments) if (!fs.existsSync(s.file)) return { ok: false, error: '원본 없음: ' + s.file };
+
+  // 오디오 스트림이 아예 없는 소스(무음 b-roll, 화면 캡처 등)도 있다 — 그런 구간을 그냥
+  // [i:a] 로 매핑하면 ffmpeg 가 "matches no streams" 로 죽는다. anullsrc 무음 입력 하나를
+  // 공용으로 두고, 오디오 없는 구간만 거기서 필요한 길이만큼 잘라 쓴다.
+  const needsSilence = segments.some((s) => s.hasAudio === false);
+  const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y'];
+  for (const s of segments) args.push('-i', s.file);
+  const silentIdx = segments.length;
+  if (needsSilence) args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+  const parts = [];
+  segments.forEach((s, i) => {
+    parts.push(`[${i}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
+    if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
+    else parts.push(`[${i}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+  });
+  const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');
+  parts.push(`${concatIn}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
+  args.push(
+    '-filter_complex', parts.join(';'),
+    '-map', '[outv]', '-map', '[outa]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '192k',
+    '-progress', 'pipe:1', outPath,
+  );
+
+  return await new Promise((resolve) => {
+    let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
+    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let stderr = '', outBuf = '';
+    proc.stdout.on('data', (d) => {
+      outBuf += d;
+      const m = /out_time_ms=(\d+)/.exec(outBuf);
+      const nl = outBuf.lastIndexOf('\n');
+      if (nl >= 0) outBuf = outBuf.slice(nl + 1);
+      if (m && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('video:exportProgress', { outTimeMs: Number(m[1]) });
+      }
+    });
+    proc.stderr.on('data', (d) => stderr += d);
+    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('close', (code) => {
+      if (code === 0) { grantWrite(outPath); resolve({ ok: true, outPath }); }
+      else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) });
     });
   });
 });

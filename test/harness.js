@@ -63,6 +63,8 @@ const DEFAULT_STUBS = {
   // 트레이닝 탭이 부팅 때부터 부르므로(usage.js 모듈 최상단) 흉내를 낸다.
   'usage:load': () => ({ log: {}, goals: {} }),
   'usage:save': () => true,
+  // 영상 편집 탭 임포트가 파일마다 부른다(오디오 스트림 유무는 ffprobe 로 확인).
+  'video:probeAudio': () => ({ hasAudio: true }),
 };
 
 async function bootRenderer(opts = {}) {
