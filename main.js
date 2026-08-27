@@ -82,6 +82,7 @@ const DIALOG_TEXT = {
     pickMedia: '분리할 영상/오디오 파일 선택',
     pickMediaFiles: '분리할 영상/오디오 파일 선택 (여러 개 가능)',
     importAudio: '오디오 파일 임포트', importVideo: '영상 파일 임포트',
+    importVideoFiles: '영상 파일 임포트 (여러 개 가능)',
     fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fAll: '모든 파일', fProject: 'YSS 프로젝트',
   },
   en: {
@@ -94,6 +95,7 @@ const DIALOG_TEXT = {
     pickMedia: 'Choose a video or audio file to separate',
     pickMediaFiles: 'Choose video/audio files to separate (multiple allowed)',
     importAudio: 'Import audio file', importVideo: 'Import video file',
+    importVideoFiles: 'Import video files (multiple allowed)',
     fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fAll: 'All files', fProject: 'YSS project',
   },
 };
@@ -693,6 +695,19 @@ ipcMain.handle('dialog:pickVideoFile', async () => {
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0] };
+});
+// 영상 편집: 비디오 파일 여러 개 임포트 (트랙 클립)
+ipcMain.handle('dialog:pickVideoFiles', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: td('importVideoFiles'),
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: td('fVideo'), extensions: ['mp4','mkv','webm','mov','avi','m4v'] },
+      { name: td('fAll'), extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePaths: res.filePaths };
 });
 
 ipcMain.handle('update:check',    () => { checkForUpdates(); return { ok: true }; });

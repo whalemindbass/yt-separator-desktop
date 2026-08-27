@@ -3846,3 +3846,88 @@ body { background: var(--bg) !important; }
 .board-detail-head h2 { font-size: 18px; font-weight: 700; color: var(--tx-1); letter-spacing: -.015em; word-break: keep-all; }
 .board-detail-head time { margin-left: auto; font: 400 11.5px/1 var(--mono); color: var(--tx-3); }
 .board-detail .notice-body { font-size: 13px; line-height: 1.8; color: var(--tx-2); }
+
+/* ── 영상 편집 탭 ─────────────────────────────────────── */
+.video-body { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0; position: relative; }
+
+.ve-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface);
+  flex: 0 0 auto;
+}
+.ve-toolbar-l, .ve-toolbar-c, .ve-toolbar-r { display: flex; align-items: center; gap: 8px; }
+.ve-toolbar-c { position: absolute; left: 50%; transform: translateX(-50%); }
+.ve-toolbar { position: relative; }
+.ve-tbtn {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 7px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-2);
+  cursor: pointer; font-size: 13px; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.ve-tbtn:hover { background: var(--elev-2); color: var(--tx-1); }
+.ve-tbtn.ve-play.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.ve-time { font: 500 12.5px/1 var(--mono); color: var(--tx-2); min-width: 84px; text-align: center; }
+
+.ve-preview-wrap {
+  position: relative; flex: 0 0 auto; background: var(--video-bg);
+  display: flex; align-items: center; justify-content: center;
+  height: 34vh; min-height: 200px; max-height: 420px; border-bottom: 1px solid var(--border);
+}
+.ve-preview { position: relative; width: 100%; height: 100%; }
+.ve-preview video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.ve-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.ve-empty p { color: var(--tx-3); font-size: 13px; }
+.ve-empty[hidden] { display: none; }
+
+.ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
+.ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
+.ve-ruler-ctrl { flex: 0 0 172px; border-right: 1px solid var(--border); }
+.ve-ruler { position: relative; height: 26px; flex: 1 0 auto; min-width: 100%; }
+.ve-ruler .tk { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-mid); }
+.ve-ruler .tk span { position: absolute; top: 3px; left: 4px; font: 400 10px/1 var(--mono); color: var(--tx-3); }
+
+.ve-lanes { position: relative; min-width: 100%; width: max-content; }
+.ve-lane { display: grid; grid-template-columns: 172px 1fr; height: 72px; border-bottom: 1px solid var(--border); }
+.ve-head {
+  flex: 0 0 172px; display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  padding: 6px 10px; background: var(--surface); border-right: 1px solid var(--border);
+  position: sticky; left: 0; z-index: 2;
+}
+.ve-head .nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ve-head .nm .ve-reorder { cursor: grab; color: var(--tx-4); font-size: 12px; }
+.ve-head .nm i { width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--accent)); cursor: pointer; flex: 0 0 auto; }
+.ve-head .nm .lbl { font: 600 12px/1.2 var(--sans); color: var(--tx-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.ve-head .ve-ctrls { display: flex; align-items: center; gap: 4px; }
+.ve-hs {
+  width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 5px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-3);
+  cursor: pointer; font: 600 10px/1 var(--sans);
+}
+.ve-hs.on { background: var(--mute); border-color: var(--mute); color: #1a1400; }
+.ve-hs.ve-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.ve-area { position: relative; background: var(--timeline); }
+.ve-lane-resize { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; z-index: 4; }
+
+.ve-clip {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 6px; overflow: hidden;
+  background: color-mix(in srgb, var(--c, var(--accent)) 28%, var(--elev));
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 55%, var(--border));
+  cursor: grab; user-select: none;
+}
+.ve-clip.sel { outline: 2px solid var(--c, var(--accent)); outline-offset: -1px; }
+.ve-clip .ve-clip-lbl {
+  position: absolute; top: 3px; left: 6px; right: 6px; font: 600 10.5px/1.2 var(--sans); color: var(--tx-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
+.ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
+.ve-clip .ve-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; }
+.ve-clip .ve-thumbs img { height: 100%; flex: 1 1 auto; object-fit: cover; min-width: 0; }
+
+.ve-playhead {
+  position: absolute; top: 0; bottom: 0; left: 172px; width: 1px; background: var(--accent);
+  z-index: 5; pointer-events: none; box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .3);
+}

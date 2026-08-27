@@ -26,6 +26,7 @@
       <button class="tab" data-view="community" data-i18n="title.tab.community" hidden>커뮤니티</button>
       <button class="tab" data-view="studio" data-i18n="title.tab.studio">스튜디오</button>
       <button class="tab" data-view="training" data-i18n="title.tab.training">트레이닝</button>
+      <button class="tab" data-view="video" data-i18n="title.tab.video">영상 편집</button>
       <button class="tab" data-view="settings" data-i18n="title.tab.settings">설정</button>
     </nav>
     <div class="titlebar-meta">
@@ -1152,6 +1153,42 @@
           <button id="trn-tuner-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
         </div>
       </section>
+    </div>
+  </main>
+
+  <!-- View: 영상 편집 -->
+  <main class="body view video-body" data-view="video" hidden>
+    <div class="ve-toolbar">
+      <div class="ve-toolbar-l">
+        <button id="ve-add-track" class="btn btn-sm" type="button" data-i18n="video.addTrack">＋ 트랙</button>
+        <button id="ve-import" class="btn btn-sm" type="button" data-i18n="video.import">임포트</button>
+      </div>
+      <div class="ve-toolbar-c">
+        <button id="ve-seek0" class="ve-tbtn" type="button" data-i18n-title="video.toStart" title="처음으로">|◀</button>
+        <button id="ve-play" class="ve-tbtn ve-play" type="button" data-i18n-title="video.playStop" title="재생/정지">▶</button>
+        <span id="ve-time" class="ve-time">0:00.000</span>
+      </div>
+      <div class="ve-toolbar-r">
+        <button id="ve-zoom-out" class="ve-tbtn" type="button" title="−">−</button>
+        <button id="ve-zoom-in" class="ve-tbtn" type="button" title="＋">＋</button>
+        <button id="ve-export" class="btn primary btn-sm" type="button" data-i18n="video.export">내보내기</button>
+      </div>
+    </div>
+    <div class="ve-preview-wrap">
+      <div id="ve-preview" class="ve-preview"></div>
+      <div id="ve-empty" class="ve-empty">
+        <p data-i18n="video.emptyTitle">아직 영상이 없습니다</p>
+        <button id="ve-empty-import" class="btn primary" type="button" data-i18n="video.import">임포트</button>
+      </div>
+    </div>
+    <div class="ve-tscroll" id="ve-tscroll">
+      <div class="ve-ruler-wrap">
+        <div class="ve-ruler-ctrl"></div>
+        <div class="ve-ruler" id="ve-ruler"></div>
+      </div>
+      <div class="ve-lanes" id="ve-lanes">
+        <div class="ve-playhead" id="ve-playhead"></div>
+      </div>
     </div>
   </main>
 
