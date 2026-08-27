@@ -116,41 +116,65 @@ function fmtTC(sec) {
   return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
-// ── 미리보기 합성 — 트랙마다 <video> 한 장, z-index = 트랙 순서(뒤에 올린 트랙이 위) ──
-const _layerEls = new Map();   // trackId → <video>
+// ── 미리보기 합성 — 트랙마다 <video> 두 장(a/b). 같은 트랙에서 클립 둘을 겹치게 끌어다
+// 놓으면(Vegas Pro 관례) 그 겹친 구간만큼 자동으로 크로스페이드된다 — 트랜지션을 따로
+// "추가"하는 UI 없이 겹친 정도가 곧 페이드 길이다. z-index = 트랙 순서(뒤에 올린 트랙이 위).
+const _layerEls = new Map();   // trackId → {a,b: <video>}
 function ensureLayers() {
   const host = $('ve-preview'); if (!host) return;
   const wanted = new Set(_veTracks.map(t => t.id));
-  for (const [id, el] of _layerEls) if (!wanted.has(id)) { el.remove(); _layerEls.delete(id); }
+  for (const [id, pair] of _layerEls) if (!wanted.has(id)) { pair.a.remove(); pair.b.remove(); _layerEls.delete(id); }
   // Vegas Pro 관례: 트랙 목록 맨 위(배열 0번)가 합성에서 맨 앞(최상위 레이어)이 된다.
   _veTracks.forEach((t, i) => {
-    let el = _layerEls.get(t.id);
-    if (!el) {
-      el = document.createElement('video');
-      el.muted = true; el.playsInline = true; el.preload = 'auto';
-      host.appendChild(el);
-      _layerEls.set(t.id, el);
+    let pair = _layerEls.get(t.id);
+    if (!pair) {
+      const mk = () => { const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; host.appendChild(v); return v; };
+      pair = { a: mk(), b: mk() };
+      _layerEls.set(t.id, pair);
     }
-    el.style.zIndex = String(_veTracks.length - i);
-    el.dataset.loadedSrc = el.dataset.loadedSrc || '';
+    const z = String(_veTracks.length - i);
+    pair.a.style.zIndex = z; pair.b.style.zIndex = z;
   });
 }
 function clipAt(trackId, t) {
   return _veClips.find(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur) || null;
 }
+// 한 트랙 안에서 시간 t 를 덮는 클립들(보통 1개, 겹친 구간이면 2개 — 먼저 시작한 게 먼저)
+function clipsAt(trackId, t) {
+  return _veClips
+    .filter(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur)
+    .sort((x, y) => x.start - y.start);
+}
+function driveLayer(el, clip, t) {
+  el.hidden = false;
+  if (el.dataset.loadedSrc !== clip.file) { el.src = toYtsepUrl(clip.file); el.dataset.loadedSrc = clip.file; }
+  const target = Math.min(clip.inOff + (t - clip.start), (el.duration || clip.srcDur) - 0.02);
+  if (Math.abs(el.currentTime - target) > 0.1) { try { el.currentTime = Math.max(0, target); } catch {} }
+  if (_playing && el.paused) el.play().catch(() => {});
+  if (!_playing && !el.paused) el.pause();
+}
+function hideLayer(el) { el.hidden = true; el.style.opacity = ''; if (!el.paused) el.pause(); }
 function syncPreview(t) {
   let any = false;
   for (const track of _veTracks) {
-    const el = _layerEls.get(track.id); if (!el) continue;
-    const clip = track.hidden ? null : clipAt(track.id, t);
-    if (!clip) { el.hidden = true; if (!el.paused) el.pause(); continue; }
-    any = true;
-    el.hidden = false;
-    if (el.dataset.loadedSrc !== clip.file) { el.src = toYtsepUrl(clip.file); el.dataset.loadedSrc = clip.file; }
-    const target = Math.min(clip.inOff + (t - clip.start), (el.duration || clip.srcDur) - 0.02);
-    if (Math.abs(el.currentTime - target) > 0.1) { try { el.currentTime = Math.max(0, target); } catch {} }
-    if (_playing && el.paused) el.play().catch(() => {});
-    if (!_playing && !el.paused) el.pause();
+    const pair = _layerEls.get(track.id); if (!pair) continue;
+    const { a, b } = pair;
+    if (track.hidden) { hideLayer(a); hideLayer(b); continue; }
+    const here = clipsAt(track.id, t);
+    if (here.length >= 2) {
+      const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
+      const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
+      const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
+      driveLayer(a, outClip, t); a.style.opacity = String(1 - mix);
+      driveLayer(b, inClip, t); b.style.opacity = String(mix);
+      any = true;
+    } else if (here.length === 1) {
+      driveLayer(a, here[0], t); a.style.opacity = '1';
+      hideLayer(b);
+      any = true;
+    } else {
+      hideLayer(a); hideLayer(b);
+    }
   }
   return any;
 }
@@ -454,29 +478,43 @@ function deleteSelected() {
 }
 
 // ── 내보내기 ────────────────────────────────────────
-// v1: 컷 편집 전용. "이 순간엔 어느 트랙이 위인가"만으로 한 줄 구간 목록을 만든다 —
-// 미리보기가 아직 크로스페이드/오버레이를 안 그리니(트랙이 겹쳐도 맨 위 트랙만 보임),
-// 내보내기도 그 화면 그대로 trim+concat 만으로 재현할 수 있다(overlay 불필요).
+// "이 순간엔 어느 트랙이 위인가"만으로 한 줄 구간 목록을 만든다(트랙 간엔 여전히 컷 —
+// 오버레이/PIP 는 다음 단계). 같은 트랙에서 클립 둘이 겹치면 미리보기와 똑같이 그 겹친
+// 구간 전체를 크로스페이드 구간 하나로 묶어(xfade:true) 내보낸다.
 function buildEDL() {
   const bounds = new Set([0]);
   for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
   const pts = [...bounds].sort((a, b) => a - b);
   const segs = [];
+  let skipUntil = -Infinity;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1];
     if (b - a < 0.001) continue;
+    if (a < skipUntil - 0.001) continue;   // 크로스페이드 구간을 이미 통째로 넣었다
     const mid = (a + b) / 2;
-    let winner = null;
+    let winners = [];
     for (const track of _veTracks) {   // 배열 0번 = 목록 맨 위 = 합성 맨 앞 → 우선
       if (track.hidden) continue;
-      const c = clipAt(track.id, mid);
-      if (c) { winner = c; break; }
+      const here = clipsAt(track.id, mid);
+      if (here.length) { winners = here; break; }
     }
-    if (!winner) continue;   // 아무 트랙도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    if (!winners.length) continue;   // 아무 트랙도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    if (winners.length >= 2) {
+      const outC = winners[0], inC = winners[1];
+      const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
+      segs.push({
+        xfade: true, dur: overlapEnd - overlapStart,
+        fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false,
+        fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false,
+      });
+      skipUntil = overlapEnd;
+      continue;
+    }
+    const winner = winners[0];
     const segStart = winner.inOff + (a - winner.start);
     const segEnd = winner.inOff + (b - winner.start);
     const last = segs[segs.length - 1];
-    if (last && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) last.end = segEnd;
+    if (last && !last.xfade && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) last.end = segEnd;
     else segs.push({ file: winner.file, start: segStart, end: segEnd, hasAudio: winner.hasAudio !== false });
   }
   return segs;
@@ -490,7 +528,7 @@ async function runExport() {
   const btn = $('ve-export');
   const label = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '0%'; }
-  const totalSec = segs.reduce((s, x) => s + (x.end - x.start), 0) || 1;
+  const totalSec = segs.reduce((s, x) => s + (x.xfade ? x.dur : (x.end - x.start)), 0) || 1;
   const off = api.video.onExportProgress(({ outTimeMs }) => {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });

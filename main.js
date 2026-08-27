@@ -876,21 +876,47 @@ ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
-  for (const s of segments) if (!fs.existsSync(s.file)) return { ok: false, error: '원본 없음: ' + s.file };
+  for (const s of segments) {
+    for (const f of (s.xfade ? [s.fileA, s.fileB] : [s.file])) {
+      if (!fs.existsSync(f)) return { ok: false, error: '원본 없음: ' + f };
+    }
+  }
 
   // 오디오 스트림이 아예 없는 소스(무음 b-roll, 화면 캡처 등)도 있다 — 그런 구간을 그냥
   // [i:a] 로 매핑하면 ffmpeg 가 "matches no streams" 로 죽는다. anullsrc 무음 입력 하나를
   // 공용으로 두고, 오디오 없는 구간만 거기서 필요한 길이만큼 잘라 쓴다.
-  const needsSilence = segments.some((s) => s.hasAudio === false);
+  const needsSilence = segments.some((s) => s.xfade ? (s.hasAudioA === false || s.hasAudioB === false) : s.hasAudio === false);
   const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y'];
-  for (const s of segments) args.push('-i', s.file);
-  const silentIdx = segments.length;
+  let nextInput = 0;
+  const idxs = segments.map((s) => {
+    if (s.xfade) { args.push('-i', s.fileA); const a = nextInput++; args.push('-i', s.fileB); const b = nextInput++; return { a, b }; }
+    args.push('-i', s.file); return { v: nextInput++ };
+  });
+  const silentIdx = nextInput;
   if (needsSilence) args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+
   const parts = [];
   segments.forEach((s, i) => {
-    parts.push(`[${i}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
-    if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
-    else parts.push(`[${i}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+    const ix = idxs[i];
+    if (s.xfade) {
+      // 같은 트랙에서 클립 두 개가 겹치도록 끌어다 놓은 구간 — 각자 겹친 부분만큼만 잘라서
+      // xfade(영상)/acrossfade(오디오)로 섞는다. 둘 다 정확히 dur 길이로 잘랐으니 offset=0.
+      const dur = s.dur.toFixed(3);
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS[xvb${i}]`);
+      parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
+      parts.push(s.hasAudioA === false
+        ? `[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
+        : `[${ix.a}:a]atrim=start=${s.aIn}:duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`);
+      parts.push(s.hasAudioB === false
+        ? `[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
+        : `[${ix.b}:a]atrim=start=${s.bIn}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
+      parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
+    } else {
+      parts.push(`[${ix.v}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
+      if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
+      else parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+    }
   });
   const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');
   parts.push(`${concatIn}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
