@@ -3924,7 +3924,7 @@ body { background: var(--bg) !important; }
 }
 .ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
-.ve-clip .ve-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; }
+.ve-clip .ve-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; pointer-events: none; }
 .ve-clip .ve-thumbs img { height: 100%; flex: 1 1 auto; object-fit: cover; min-width: 0; }
 
 .ve-playhead {

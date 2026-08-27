@@ -6,6 +6,7 @@
 import { t as tr } from './i18n.js';
 import { esc } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
+import { getClipThumb } from './video-thumbs.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -245,6 +246,13 @@ function wireReorder(e, vt) {
 }
 
 // ── 클립 ────────────────────────────────────────────
+function paintThumbs(clip) {
+  // renderClips() 가 통째로 다시 그려버렸을 수 있으니(비동기 완료 시점), 그때마다 지금
+  // 화면에 있는 엘리먼트를 다시 찾는다 — 없으면(트랙 삭제 등으로 사라짐) 조용히 넘어간다.
+  const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"] .ve-thumbs`);
+  if (!el || !clip._thumbUrls) return;
+  el.innerHTML = clip._thumbUrls.map(u => `<img src="${u}" draggable="false">`).join('');
+}
 function renderClips() {
   document.querySelectorAll('.ve-lane').forEach(lane => {
     const trackId = Number(lane.dataset.trackId);
@@ -256,7 +264,7 @@ function renderClips() {
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
-      el.innerHTML = `<span class="ve-clip-lbl">${esc(c.name)}</span>
+      el.innerHTML = `<div class="ve-thumbs"></div><span class="ve-clip-lbl">${esc(c.name)}</span>
         <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
       el.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('ve-trim')) return;
@@ -267,6 +275,8 @@ function renderClips() {
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
       area.appendChild(el);
+      const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
+      if (cached) paintThumbs(c);
     }
   });
 }
