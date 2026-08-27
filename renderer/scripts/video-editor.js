@@ -706,8 +706,9 @@ function buildEDL() {
       if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: clip.inOff + (a - clip.start), end: clip.inOff + (b - clip.start) });
     }
 
-    if (relevantVideo.length >= 2) {
-      // PIP 등 여러 트랙이 동시에 화면에 보여야 하는 구간.
+    if (!topFillsFrame) {
+      // PIP 등 화면을 꽉 채우지 않는 트랙이 맨 위에 있는 구간 — 다른 트랙과 안 겹쳐도(트랙이
+      // 이거 하나뿐이어도) 검은 배경 위에 위치·크기를 반영해서 그려야 한다(미리보기와 맞추기).
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];

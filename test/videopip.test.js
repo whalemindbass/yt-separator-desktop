@@ -5,7 +5,7 @@
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
 const { spawnSync } = require('child_process');
-const { app } = require('electron');
+const { app, dialog } = require('electron');
 
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'yss-vepip-profile-')));
 
@@ -28,7 +28,7 @@ function makeClip(file, color, freq, seconds) {
 makeClip(RED, 'red', 440, 3);
 makeClip(BLUE, 'blue', 880, 3);
 
-const { bootMain, expect, near, section, finish } = require('./harness');
+const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
 (async () => {
   const { app, js } = await bootMain({ settle: 1500 });
@@ -88,6 +88,45 @@ const { bootMain, expect, near, section, finish } = require('./harness');
     const stderr = vd.stderr || '';
     const mean = parseFloat((/mean_volume:\s*(-?[\d.]+)/.exec(stderr) || [])[1] ?? '-999');
     expect('평균 음량이 무음(-90dB 이하)이 아님', mean > -80, true);
+  }
+
+  section('5) 단독 트랙 PIP — 다른 트랙 없어도 위치/크기가 내보내기에 반영돼야 함');
+  // 실제 UI 흐름(임포트 → PIP 팝오버 조작 → 내보내기)으로 buildEDL() 의 topFillsFrame 분기
+  // 수정(관련 트랙이 하나뿐이어도 layers 경로를 타야 함)까지 끝까지 검증한다.
+  const OUT2 = path.join(TMP, 'out2.mp4');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [RED] });
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT2 });
+  await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
+  await wait(300);
+  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-import').click(); true`);
+  let n2 = 0;
+  for (let i = 0; i < 40; i++) {
+    n2 = await js(`document.querySelectorAll('.ve-clip').length`);
+    if (n2 >= 1) break;
+    await wait(300);
+  }
+  expect('단독 트랙에 클립 1개 임포트됨', n2 >= 1, true);
+  await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
+  await js(`(() => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('pip-x', 70); set('pip-y', 10); set('pip-scale', 25);
+  })(); true`);
+  await js(`document.getElementById('ve-export').click(); true`);
+  for (let i = 0; i < 60; i++) {
+    if (fs.existsSync(OUT2)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
+    await wait(500);
+  }
+  expect('단독 PIP 트랙 내보내기 파일 생김', fs.existsSync(OUT2), true);
+  if (fs.existsSync(OUT2)) {
+    const RAW2 = path.join(TMP, 'frame2.raw');
+    spawnSync(FFMPEG, ['-y', '-ss', '0.5', '-i', OUT2, '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, RAW2], { stdio: 'ignore' });
+    const buf2 = fs.readFileSync(RAW2);
+    const px2 = (x, y) => { const o = (y * W + x) * 3; return { r: buf2[o], g: buf2[o + 1], b: buf2[o + 2] }; };
+    const bg = px2(10, 200);     // PIP 박스(대략 x210-290,y24-84) 밖 — 검은 배경이어야 함
+    const box = px2(250, 50);    // PIP 박스 안 — red 여야 함
+    expect('배경은 검정(트랙이 하나뿐이어도 화면을 안 채움)', bg.r < 25 && bg.g < 25 && bg.b < 25, true);
+    expect('PIP 박스 안은 빨강', box.r > box.g + 40 && box.r > box.b + 40, true);
   }
 
   finish(app);
