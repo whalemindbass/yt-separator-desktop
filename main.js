@@ -825,6 +825,9 @@ function getEngine() {
       let take = null;
       if (crashed && lastRecordFile) take = repairWav(lastRecordFile);
       lastRecordFile = null;
+      // 엔진(네이티브 프로세스)이 비정상 종료하면 JS 스택트레이스가 없다 — 재현 없이는 원인을
+      // 알 방법이 없었다. 직전에 보낸 명령이라도 남겨두면 다음에 같은 크래시가 나도 실마리가 된다.
+      if (crashed) noteCrash('engine', null, { message: '오디오 엔진 비정상 종료', exitCode: c, lastCmd: lastEngineCmd });
       try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c, crashed: !!crashed, take }); } catch {}
     });
   }
@@ -834,9 +837,19 @@ ipcMain.handle('engine:start', (_e, stems) => {
   const eng = getEngine();
   return { ok: eng.start(Array.isArray(stems) ? stems : []), exe: eng.exePath };
 });
+// 엔진이 죽었을 때 "직전에 뭘 시켰는지" 알 수 있게 마지막 명령을 남겨둔다(크래시 진단용).
+// base64 프리셋 데이터처럼 큰 값은 크기만 남기고 실제 값은 버린다.
+let lastEngineCmd = null;
+function summarizeCmd(cmd) {
+  if (!cmd || typeof cmd !== 'object') return cmd ?? null;
+  const out = {};
+  for (const [k, v] of Object.entries(cmd)) out[k] = (typeof v === 'string' && v.length > 80) ? `<${v.length}B>` : v;
+  return out;
+}
 ipcMain.handle('engine:cmd',  (_e, cmd) => {
   // 정상적으로 멈췄으면 파일은 엔진이 마무리한다 — 되살릴 대상이 아니다
   if (cmd && cmd.cmd === 'recordStop') lastRecordFile = null;
+  lastEngineCmd = summarizeCmd(cmd);
   return { ok: getEngine().send(cmd) };
 });
 ipcMain.handle('engine:recordArm', () => {
