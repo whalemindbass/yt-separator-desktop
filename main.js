@@ -884,78 +884,119 @@ ipcMain.handle('video:probeAudio', async (_ev, file) => {
     proc.on('close', (code) => resolve({ hasAudio: code !== 0 ? true : out.trim().length > 0 }));
   });
 });
-// 영상 편집 탭 내보내기 — 컷 편집 전용(v1). 렌더러가 "이 순간엔 어느 트랙이 위인가"만으로
-// 미리 만든 한 줄 구간 목록(EDL)을 그대로 trim+concat 한다 — 트랙이 겹칠 때 쓰는
-// overlay/xfade 는 아직 없다(미리보기도 아직 컷 편집만 지원하니 대칭적으로 맞춘 것).
+// 영상 편집 탭 내보내기(v2) — 컷 편집 + 트랙 겹침(PIP overlay) + 여러 오디오 트랙 믹스.
+// 렌더러 buildEDL() 이 구간별로 layers(겹친 영상 트랙들)/audioSources(N개 오디오 트랙)를
+// 미리 계산해서 넘긴다 — 여기선 그 구간 정보를 filter_complex 로 옮기기만 한다.
 ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
-  for (const s of segments) {
-    const files = s.xfade ? [s.fileA, s.fileB] : [s.file];
-    if (s.audioFile) files.push(s.audioFile);   // 영상과 오디오가 서로 다른 파일(짝지어 임포트된 영상/오디오 트랙)
-    for (const f of files) {
-      if (!fs.existsSync(f)) return { ok: false, error: '원본 없음: ' + f };
-    }
-  }
 
-  // 오디오 스트림이 아예 없는 소스(무음 b-roll, 화면 캡처 등)도 있다 — 그런 구간을 그냥
-  // [i:a] 로 매핑하면 ffmpeg 가 "matches no streams" 로 죽는다. anullsrc 무음 입력 하나를
-  // 공용으로 두고, 오디오 없는 구간만 거기서 필요한 길이만큼 잘라 쓴다.
-  const needsSilence = segments.some((s) => s.xfade ? (s.hasAudioA === false || s.hasAudioB === false) : s.hasAudio === false);
-  // mp3/wav 처럼 영상 트랙이 아예 없는 구간(배경음악 등) — 검은 화면을 대신 채워야 한다.
-  // 해상도는 렌더러가 프로젝트 안의 실제 영상 클립에서 골라 보낸 값(refW/refH)을 쓴다.
-  const audioOnlySeg = segments.find((s) => !s.xfade && s.isAudioOnly);
-  const needsBlackVideo = !!audioOnlySeg;
+  const allFiles = new Set();
+  for (const s of segments) {
+    if (s.xfade) { allFiles.add(s.fileA); allFiles.add(s.fileB); }
+    if (s.file) allFiles.add(s.file);
+    if (s.layers) for (const l of s.layers) allFiles.add(l.file);
+    if (s.audioSources) for (const a of s.audioSources) allFiles.add(a.file);
+  }
+  for (const f of allFiles) if (!fs.existsSync(f)) return { ok: false, error: '원본 없음: ' + f };
+
   const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y'];
   let nextInput = 0;
-  const idxs = segments.map((s) => {
-    if (s.xfade) { args.push('-i', s.fileA); const a = nextInput++; args.push('-i', s.fileB); const b = nextInput++; return { a, b }; }
-    args.push('-i', s.file); const v = nextInput++;
-    // 영상 임포트가 영상/오디오 트랙을 나눠 놓은 짝 클립 — 오디오가 다른 파일(다른 -i)에서 온다.
-    if (s.audioFile && s.audioFile !== s.file) { args.push('-i', s.audioFile); return { v, aFile: nextInput++ }; }
-    return { v };
-  });
-  const silentIdx = nextInput;
-  if (needsSilence) { args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'); nextInput++; }
-  const blackIdx = nextInput;
-  if (needsBlackVideo) args.push('-f', 'lavfi', '-i', `color=black:size=${audioOnlySeg.refW || 1280}x${audioOnlySeg.refH || 720}:rate=30`);
+  // 같은 파일이 여러 구간·레이어·오디오소스에서 반복 참조될 수 있다 — 파일당 -i 하나만 열고
+  // filter_complex 안에서 같은 입력 인덱스를 여러 번(다른 trim 범위로) 재사용한다.
+  const fileIdx = new Map();
+  function inputIndexFor(file) {
+    if (fileIdx.has(file)) return fileIdx.get(file);
+    args.push('-i', file);
+    const idx = nextInput++;
+    fileIdx.set(file, idx);
+    return idx;
+  }
+  const idxs = segments.map((s) => (s.xfade ? { a: inputIndexFor(s.fileA), b: inputIndexFor(s.fileB) } : null));
+
+  // 오디오 스트림이 없는 소스·오디오소스가 0개인 구간을 위한 공용 무음 입력(지연 생성).
+  let silentIdx = -1;
+  function ensureSilent() {
+    if (silentIdx < 0) { args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'); silentIdx = nextInput++; }
+    return silentIdx;
+  }
+  // 영상 트랙이 없는 구간(mp3/wav 단독, PIP 배경)을 위한 공용 검은 화면 입력(지연 생성).
+  let blackIdx = -1;
+  function ensureBlack(w, h) {
+    if (blackIdx < 0) { args.push('-f', 'lavfi', '-i', `color=black:size=${w || 1280}x${h || 720}:rate=30`); blackIdx = nextInput++; }
+    return blackIdx;
+  }
 
   const parts = [];
+  // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
+  function buildAudio(sources, dur, label) {
+    const d = dur.toFixed(3);
+    if (!sources || !sources.length) {
+      parts.push(`[${ensureSilent()}:a]atrim=duration=${d},asetpts=PTS-STARTPTS[${label}]`);
+      return;
+    }
+    if (sources.length === 1) {
+      const s = sources[0];
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[${label}]`);
+      return;
+    }
+    const subs = sources.map((s, j) => {
+      const lb = `${label}_s${j}`;
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[${lb}]`);
+      return `[${lb}]`;
+    });
+    parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
+  }
+
   segments.forEach((s, i) => {
-    const ix = idxs[i];
     if (s.xfade) {
       // 같은 트랙에서 클립 두 개가 겹치도록 끌어다 놓은 구간 — 각자 겹친 부분만큼만 잘라서
       // xfade(영상)/acrossfade(오디오)로 섞는다. 둘 다 정확히 dur 길이로 잘랐으니 offset=0.
+      const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS[xva${i}]`);
       parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
-        ? `[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
+        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
         : `[${ix.a}:a]atrim=start=${s.aIn}:duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`);
       parts.push(s.hasAudioB === false
-        ? `[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
+        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
         : `[${ix.b}:a]atrim=start=${s.bIn}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
+    } else if (s.layers) {
+      // 트랙 겹침(PIP) — 검은 배경부터 시작해 아래→위 순서로 overlay 를 쌓는다.
+      // s.layers 는 위(화면 앞)→아래 순서로 와 있으니 뒤집어서 처리.
+      const w = s.refW || 1280, h = s.refH || 720;
+      const bIdx = ensureBlack(w, h);
+      let base = `v${i}_base`;
+      parts.push(`[${bIdx}:v]trim=duration=${s.dur.toFixed(3)},setpts=PTS-STARTPTS,scale=${w}:${h}[${base}]`);
+      [...s.layers].reverse().forEach((layer, li) => {
+        const raw = `v${i}_l${li}`;
+        const tf = layer.transform;
+        const lw = tf ? Math.max(2, Math.round(w * tf.scale)) : w;
+        const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
+        const lx = tf ? Math.round(w * tf.x) : 0;
+        const ly = tf ? Math.round(h * tf.y) : 0;
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end},setpts=PTS-STARTPTS,scale=${lw}:${lh}[${raw}]`);
+        const next = `v${i}_s${li}`;
+        parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
+        base = next;
+      });
+      parts.push(`[${base}]null[v${i}]`);
+      buildAudio(s.audioSources, s.dur, `a${i}`);
     } else if (s.isAudioOnly) {
-      // 영상 트랙이 없는 구간(mp3/wav) — 공용 검은 화면 입력을 이 구간 길이만큼 잘라 쓰고,
-      // 오디오는 원본 파일에서 그대로(원본은 이미 -i 로 들어가 있다 — 영상 스트림만 없을 뿐).
-      const dur = (s.end - s.start).toFixed(3);
-      parts.push(`[${blackIdx}:v]trim=duration=${dur},setpts=PTS-STARTPTS[v${i}]`);
-      if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[a${i}]`);
-      else parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
+      // 영상 트랙이 없는 구간(mp3/wav 단독) — 공용 검은 화면을 이 구간 길이만큼 잘라 쓴다.
+      const w = s.refW || 1280, h = s.refH || 720;
+      const bIdx = ensureBlack(w, h);
+      const dur = s.dur != null ? s.dur : (s.end - s.start);
+      parts.push(`[${bIdx}:v]trim=duration=${dur.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`);
+      buildAudio(s.audioSources, dur, `a${i}`);
     } else {
-      parts.push(`[${ix.v}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
-      if (s.hasAudio === false) {
-        parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);
-      } else if (s.audioFile) {
-        // 영상/오디오가 별도 트랙(짝지어 임포트)에서 왔다 — 오디오는 그쪽 파일·구간을 쓴다.
-        const audIx = ix.aFile != null ? ix.aFile : ix.v;
-        parts.push(`[${audIx}:a]atrim=start=${s.audioStart}:end=${s.audioEnd},asetpts=PTS-STARTPTS[a${i}]`);
-      } else {
-        parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
-      }
+      const dur = s.dur != null ? s.dur : (s.end - s.start);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
+      buildAudio(s.audioSources, dur, `a${i}`);
     }
   });
   const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');

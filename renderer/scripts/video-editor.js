@@ -52,7 +52,7 @@ function scheduleSave() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
-      tracks: _veTracks.map(({ id, name, color, height, hidden, kind }) => ({ id, name, color, height, hidden, kind })),
+      tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
       clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId }) =>
         ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId })),
     });
@@ -151,7 +151,63 @@ function ensureLayers() {
     }
     const z = String(_veTracks.length - i);
     pair.a.style.zIndex = z; pair.b.style.zIndex = z;
+    applyTrackTransform(pair, t);
   });
+}
+// 트랙 단위 위치/크기(PIP) — 레이어 그림을 다루듯 구석에 작게 놓거나 확대할 수 있게.
+// 애니메이션(키프레임)은 v1 범위 밖 — 트랙 전체에 고정값 하나만 적용한다.
+function defaultTransform() { return { x: 0, y: 0, scale: 1 }; }
+function applyTrackTransform(pair, track) {
+  const tf = track.transform || defaultTransform();
+  for (const el of [pair.a, pair.b]) {
+    el.style.left = (tf.x * 100) + '%';
+    el.style.top = (tf.y * 100) + '%';
+    el.style.width = (tf.scale * 100) + '%';
+    el.style.height = (tf.scale * 100) + '%';
+  }
+}
+// ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다. 레이어처럼 구석에 작게 놓거나
+// 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나).
+let _pipPopoverEl = null;
+function onOutsidePip(e) { if (_pipPopoverEl && !_pipPopoverEl.contains(e.target)) closePipPopover(); }
+function closePipPopover() {
+  if (!_pipPopoverEl) return;
+  _pipPopoverEl.remove(); _pipPopoverEl = null;
+  document.removeEventListener('pointerdown', onOutsidePip, true);
+}
+function openPipPopover(track, anchorEl) {
+  closePipPopover();
+  const tf = track.transform || defaultTransform();
+  const r = anchorEl.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 've-pip-pop';
+  pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  pop.innerHTML = `
+    <label>${tr('video.pipX')}<input type="number" id="pip-x" min="0" max="100" step="1" value="${Math.round(tf.x * 100)}">%</label>
+    <label>${tr('video.pipY')}<input type="number" id="pip-y" min="0" max="100" step="1" value="${Math.round(tf.y * 100)}">%</label>
+    <label>${tr('video.pipScale')}<input type="number" id="pip-scale" min="10" max="100" step="1" value="${Math.round(tf.scale * 100)}">%</label>
+    <button class="mini" id="pip-reset">${tr('video.pipReset')}</button>`;
+  document.body.appendChild(pop);
+  _pipPopoverEl = pop;
+  const apply = () => {
+    const x = Math.max(0, Math.min(100, Number(pop.querySelector('#pip-x').value) || 0)) / 100;
+    const y = Math.max(0, Math.min(100, Number(pop.querySelector('#pip-y').value) || 0)) / 100;
+    const scale = Math.max(0.1, Math.min(1, (Number(pop.querySelector('#pip-scale').value) || 100) / 100));
+    const isDefault = x === 0 && y === 0 && scale === 1;
+    track.transform = isDefault ? null : { x, y, scale };
+    const pair = _layerEls.get(track.id);
+    if (pair) applyTrackTransform(pair, track);
+    anchorEl.classList.toggle('on', !isDefault);
+    scheduleSave();
+  };
+  pop.querySelector('#pip-x').addEventListener('input', apply);
+  pop.querySelector('#pip-y').addEventListener('input', apply);
+  pop.querySelector('#pip-scale').addEventListener('input', apply);
+  pop.querySelector('#pip-reset').addEventListener('click', () => {
+    pop.querySelector('#pip-x').value = 0; pop.querySelector('#pip-y').value = 0; pop.querySelector('#pip-scale').value = 100;
+    apply();
+  });
+  setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
 function clipAt(trackId, t) {
   return _veClips.find(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur) || null;
@@ -294,6 +350,7 @@ function renderLanes() {
           <span class="lbl" data-i18n-title="video.rename" title="이름 변경">${esc(trackLabel(vt))}</span>
         </div>
         <div class="ve-ctrls">
+          ${vt.kind === 'audio' ? '' : `<button class="ve-hs ve-pip${vt.transform ? ' on' : ''}" data-i18n-title="video.pip" title="위치/크기(PIP)">▭</button>`}
           <button class="ve-hs ve-hide${vt.hidden ? ' on' : ''}" data-i18n-title="video.hide" title="숨기기">H</button>
           <button class="ve-hs ve-del" data-i18n-title="video.deleteTrack" title="트랙 삭제">✕</button>
         </div>
@@ -306,6 +363,7 @@ function renderLanes() {
       lane.querySelector('.ve-hide').classList.toggle('on', vt.hidden);
       syncPreview(nowSec());
     });
+    lane.querySelector('.ve-pip')?.addEventListener('click', (e) => { e.stopPropagation(); openPipPopover(vt, e.currentTarget); });
     lane.querySelector('.ve-del').addEventListener('click', (e) => {
       e.stopPropagation();
       const removedClips = _veClips.filter(c => c.trackId === vt.id);
@@ -599,11 +657,13 @@ function ungroupSelected() {
 }
 
 // ── 내보내기 ────────────────────────────────────────
-// "이 순간엔 어느 트랙이 위인가"만으로 한 줄 구간 목록을 만든다(트랙 간엔 여전히 컷 —
-// 오버레이/PIP 는 다음 단계). 같은 트랙에서 클립 둘이 겹치면 미리보기와 똑같이 그 겹친
-// 구간 전체를 크로스페이드 구간 하나로 묶어(xfade:true) 내보낸다.
-// v1 범위: 오디오 트랙은 한 번에 하나만 반영한다(여러 오디오 트랙을 동시에 믹싱하는 건
-// 다음 단계) — 임포트가 항상 영상 1개당 오디오 1개로 짝짓기만 하니 실사용에선 충분하다.
+// 트랙 목록 위→아래가 곧 화면 앞→뒤다. 맨 위(가장 앞) 트랙이 화면을 꽉 채우면(기본값,
+// PIP 안 씀) 그 아래는 안 보이니 예전처럼 단순 컷 하나로 나간다 — 맨 위 트랙에 위치/크기
+// (PIP) 를 줘서 화면 일부만 덮으면, 그 순간 살아있는 트랙 전부를 레이어로 겹쳐 넣는다.
+// 오디오는 트랙 자체 오디오(레거시)+오디오 트랙들을 전부 모아서(여러 개면 main.js 가
+// amix 로 섞는다) — 오디오 트랙은 이제 몇 개든 동시에 반영된다.
+// v1 범위: 크로스페이드(같은 트랙 클립 겹침)는 PIP 레이어가 동시에 있는 구간에선 지원하지
+// 않는다(그 순간엔 먼저 시작한 클립만 쓴다) — 흔치 않은 조합이라 다음 단계로 미룬다.
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 프로젝트 안의 실제 영상 클립에서 가져온다.
@@ -623,70 +683,63 @@ function buildEDL() {
     if (a < skipUntil - 0.001) continue;   // 크로스페이드 구간을 이미 통째로 넣었다
     const mid = (a + b) / 2;
 
-    let winners = [];
-    for (const track of videoTracks) {   // 배열 순서 = 목록 위→아래 = 합성 맨 앞 우선
+    const activeVideo = [];
+    for (const track of videoTracks) {   // 배열 순서 = 목록 위→아래 = 화면 앞→뒤
       if (track.hidden) continue;
       const here = clipsAt(track.id, mid);
-      if (here.length) { winners = here; break; }
+      if (here.length) activeVideo.push({ track, clips: here });
     }
-    let audioClip = null;
+    const top = activeVideo[0];
+    const topFillsFrame = !top || !top.track.transform;   // 기본 transform = 화면 꽉 채움
+    const relevantVideo = topFillsFrame ? (top ? [top] : []) : activeVideo;
+
+    // 오디오 소스 모으기 — 화면에 실제로 반영되는 영상 트랙들의 자체 오디오(있으면) +
+    // 오디오 트랙 전부(숨김 제외). 몇 개든 상관없이 다 담는다 — main.js 가 섞는다.
+    const audioSources = [];
+    for (const { clips } of relevantVideo) {
+      const c = clips[0];
+      if (c.hasAudio !== false) audioSources.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start) });
+    }
     for (const track of audioTracks) {
       if (track.hidden) continue;
-      const c = clipAt(track.id, mid);
-      if (c && c.hasAudio !== false) { audioClip = c; break; }
+      const clip = clipAt(track.id, mid);
+      if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: clip.inOff + (a - clip.start), end: clip.inOff + (b - clip.start) });
     }
 
-    if (winners.length >= 2) {
-      // 같은 트랙 안 크로스페이드 — 겹친 순간과 동시에 별도 오디오 트랙까지 섞는 건
-      // 다음 단계로 미룬다(흔치 않은 조합).
-      const outC = winners[0], inC = winners[1];
-      const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
+    if (relevantVideo.length >= 2) {
+      // PIP 등 여러 트랙이 동시에 화면에 보여야 하는 구간.
       segs.push({
-        xfade: true, dur: overlapEnd - overlapStart,
-        fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false,
-        fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false,
+        layers: relevantVideo.map(({ track, clips }) => {
+          const c = clips[0];
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform };
+        }),
+        audioSources, refW, refH, dur: b - a,
       });
-      skipUntil = overlapEnd;
       continue;
     }
 
-    if (winners.length === 1) {
-      const winner = winners[0];
-      const segStart = winner.inOff + (a - winner.start);
-      const segEnd = winner.inOff + (b - winner.start);
-      // 영상 클립 자체가 소리를 내면(예전 프로젝트, 짝 없는 임포트) 그걸 쓰고, 아니면
-      // 짝지어진(또는 그냥 같이 걸린) 오디오 트랙 클립을 대신 쓴다.
-      const useOwnAudio = winner.hasAudio !== false;
-      // 자기 오디오를 쓰는 단순한 경우만 인접 구간을 하나로 합친다(세그먼트 수를 줄여
-      // ffmpeg 입력을 아낀다) — 외부 오디오 트랙을 쓰는 경우는 그 트랙의 경계마다 이미
-      // 정확히 구간이 나뉘어 있으니 합칠 필요가 없다(억지로 합치려다 위치 계산을 틀리기
-      // 쉽다).
-      if (useOwnAudio) {
-        const last = segs[segs.length - 1];
-        if (last && !last.xfade && !last.isAudioOnly && !last.audioFile && last.hasAudio && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) {
-          last.end = segEnd;
-          continue;
-        }
+    if (relevantVideo.length === 1) {
+      const { clips } = relevantVideo[0];
+      if (clips.length >= 2) {
+        // 같은 트랙 안 크로스페이드(겹쳐 끌어다 놓은 두 클립).
+        const outC = clips[0], inC = clips[1];
+        const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
+        segs.push({
+          xfade: true, dur: overlapEnd - overlapStart,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false,
+        });
+        skipUntil = overlapEnd;
+        continue;
       }
-      const seg = { file: winner.file, start: segStart, end: segEnd, refW, refH };
-      if (useOwnAudio) { seg.hasAudio = true; }
-      else if (audioClip) {
-        seg.hasAudio = true;
-        seg.audioFile = audioClip.file;
-        seg.audioStart = audioClip.inOff + (a - audioClip.start);
-        seg.audioEnd = audioClip.inOff + (b - audioClip.start);
-      } else { seg.hasAudio = false; }
-      segs.push(seg);
+      const c = clips[0];
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a });
       continue;
     }
 
-    // 영상 트랙엔 아무도 없다 — 오디오 트랙만 있으면 검은 화면 + 그 오디오로 채운다.
-    if (!audioClip) continue;   // 둘 다 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
-    const segStart = audioClip.inOff + (a - audioClip.start);
-    const segEnd = audioClip.inOff + (b - audioClip.start);
-    const last = segs[segs.length - 1];
-    if (last && last.isAudioOnly && last.file === audioClip.file && Math.abs(last.end - segStart) < 0.005) { last.end = segEnd; continue; }
-    segs.push({ isAudioOnly: true, file: audioClip.file, start: segStart, end: segEnd, hasAudio: true, refW, refH });
+    // 영상 트랙엔 아무도 없다 — 오디오 트랙만 있으면 검은 화면 + 그 오디오들로 채운다.
+    if (!audioSources.length) continue;   // 아무것도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    segs.push({ isAudioOnly: true, audioSources, refW, refH, dur: b - a });
   }
   return segs;
 }
@@ -699,7 +752,7 @@ async function runExport() {
   const btn = $('ve-export');
   const label = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '0%'; }
-  const totalSec = segs.reduce((s, x) => s + (x.xfade ? x.dur : (x.end - x.start)), 0) || 1;
+  const totalSec = segs.reduce((s, x) => s + (x.dur != null ? x.dur : (x.end - x.start)), 0) || 1;
   const off = api.video.onExportProgress(({ outTimeMs }) => {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
