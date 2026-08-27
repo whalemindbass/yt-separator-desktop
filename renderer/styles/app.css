@@ -3864,7 +3864,8 @@ body { background: var(--bg) !important; }
   cursor: pointer; font-size: 13px; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .ve-tbtn:hover { background: var(--elev-2); color: var(--tx-1); }
-.ve-tbtn.ve-play.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.ve-tbtn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+.ve-tbtn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .ve-time { font: 500 12.5px/1 var(--mono); color: var(--tx-2); min-width: 84px; text-align: center; }
 
 .ve-preview-wrap {
@@ -3894,7 +3895,7 @@ body { background: var(--bg) !important; }
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
 .ve-ruler-ctrl { flex: 0 0 172px; border-right: 1px solid var(--border); }
-.ve-ruler { position: relative; height: 26px; flex: 1 0 auto; min-width: 100%; }
+.ve-ruler { position: relative; height: 26px; flex: 1 0 auto; min-width: 100%; cursor: pointer; }
 .ve-ruler .tk { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-mid); }
 .ve-ruler .tk span { position: absolute; top: 3px; left: 4px; font: 400 10px/1 var(--mono); color: var(--tx-3); }
 

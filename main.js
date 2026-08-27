@@ -827,7 +827,7 @@ function getEngine() {
       lastRecordFile = null;
       // 엔진(네이티브 프로세스)이 비정상 종료하면 JS 스택트레이스가 없다 — 재현 없이는 원인을
       // 알 방법이 없었다. 직전에 보낸 명령이라도 남겨두면 다음에 같은 크래시가 나도 실마리가 된다.
-      if (crashed) noteCrash('engine', null, { message: '오디오 엔진 비정상 종료', exitCode: c, lastCmd: lastEngineCmd });
+      if (crashed) noteCrash('engine', null, { message: `오디오 엔진 비정상 종료`, exitCode: c, lastCmd: lastEngineCmd });
       try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c, crashed: !!crashed, take }); } catch {}
     });
   }
@@ -945,6 +945,13 @@ ipcMain.handle('video:export', async (event, payload) => {
   function scalePad(w, h) {
     return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
   }
+  // 클립 단위 좌우/상하 반전 — 필터 체인에 끼워 넣을 조각(없으면 빈 문자열).
+  function flipFrag(flipH, flipV) {
+    const fs = [];
+    if (flipH) fs.push('hflip');
+    if (flipV) fs.push('vflip');
+    return fs.length ? ',' + fs.join(',') : '';
+  }
 
   const parts = [];
   // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
@@ -974,8 +981,8 @@ ipcMain.handle('video:export', async (event, payload) => {
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS,${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS,${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
@@ -998,7 +1005,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end},setpts=PTS-STARTPTS,scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1015,7 +1022,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS,${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });
