@@ -1169,8 +1169,17 @@ public:
             old.swap (*chain);
             *chain = std::move (next);
         }
-        for (auto& s : old) if (s) s->editor.reset();   // message 스레드에서 정리
-        old.clear();
+        // 재생 중 첫 톤 로드는 old 가 비어 있어 무해하지만, 두 번째부터는 old 에 방금까지
+        // 실제로 소리를 내던(막 processBlock 되던) 플러그인이 들어있다 — 그 에디터/인스턴스를
+        // 이 dispatch 콜백(callAsync) 안에서 바로 부수면, 같은 플러그인이 자기 내부적으로
+        // 예약해 둔 후속 콜백과 겹쳐 죽을 수 있다. 다음 메시지 루프 틱으로 한 번 미룬다
+        // (여전히 message 스레드, 여전히 안전 — 그냥 "지금 이 순간"만 피한다).
+        auto oldKeep = std::make_shared<std::vector<std::unique_ptr<FxSlot>>> (std::move (old));
+        MessageManager::callAsync ([oldKeep]
+        {
+            for (auto& s : *oldKeep) if (s) s->editor.reset();
+            oldKeep->clear();
+        });
         recomputePdc();
         if (failed > 0) { auto* e = ev ("fxError"); e->setProperty ("trackId", trackId); e->setProperty ("failed", failed); emit (var (e)); }
         emitChainId (trackId, *chain);
