@@ -21,6 +21,7 @@ let _veClips = [];    // [{id, trackId, file, name, start, inOff, srcDur, dur, w
 let _trackSeq = 0, _clipSeq = 0;
 let _pxPerSec = 40;
 let _selClipId = null;
+let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
 
 function nextTrackId() { return ++_trackSeq; }
@@ -55,6 +56,7 @@ function scheduleSave() {
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
       clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId }) =>
         ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId })),
+      resolution: _veResolution,
     });
   }, 600);
 }
@@ -67,8 +69,10 @@ async function loadProject() {
     _veClips = p.clips || [];
     _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
     _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
+    _veResolution = p.resolution || null;
     ensureLayers();
   }
+  syncResUI();
 }
 
 // ── 재생 시계 (엔진 없음 — rAF 로 직접 잰다) ──────────────
@@ -257,6 +261,42 @@ function syncPreview(t) {
   return any;
 }
 
+// ── 렌더(내보내기) 해상도 — buildEDL()/미리보기 프레임 크기가 여기서 나온다.
+// 사용자가 고르지 않았으면 예전처럼 프로젝트의 첫 영상 클립 크기를 그대로 쓴다(자동).
+function getResolution() {
+  if (_veResolution) return _veResolution;
+  const c = _veClips.find(c => !c.isAudioOnly && c.w && c.h);
+  return c ? { w: c.w, h: c.h } : { w: 1280, h: 720 };
+}
+// _veResolution → 해상도 선택 UI(드롭다운/사용자 지정 칸) 표시를 맞춘다(프로젝트 복원 시 등).
+function syncResUI() {
+  const resSel = $('ve-res'), resCustom = $('ve-res-custom'), resW = $('ve-res-w'), resH = $('ve-res-h');
+  if (!resSel) return;
+  if (!_veResolution) { resSel.value = 'auto'; if (resCustom) resCustom.hidden = true; return; }
+  const preset = `${_veResolution.w}x${_veResolution.h}`;
+  if ([...resSel.options].some(o => o.value === preset)) {
+    resSel.value = preset; if (resCustom) resCustom.hidden = true;
+  } else {
+    resSel.value = 'custom';
+    if (resCustom) resCustom.hidden = false;
+    if (resW) resW.value = _veResolution.w;
+    if (resH) resH.value = _veResolution.h;
+  }
+}
+// 미리보기 틀(#ve-preview) 크기를 실제 렌더 해상도 비율대로 정확히 맞춘다 — 이게 없으면
+// 미리보기가 그냥 패널을 꽉 채워서, 어디까지가 진짜 출력 프레임이고 어디부터가 여백인지
+// 구분이 안 됐다(PIP 위치도 이 틀 기준 퍼센트라 틀이 틀리면 미리보기와 실제 결과물이 어긋난다).
+function sizePreviewFrame() {
+  const wrap = $('ve-preview-wrap'), host = $('ve-preview');
+  if (!wrap || !host) return;
+  const availW = wrap.clientWidth, availH = wrap.clientHeight;
+  if (!availW || !availH) return;
+  const { w, h } = getResolution();
+  const scale = Math.min(availW / w, availH / h);
+  host.style.width = Math.max(1, Math.round(w * scale)) + 'px';
+  host.style.height = Math.max(1, Math.round(h * scale)) + 'px';
+}
+
 // ── 타임라인 크기 ──────────────────────────────────────
 function fullSec() {
   const sc = $('ve-tscroll');
@@ -286,6 +326,7 @@ function layout() {
   }
   renderClips();
   updatePlayheadUI();
+  sizePreviewFrame();
   syncPreview(nowSec());   // 임포트·트림·분할·삭제 등으로 배치가 바뀌면 미리보기도 바로 반영
   const empty = $('ve-empty'); if (empty) empty.hidden = _veClips.length > 0;
   if (_loaded) scheduleSave();   // 복원 도중(초기 렌더)엔 저장할 필요 없다
@@ -666,9 +707,8 @@ function ungroupSelected() {
 // 않는다(그 순간엔 먼저 시작한 클립만 쓴다) — 흔치 않은 조합이라 다음 단계로 미룬다.
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
-  // 검은 화면을 대신 채워야 한다 — 해상도는 프로젝트 안의 실제 영상 클립에서 가져온다.
-  const refClip = _veClips.find(c => !c.isAudioOnly && c.w && c.h);
-  const refW = refClip?.w || 1280, refH = refClip?.h || 720;
+  // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
+  const { w: refW, h: refH } = getResolution();
   const videoTracks = _veTracks.filter(t => t.kind !== 'audio');
   const audioTracks = _veTracks.filter(t => t.kind === 'audio');
 
@@ -729,6 +769,7 @@ function buildEDL() {
           xfade: true, dur: overlapEnd - overlapStart,
           fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false,
           fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false,
+          refW, refH,
         });
         skipUntil = overlapEnd;
         continue;
@@ -880,6 +921,35 @@ function wire() {
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
   $('ve-export')?.addEventListener('click', () => runExport());
+  // 렌더 해상도 선택 — 프리셋 또는 사용자 지정. 미리보기 틀 크기·PIP 좌표 기준·내보내기
+  // 결과물 크기가 전부 이걸 따른다(getResolution()).
+  const resSel = $('ve-res'), resCustom = $('ve-res-custom'), resW = $('ve-res-w'), resH = $('ve-res-h');
+  function applyResSelection() {
+    const v = resSel?.value;
+    if (v === 'custom') {
+      if (resCustom) resCustom.hidden = false;
+      // yuv420p 인코딩은 가로/세로가 홀수면 실패한다 — 짝수로 반올림.
+      const w = Math.max(2, Math.round((Number(resW?.value) || 1920) / 2) * 2);
+      const h = Math.max(2, Math.round((Number(resH?.value) || 1080) / 2) * 2);
+      _veResolution = { w, h };
+    } else if (v === 'auto') {
+      if (resCustom) resCustom.hidden = true;
+      _veResolution = null;
+    } else {
+      if (resCustom) resCustom.hidden = true;
+      const [w, h] = (v || '').split('x').map(Number);
+      _veResolution = (w && h) ? { w, h } : null;
+    }
+    sizePreviewFrame();
+    syncPreview(nowSec());
+    scheduleSave();
+  }
+  resSel?.addEventListener('change', applyResSelection);
+  resW?.addEventListener('input', applyResSelection);
+  resH?.addEventListener('input', applyResSelection);
+  // 미리보기 패널 크기가 바뀔 때마다(창 크기 조절 등) 렌더 프레임 틀도 다시 맞춘다.
+  const previewWrap = $('ve-preview-wrap');
+  if (previewWrap) new ResizeObserver(() => sizePreviewFrame()).observe(previewWrap);
   $('ve-tscroll')?.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();

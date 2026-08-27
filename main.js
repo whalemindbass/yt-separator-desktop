@@ -927,6 +927,11 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (blackIdx < 0) { args.push('-f', 'lavfi', '-i', `color=black:size=${w || 1280}x${h || 720}:rate=30`); blackIdx = nextInput++; }
     return blackIdx;
   }
+  // 구간마다 소스 해상도가 다를 수 있다(사용자가 고른 렌더 해상도와도 다를 수 있고) — concat 은
+  // 모든 [vN] 이 같은 크기여야 하니, 비율은 유지한 채(왜곡 없이) 검은 여백으로 맞춰 넣는다.
+  function scalePad(w, h) {
+    return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+  }
 
   const parts = [];
   // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
@@ -955,8 +960,9 @@ ipcMain.handle('video:export', async (event, payload) => {
       // xfade(영상)/acrossfade(오디오)로 섞는다. 둘 다 정확히 dur 길이로 잘랐으니 offset=0.
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS[xvb${i}]`);
+      const xw = s.refW || 1280, xh = s.refH || 720;
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS,${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS,${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
@@ -995,7 +1001,8 @@ ipcMain.handle('video:export', async (event, payload) => {
       buildAudio(s.audioSources, dur, `a${i}`);
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
+      const w = s.refW || 1280, h = s.refH || 720;
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS,${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });
@@ -1885,12 +1892,13 @@ ipcMain.handle('videoProject:load', () => {
     return {
       tracks: Array.isArray(j.tracks) ? j.tracks : [],
       clips: Array.isArray(j.clips) ? j.clips : [],
+      resolution: (j.resolution && j.resolution.w && j.resolution.h) ? j.resolution : null,
     };
   } catch { return { tracks: [], clips: [] }; }
 });
 ipcMain.handle('videoProject:save', (_ev, data) => {
   try {
-    fs.writeFileSync(videoProjectFile(), JSON.stringify({ tracks: data?.tracks || [], clips: data?.clips || [] }));
+    fs.writeFileSync(videoProjectFile(), JSON.stringify({ tracks: data?.tracks || [], clips: data?.clips || [], resolution: data?.resolution || null }));
     return true;
   } catch { return false; }
 });

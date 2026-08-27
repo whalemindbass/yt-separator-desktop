@@ -3872,8 +3872,19 @@ body { background: var(--bg) !important; }
   display: flex; align-items: center; justify-content: center;
   height: 34vh; min-height: 200px; max-height: 420px; border-bottom: 1px solid var(--border);
 }
-.ve-preview { position: relative; width: 100%; height: 100%; }
+/* #ve-preview 는 실제 렌더(내보내기) 프레임 그 자체다 — JS 가 선택된 해상도 비율대로
+   정확한 px 크기를 매겨준다(sizePreviewFrame). 그 바깥(ve-preview-wrap 의 나머지 공간)은
+   레터박스일 뿐 렌더 영역이 아니라는 걸 테두리로 구분한다. */
+.ve-preview {
+  position: relative; max-width: 100%; max-height: 100%;
+  aspect-ratio: 16 / 9;   /* JS 가 아직 못 잰 순간의 대체값(초기 렌더) */
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22), 0 2px 20px rgba(0, 0, 0, .45);
+}
 .ve-preview video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.ve-res-select { font-size: 12px; }
+.ve-res-custom { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tx-3); }
+.ve-res-custom input { width: 64px; }
 .ve-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
 }
