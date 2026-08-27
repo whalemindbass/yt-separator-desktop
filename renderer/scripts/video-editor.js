@@ -22,6 +22,8 @@ let _trackSeq = 0, _clipSeq = 0;
 let _pxPerSec = 40;
 let _selClipId = null;
 let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
+let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
+let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
 
 function nextTrackId() { return ++_trackSeq; }
@@ -301,6 +303,50 @@ function sizePreviewFrame() {
   host.style.height = Math.max(1, Math.round(h * scale)) + 'px';
 }
 
+// ── 내보내기 범위(눈금자에서 드래그로 지정) — 스튜디오와 같은 패턴 ──────
+function veTracksHeight() { return _veTracks.reduce((s, t) => s + (t.height || DEFAULT_LANE_H), 0); }
+function ensureExportEls() {
+  const ruler = $('ve-ruler');
+  if (ruler && !document.getElementById('ve-erange')) {
+    const e = document.createElement('div'); e.id = 've-erange'; e.className = 've-erange'; e.hidden = true;
+    e.innerHTML = `<div class="ve-eh l" data-i18n-title="video.adjustStart" title="${tr('video.adjustStart')}"></div><div class="ve-eh r" data-i18n-title="video.adjustEnd" title="${tr('video.adjustEnd')}"></div>`;
+    ruler.appendChild(e);
+    e.querySelector('.ve-eh.l').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'start'));
+    e.querySelector('.ve-eh.r').addEventListener('pointerdown', (ev) => dragExportEdge(ev, 'end'));
+    e.addEventListener('dblclick', (ev) => { ev.stopPropagation(); _veExportRange = null; renderExportRange(); flash(tr('video.rangeCleared')); });
+  }
+  const lanes = $('ve-lanes');
+  let band = document.getElementById('ve-eband');
+  if (lanes && (!band || band.parentElement !== lanes)) {
+    if (band) band.remove();
+    band = document.createElement('div'); band.id = 've-eband'; band.className = 've-eband'; band.hidden = true;
+    lanes.appendChild(band);
+  }
+}
+function dragExportEdge(e, which) {
+  e.preventDefault(); e.stopPropagation();
+  const ruler = $('ve-ruler');
+  const toSec = (cx) => Math.max(0, Math.min(fullSec(), (cx - ruler.getBoundingClientRect().left) / _pxPerSec));
+  const mv = (ev) => {
+    const v = toSec(ev.clientX);
+    if (which === 'start') _veExportRange.start = Math.min(v, _veExportRange.end - 0.02);
+    else _veExportRange.end = Math.max(v, _veExportRange.start + 0.02);
+    renderExportRange();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up);
+    flash(tr('video.rangeSet', { a: fmtTC(_veExportRange.start), b: fmtTC(_veExportRange.end) }));
+  };
+  window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+}
+function renderExportRange() {
+  const e = document.getElementById('ve-erange'), band = document.getElementById('ve-eband');
+  if (!_veExportRange) { if (e) e.hidden = true; if (band) band.hidden = true; return; }
+  const x = _veExportRange.start * _pxPerSec, w = (_veExportRange.end - _veExportRange.start) * _pxPerSec;
+  if (e) { e.hidden = false; e.style.left = x + 'px'; e.style.width = w + 'px'; }
+  if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = veTracksHeight() + 'px'; }
+}
+
 // ── 타임라인 크기 ──────────────────────────────────────
 function fullSec() {
   const sc = $('ve-tscroll');
@@ -328,6 +374,7 @@ function layout() {
       ruler.appendChild(tk);
     }
   }
+  ensureExportEls(); renderExportRange();
   renderClips();
   updatePlayheadUI();
   sizePreviewFrame();
@@ -735,8 +782,12 @@ function buildEDL() {
   const videoTracks = _veTracks.filter(t => t.kind !== 'audio');
   const audioTracks = _veTracks.filter(t => t.kind === 'audio');
 
+  // 눈금자에서 지정한 내보내기 구간 — 경계값 자체를 breakpoint 로 넣어 두면 그 지점에서
+  // 정확히 구간이 갈라져서, 걸치는 클립을 따로 잘라 넣을 필요 없이 범위 밖 구간만 건너뛰면 된다.
+  const range = _veExportRange;
   const bounds = new Set([0]);
   for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
+  if (range) { bounds.add(range.start); bounds.add(range.end); }
   const pts = [...bounds].sort((a, b) => a - b);
   const segs = [];
   let skipUntil = -Infinity;
@@ -744,6 +795,7 @@ function buildEDL() {
     const a = pts[i], b = pts[i + 1];
     if (b - a < 0.001) continue;
     if (a < skipUntil - 0.001) continue;   // 크로스페이드 구간을 이미 통째로 넣었다
+    if (range && (b <= range.start + 0.0005 || a >= range.end - 0.0005)) continue;   // 범위 밖
     const mid = (a + b) / 2;
 
     const activeVideo = [];
@@ -986,21 +1038,43 @@ function wire() {
   $('ve-export')?.addEventListener('click', () => runExport());
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
+  // Shift+드래그(또는 영역 선택 모드)면 재생선 대신 내보내기 구간을 지정한다(스튜디오와 동일).
   {
     const ruler = $('ve-ruler');
-    const seekFromEvent = (e) => {
+    const secAt = (clientX) => {
       const rect = ruler.getBoundingClientRect();
-      seekTo(Math.max(0, (e.clientX - rect.left) / _pxPerSec));
+      return Math.max(0, (clientX - rect.left) / _pxPerSec);
     };
     ruler?.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.ve-eh')) return;   // 범위 가장자리 핸들은 dragExportEdge 가 처리
       e.preventDefault();
-      seekFromEvent(e);
-      const onMove = (ev) => seekFromEvent(ev);
+      if (_veRangeMode || e.shiftKey) {
+        const a = secAt(e.clientX); let b = a;
+        const onMove = (ev) => { b = secAt(ev.clientX); _veExportRange = { start: Math.min(a, b), end: Math.max(a, b) }; renderExportRange(); };
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
+          if (Math.abs(b - a) < 0.08) { _veExportRange = null; renderExportRange(); }
+          else flash(tr('video.rangeSet', { a: fmtTC(_veExportRange.start), b: fmtTC(_veExportRange.end) }));
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp, { once: true });
+        return;
+      }
+      seekTo(secAt(e.clientX));
+      const onMove = (ev) => seekTo(secAt(ev.clientX));
       const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp, { once: true });
     });
   }
+  $('ve-range-mode')?.addEventListener('click', () => {
+    _veRangeMode = !_veRangeMode;
+    const btn = $('ve-range-mode');
+    btn.classList.toggle('on', _veRangeMode);
+    btn.setAttribute('aria-pressed', String(_veRangeMode));
+    $('ve-ruler-wrap')?.classList.toggle('range-mode', _veRangeMode);
+    flash(_veRangeMode ? tr('video.rangeModeOn') : tr('video.rangeModeOff'));
+  });
   // 렌더 해상도 선택 — 프리셋 또는 사용자 지정. 미리보기 틀 크기·PIP 좌표 기준·내보내기
   // 결과물 크기가 전부 이걸 따른다(getResolution()).
   const resSel = $('ve-res'), resCustom = $('ve-res-custom'), resW = $('ve-res-w'), resH = $('ve-res-h');

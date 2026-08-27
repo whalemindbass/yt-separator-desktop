@@ -1189,6 +1189,9 @@
         <span id="ve-time" class="ve-time">0:00.000</span>
       </div>
       <div class="ve-toolbar-r">
+        <button id="ve-range-mode" class="ve-tbtn" type="button" aria-pressed="false" data-i18n-title="video.rangeModeTitle" title="영역 선택 모드 — 눈금자를 드래그해 내보내기 구간 지정">
+          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg>
+        </button>
         <button id="ve-zoom-out" class="ve-tbtn" type="button" title="−">−</button>
         <button id="ve-zoom-in" class="ve-tbtn" type="button" title="＋">＋</button>
         <button id="ve-export" class="btn primary btn-sm" type="button" data-i18n="video.export">내보내기</button>
@@ -1202,7 +1205,7 @@
       </div>
     </div>
     <div class="ve-tscroll" id="ve-tscroll">
-      <div class="ve-ruler-wrap">
+      <div class="ve-ruler-wrap" id="ve-ruler-wrap">
         <div class="ve-ruler-ctrl"></div>
         <div class="ve-ruler" id="ve-ruler"></div>
       </div>
