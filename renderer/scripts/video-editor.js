@@ -104,9 +104,18 @@ function setPlaying(on) {
   if (on) {
     _playSecStart = _playheadSec; _playWallStart = performance.now();
     _rafId = requestAnimationFrame(tick);
-  } else if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+  } else {
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+    // rAF 를 멈추면 그걸로 끝이 아니다 — <video> 는 el.play() 로 일단 재생을 시작시켜 두면
+    // 우리가 더 이상 손대지 않는 한 자기 혼자 계속 돈다. syncPreview 는 매 tick 마다
+    // "_playing 이 꺼졌으면 pause" 를 하는데, 그 tick 자체가 이제 안 오니 한 번은 직접
+    // 불러줘야 실제로 멈춘다 — 이걸 빼먹어서 정지해도 영상이 계속 재생되는 버그가 있었다.
+    syncPreview(_playheadSec);
+  }
 }
 function updatePlayheadUI() {
+  // 위치는 이 transform 이 전부다 — CSS 쪽에 left 를 또 주면(예전에 그랬다) 172px 가
+  // 두 번 더해져 트랙 위 클립보다 항상 오른쪽으로 밀려 보였다.
   const ph = $('ve-playhead'); if (ph) ph.style.transform = `translate3d(${HEAD_W + _playheadSec * _pxPerSec}px,0,0)`;
   const tc = $('ve-time'); if (tc) tc.textContent = fmtTC(_playheadSec);
 }

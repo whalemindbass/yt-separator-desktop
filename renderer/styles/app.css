@@ -3928,6 +3928,6 @@ body { background: var(--bg) !important; }
 .ve-clip .ve-thumbs img { height: 100%; flex: 1 1 auto; object-fit: cover; min-width: 0; }
 
 .ve-playhead {
-  position: absolute; top: 0; bottom: 0; left: 172px; width: 1px; background: var(--accent);
+  position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--accent);
   z-index: 5; pointer-events: none; box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .3);
 }

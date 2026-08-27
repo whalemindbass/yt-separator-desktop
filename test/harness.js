@@ -78,8 +78,15 @@ async function bootRenderer(opts = {}) {
     privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true },
   }]);
   await app.whenReady();
-  protocol.handle('ytsep', (req) =>
-    net.fetch('file:///' + decodeURI(new URL(req.url).pathname.replace(/^\/+/, ''))));
+  // Range 헤더(특히 bytes=-N 꼬리 조회 — moov 가 파일 끝에 있는 mp4 를 seek 가능하게
+  // 만들 때 크롬이 씀)를 그대로 넘겨야 한다. 안 넘기면 매번 파일 전체를 200 으로 돌려주게
+  // 되어 큰 파일에서 seekable 이 통째로 비어버린다(main.js 의 실제 핸들러에서 겪은 것과
+  // 같은 버그 — 여긴 테스트 전용 프록시라 별도로 안 넘기고 있었다).
+  protocol.handle('ytsep', (req) => {
+    const p = 'file:///' + decodeURI(new URL(req.url).pathname.replace(/^\/+/, ''));
+    const range = req.headers.get('range');
+    return net.fetch(p, range ? { headers: { range } } : undefined);
+  });
 
   for (const [ch, fn] of Object.entries({ ...DEFAULT_STUBS, ...(opts.stubs || {}) })) {
     try { ipcMain.handle(ch, fn); } catch { /* 이미 등록됨 */ }

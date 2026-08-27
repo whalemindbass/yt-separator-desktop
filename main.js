@@ -337,10 +337,17 @@ app.whenReady().then(() => {
       };
 
       const rangeHdr = req.headers.get('range');
-      const m = rangeHdr && /^bytes=(\d+)-(\d+)?$/.exec(rangeHdr);
-      if (m) {
-        const start = parseInt(m[1], 10);
-        const end   = m[2] ? Math.min(parseInt(m[2], 10), size - 1) : (size - 1);
+      // bytes=시작-끝 뿐 아니라 bytes=-N("끝에서부터 N바이트") 도 와야 한다 — moov 가 파일
+      // 끝에 있는(faststart 안 한) mp4 를 크롬이 seek 가능하게 만들 때 꼭 이 형식으로 먼저
+      // 찾으러 온다. 이걸 놓치면(예전엔 놓쳤다) "전체 요청"으로 새 버려 큰 파일 전체를
+      // 잘못 돌려주고, 크롬은 그 응답을 못 알아듣고 포기해서 seekable 이 통째로 비어버린다
+      // — 몇 분짜리 실제 영상만 임포트하면 seek 이 전혀 안 먹혀서 필름스트립이 죄다
+      // 첫 프레임(검게 나온 경우도 있었다)으로 굳어 보이던 원인이 이거였다.
+      const suffixM = rangeHdr && /^bytes=-(\d+)$/.exec(rangeHdr);
+      const normalM = rangeHdr && /^bytes=(\d+)-(\d+)?$/.exec(rangeHdr);
+      if (suffixM || normalM) {
+        const start = suffixM ? Math.max(0, size - parseInt(suffixM[1], 10)) : parseInt(normalM[1], 10);
+        const end   = suffixM ? (size - 1) : (normalM[2] ? Math.min(parseInt(normalM[2], 10), size - 1) : (size - 1));
         if (isNaN(start) || start > end || start >= size) {
           return new Response(null, {
             status: 416, headers: { ...commonHeaders, 'Content-Range': `bytes */${size}` },

@@ -63,7 +63,12 @@ function pump() {
  * 새로 만들 게 있으면 백그라운드로 만들고, 끝나면 onReady(clip) 를 부른다.
  */
 export function getClipThumb(clip, pxPerSec, toUrl, onReady) {
-  const n = Math.max(1, Math.min(10, Math.round((clip.dur * pxPerSec) / 70)));
+  // 캡을 너무 낮게 두면(예전엔 10) 긴 클립에서 프레임 하나가 수백 px 로 뻥튀기돼 그 한
+  // 프레임의 우연한 어두운 부분(콜라바의 검은 줄 등)이 "클립 일부가 안 보인다"처럼 크게
+  // 부풀려 보인다 — 실제로 몇 분짜리 실사용 영상에서 이렇게 보고됐다. 프레임 하나가
+  // 화면에서 대략 70~120px 를 넘지 않게 캡을 훨씬 넉넉히 잡는다(생성 시간은 순차라
+  // 늘어나지만 큐가 백그라운드로 도니 화면이 막히진 않는다).
+  const n = Math.max(1, Math.min(60, Math.round((clip.dur * pxPerSec) / 70)));
   const key = `${clip.file}:${clip.inOff.toFixed(2)}:${clip.dur.toFixed(2)}:${n}`;
   if (clip._thumbKey === key) return clip._thumbUrls;
   if (_pending.has(clip.id)) return clip._thumbUrls || null;
