@@ -53,8 +53,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden }) => ({ id, name, color, height, hidden })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly })),
     });
   }, 600);
 }
@@ -137,7 +137,7 @@ function ensureLayers() {
   _veTracks.forEach((t, i) => {
     let pair = _layerEls.get(t.id);
     if (!pair) {
-      const mk = () => { const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; host.appendChild(v); return v; };
+      const mk = () => { const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto'; host.appendChild(v); return v; };
       pair = { a: mk(), b: mk() };
       _layerEls.set(t.id, pair);
     }
@@ -174,11 +174,11 @@ function syncPreview(t) {
       const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
-      driveLayer(a, outClip, t); a.style.opacity = String(1 - mix);
-      driveLayer(b, inClip, t); b.style.opacity = String(mix);
+      driveLayer(a, outClip, t); a.style.opacity = String(1 - mix); a.volume = 1 - mix;
+      driveLayer(b, inClip, t); b.style.opacity = String(mix); b.volume = mix;
       any = true;
     } else if (here.length === 1) {
-      driveLayer(a, here[0], t); a.style.opacity = '1';
+      driveLayer(a, here[0], t); a.style.opacity = '1'; a.volume = 1;
       hideLayer(b);
       any = true;
     } else {
@@ -352,11 +352,14 @@ function renderClips() {
     area.innerHTML = '';
     for (const c of _veClips.filter(x => x.trackId === trackId)) {
       const el = document.createElement('div');
-      el.className = 've-clip' + (c.id === _selClipId ? ' sel' : '');
+      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.id === _selClipId ? ' sel' : '');
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
-      el.innerHTML = `<div class="ve-thumbs"></div><span class="ve-clip-lbl">${esc(c.name)}</span>
+      // 오디오 전용(mp3/wav 등, 영상 트랙 없음) 클립은 캡처할 프레임 자체가 없다 —
+      // 필름스트립 대신 음표 표시만 둔다.
+      el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
+        + `<span class="ve-clip-lbl">${esc(c.name)}</span>
         <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
       el.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('ve-trim')) return;
@@ -367,8 +370,10 @@ function renderClips() {
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
       area.appendChild(el);
-      const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
-      if (cached) paintThumbs(c);
+      if (!c.isAudioOnly) {
+        const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
+        if (cached) paintThumbs(c);
+      }
     }
   });
 }
@@ -491,6 +496,11 @@ function deleteSelected() {
 // 오버레이/PIP 는 다음 단계). 같은 트랙에서 클립 둘이 겹치면 미리보기와 똑같이 그 겹친
 // 구간 전체를 크로스페이드 구간 하나로 묶어(xfade:true) 내보낸다.
 function buildEDL() {
+  // 오디오 전용(mp3/wav 등) 구간은 영상 트랙이 없어서 내보낼 때 검은 화면을 대신 채워야
+  // 한다 — 그 검은 화면 해상도를 프로젝트 안의 실제 영상 클립 하나에서 가져온다(전부
+  // 오디오뿐이면 무난한 기본값).
+  const refClip = _veClips.find(c => !c.isAudioOnly && c.w && c.h);
+  const refW = refClip?.w || 1280, refH = refClip?.h || 720;
   const bounds = new Set([0]);
   for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
   const pts = [...bounds].sort((a, b) => a - b);
@@ -524,7 +534,10 @@ function buildEDL() {
     const segEnd = winner.inOff + (b - winner.start);
     const last = segs[segs.length - 1];
     if (last && !last.xfade && last.file === winner.file && Math.abs(last.end - segStart) < 0.005) last.end = segEnd;
-    else segs.push({ file: winner.file, start: segStart, end: segEnd, hasAudio: winner.hasAudio !== false });
+    else segs.push({
+      file: winner.file, start: segStart, end: segEnd, hasAudio: winner.hasAudio !== false,
+      isAudioOnly: !!winner.isAudioOnly, refW, refH,
+    });
   }
   return segs;
 }
@@ -570,7 +583,10 @@ async function importVideoFiles(paths, trackId) {
     if (!meta.dur) continue;
     const { hasAudio } = await api.video.probeAudio(p);
     const name = p.split(/[\\/]/).pop();
-    const clip = { id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio };
+    // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
+    // 얹고 싶을 때를 위해 받되, 썸네일·내보내기는 이 클립엔 다르게 처리해야 한다.
+    const isAudioOnly = !meta.w || !meta.h;
+    const clip = { id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio, isAudioOnly };
     _veClips.push(clip);
     added.push(clip);
     cursor += meta.dur;

@@ -706,11 +706,19 @@ ipcMain.handle('dialog:pickVideoFile', async () => {
 });
 // 영상 편집: 비디오 파일 여러 개 임포트 (트랙 클립)
 ipcMain.handle('dialog:pickVideoFiles', async () => {
+  const videoExts = ['mp4','mkv','webm','mov','avi','m4v'];
+  const audioExts = ['mp3','wav','flac','ogg','aif','aiff','m4a','aac'];
   const res = await dialog.showOpenDialog(mainWindow || null, {
     title: td('importVideoFiles'),
     properties: ['openFile', 'multiSelections'],
+    // 기본 필터가 영상 확장자만이라 배경음악 등 오디오 파일 하나 넣으려 해도 매번
+    // "모든 파일"로 바꿔야 했다 — 기본값 자체를 영상+오디오 합친 목록으로 바꿨다
+    // (다른 곳의 fMedia 필터와 같은 방향). 영상만/오디오만 따로 고르고 싶을 때를
+    // 위해 그 둘도 옵션으로 남겨둔다.
     filters: [
-      { name: td('fVideo'), extensions: ['mp4','mkv','webm','mov','avi','m4v'] },
+      { name: td('fMedia'), extensions: [...videoExts, ...audioExts] },
+      { name: td('fVideo'), extensions: videoExts },
+      { name: td('fAudio'), extensions: audioExts },
       { name: td('fAll'), extensions: ['*'] },
     ],
   });
@@ -893,6 +901,10 @@ ipcMain.handle('video:export', async (event, payload) => {
   // [i:a] 로 매핑하면 ffmpeg 가 "matches no streams" 로 죽는다. anullsrc 무음 입력 하나를
   // 공용으로 두고, 오디오 없는 구간만 거기서 필요한 길이만큼 잘라 쓴다.
   const needsSilence = segments.some((s) => s.xfade ? (s.hasAudioA === false || s.hasAudioB === false) : s.hasAudio === false);
+  // mp3/wav 처럼 영상 트랙이 아예 없는 구간(배경음악 등) — 검은 화면을 대신 채워야 한다.
+  // 해상도는 렌더러가 프로젝트 안의 실제 영상 클립에서 골라 보낸 값(refW/refH)을 쓴다.
+  const audioOnlySeg = segments.find((s) => !s.xfade && s.isAudioOnly);
+  const needsBlackVideo = !!audioOnlySeg;
   const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y'];
   let nextInput = 0;
   const idxs = segments.map((s) => {
@@ -900,7 +912,9 @@ ipcMain.handle('video:export', async (event, payload) => {
     args.push('-i', s.file); return { v: nextInput++ };
   });
   const silentIdx = nextInput;
-  if (needsSilence) args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+  if (needsSilence) { args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'); nextInput++; }
+  const blackIdx = nextInput;
+  if (needsBlackVideo) args.push('-f', 'lavfi', '-i', `color=black:size=${audioOnlySeg.refW || 1280}x${audioOnlySeg.refH || 720}:rate=30`);
 
   const parts = [];
   segments.forEach((s, i) => {
@@ -919,6 +933,13 @@ ipcMain.handle('video:export', async (event, payload) => {
         ? `[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
         : `[${ix.b}:a]atrim=start=${s.bIn}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
+    } else if (s.isAudioOnly) {
+      // 영상 트랙이 없는 구간(mp3/wav) — 공용 검은 화면 입력을 이 구간 길이만큼 잘라 쓰고,
+      // 오디오는 원본 파일에서 그대로(원본은 이미 -i 로 들어가 있다 — 영상 스트림만 없을 뿐).
+      const dur = (s.end - s.start).toFixed(3);
+      parts.push(`[${blackIdx}:v]trim=duration=${dur},setpts=PTS-STARTPTS[v${i}]`);
+      if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[a${i}]`);
+      else parts.push(`[${ix.v}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[a${i}]`);
     } else {
       parts.push(`[${ix.v}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS[v${i}]`);
       if (s.hasAudio === false) parts.push(`[${silentIdx}:a]atrim=duration=${(s.end - s.start).toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`);

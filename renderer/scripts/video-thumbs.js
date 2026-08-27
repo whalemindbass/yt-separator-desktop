@@ -35,7 +35,10 @@ function loadOnce(video, src) {
 async function generate(clip, n, toUrl) {
   await loadOnce(_pool, toUrl(clip.file));
   const vw = _pool.videoWidth || 16, vh = _pool.videoHeight || 9;
-  const w = 80, h = Math.max(1, Math.round(w * (vh / vw)));
+  // 80px 는 확대하거나 고해상도 화면에서 눈에 띄게 흐렸다 — 화면 썸네일 폭(대략 70~120px)
+  // 보다 넉넉히 큰 해상도로 캡처해 둔다(디코드 비용은 seek 쪽이 대부분이라 이 정도 크기
+  // 차이는 체감 속도에 거의 안 보인다).
+  const w = 200, h = Math.max(1, Math.round(w * (vh / vw)));
   const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   const srcDur = _pool.duration || clip.srcDur || clip.dur;
