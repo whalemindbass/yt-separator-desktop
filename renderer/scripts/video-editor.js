@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut })),
       resolution: _veResolution,
     });
   }, 600);
@@ -241,6 +241,14 @@ function driveLayer(el, clip, t, visual) {
   if (!_playing && !el.paused) el.pause();
 }
 function hideLayer(el, visual) { if (visual) { el.hidden = true; el.style.opacity = ''; } if (!el.paused) el.pause(); }
+// 클립 자체 페이드인/아웃 배율(0~1) — 같은 트랙 크로스페이드 믹스와 곱해서 합성한다.
+function fadeMul(clip, t) {
+  let m = 1;
+  const localT = t - clip.start;
+  if (clip.fadeIn) m *= Math.max(0, Math.min(1, localT / clip.fadeIn));
+  if (clip.fadeOut) m *= Math.max(0, Math.min(1, (clip.start + clip.dur - t) / clip.fadeOut));
+  return m;
+}
 function syncPreview(t) {
   let any = false;
   for (const track of _veTracks) {
@@ -253,11 +261,13 @@ function syncPreview(t) {
       const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
-      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(1 - mix); a.volume = 1 - mix;
-      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(mix); b.volume = mix;
+      const fa = (1 - mix) * fadeMul(outClip, t), fb = mix * fadeMul(inClip, t);
+      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(fa); a.volume = fa;
+      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(fb); b.volume = fb;
       any = true;
     } else if (here.length === 1) {
-      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = '1'; a.volume = 1;
+      const f = fadeMul(here[0], t);
+      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = String(f); a.volume = f;
       hideLayer(b, visual);
       any = true;
     } else {
@@ -546,15 +556,25 @@ function renderClips() {
       // 필름스트립 대신 음표 표시만 둔다.
       el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
         + `<span class="ve-clip-lbl">${esc(c.name)}</span>
+        <div class="ve-fade l"></div><div class="ve-fade r"></div>
+        <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
         <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
       el.addEventListener('pointerdown', (e) => {
-        if (e.target.classList.contains('ve-trim')) return;
+        if (e.target.classList.contains('ve-trim') || e.target.classList.contains('ve-fadeh')) return;
         _selClipId = c.id;
         wireMove(e, c, el);
       });
       el.addEventListener('dblclick', () => { seekTo(c.start); });
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
+      const paintFade = () => {
+        const wi = (c.fadeIn || 0) * _pxPerSec, wo = (c.fadeOut || 0) * _pxPerSec;
+        el.querySelector('.ve-fade.l').style.width = wi + 'px'; el.querySelector('.ve-fadeh.l').style.left = wi + 'px';
+        el.querySelector('.ve-fade.r').style.width = wo + 'px'; el.querySelector('.ve-fadeh.r').style.right = wo + 'px';
+      };
+      paintFade();
+      wireFade(el.querySelector('.ve-fadeh.l'), c, paintFade, -1);
+      wireFade(el.querySelector('.ve-fadeh.r'), c, paintFade, +1);
       area.appendChild(el);
       if (!c.isAudioOnly) {
         const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
@@ -681,6 +701,36 @@ function wireTrim(handle, c, el, dir) {
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
   });
 }
+// 클립 상단 코너 페이드 핸들 — 대각선 오버레이만큼 페이드 구간이다(스튜디오와 같은 UX).
+// dir -1 = 페이드인(왼쪽), +1 = 페이드아웃(오른쪽). 클립 길이를 넘어서거나 서로 겹치진
+// 못한다(페이드인+페이드아웃 합이 dur 을 넘지 않게 제한).
+function wireFade(handle, c, paint, dir) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    _selClipId = c.id;
+    const startX = e.clientX;
+    const bIn = c.fadeIn || 0, bOut = c.fadeOut || 0;
+    const mv = (ev) => {
+      const dx = (ev.clientX - startX) / _pxPerSec;
+      if (dir < 0) c.fadeIn = Math.max(0, Math.min(c.dur - (c.fadeOut || 0), bIn + dx));
+      else c.fadeOut = Math.max(0, Math.min(c.dur - (c.fadeIn || 0), bOut - dx));
+      paint();
+      syncPreview(nowSec());
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      if (c.fadeIn !== bIn || c.fadeOut !== bOut) {
+        const endIn = c.fadeIn, endOut = c.fadeOut;
+        pushUndo(
+          () => { c.fadeIn = bIn; c.fadeOut = bOut; layout(); },
+          () => { c.fadeIn = endIn; c.fadeOut = endOut; layout(); },
+        );
+      }
+      layout();
+    };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+}
 function splitAtPlayhead() {
   if (_selClipId == null) return;
   const c = _veClips.find(x => x.id === _selClipId); if (!c) return;
@@ -775,6 +825,16 @@ function updateFlipUI() {
 // amix 로 섞는다) — 오디오 트랙은 이제 몇 개든 동시에 반영된다.
 // v1 범위: 크로스페이드(같은 트랙 클립 겹침)는 PIP 레이어가 동시에 있는 구간에선 지원하지
 // 않는다(그 순간엔 먼저 시작한 클립만 쓴다) — 흔치 않은 조합이라 다음 단계로 미룬다.
+// 페이드는 클립 단위(초 단위 fadeIn/fadeOut)로 저장되지만, main.js 의 ffmpeg 필터는 각
+// 구간(segment)이 아니라 "원본 파일의 절대 시각" 기준 st(시작점)/d(길이) 를 받는다 —
+// trim 은 PTS 를 안 건드리니, setpts=PTS-STARTPTS 로 리셋하기 전에 fade 를 걸면 세그먼트가
+// (다른 트랙・PIP・범위 지정 등으로) 잘게 쪼개져도 경계에서 끊기지 않고 이어진다.
+function fadeFieldsFor(c) {
+  const f = {};
+  if (c.fadeIn) { f.fadeInSt = c.inOff; f.fadeInD = c.fadeIn; }
+  if (c.fadeOut) { f.fadeOutSt = c.inOff + c.dur - c.fadeOut; f.fadeOutD = c.fadeOut; }
+  return f;
+}
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
@@ -813,12 +873,12 @@ function buildEDL() {
     const audioSources = [];
     for (const { clips } of relevantVideo) {
       const c = clips[0];
-      if (c.hasAudio !== false) audioSources.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start) });
+      if (c.hasAudio !== false) audioSources.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), ...fadeFieldsFor(c) });
     }
     for (const track of audioTracks) {
       if (track.hidden) continue;
       const clip = clipAt(track.id, mid);
-      if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: clip.inOff + (a - clip.start), end: clip.inOff + (b - clip.start) });
+      if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: clip.inOff + (a - clip.start), end: clip.inOff + (b - clip.start), ...fadeFieldsFor(clip) });
     }
 
     if (!topFillsFrame) {
@@ -827,7 +887,7 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a,
       });
@@ -850,7 +910,7 @@ function buildEDL() {
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, ...fadeFieldsFor(c) });
       continue;
     }
 

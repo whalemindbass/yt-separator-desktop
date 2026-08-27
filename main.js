@@ -952,6 +952,16 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (flipV) fs.push('vflip');
     return fs.length ? ',' + fs.join(',') : '';
   }
+  // 클립 페이드인/아웃 — buildEDL() 이 원본 파일의 절대 시각 기준 st(시작)/d(길이) 로 넘겨준다.
+  // trim/atrim 은 PTS 를 안 건드리므로, asetpts/setpts 로 리셋하기 *전에* 걸어야 세그먼트가
+  // 잘게 쪼개져도(다른 트랙・PIP・구간 지정 등으로) 페이드 경계에서 끊기지 않고 이어진다.
+  function fadeFrag(kind, obj) {
+    const name = kind === 'v' ? 'fade' : 'afade';
+    const fs = [];
+    if (obj.fadeInD) fs.push(`${name}=t=in:st=${obj.fadeInSt.toFixed(3)}:d=${obj.fadeInD.toFixed(3)}`);
+    if (obj.fadeOutD) fs.push(`${name}=t=out:st=${obj.fadeOutSt.toFixed(3)}:d=${obj.fadeOutD.toFixed(3)}`);
+    return fs.length ? ',' + fs.join(',') : '';
+  }
 
   const parts = [];
   // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
@@ -963,12 +973,12 @@ ipcMain.handle('video:export', async (event, payload) => {
     }
     if (sources.length === 1) {
       const s = sources[0];
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[${label}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${label}]`);
       return;
     }
     const subs = sources.map((s, j) => {
       const lb = `${label}_s${j}`;
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end},asetpts=PTS-STARTPTS[${lb}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${lb}]`);
       return `[${lb}]`;
     });
     parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
@@ -1005,7 +1015,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)},scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1022,7 +1032,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });

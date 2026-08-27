@@ -3954,6 +3954,13 @@ body { background: var(--bg) !important; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
 .ve-clip .ve-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; pointer-events: none; }
 .ve-clip .ve-thumbs img { height: 100%; flex: 1 1 auto; object-fit: cover; min-width: 0; }
+.ve-fade { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--elev) 80%, transparent); }
+.ve-fade.l { left: 0; clip-path: polygon(0 0, 100% 0, 0 100%); }
+.ve-fade.r { right: 0; clip-path: polygon(100% 0, 100% 100%, 0 0); }
+.ve-fadeh { position: absolute; top: 0; width: 11px; height: 11px; z-index: 3; cursor: pointer; }
+.ve-fadeh::after { content: ''; position: absolute; top: 2px; left: 2px; width: 7px; height: 7px; border-radius: 50%; background: color-mix(in srgb, var(--tx-1) 30%, transparent); }
+.ve-fadeh:hover::after { background: var(--tx-1); }
+.ve-fadeh.l { transform: translateX(-50%); } .ve-fadeh.r { transform: translateX(50%); }
 .ve-clip.audio { background: color-mix(in srgb, var(--c, var(--accent)) 20%, var(--sunken)); }
 .ve-lane.audio .ve-area { background: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
 
