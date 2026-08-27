@@ -89,7 +89,7 @@ function switchView(name) {
   if (name === 'community') initCommunity().catch(console.error);
   if (name === 'studio') initStudio().catch(console.error);
   if (name === 'training') initTraining();
-  if (name === 'video') initVideoEditor();
+  if (name === 'video') initVideoEditor().catch(console.error);
   if (name === 'home') initHome(switchView);
   // 홈은 탭이 아니라 로고로 들어온다 — 홈일 때는 어떤 탭도 켜져 있으면 안 된다
   document.getElementById('brand-home')?.classList.toggle('on', name === 'home');

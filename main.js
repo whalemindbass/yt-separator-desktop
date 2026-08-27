@@ -1766,3 +1766,24 @@ ipcMain.handle('usage:save', (_ev, data) => {
     return true;
   } catch { return false; }
 });
+// 영상 편집 탭 — library.json/usageLog.json 과 같은 패턴. 프로젝트가 하나뿐이라(여러 개
+// 관리하는 라이브러리 개념은 아직 없다) "저장" 버튼 없이 편집할 때마다 자동 저장하고,
+// 탭에 들어올 때 그대로 복원한다 — 탭을 나가거나 앱을 껐다 켜도 작업이 안 사라진다.
+function videoProjectFile() {
+  return path.join(app.getPath('userData'), 'videoProject.json');
+}
+ipcMain.handle('videoProject:load', () => {
+  try {
+    const j = JSON.parse(fs.readFileSync(videoProjectFile(), 'utf-8'));
+    return {
+      tracks: Array.isArray(j.tracks) ? j.tracks : [],
+      clips: Array.isArray(j.clips) ? j.clips : [],
+    };
+  } catch { return { tracks: [], clips: [] }; }
+});
+ipcMain.handle('videoProject:save', (_ev, data) => {
+  try {
+    fs.writeFileSync(videoProjectFile(), JSON.stringify({ tracks: data?.tracks || [], clips: data?.clips || [] }));
+    return true;
+  } catch { return false; }
+});

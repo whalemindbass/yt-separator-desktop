@@ -26,6 +26,51 @@ let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈�
 function nextTrackId() { return ++_trackSeq; }
 function nextClipId() { return ++_clipSeq; }
 
+// ── 되돌리기 — 이 탭 로컬(엔진·스튜디오와 무관). 핵심 편집(트랙 추가/삭제, 클립
+// 이동/트림/분할/삭제)만 담는다 — 색·이름·숨김 같은 사소한 건 되돌려도 아쉬울 게 적어 뺐다.
+let _undoStack = [], _redoStack = [];
+function pushUndo(undo, redo) {
+  _undoStack.push({ undo, redo });
+  if (_undoStack.length > 100) _undoStack.shift();
+  _redoStack.length = 0;
+}
+function doUndo() {
+  const e = _undoStack.pop(); if (!e) return;
+  e.undo(); _redoStack.push(e);
+  ensureLayers(); renderLanes();
+}
+function doRedo() {
+  const e = _redoStack.pop(); if (!e) return;
+  e.redo(); _undoStack.push(e);
+  ensureLayers(); renderLanes();
+}
+
+// ── 자동 저장/복원 — library.json 처럼 실제 파일로(usageLog.json 과 같은 패턴). 프로젝트가
+// 하나뿐이라 "저장" 버튼 없이 편집할 때마다 조용히 저장하고, 탭에 들어올 때 그대로 복원한다.
+let _saveTimer = null;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    api.videoProject.save({
+      tracks: _veTracks.map(({ id, name, color, height, hidden }) => ({ id, name, color, height, hidden })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio })),
+    });
+  }, 600);
+}
+let _loaded = false;
+async function loadProject() {
+  if (_loaded) return; _loaded = true;
+  const p = await api.videoProject.load();
+  if (p?.tracks?.length) {
+    _veTracks = p.tracks;
+    _veClips = p.clips || [];
+    _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
+    _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
+    ensureLayers();
+  }
+}
+
 // ── 재생 시계 (엔진 없음 — rAF 로 직접 잰다) ──────────────
 let _playing = false;
 let _playheadSec = 0;
@@ -141,14 +186,22 @@ function layout() {
   updatePlayheadUI();
   syncPreview(nowSec());   // 임포트·트림·분할·삭제 등으로 배치가 바뀌면 미리보기도 바로 반영
   const empty = $('ve-empty'); if (empty) empty.hidden = _veClips.length > 0;
+  if (_loaded) scheduleSave();   // 복원 도중(초기 렌더)엔 저장할 필요 없다
 }
 
 // ── 트랙/레인 ────────────────────────────────────────
-function newVideoTrack() {
+function newVideoTrack(pushHistory = true) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
+  const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false };
   // Vegas Pro 관례: 새 비디오 트랙은 목록 맨 위(= 합성 맨 앞)에 들어간다.
-  _veTracks.unshift({ id, name: '', color, height: DEFAULT_LANE_H, hidden: false });
+  _veTracks.unshift(track);
+  if (pushHistory) {
+    pushUndo(
+      () => { _veTracks = _veTracks.filter(t => t.id !== id); _veClips = _veClips.filter(c => c.trackId !== id); },
+      () => { _veTracks.unshift(track); },
+    );
+  }
   ensureLayers();
   renderLanes();
   return id;
@@ -186,6 +239,12 @@ function renderLanes() {
     });
     lane.querySelector('.ve-del').addEventListener('click', (e) => {
       e.stopPropagation();
+      const removedClips = _veClips.filter(c => c.trackId === vt.id);
+      const removedIdx = _veTracks.indexOf(vt);
+      pushUndo(
+        () => { _veTracks.splice(removedIdx, 0, vt); _veClips.push(...removedClips); },
+        () => { _veTracks = _veTracks.filter(t => t.id !== vt.id); _veClips = _veClips.filter(c => c.trackId !== vt.id); },
+      );
       _veClips = _veClips.filter(c => c.trackId !== vt.id);
       _veTracks = _veTracks.filter(t => t.id !== vt.id);
       ensureLayers(); renderLanes(); layout();
@@ -319,8 +378,14 @@ function wireMove(e, c, el) {
   const up = () => {
     document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
     _dragging = false;
+    if (c.start !== startStart || c.trackId !== startTrackId) {
+      const endStart = c.start, endTrackId = c.trackId;
+      pushUndo(
+        () => { c.start = startStart; c.trackId = startTrackId; layout(); },
+        () => { c.start = endStart; c.trackId = endTrackId; layout(); },
+      );
+    }
     layout();
-    if (c.start !== startStart || c.trackId !== startTrackId) { /* 이동 확정 — 되돌리기 스택은 다음 단계 */ }
   };
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
@@ -345,7 +410,17 @@ function wireTrim(handle, c, el, dir) {
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
     };
-    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); layout(); };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      if (c.start !== start0 || c.dur !== dur0) {
+        const endStart = c.start, endDur = c.dur, endInOff = c.inOff;
+        pushUndo(
+          () => { c.start = start0; c.dur = dur0; c.inOff = inOff0; layout(); },
+          () => { c.start = endStart; c.dur = endDur; c.inOff = endInOff; layout(); },
+        );
+      }
+      layout();
+    };
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
   });
 }
@@ -354,14 +429,25 @@ function splitAtPlayhead() {
   const c = _veClips.find(x => x.id === _selClipId); if (!c) return;
   const t = _playheadSec;
   if (t <= c.start || t >= c.start + c.dur) return;
+  const origDur = c.dur;
   const rightDur = c.start + c.dur - t;
   const right = { ...c, id: nextClipId(), start: t, dur: rightDur, inOff: c.inOff + (t - c.start) };
   c.dur = t - c.start;
   _veClips.push(right);
+  pushUndo(
+    () => { c.dur = origDur; _veClips = _veClips.filter(x => x !== right); },
+    () => { c.dur = t - c.start; _veClips.push(right); },
+  );
   layout();
 }
 function deleteSelected() {
   if (_selClipId == null) return;
+  const removed = _veClips.find(c => c.id === _selClipId); if (!removed) return;
+  const idx = _veClips.indexOf(removed);
+  pushUndo(
+    () => { _veClips.splice(idx, 0, removed); },
+    () => { _veClips = _veClips.filter(c => c !== removed); },
+  );
   _veClips = _veClips.filter(c => c.id !== _selClipId);
   _selClipId = null;
   layout();
@@ -426,22 +512,37 @@ function probeVideo(file) {
 }
 async function importVideoFiles(paths, trackId) {
   let tid = trackId;
-  if (tid == null) tid = newVideoTrack();
+  const createdTrack = tid == null;
+  if (createdTrack) tid = newVideoTrack(false);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
+  const newTrackRef = createdTrack ? _veTracks.find(t => t.id === tid) : null;
   let cursor = 0;
   for (const c of _veClips.filter(x => x.trackId === tid)) cursor = Math.max(cursor, c.start + c.dur);
-  let n = 0;
+  const added = [];
   for (const p of paths) {
     const meta = await probeVideo(p);
     if (!meta.dur) continue;
     const { hasAudio } = await api.video.probeAudio(p);
     const name = p.split(/[\\/]/).pop();
-    _veClips.push({ id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio });
+    const clip = { id: nextClipId(), trackId: tid, file: p, name, start: cursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio };
+    _veClips.push(clip);
+    added.push(clip);
     cursor += meta.dur;
-    n++;
+  }
+  if (added.length) {
+    pushUndo(
+      () => {
+        _veClips = _veClips.filter(c => !added.includes(c));
+        if (createdTrack) _veTracks = _veTracks.filter(t => t.id !== tid);
+      },
+      () => {
+        if (createdTrack) _veTracks.unshift(newTrackRef);
+        _veClips.push(...added);
+      },
+    );
   }
   ensureLayers();
   layout();
-  if (n) flash(tr('video.importing', { n }));
+  if (added.length) flash(tr('video.importing', { n: added.length }));
   else flash(tr('video.needImport'));
 }
 async function pickImportVideo() {
@@ -469,6 +570,8 @@ function wire() {
   if (_wired) return; _wired = true;
   $('ve-add-track')?.addEventListener('click', () => newVideoTrack());
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
+  $('ve-undo')?.addEventListener('click', () => doUndo());
+  $('ve-redo')?.addEventListener('click', () => doRedo());
   $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
@@ -486,6 +589,8 @@ function wire() {
     if (!view || view.hidden) return;
     if (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { e.preventDefault(); setPlaying(!_playing); }
+    else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); doRedo(); }
     else if (e.key === 's' || e.key === 'S') splitAtPlayhead();
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   });
@@ -499,8 +604,9 @@ function wire() {
   });
 }
 
-export function initVideoEditor() {
+export async function initVideoEditor() {
   wire();
+  await loadProject();
   if (!_veTracks.length) ensureLayers();
   renderLanes();
   layout();

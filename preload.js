@@ -81,6 +81,10 @@ contextBridge.exposeInMainWorld('yssApi', {
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
   },
+  videoProject: {
+    load: ()     => ipcRenderer.invoke('videoProject:load'),
+    save: (data) => ipcRenderer.invoke('videoProject:save', data),
+  },
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),
     export: (payload) => ipcRenderer.invoke('video:export', payload),

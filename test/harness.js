@@ -65,6 +65,9 @@ const DEFAULT_STUBS = {
   'usage:save': () => true,
   // 영상 편집 탭 임포트가 파일마다 부른다(오디오 스트림 유무는 ffprobe 로 확인).
   'video:probeAudio': () => ({ hasAudio: true }),
+  // 영상 편집 탭도 usage.js 처럼 탭에 들어갈 때마다 자동 저장분을 불러온다.
+  'videoProject:load': () => ({ tracks: [], clips: [] }),
+  'videoProject:save': () => true,
 };
 
 async function bootRenderer(opts = {}) {

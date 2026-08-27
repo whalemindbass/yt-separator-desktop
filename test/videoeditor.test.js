@@ -126,7 +126,25 @@ makeClip(BLUE, 'testsrc2', 2);
   const afterDel = await js(`document.querySelectorAll('.ve-clip').length`);
   expect('Delete 로 클립 하나 줄어듦', afterDel, beforeDel - 1);
 
-  section('8) 콘솔 오류 없음');
+  section('8) 되돌리기/다시 실행 (Ctrl+Z / Ctrl+Shift+Z)');
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })); true`);
+  await wait(80);
+  const afterUndo = await js(`document.querySelectorAll('.ve-clip').length`);
+  expect('Ctrl+Z 로 삭제 취소됨(클립 다시 늘어남)', afterUndo, beforeDel);
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true, bubbles: true })); true`);
+  await wait(80);
+  const afterRedo = await js(`document.querySelectorAll('.ve-clip').length`);
+  expect('Ctrl+Shift+Z 로 다시 삭제됨', afterRedo, afterDel);
+  // 트랙 추가도 되돌릴 수 있어야 한다
+  const tracksBefore = await js(`document.querySelectorAll('.ve-lane').length`);
+  await js(`document.getElementById('ve-add-track').click(); true`);
+  await wait(80);
+  await js(`document.getElementById('ve-undo').click(); true`);
+  await wait(80);
+  const tracksAfterUndo = await js(`document.querySelectorAll('.ve-lane').length`);
+  expect('되돌리기 버튼으로 트랙 추가도 취소됨', tracksAfterUndo, tracksBefore);
+
+  section('9) 콘솔 오류 없음');
   expectNoConsoleErrors(errors);
 
   finish(app);
