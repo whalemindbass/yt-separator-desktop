@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color })),
       resolution: _veResolution,
     });
   }, 600);
@@ -215,6 +215,56 @@ function openPipPopover(track, anchorEl) {
   });
   setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
+// ── 색보정(밝기/대비/채도) — 클립 단위. 0 = 보정 없음. 미리보기는 CSS filter(brightness/
+// contrast/saturate, 전부 "1 기준 배율"), 내보내기는 ffmpeg eq 필터로 같은 값을 쓴다 —
+// 픽셀 단위로 완전히 똑같진 않지만(CPU/CSS 구현이 다르니) 같은 방향·정도로 보정된다.
+let _colorPopoverEl = null;
+function onOutsideColor(e) { if (_colorPopoverEl && !_colorPopoverEl.contains(e.target)) closeColorPopover(); }
+function closeColorPopover() {
+  if (!_colorPopoverEl) return;
+  _colorPopoverEl.remove(); _colorPopoverEl = null;
+  document.removeEventListener('pointerdown', onOutsideColor, true);
+}
+function colorFilterCss(color) {
+  if (!color) return '';
+  const b = 1 + (color.b || 0) / 100, c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
+  if (b === 1 && c === 1 && s === 1) return '';
+  return `brightness(${b}) contrast(${c}) saturate(${s})`;
+}
+function openColorPopover(clip, anchorEl) {
+  closeColorPopover();
+  const col = clip.color || { b: 0, c: 0, s: 0 };
+  const r = anchorEl.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 've-color-pop';
+  pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  pop.innerHTML = `
+    <label><span>${tr('video.colorBrightness')}</span><input type="range" id="cc-b" min="-100" max="100" step="1" value="${col.b}"><span id="cc-b-v">${col.b}</span></label>
+    <label><span>${tr('video.colorContrast')}</span><input type="range" id="cc-c" min="-100" max="100" step="1" value="${col.c}"><span id="cc-c-v">${col.c}</span></label>
+    <label><span>${tr('video.colorSaturation')}</span><input type="range" id="cc-s" min="-100" max="100" step="1" value="${col.s}"><span id="cc-s-v">${col.s}</span></label>
+    <button class="mini" id="cc-reset">${tr('video.pipReset')}</button>`;
+  document.body.appendChild(pop);
+  _colorPopoverEl = pop;
+  const apply = () => {
+    const b = Number(pop.querySelector('#cc-b').value) || 0;
+    const c = Number(pop.querySelector('#cc-c').value) || 0;
+    const s = Number(pop.querySelector('#cc-s').value) || 0;
+    pop.querySelector('#cc-b-v').textContent = b; pop.querySelector('#cc-c-v').textContent = c; pop.querySelector('#cc-s-v').textContent = s;
+    const isDefault = b === 0 && c === 0 && s === 0;
+    clip.color = isDefault ? null : { b, c, s };
+    anchorEl.classList.toggle('on', !isDefault);
+    syncPreview(nowSec());
+    scheduleSave();
+  };
+  pop.querySelector('#cc-b').addEventListener('input', apply);
+  pop.querySelector('#cc-c').addEventListener('input', apply);
+  pop.querySelector('#cc-s').addEventListener('input', apply);
+  pop.querySelector('#cc-reset').addEventListener('click', () => {
+    pop.querySelector('#cc-b').value = 0; pop.querySelector('#cc-c').value = 0; pop.querySelector('#cc-s').value = 0;
+    apply();
+  });
+  setTimeout(() => document.addEventListener('pointerdown', onOutsideColor, true), 0);
+}
 function clipAt(trackId, t) {
   return _veClips.find(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur) || null;
 }
@@ -229,6 +279,7 @@ function driveLayer(el, clip, t, visual) {
     el.hidden = false;
     const sx = clip.flipH ? -1 : 1, sy = clip.flipV ? -1 : 1;
     el.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
+    el.style.filter = colorFilterCss(clip.color);
   }
   // 영상 클립이 짝(groupId, 오디오 트랙의 오디오 클립)을 가지고 있으면 소리는 그 짝이
   // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
@@ -582,7 +633,7 @@ function renderClips() {
       }
     }
   });
-  updateFlipUI();
+  updateClipToolbarUI();
 }
 // 영상 임포트 시 자동으로 짝지어진 오디오 클립(Vegas Pro 관례: groupId 공유) — 그룹인
 // 클립은 이동/트림/분할/삭제가 서로 따라간다. "U" 로 그룹을 풀면 그때부턴 따로 논다.
@@ -806,15 +857,17 @@ function flipSelected(axis) {
   const key = axis === 'h' ? 'flipH' : 'flipV';
   c[key] = !c[key];
   syncPreview(nowSec());
-  updateFlipUI();
+  updateClipToolbarUI();
   scheduleSave();
 }
-function updateFlipUI() {
+function updateClipToolbarUI() {
   const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
   const canFlip = !!c && !c.isAudioOnly;
-  const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v');
+  const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v'), colorBtn = $('ve-color');
   if (hBtn) { hBtn.disabled = !canFlip; hBtn.classList.toggle('on', !!c?.flipH); }
   if (vBtn) { vBtn.disabled = !canFlip; vBtn.classList.toggle('on', !!c?.flipV); }
+  if (colorBtn) { colorBtn.disabled = !canFlip; colorBtn.classList.toggle('on', !!c?.color); }
+  closeColorPopover();   // 선택이 바뀌면(또는 목록이 다시 그려지면) 열려 있던 팝오버는 닫는다 — 다른 클립을 보여줄 순 없다
 }
 
 // ── 내보내기 ────────────────────────────────────────
@@ -887,7 +940,7 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, ...fadeFieldsFor(c) };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a,
       });
@@ -902,15 +955,15 @@ function buildEDL() {
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color,
           refW, refH,
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, ...fadeFieldsFor(c) });
       continue;
     }
 
@@ -1090,6 +1143,11 @@ function wire() {
   $('ve-redo')?.addEventListener('click', () => doRedo());
   $('ve-flip-h')?.addEventListener('click', () => flipSelected('h'));
   $('ve-flip-v')?.addEventListener('click', () => flipSelected('v'));
+  $('ve-color')?.addEventListener('click', (e) => {
+    const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
+    if (!c || c.isAudioOnly) return;
+    openColorPopover(c, e.currentTarget);
+  });
   $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));

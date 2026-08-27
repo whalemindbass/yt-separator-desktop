@@ -955,6 +955,13 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 클립 페이드인/아웃 — buildEDL() 이 원본 파일의 절대 시각 기준 st(시작)/d(길이) 로 넘겨준다.
   // trim/atrim 은 PTS 를 안 건드리므로, asetpts/setpts 로 리셋하기 *전에* 걸어야 세그먼트가
   // 잘게 쪼개져도(다른 트랙・PIP・구간 지정 등으로) 페이드 경계에서 끊기지 않고 이어진다.
+  // 색보정(밝기/대비/채도) — 렌더러 미리보기의 CSS filter(brightness/contrast/saturate,
+  // 전부 "1 기준 배율")와 같은 값을 ffmpeg eq 필터에 그대로 넣는다.
+  function eqFrag(color) {
+    if (!color || (!color.b && !color.c && !color.s)) return '';
+    const b = (color.b || 0) / 100, c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
+    return `,eq=brightness=${b}:contrast=${c}:saturation=${s}`;
+  }
   function fadeFrag(kind, obj) {
     const name = kind === 'v' ? 'fade' : 'afade';
     const fs = [];
@@ -991,8 +998,8 @@ ipcMain.handle('video:export', async (event, payload) => {
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)},${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)},${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${eqFrag(s.colorA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${eqFrag(s.colorB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
@@ -1015,7 +1022,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)},scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${eqFrag(layer.color)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1032,7 +1039,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${eqFrag(s.color)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });
