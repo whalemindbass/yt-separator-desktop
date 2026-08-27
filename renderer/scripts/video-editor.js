@@ -138,6 +138,7 @@ function layout() {
   }
   renderClips();
   updatePlayheadUI();
+  syncPreview(nowSec());   // 임포트·트림·분할·삭제 등으로 배치가 바뀌면 미리보기도 바로 반영
   const empty = $('ve-empty'); if (empty) empty.hidden = _veClips.length > 0;
 }
 
