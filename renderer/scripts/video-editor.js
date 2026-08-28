@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey })),
       resolution: _veResolution,
     });
   }, 600);
@@ -193,13 +193,67 @@ function applyTrackTransform(pair, track) {
   }
 }
 // ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다. 레이어처럼 구석에 작게 놓거나
-// 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나).
-let _pipPopoverEl = null;
-function onOutsidePip(e) { if (_pipPopoverEl && !_pipPopoverEl.contains(e.target)) closePipPopover(); }
+// 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나). 숫자 입력칸과 함께, 미리보기
+// 위에 직접 드래그(이동)·모서리 드래그(크기)할 수 있는 박스도 같이 띄운다 — 다른 편집기
+// 처럼 "숫자로만"이 아니라 화면 보면서 바로 조정 가능해야 한다는 요청 반영. 박스도
+// 숫자 입력칸도 같은 track.transform 을 보고 있어서 어느 쪽을 조작해도 서로 즉시 맞는다.
+let _pipPopoverEl = null, _pipBoxEl = null;
+function onOutsidePip(e) {
+  if (_pipPopoverEl && !_pipPopoverEl.contains(e.target) && !(_pipBoxEl && _pipBoxEl.contains(e.target))) closePipPopover();
+}
 function closePipPopover() {
+  if (_pipBoxEl) { _pipBoxEl.remove(); _pipBoxEl = null; }
   if (!_pipPopoverEl) return;
   _pipPopoverEl.remove(); _pipPopoverEl = null;
   document.removeEventListener('pointerdown', onOutsidePip, true);
+}
+function syncPipBoxFromTransform(track) {
+  if (!_pipBoxEl) return;
+  const tf = track.transform || defaultTransform();
+  _pipBoxEl.style.left = (tf.x * 100) + '%'; _pipBoxEl.style.top = (tf.y * 100) + '%';
+  _pipBoxEl.style.width = (tf.scale * 100) + '%'; _pipBoxEl.style.height = (tf.scale * 100) + '%';
+}
+function createPipBox(track, onChange) {
+  const host = $('ve-preview'); if (!host) return;
+  const box = document.createElement('div');
+  box.className = 've-pip-box';
+  box.innerHTML = `<div class="ve-pip-box-handle"></div>`;
+  host.appendChild(box);
+  _pipBoxEl = box;
+  syncPipBoxFromTransform(track);
+  box.addEventListener('pointerdown', (e) => {
+    if (e.target.classList.contains('ve-pip-box-handle')) return;
+    e.preventDefault(); e.stopPropagation();
+    const hostRect = host.getBoundingClientRect();
+    const tf0 = track.transform || defaultTransform();
+    const startX = e.clientX, startY = e.clientY;
+    try { box.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      const nx = Math.max(0, Math.min(1 - tf0.scale, tf0.x + (ev.clientX - startX) / hostRect.width));
+      const ny = Math.max(0, Math.min(1 - tf0.scale, tf0.y + (ev.clientY - startY) / hostRect.height));
+      track.transform = { x: nx, y: ny, scale: tf0.scale };
+      syncPipBoxFromTransform(track);
+      onChange(false);
+    };
+    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+  box.querySelector('.ve-pip-box-handle').addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const hostRect = host.getBoundingClientRect();
+    const tf0 = track.transform || defaultTransform();
+    const startX = e.clientX, startY = e.clientY;
+    try { e.target.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      const d = ((ev.clientX - startX) / hostRect.width + (ev.clientY - startY) / hostRect.height) / 2;
+      const scale = Math.max(0.1, Math.min(1 - Math.max(tf0.x, tf0.y), tf0.scale + d));
+      track.transform = { x: tf0.x, y: tf0.y, scale };
+      syncPipBoxFromTransform(track);
+      onChange(false);
+    };
+    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
 }
 function openPipPopover(track, anchorEl) {
   closePipPopover();
@@ -223,6 +277,7 @@ function openPipPopover(track, anchorEl) {
     track.transform = isDefault ? null : { x, y, scale };
     const pair = _layerEls.get(track.id);
     if (pair) applyTrackTransform(pair, track);
+    syncPipBoxFromTransform(track);
     anchorEl.classList.toggle('on', !isDefault);
     scheduleSave();
   };
@@ -232,6 +287,20 @@ function openPipPopover(track, anchorEl) {
   pop.querySelector('#pip-reset').addEventListener('click', () => {
     pop.querySelector('#pip-x').value = 0; pop.querySelector('#pip-y').value = 0; pop.querySelector('#pip-scale').value = 100;
     apply();
+  });
+  // 박스를 드래그/리사이즈했을 때 숫자 입력칸도 같이 맞춘다(반대 방향 동기화).
+  createPipBox(track, (committed) => {
+    const pair = _layerEls.get(track.id);
+    if (pair) applyTrackTransform(pair, track);
+    const tfNow = track.transform || defaultTransform();
+    pop.querySelector('#pip-x').value = Math.round(tfNow.x * 100);
+    pop.querySelector('#pip-y').value = Math.round(tfNow.y * 100);
+    pop.querySelector('#pip-scale').value = Math.round(tfNow.scale * 100);
+    if (committed) {
+      const isDefault = tfNow.x === 0 && tfNow.y === 0 && tfNow.scale === 1;
+      anchorEl.classList.toggle('on', !isDefault);
+      scheduleSave();
+    }
   });
   setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
@@ -597,20 +666,94 @@ function fadeMul(clip, t) {
 }
 // 텍스트 트랙 컨테이너 갱신 — 그 순간 재생 위치를 덮는 텍스트 클립들을 (보통 0~1개,
 // 겹쳐 놓았으면 여러 개) 그려 넣는다. 페이드 핸들은 텍스트 클립엔 안 붙이므로(내보내기가
-// 아직 못 따라가는 반쪽 기능은 만들지 않는다) opacity 는 항상 1.
+// 아직 못 따라가는 반쪽 기능은 만들지 않는다) opacity 는 항상 1. 항목 자체를 미리보기
+// 위에서 바로 드래그(위치)·모서리 핸들 드래그(크기)할 수 있게 만든다 — CapCut/Canva 류
+// 편집기처럼, 숫자 입력칸(팝오버)에 의존하지 않고도 조정 가능해야 한다는 요청 반영.
 function syncTextLayer(container, track, t) {
   const here = clipsAt(track.id, t);
   container.innerHTML = '';
   for (const c of here) {
+    const font = TEXT_FONTS[c.fontKey] || TEXT_FONTS.malgun;
     const el = document.createElement('div');
-    el.className = 've-text-item';
+    el.className = 've-text-item' + (c.id === _selClipId ? ' sel' : '');
     el.style.left = (c.xPct * 100) + '%';
     el.style.top = (c.yPct * 100) + '%';
     el.style.fontSize = (c.size || 42) + 'px';
     el.style.color = c.color || '#ffffff';
+    el.style.fontFamily = font.css;
+    el.style.fontWeight = font.weight || '400';
     el.textContent = c.text || '';
+    wireTextItemDrag(el, c);
+    if (c.id === _selClipId) {
+      const handle = document.createElement('div');
+      handle.className = 've-text-item-rs';
+      el.appendChild(handle);
+      wireTextItemResize(handle, c);
+    }
     container.appendChild(el);
   }
+}
+// 본문 드래그 = 위치(xPct/yPct) 이동. #ve-preview 크기를 기준으로 비율 델타를 계산해서
+// 미리보기 해상도가 바뀌어도(세로 프리셋 등) 항상 맞게 움직인다.
+function wireTextItemDrag(el, c) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target.classList.contains('ve-text-item-rs')) return;
+    e.preventDefault(); e.stopPropagation();
+    const wasSel = _selClipId === c.id;
+    _selClipId = c.id;
+    // 다른 클립을 고르는 거면 그 클립용으로 열려 있던 팝오버(있다면)는 닫는다 — 안 닫으면
+    // renderClips() 가 타임라인을 다시 그리면서 팝오버가 붙잡고 있던 라벨 엘리먼트가 붕 뜬다.
+    if (!wasSel) { closeTextPopover(); renderClips(); syncPreview(nowSec()); }
+    const host = $('ve-preview'); if (!host) return;
+    const hostRect = host.getBoundingClientRect();
+    const x0 = c.xPct, y0 = c.yPct;
+    const startX = e.clientX, startY = e.clientY;
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      c.xPct = Math.max(0, Math.min(1, x0 + (ev.clientX - startX) / hostRect.width));
+      c.yPct = Math.max(0, Math.min(1, y0 + (ev.clientY - startY) / hostRect.height));
+      el.style.left = (c.xPct * 100) + '%';
+      el.style.top = (c.yPct * 100) + '%';
+      syncTextPopoverFields(c);
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      if (c.xPct !== x0 || c.yPct !== y0) scheduleSave();
+    };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', (e) => { e.stopPropagation(); openTextPopover(c, el); });
+}
+// 모서리 핸들 드래그 = 글자 크기. 대각선으로 움직인 픽셀만큼 fontsize 를 늘리고 줄인다
+// (모서리에서 멀어지면 커짐, 가까워지면 작아짐 — 다른 편집기의 리사이즈 핸들과 같은 감각).
+function wireTextItemResize(handle, c) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const size0 = c.size || 42;
+    const startX = e.clientX, startY = e.clientY;
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      const d = (ev.clientX - startX) + (ev.clientY - startY);
+      c.size = Math.max(8, Math.min(300, Math.round(size0 + d / 2)));
+      const el = handle.parentElement; if (el) el.style.fontSize = c.size + 'px';
+      syncTextPopoverFields(c);
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      if (c.size !== size0) scheduleSave();
+    };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+}
+// 미리보기 위 드래그 결과를 열려 있는 편집 팝오버(있고, 지금 그 클립 것이면)의 숫자
+// 입력칸에도 실시간 반영 — input 이벤트를 다시 쏘진 않는다(무한 루프 방지, 그리고 어차피
+// apply() 는 이미 clip 필드를 직접 바꿔놨다).
+function syncTextPopoverFields(c) {
+  if (!_textPopoverEl || _textPopoverCurrentId !== c.id) return;
+  const xEl = _textPopoverEl.querySelector('#tx-x'), yEl = _textPopoverEl.querySelector('#tx-y'), sEl = _textPopoverEl.querySelector('#tx-size');
+  if (xEl) xEl.value = Math.round(c.xPct * 100);
+  if (yEl) yEl.value = Math.round(c.yPct * 100);
+  if (sEl) sEl.value = c.size;
 }
 function syncPreview(t) {
   let any = false;
@@ -929,6 +1072,18 @@ function paintThumbs(clip) {
   el.innerHTML = clip._thumbUrls.map(u => `<img src="${u}" draggable="false">`).join('');
 }
 // ── 텍스트/타이틀 클립 ────────────────────────────────
+// 고를 수 있는 글꼴 — main.js 의 TEXT_FONT_FILES 와 키가 짝이 맞아야 한다(거긴 실제
+// export 용 실파일 경로, 여긴 미리보기 CSS font-family/드롭다운 표시용). 전부 Windows
+// 기본 설치 폰트 — 번들 없이 참조만 하니 라이선스 문제 없음. 처음 3개는 한글 지원,
+// 나머지 3개는 영문 캡션용 스타일 옵션(임팩트=밈 자막, Georgia=세리프, Consolas=고정폭).
+const TEXT_FONTS = {
+  malgun:   { label: '맑은 고딕',        css: "'Malgun Gothic', sans-serif" },
+  malgunbd: { label: '맑은 고딕 (굵게)', css: "'Malgun Gothic', sans-serif", weight: '700' },
+  nanum:    { label: '나눔고딕',          css: "'Nanum Gothic', sans-serif" },
+  impact:   { label: 'Impact',           css: "Impact, sans-serif" },
+  georgia:  { label: 'Georgia',          css: "Georgia, serif" },
+  consolas: { label: 'Consolas',         css: "Consolas, monospace" },
+};
 // srcDur 를 넉넉히 큰 값으로 잡아둔다 — wireTrim 의 오른쪽 트림 상한(c.srcDur - c.inOff)이
 // 영상 클립처럼 "소스 길이"를 의미 있게 가질 필요가 텍스트엔 없어서, 사실상 무제한으로 늘릴
 // 수 있게 하는 값이다(Infinity 는 JSON.stringify 가 null 로 뭉개버려 프로젝트 저장이 깨진다).
@@ -936,7 +1091,7 @@ const TEXT_CLIP_SRC_DUR = 86400;
 function addTextClipAt(trackId, atSec) {
   const clip = {
     id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: TEXT_CLIP_SRC_DUR,
-    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff',
+    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun',
   };
   _veClips.push(clip);
   pushUndo(
@@ -957,11 +1112,17 @@ function addText() {
   const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
   if (el) openTextPopover(clip, el);
 }
-let _textPopoverEl = null;
-function onOutsideTextPopover(e) { if (_textPopoverEl && !_textPopoverEl.contains(e.target)) closeTextPopover(); }
+let _textPopoverEl = null, _textPopoverCurrentId = null;
+function onOutsideTextPopover(e) {
+  // 미리보기 위 텍스트 아이템(같은 클립이든 다른 클립이든) 클릭·드래그는 "바깥 클릭"이
+  // 아니다 — wireTextItemDrag 가 선택 전환·팝오버 정리를 자기 안에서 이미 알아서 한다.
+  // 여기서도 같이 닫아버리면 드래그를 시작하는 순간 숫자 입력칸이 사라진다.
+  if (e.target.closest && e.target.closest('.ve-text-item')) return;
+  if (_textPopoverEl && !_textPopoverEl.contains(e.target)) closeTextPopover();
+}
 function closeTextPopover() {
   if (!_textPopoverEl) return;
-  _textPopoverEl.remove(); _textPopoverEl = null;
+  _textPopoverEl.remove(); _textPopoverEl = null; _textPopoverCurrentId = null;
   document.removeEventListener('pointerdown', onOutsideTextPopover, true);
 }
 // 텍스트 클립 더블클릭 시 여는 속성 편집 팝오버 — PIP 팝오버(openPipPopover)와 같은 패턴.
@@ -973,8 +1134,11 @@ function openTextPopover(clip, anchorEl) {
   const pop = document.createElement('div');
   pop.className = 've-text-pop';
   pop.style.left = Math.max(4, r.left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  const fontOptions = Object.entries(TEXT_FONTS).map(([key, f]) =>
+    `<option value="${key}" ${key === (clip.fontKey || 'malgun') ? 'selected' : ''}>${esc(f.label)}</option>`).join('');
   pop.innerHTML = `
     <textarea id="tx-content" rows="2" maxlength="200">${esc(clip.text || '')}</textarea>
+    <label class="ve-text-pop-full">${tr('video.textFont')}<select id="tx-font">${fontOptions}</select></label>
     <div class="ve-text-pop-row">
       <label>${tr('video.textX')}<input type="number" id="tx-x" min="0" max="100" step="1" value="${Math.round(clip.xPct * 100)}"></label>
       <label>${tr('video.textY')}<input type="number" id="tx-y" min="0" max="100" step="1" value="${Math.round(clip.yPct * 100)}"></label>
@@ -985,10 +1149,11 @@ function openTextPopover(clip, anchorEl) {
     </div>
     <button class="ve-text-pop-del" id="tx-delete">${tr('video.fxRemove')}</button>`;
   document.body.appendChild(pop);
-  _textPopoverEl = pop;
+  _textPopoverEl = pop; _textPopoverCurrentId = clip.id;
   const lblEl = anchorEl.querySelector('.ve-clip-lbl');
   const apply = () => {
     clip.text = pop.querySelector('#tx-content').value;
+    clip.fontKey = pop.querySelector('#tx-font').value;
     clip.xPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-x').value) || 0)) / 100;
     clip.yPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-y').value) || 0)) / 100;
     clip.size = Math.max(1, Number(pop.querySelector('#tx-size').value) || 42);
@@ -998,6 +1163,7 @@ function openTextPopover(clip, anchorEl) {
     scheduleSave();
   };
   pop.querySelector('#tx-content').addEventListener('input', apply);
+  pop.querySelector('#tx-font').addEventListener('change', apply);
   pop.querySelector('#tx-x').addEventListener('input', apply);
   pop.querySelector('#tx-y').addEventListener('input', apply);
   pop.querySelector('#tx-size').addEventListener('input', apply);
@@ -1338,7 +1504,7 @@ function buildEDL() {
     for (const track of textTracks) {
       if (track.hidden) continue;
       for (const tc of clipsAt(track.id, sampleT)) {
-        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color });
+        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color, fontKey: tc.fontKey });
       }
     }
     return out;

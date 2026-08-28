@@ -147,20 +147,27 @@ const FFMPEG_BIN = vendorPath('ffmpeg', 'ffmpeg.exe');
 const FFMPEG_DIR = vendorPath('ffmpeg');
 const FFPROBE_BIN = vendorPath('ffmpeg', 'ffprobe.exe');
 
-// ── 텍스트/타이틀 오버레이용 폰트 — 한글이 필요해서(자막·타이틀) 시스템 폰트를 못 찾으면
-// export 가 아예 안 된다. 우리 폰트를 새로 번들하는 대신, Windows 가 Vista 이후 기본으로
-// 까는 맑은 고딕 경로를 그대로 쓴다(재배포 없이 참조만 — 라이선스 문제 없음). 캐시해서
-// 매 export 마다 fs.existsSync 를 반복하지 않는다.
-const DRAWTEXT_FONT_CANDIDATES = [
-  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'malgun.ttf'),
-  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'malgunbd.ttf'),
-  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'arial.ttf'),
-];
-let _drawtextFontPath;   // undefined=아직 확인 안 함, null=못 찾음, string=경로
-function resolveDrawtextFont() {
-  if (_drawtextFontPath !== undefined) return _drawtextFontPath;
-  _drawtextFontPath = DRAWTEXT_FONT_CANDIDATES.find(p => { try { return fs.existsSync(p); } catch { return false; } }) || null;
-  return _drawtextFontPath;
+// ── 텍스트/타이틀 오버레이용 폰트 — 우리 폰트를 새로 번들하는 대신 Windows 에 이미 깔린
+// 파일을 그대로 참조한다(재배포 없이 참조만 — 라이선스 문제 없음). 키는 렌더러
+// (video-editor.js 의 TEXT_FONTS)와 짝이 맞아야 한다 — 렌더러는 미리보기 CSS
+// font-family/드롭다운 표시용, 여긴 실제 내보내기용 실파일 경로 해석용. 한쪽만 고치면
+// "미리보기랑 결과물 폰트가 다르다" 버그가 난다.
+const TEXT_FONT_FILES = {
+  malgun: 'malgun.ttf', malgunbd: 'malgunbd.ttf', nanum: 'NanumGothic.ttf',
+  impact: 'impact.ttf', georgia: 'georgia.ttf', consolas: 'consola.ttf',
+};
+const FONTS_DIR = path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts');
+const _fontPathCache = new Map();   // key → 경로(string) | null(못 찾음, malgun 도 없단 뜻)
+// 고른 폰트가 이 컴퓨터에 없으면(드물지만 있을 수 있다) 조용히 맑은 고딕으로 대체한다 —
+// export 전체를 막기보단 최대한 결과물을 낸다. 맑은 고딕조차 없으면 그때 null.
+function resolveTextFont(key) {
+  const k = TEXT_FONT_FILES[key] ? key : 'malgun';
+  if (_fontPathCache.has(k)) return _fontPathCache.get(k);
+  const p = path.join(FONTS_DIR, TEXT_FONT_FILES[k]);
+  let found = fs.existsSync(p) ? p : null;
+  if (!found && k !== 'malgun') found = resolveTextFont('malgun');
+  _fontPathCache.set(k, found);
+  return found;
 }
 
 // 진단 로그 — main 프로세스 콘솔에만. 파일 기록·렌더러 전달 없음
@@ -943,12 +950,18 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 파일명만(콜론 없이) 넘기는 것뿐이었다.
   const hasTexts = segments.some(s => s.texts && s.texts.length);
   let drawtextDir = null;
+  const _copiedFonts = new Set();   // 실제로 쓰인 폰트만, 중복 복사 안 함
+  function ensureFontCopied(key) {
+    const src = resolveTextFont(key);
+    if (!src) return null;
+    const name = path.basename(src);
+    if (!_copiedFonts.has(name)) { fs.copyFileSync(src, path.join(drawtextDir, name)); _copiedFonts.add(name); }
+    return name;
+  }
   if (hasTexts) {
-    const font = resolveDrawtextFont();
-    if (!font) return { ok: false, error: '텍스트 오버레이용 폰트를 찾을 수 없습니다(맑은 고딕/Arial 없음)' };
+    if (!resolveTextFont('malgun')) return { ok: false, error: '텍스트 오버레이용 폰트를 찾을 수 없습니다(맑은 고딕 없음)' };
     drawtextDir = path.join(app.getPath('temp'), 'yss-drawtext-' + crypto.randomBytes(4).toString('hex'));
     fs.mkdirSync(drawtextDir, { recursive: true });
-    fs.copyFileSync(font, path.join(drawtextDir, 'font.ttf'));
   }
   let _capSeq = 0;
   function writeCaptionFile(content) {
@@ -966,10 +979,11 @@ ipcMain.handle('video:export', async (event, payload) => {
     const dstLabel = `${srcLabel}_txt`;
     const stages = active.map((t) => {
       const file = writeCaptionFile(t.content);
+      const fontFile = ensureFontCopied(t.fontKey) || 'malgun.ttf';
       const size = Math.max(1, Math.round(t.size || 42));
       const x = `(w*${(t.x ?? 0.5).toFixed(4)}-text_w/2)`;
       const y = `(h*${(t.y ?? 0.85).toFixed(4)}-text_h/2)`;
-      return `drawtext=fontfile=font.ttf:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
+      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
     return dstLabel;

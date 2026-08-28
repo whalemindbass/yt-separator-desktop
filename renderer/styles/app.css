@@ -4088,6 +4088,16 @@ body { background: var(--bg) !important; }
 }
 .ve-pip-pop button.mini { align-self: flex-end; }
 
+/* 미리보기 위 PIP 박스 — openPipPopover 가 열려 있는 동안만 보인다. */
+.ve-pip-box {
+  position: absolute; z-index: 60; border: 1.5px dashed var(--accent); background: rgba(var(--accent-rgb), .08);
+  cursor: move; box-sizing: border-box;
+}
+.ve-pip-box-handle {
+  position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--elev); cursor: nwse-resize;
+}
+
 /* ── 텍스트/타이틀 트랙 ─────────────────────────────── */
 .ve-lane.text .ve-area { background: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
 .ve-clip.text {
@@ -4099,11 +4109,16 @@ body { background: var(--bg) !important; }
 /* 미리보기 위 텍스트 오버레이 — export 의 drawtext(box=1, boxcolor=#000@.45) 와 비슷하게
    반투명 검정 배경을 둬서 어떤 배경 위에서도 읽히게 맞춘다(완전히 같은 픽셀은 아니어도
    된다 — 실제 결과는 export 픽셀로 검증한다). */
-.ve-text-layer { position: absolute; inset: 0; pointer-events: none; }
+.ve-text-layer { position: absolute; inset: 0; pointer-events: none; z-index: 50; }
 .ve-text-item {
   position: absolute; transform: translate(-50%, -50%); white-space: pre-wrap; text-align: center;
   font-family: var(--sans); line-height: 1.3; background: rgba(0, 0, 0, .45); padding: .15em .4em;
-  border-radius: 3px; max-width: 90%;
+  border-radius: 3px; max-width: 90%; pointer-events: auto; cursor: move; user-select: none;
+}
+.ve-text-item.sel { outline: 1.5px dashed var(--accent); outline-offset: 3px; }
+.ve-text-item-rs {
+  position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--elev); cursor: nwse-resize;
 }
 
 .ve-text-pop {
@@ -4113,6 +4128,11 @@ body { background: var(--bg) !important; }
 .ve-text-pop textarea {
   width: 100%; resize: vertical; background: var(--input); border: 1px solid var(--border); border-radius: 6px;
   padding: 6px 8px; color: var(--tx-1); font: 500 12.5px/1.4 var(--sans);
+}
+.ve-text-pop-full { display: flex; align-items: center; justify-content: space-between; gap: 6px; font: 500 11.5px/1 var(--sans); color: var(--tx-2); }
+.ve-text-pop-full select, .ve-text-pop select {
+  flex: 1; max-width: 130px; background: var(--input); border: 1px solid var(--border); border-radius: 5px;
+  padding: 4px 6px; color: var(--tx-1); font: 500 12px/1 var(--sans);
 }
 .ve-text-pop-row { display: flex; gap: 10px; }
 .ve-text-pop-row label { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; font: 500 11.5px/1 var(--sans); color: var(--tx-2); }
