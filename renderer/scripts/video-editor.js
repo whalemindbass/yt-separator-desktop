@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr, fx }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr, fx })),
       resolution: _veResolution,
     });
   }, 600);
@@ -231,9 +231,20 @@ function colorFilterCss(color) {
   if (b === 1 && c === 1 && s === 1) return '';
   return `brightness(${b}) contrast(${c}) saturate(${s})`;
 }
+// FX(대표 효과) — 흑백/세피아/블러. CSS 함수(grayscale/sepia/blur)가 그대로 있어서
+// 내보내기 쪽(ffmpeg)도 같은 뜻의 필터로 맞추면 된다(색보정 때와 같은 방식).
+function fxFilterCss(fx) {
+  if (!fx) return '';
+  const parts = [];
+  if (fx.bw) parts.push('grayscale(1)');
+  if (fx.sepia) parts.push('sepia(1)');
+  if (fx.blur) parts.push(`blur(${fx.blur}px)`);
+  return parts.join(' ');
+}
 function openColorPopover(clip, anchorEl) {
   closeColorPopover();
   const col = clip.color || { b: 0, c: 0, s: 0 };
+  const fx = clip.fx || { bw: false, sepia: false, blur: 0 };
   const r = anchorEl.getBoundingClientRect();
   const pop = document.createElement('div');
   pop.className = 've-color-pop';
@@ -242,6 +253,10 @@ function openColorPopover(clip, anchorEl) {
     <label><span>${tr('video.colorBrightness')}</span><input type="range" id="cc-b" min="-100" max="100" step="1" value="${col.b}"><span id="cc-b-v">${col.b}</span></label>
     <label><span>${tr('video.colorContrast')}</span><input type="range" id="cc-c" min="-100" max="100" step="1" value="${col.c}"><span id="cc-c-v">${col.c}</span></label>
     <label><span>${tr('video.colorSaturation')}</span><input type="range" id="cc-s" min="-100" max="100" step="1" value="${col.s}"><span id="cc-s-v">${col.s}</span></label>
+    <div class="ve-color-sep"></div>
+    <label class="ve-color-chk"><input type="checkbox" id="cc-bw" ${fx.bw ? 'checked' : ''}><span>${tr('video.fxBw')}</span></label>
+    <label class="ve-color-chk"><input type="checkbox" id="cc-sepia" ${fx.sepia ? 'checked' : ''}><span>${tr('video.fxSepia')}</span></label>
+    <label><span>${tr('video.fxBlur')}</span><input type="range" id="cc-blur" min="0" max="20" step="1" value="${fx.blur}"><span id="cc-blur-v">${fx.blur}</span></label>
     <button class="mini" id="cc-reset">${tr('video.pipReset')}</button>`;
   document.body.appendChild(pop);
   _colorPopoverEl = pop;
@@ -252,15 +267,27 @@ function openColorPopover(clip, anchorEl) {
     pop.querySelector('#cc-b-v').textContent = b; pop.querySelector('#cc-c-v').textContent = c; pop.querySelector('#cc-s-v').textContent = s;
     const isDefault = b === 0 && c === 0 && s === 0;
     clip.color = isDefault ? null : { b, c, s };
-    anchorEl.classList.toggle('on', !isDefault);
+
+    const bw = pop.querySelector('#cc-bw').checked;
+    const sepia = pop.querySelector('#cc-sepia').checked;
+    const blur = Number(pop.querySelector('#cc-blur').value) || 0;
+    pop.querySelector('#cc-blur-v').textContent = blur;
+    const fxDefault = !bw && !sepia && !blur;
+    clip.fx = fxDefault ? null : { bw, sepia, blur };
+
+    anchorEl.classList.toggle('on', !isDefault || !fxDefault);
     syncPreview(nowSec());
     scheduleSave();
   };
   pop.querySelector('#cc-b').addEventListener('input', apply);
   pop.querySelector('#cc-c').addEventListener('input', apply);
   pop.querySelector('#cc-s').addEventListener('input', apply);
+  pop.querySelector('#cc-bw').addEventListener('input', apply);
+  pop.querySelector('#cc-sepia').addEventListener('input', apply);
+  pop.querySelector('#cc-blur').addEventListener('input', apply);
   pop.querySelector('#cc-reset').addEventListener('click', () => {
     pop.querySelector('#cc-b').value = 0; pop.querySelector('#cc-c').value = 0; pop.querySelector('#cc-s').value = 0;
+    pop.querySelector('#cc-bw').checked = false; pop.querySelector('#cc-sepia').checked = false; pop.querySelector('#cc-blur').value = 0;
     apply();
   });
   setTimeout(() => document.addEventListener('pointerdown', onOutsideColor, true), 0);
@@ -279,7 +306,7 @@ function driveLayer(el, clip, t, visual) {
     el.hidden = false;
     const sx = clip.flipH ? -1 : 1, sy = clip.flipV ? -1 : 1;
     el.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
-    el.style.filter = colorFilterCss(clip.color);
+    el.style.filter = [colorFilterCss(clip.color), fxFilterCss(clip.fx)].filter(Boolean).join(' ');
   }
   // 영상 클립이 짝(groupId, 오디오 트랙의 오디오 클립)을 가지고 있으면 소리는 그 짝이
   // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
@@ -866,7 +893,7 @@ function updateClipToolbarUI() {
   const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v'), colorBtn = $('ve-color');
   if (hBtn) { hBtn.disabled = !canFlip; hBtn.classList.toggle('on', !!c?.flipH); }
   if (vBtn) { vBtn.disabled = !canFlip; vBtn.classList.toggle('on', !!c?.flipV); }
-  if (colorBtn) { colorBtn.disabled = !canFlip; colorBtn.classList.toggle('on', !!c?.color); }
+  if (colorBtn) { colorBtn.disabled = !canFlip; colorBtn.classList.toggle('on', !!c?.color || !!c?.fx); }
   closeColorPopover();   // 선택이 바뀌면(또는 목록이 다시 그려지면) 열려 있던 팝오버는 닫는다 — 다른 클립을 보여줄 순 없다
 }
 
@@ -940,7 +967,7 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, hdr: c.hdr, ...fadeFieldsFor(c) };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, fx: c.fx, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a,
       });
@@ -955,15 +982,15 @@ function buildEDL() {
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color, hdrA: outC.hdr,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color, hdrB: inC.hdr,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color, fxA: outC.fx, hdrA: outC.hdr,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color, fxB: inC.fx, hdrB: inC.hdr,
           refW, refH,
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, hdr: c.hdr, ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, fx: c.fx, hdr: c.hdr, ...fadeFieldsFor(c) });
       continue;
     }
 
