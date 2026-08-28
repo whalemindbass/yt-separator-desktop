@@ -917,8 +917,7 @@ ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath, format } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
-  const fmt = ['mp4', 'mov', 'webm', 'gif'].includes(format) ? format : 'mp4';
-  const isGif = fmt === 'gif';   // GIF 는 오디오 스트림 자체가 없다 — 별도로 취급한다.
+  const fmt = ['mp4', 'mov', 'webm'].includes(format) ? format : 'mp4';
 
   const allFiles = new Set();
   for (const s of segments) {
@@ -1104,28 +1103,10 @@ ipcMain.handle('video:export', async (event, payload) => {
   });
   const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');
   parts.push(`${concatIn}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
-
-  // GIF 는 오디오 자체가 없는 포맷이다(그래서 위 오디오 필터그래프는 만들어지긴 하지만
-  // 그냥 안 쓰인다 — 짧은 클립이 보통이라 그 정도 낭비는 무시할 만하다) — 대신 좋은 화질을
-  // 위해 팔레트 2단계(생성→디더링 적용)를 거친다. 그 외(mp4/mov/webm)는 원래 그대로 매핑.
-  let videoLabel = 'outv';
-  if (isGif) {
-    parts.push('[outv]fps=15,scale=480:-1:flags=lanczos,split[gs0][gs1]');
-    parts.push('[gs0]palettegen=stats_mode=diff[gp]');
-    parts.push('[gs1][gp]paletteuse=dither=bayer[outg]');
-    videoLabel = 'outg';
-    // concat 이 만든 [outa] 를 아무 데도 안 쓰면 ffmpeg 가 필터그래프 검증에서 바로
-    // 죽는다("output 0 (outa) unconnected") — GIF 는 오디오 스트림 자체가 없어서 -map
-    // 을 안 하니, 그냥 버리는 싱크 필터로 소비 처리만 해준다.
-    parts.push('[outa]anullsink');
-  }
-  args.push('-filter_complex', parts.join(';'), '-map', `[${videoLabel}]`);
-  if (!isGif) args.push('-map', '[outa]');
+  args.push('-filter_complex', parts.join(';'), '-map', '[outv]', '-map', '[outa]');
 
   if (fmt === 'webm') {
     args.push('-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
-  } else if (isGif) {
-    args.push('-loop', '0');
   } else {   // mp4/mov — 코덱은 똑같이 h264+aac, 컨테이너만 확장자로 자동 결정된다
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k');
   }

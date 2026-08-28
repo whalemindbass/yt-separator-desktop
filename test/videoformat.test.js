@@ -1,7 +1,6 @@
 'use strict';
-// 내보내기 포맷 다양화(MP4/MOV/WebM/GIF) — 포맷 선택 UI(저장 대화상자 확장자까지 맞는지)
-// 와 실제 내보낸 파일이 그 포맷에 맞는 스트림 구성(GIF=오디오 없음, WebM=VP9+Opus)인지
-// ffprobe 로 검증한다.
+// 내보내기 포맷 다양화(MP4/MOV/WebM) — 포맷 선택 UI(저장 대화상자 확장자까지 맞는지)
+// 와 실제 내보낸 파일이 그 포맷에 맞는 스트림 구성(WebM=VP9+Opus)인지 ffprobe 로 검증한다.
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
 const { spawnSync } = require('child_process');
@@ -39,38 +38,12 @@ function probe(file) {
   await js(`document.getElementById('ve-add-track').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
-  expect('포맷 선택에 mp4/mov/webm/gif 옵션 있음',
-    await js(`[...document.getElementById('ve-format').options].map(o => o.value).sort().join(',')`), 'gif,mov,mp4,webm');
+  expect('포맷 선택에 mp4/mov/webm 옵션 있음',
+    await js(`[...document.getElementById('ve-format').options].map(o => o.value).sort().join(',')`), 'mov,mp4,webm');
   expect('기본값 mp4', await js(`document.getElementById('ve-format').value`), 'mp4');
-
-  section('2) GIF 선택 시 소리 없다는 안내');
-  await js(`(() => {
-    const sel = document.getElementById('ve-format');
-    sel.value = 'gif';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-  })(); true`);
-  await wait(150);
-  expect('GIF 안내 토스트 뜸', (await js(`document.getElementById('ve-toast')?.textContent`) || '').includes('GIF'), true);
-
-  section('3) GIF 내보내기 — 저장 대화상자 확장자 .gif, 결과물엔 오디오 스트림 없음');
-  const OUT_GIF = path.join(TMP, 'out.gif');
   let savedName = null;
-  dialog.showSaveDialog = async (win, opts) => { savedName = opts.defaultPath; return { canceled: false, filePath: OUT_GIF }; };
-  await js(`document.getElementById('ve-export').click(); true`);
-  for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(OUT_GIF)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
-    await wait(500);
-  }
-  expect('저장 대화상자 기본 파일명이 .gif', (savedName || '').endsWith('.gif'), true);
-  expect('GIF 출력 파일 생김', fs.existsSync(OUT_GIF), true);
-  if (fs.existsSync(OUT_GIF)) {
-    const info = probe(OUT_GIF);
-    expect('GIF 결과물엔 오디오 스트림 없음', info.includes('codec_type=audio'), false);
-    expect('GIF 코덱 확인', info.includes('codec_name=gif'), true);
-    near('GIF 길이 ≈ 2초', parseFloat((/duration=([\d.]+)/.exec(info) || [])[1] || 0), 2, 0.5);
-  }
 
-  section('4) WebM 내보내기 — VP9 영상 + Opus 오디오');
+  section('2) WebM 내보내기 — VP9 영상 + Opus 오디오');
   await js(`(() => {
     const sel = document.getElementById('ve-format');
     sel.value = 'webm';
@@ -91,7 +64,7 @@ function probe(file) {
     expect('WebM 오디오 코덱 Opus', info.includes('codec_name=opus'), true);
   }
 
-  section('5) MOV 내보내기 — H.264 그대로, 컨테이너만 MOV');
+  section('3) MOV 내보내기 — H.264 그대로, 컨테이너만 MOV');
   await js(`(() => {
     const sel = document.getElementById('ve-format');
     sel.value = 'mov';
