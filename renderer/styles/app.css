@@ -3911,6 +3911,7 @@ body { background: var(--bg) !important; }
   padding: 9px 10px; border-bottom: 1px solid var(--border);
 }
 .ve-fx-title { font: 600 12px/1 var(--sans); color: var(--tx-1); }
+.ve-fx-actions { display: flex; align-items: center; gap: 6px; }
 .ve-fx-add-wrap { position: relative; }
 .ve-fx-add-btn {
   width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
@@ -3930,6 +3931,34 @@ body { background: var(--bg) !important; }
   color: var(--tx-2); font: 500 12px/1 var(--sans); cursor: pointer;
 }
 .ve-fx-add-item:hover { background: var(--elev-2); color: var(--tx-1); }
+
+.ve-fx-preset-menu { min-width: 190px; right: -36px; }
+.ve-fx-preset-save-row { display: flex; gap: 4px; padding: 3px; }
+.ve-fx-preset-save-row input {
+  flex: 1 1 auto; min-width: 0; padding: 6px 7px; border-radius: 5px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--tx-1); font: 400 12px/1 var(--sans);
+}
+.ve-fx-preset-save-row button {
+  flex: 0 0 auto; padding: 6px 9px; border-radius: 5px; border: 0; background: var(--accent-dim);
+  color: var(--accent); font: 600 11.5px/1 var(--sans); cursor: pointer;
+}
+.ve-fx-preset-save-row button:disabled { opacity: .4; cursor: default; }
+.ve-fx-preset-sep { height: 1px; background: var(--border); margin: 3px 1px; }
+.ve-fx-preset-row {
+  display: flex; align-items: center; gap: 4px; border-radius: 5px;
+}
+.ve-fx-preset-row:hover { background: var(--elev-2); }
+.ve-fx-preset-apply {
+  flex: 1 1 auto; min-width: 0; text-align: left; padding: 7px 9px; border: 0; background: transparent;
+  color: var(--tx-2); font: 500 12px/1 var(--sans); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ve-fx-preset-row:hover .ve-fx-preset-apply { color: var(--tx-1); }
+.ve-fx-preset-del {
+  flex: 0 0 auto; width: 20px; height: 20px; margin-right: 4px; border: 0; background: transparent;
+  color: var(--tx-3); font: 400 13px/1 var(--sans); cursor: pointer; border-radius: 4px;
+}
+.ve-fx-preset-del:hover { background: var(--elev); color: var(--danger); }
+.ve-fx-preset-empty { padding: 8px 9px; color: var(--tx-3); font: 400 11.5px/1.5 var(--sans); }
 
 .ve-fx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .ve-fx-empty { color: var(--tx-3); font: 400 12px/1.6 var(--sans); text-align: center; margin-top: 18px; padding: 0 6px; }

@@ -296,6 +296,36 @@ function migrateClipEffects(clip) {
   delete clip.color; delete clip.fx;
 }
 
+// ── 효과 체인 프리셋 — 클립이 아니라 앱 전역(localStorage)에 저장한다. 프로젝트를
+// 넘나들며 "밝기+세피아+블러" 같은 조합에 이름 붙여 재사용하는 용도라 프로젝트 파일에
+// 넣을 이유가 없다(테마/모델 선택 등 다른 전역 설정도 전부 localStorage 를 쓴다).
+const FX_PRESET_KEY = 've.effectPresets';
+function loadEffectPresets() {
+  try { const raw = JSON.parse(localStorage.getItem(FX_PRESET_KEY) || '[]'); return Array.isArray(raw) ? raw : []; }
+  catch { return []; }
+}
+function saveEffectPresetsToStorage(list) {
+  try { localStorage.setItem(FX_PRESET_KEY, JSON.stringify(list)); } catch {}
+}
+let _effectPresets = loadEffectPresets();
+function saveEffectPreset(name, effects) {
+  const clean = (effects || []).map(e => ({ type: e.type, value: e.value, enabled: e.enabled !== false }));
+  _effectPresets.push({ id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), name, effects: clean });
+  saveEffectPresetsToStorage(_effectPresets);
+}
+function deleteEffectPreset(id) {
+  _effectPresets = _effectPresets.filter(p => p.id !== id);
+  saveEffectPresetsToStorage(_effectPresets);
+}
+// 프리셋을 클립에 적용 — 지금 있는 효과는 전부 갈아치운다(덧붙이지 않는다), id 는
+// 전역 시퀀스로 새로 발급(프리셋 저장 시점의 id 를 그대로 쓰면 같은 프리셋을 두 번
+// 적용했을 때 클립 안에서 id 가 겹친다).
+function applyEffectPreset(clip, preset) {
+  if (!clip || !preset) return;
+  clip.effects = preset.effects.map(e => ({ id: nextEffectId(), type: e.type, value: e.value, enabled: e.enabled !== false }));
+  syncPreview(nowSec()); scheduleSave();
+}
+
 // ── 효과 체인 패널(미리보기 왼쪽, 상시 표시) ──────────────────────────
 // updateClipToolbarUI() 가 선택이 바뀔 때마다(또는 목록이 다시 그려질 때마다) 이 함수를
 // 호출한다. 여긴 항상 DOM 을 통째로 다시 그린다 — 구조 변경(추가/삭제/재배치/on-off)이
@@ -323,21 +353,80 @@ function toggleFxAddMenu(clip) {
   menu.hidden = false;
   setTimeout(() => document.addEventListener('pointerdown', _onFxAddOutside, true), 0);
 }
+function closeFxPresetMenu() {
+  const menu = $('ve-fx-preset-menu');
+  if (menu) menu.hidden = true;
+  document.removeEventListener('pointerdown', _onFxPresetOutside, true);
+}
+function _onFxPresetOutside(e) {
+  const menu = $('ve-fx-preset-menu'), btn = $('ve-fx-preset-btn');
+  if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== btn) closeFxPresetMenu();
+}
+// 프리셋 메뉴 = 저장 행(이름 입력 + 저장 버튼) + 저장된 프리셋 목록(클릭=적용, ×=삭제).
+// 저장 버튼은 (a) 이름이 비었거나 (b) 지금 클립에 적용된 효과가 하나도 없으면 막는다
+// — 빈 이름/빈 체인 프리셋은 나중에 목록만 어지럽힌다.
+function buildFxPresetMenu(clip) {
+  const menu = $('ve-fx-preset-menu'); if (!menu) return;
+  menu.innerHTML = '';
+  const saveRow = document.createElement('div');
+  saveRow.className = 've-fx-preset-save-row';
+  saveRow.innerHTML = `<input type="text" maxlength="40" placeholder="${esc(tr('video.fxPresetNamePh'))}">
+    <button type="button">${esc(tr('video.fxPresetSave'))}</button>`;
+  const input = saveRow.querySelector('input'), saveBtn = saveRow.querySelector('button');
+  const hasEffects = !!(clip.effects && clip.effects.length);
+  const syncSaveBtn = () => { saveBtn.disabled = !hasEffects || !input.value.trim(); };
+  syncSaveBtn();
+  if (!hasEffects) saveBtn.title = tr('video.fxPresetNoEffects');
+  input.addEventListener('input', syncSaveBtn);
+  saveBtn.addEventListener('click', () => {
+    const name = input.value.trim(); if (!name || !hasEffects) return;
+    saveEffectPreset(name, clip.effects);
+    closeFxPresetMenu();
+  });
+  menu.appendChild(saveRow);
+  if (_effectPresets.length) {
+    const sep = document.createElement('div'); sep.className = 've-fx-preset-sep'; menu.appendChild(sep);
+    _effectPresets.forEach((p) => {
+      const row = document.createElement('div'); row.className = 've-fx-preset-row';
+      const apply = document.createElement('button');
+      apply.type = 'button'; apply.className = 've-fx-preset-apply'; apply.textContent = p.name; apply.title = tr('video.fxPresetApplyTitle');
+      apply.addEventListener('click', () => { applyEffectPreset(clip, p); closeFxPresetMenu(); renderEffectPanel(clip); });
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 've-fx-preset-del'; del.textContent = '×'; del.title = tr('video.fxPresetDeleteTitle');
+      del.addEventListener('click', (e) => { e.stopPropagation(); deleteEffectPreset(p.id); buildFxPresetMenu(clip); });
+      row.appendChild(apply); row.appendChild(del);
+      menu.appendChild(row);
+    });
+  } else {
+    const empty = document.createElement('p'); empty.className = 've-fx-preset-empty'; empty.textContent = tr('video.fxPresetEmpty');
+    menu.appendChild(empty);
+  }
+}
+function toggleFxPresetMenu(clip) {
+  const menu = $('ve-fx-preset-menu'); if (!menu || !clip || clip.isAudioOnly) return;
+  if (!menu.hidden) { closeFxPresetMenu(); return; }
+  buildFxPresetMenu(clip);
+  menu.hidden = false;
+  setTimeout(() => document.addEventListener('pointerdown', _onFxPresetOutside, true), 0);
+}
 function renderEffectPanel(clip) {
-  const body = $('ve-fx-body'), addBtn = $('ve-fx-add-btn');
+  const body = $('ve-fx-body'), addBtn = $('ve-fx-add-btn'), presetBtn = $('ve-fx-preset-btn');
   if (!body) return;
-  closeFxAddMenu();
+  closeFxAddMenu(); closeFxPresetMenu();
   if (!clip) {
     if (addBtn) addBtn.disabled = true;
+    if (presetBtn) presetBtn.disabled = true;
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxNoClip'))}</p>`;
     return;
   }
   if (clip.isAudioOnly) {
     if (addBtn) addBtn.disabled = true;
+    if (presetBtn) presetBtn.disabled = true;
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxAudioOnly'))}</p>`;
     return;
   }
   if (addBtn) addBtn.disabled = false;
+  if (presetBtn) presetBtn.disabled = false;
   const list = clip.effects || [];
   if (!list.length) {
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`;
@@ -1269,6 +1358,10 @@ function wire() {
   $('ve-fx-add-btn')?.addEventListener('click', () => {
     const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
     toggleFxAddMenu(c);
+  });
+  $('ve-fx-preset-btn')?.addEventListener('click', () => {
+    const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
+    toggleFxPresetMenu(c);
   });
   $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
