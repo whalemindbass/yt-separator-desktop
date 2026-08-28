@@ -1095,7 +1095,8 @@ function buildEDL() {
 async function runExport() {
   const segs = buildEDL();
   if (!segs.length) { flash(tr('video.needImport')); return; }
-  const r = await api.dialog.saveAs('export.mp4', ['mp4']);
+  const format = $('ve-format')?.value || 'mp4';
+  const r = await api.dialog.saveAs(`export.${format}`, [format]);
   if (!r || !r.ok) return;
   setPlaying(false);
   const btn = $('ve-export');
@@ -1106,7 +1107,7 @@ async function runExport() {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
   let res;
-  try { res = await api.video.export({ segments: segs, outPath: r.filePath }); }
+  try { res = await api.video.export({ segments: segs, outPath: r.filePath, format }); }
   finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
   flash(res.ok ? tr('video.exportDone') : tr('video.exportFail', { err: res.error || '' }));
 }
@@ -1275,6 +1276,7 @@ function wire() {
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
   $('ve-export')?.addEventListener('click', () => runExport());
+  $('ve-format')?.addEventListener('change', (e) => { if (e.target.value === 'gif') flash(tr('video.gifNoAudio')); });
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
   // Shift+드래그(또는 영역 선택 모드)면 재생선 대신 내보내기 구간을 지정한다(스튜디오와 동일).
