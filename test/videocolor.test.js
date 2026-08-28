@@ -19,6 +19,14 @@ const W = 320, H = 240;
 spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=gray:size=${W}x${H}:duration=2:rate=10`,
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', SRC], { stdio: 'ignore' });
 if (!fs.existsSync(SRC)) throw new Error('ffmpeg 로 테스트 mp4 생성 실패');
+// 채도 검증용(순수 빨강 — 회색 소스로는 채도 변화를 아예 관찰할 수 없다, R=G=B 는 그대로 R=G=B)
+const RED = path.join(TMP, 'red.mp4');
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=red:size=${W}x${H}:duration=2:rate=10`,
+  '-c:v', 'libx264', '-pix_fmt', 'yuv420p', RED], { stdio: 'ignore' });
+// 대비 검증용(중간톤 128 이 아닌 값 — 128 에선 대비를 아무리 줘도 안 변하는 게 정상이라 구분이 안 됨)
+const LIGHT = path.join(TMP, 'light.mp4');
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=0xC8C8C8:size=${W}x${H}:duration=2:rate=10`,
+  '-c:v', 'libx264', '-pix_fmt', 'yuv420p', LIGHT], { stdio: 'ignore' });
 
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [SRC] });
 
@@ -30,6 +38,13 @@ function frameBrightness(file, t) {
   const buf = fs.readFileSync(raw);
   let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i];
   return sum / buf.length;
+}
+function framePixel(file, t) {
+  const raw = file + `.${t}.px.raw`;
+  spawnSync(FFMPEG, ['-y', '-ss', String(t), '-i', file, '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, raw], { stdio: 'ignore' });
+  const buf = fs.readFileSync(raw);
+  const o = (Math.floor(H / 2) * W + Math.floor(W / 2)) * 3;
+  return { r: buf[o], g: buf[o + 1], b: buf[o + 2] };
 }
 
 (async () => {
@@ -88,6 +103,81 @@ function frameBrightness(file, t) {
   await wait(100);
   expect('색보정 버튼 off', await js(`document.getElementById('ve-color').classList.contains('on')`), false);
   expect('필터 비워짐', await js(`document.querySelector('#ve-preview video:not([hidden])')?.style.filter`), '');
+
+  section('5) 채도 -100(완전 무채도) — 순수 빨강이 CSS saturate(0) 과 같은 회색으로');
+  // ffmpeg eq 의 saturation 은 YUV(색차) 기준이라 CSS saturate() 의 RGB 휘도보존 행렬과
+  // 다르게 보일 수 있다 — colorchannelmixer 로 CSS 명세 행렬을 직접 넣은 게 맞는지 검증.
+  const OUT2 = path.join(TMP, 'out2.mp4');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [RED] });
+  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-import').click(); true`);
+  for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
+  await js(`(() => {
+    const clips = document.querySelectorAll('.ve-clip');
+    const el = clips[0];
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 5 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 5 }));
+  })(); true`);
+  await wait(100);
+  await js(`document.getElementById('ve-color').click(); true`);
+  await wait(100);
+  await js(`(() => {
+    const el = document.getElementById('cc-s');
+    el.value = -100;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  })(); true`);
+  await wait(100);
+  await js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5 })); true`);
+  await wait(150);
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT2 });
+  await js(`document.getElementById('ve-export').click(); true`);
+  for (let i = 0; i < 60; i++) {
+    if (fs.existsSync(OUT2)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
+    await wait(500);
+  }
+  expect('출력 파일 생김', fs.existsSync(OUT2), true);
+  if (fs.existsSync(OUT2)) {
+    const px = framePixel(OUT2, 0.5);
+    // CSS/SVG saturate(0) 휘도 가중치: 0.213R + 0.715G + 0.072B → 순수 빨강(255,0,0) 은 ≈54.3
+    near('R 채널 ≈ CSS 휘도값(54)', px.r, 54, 10);
+    expect('R≈G≈B(완전 무채도 = 회색)', Math.abs(px.r - px.g) < 8 && Math.abs(px.g - px.b) < 8, true);
+  }
+
+  section('6) 대비 +50(중간톤 아닌 값에서) — CSS contrast(1.5) 공식과 일치하는가');
+  const OUT3 = path.join(TMP, 'out3.mp4');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [LIGHT] });
+  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-import').click(); true`);
+  for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 3) break; await wait(300); }
+  await js(`(() => {
+    const clips = document.querySelectorAll('.ve-clip');
+    const el = clips[0];
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 6 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 6 }));
+  })(); true`);
+  await wait(100);
+  await js(`document.getElementById('ve-color').click(); true`);
+  await wait(100);
+  await js(`(() => {
+    const el = document.getElementById('cc-c');
+    el.value = 50;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  })(); true`);
+  await wait(100);
+  await js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5 })); true`);
+  await wait(150);
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT3 });
+  await js(`document.getElementById('ve-export').click(); true`);
+  for (let i = 0; i < 60; i++) {
+    if (fs.existsSync(OUT3)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
+    await wait(500);
+  }
+  expect('출력 파일 생김', fs.existsSync(OUT3), true);
+  if (fs.existsSync(OUT3)) {
+    const px = framePixel(OUT3, 0.5);
+    // CSS contrast(1.5): (200-128)*1.5+128 = 236
+    near('대비 +50 결과가 CSS contrast(1.5) 공식과 일치(≈236)', px.r, 236, 10);
+  }
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

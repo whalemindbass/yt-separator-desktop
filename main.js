@@ -955,25 +955,33 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 클립 페이드인/아웃 — buildEDL() 이 원본 파일의 절대 시각 기준 st(시작)/d(길이) 로 넘겨준다.
   // trim/atrim 은 PTS 를 안 건드리므로, asetpts/setpts 로 리셋하기 *전에* 걸어야 세그먼트가
   // 잘게 쪼개져도(다른 트랙・PIP・구간 지정 등으로) 페이드 경계에서 끊기지 않고 이어진다.
-  // 색보정(밝기/대비/채도) — 미리보기는 CSS filter(brightness/contrast/saturate, 전부
-  // "1 기준 배율"). ffmpeg eq 의 brightness 는 겉보기와 달리 -1~1 범위를 그대로 "더하는"
-  // 값이라(배율이 아니라 오프셋), CSS brightness() 와 정도가 완전히 달라진다(중간 밝기만
-  // 돼도 흰색으로 날아가 버림) — 실제로 이 불일치가 "미리보기랑 결과물이 다르다" 버그였다.
-  // CSS brightness() 와 정확히 같은 "0 기준 순수 배율"을 내려면 eq 대신 colorchannelmixer
-  // (rr/gg/bb 대각선만 채운 순수 채널별 곱셈)를 쓴다. 대비・채도는 eq 의 정의(중간톤 0.5
-  // 기준 배율)가 CSS 와 같은 뜻이라 그대로 둔다.
+  // 색보정(밝기/대비/채도) — 미리보기는 CSS filter(brightness/contrast/saturate). ffmpeg
+  // eq 필터는 밝기를 배율이 아니라 -1~1 오프셋으로 더하고(그래서 살짝만 올려도 결과물이
+  // 흰색으로 날아감), 대비・채도도 RGB 가 아니라 YUV(휘도/색차 평면) 기준이라 컬러풀한
+  // 영상에서 CSS 와 다르게 보인다 — colorchannelmixer 로 밝기만 고쳤을 때도(1차 시도) 대비・
+  // 채도가 여전히 안 맞아서 결과물이 계속 달라 보였다. CSS 명세식 그대로 RGB 공간에서
+  // 직접 계산해서 완전히 맞춘다:
+  //  - format=rgb24 로 먼저 RGB 로 강제 변환(YUV 기준 연산이 섞이지 않게)
+  //  - 밝기+대비: val -> clip((val*B - 128)*C + 128, 0, 255) 를 R/G/B 각각에 (lutrgb)
+  //  - 채도: CSS/SVG saturate() 표준 휘도보존 3x3 행렬 그대로 (colorchannelmixer)
+  // (출력은 어차피 -pix_fmt yuv420p 로 인코딩되니 마지막에 다시 YUV 로 안 돌려도 된다.)
   function eqFrag(color) {
     if (!color || (!color.b && !color.c && !color.s)) return '';
-    const fs = [];
-    if (color.b) {
-      const k = Math.max(0, 1 + color.b / 100);
-      fs.push(`colorchannelmixer=rr=${k}:gg=${k}:bb=${k}`);
+    const B = Math.max(0, 1 + (color.b || 0) / 100);
+    const C = 1 + (color.c || 0) / 100;
+    const S = 1 + (color.s || 0) / 100;
+    const stages = ['format=rgb24'];
+    if (color.b || color.c) {
+      const expr = `clip((val*${B}-128)*${C}+128\\,0\\,255)`;
+      stages.push(`lutrgb=r='${expr}':g='${expr}':b='${expr}'`);
     }
-    if (color.c || color.s) {
-      const c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
-      fs.push(`eq=contrast=${c}:saturation=${s}`);
+    if (color.s) {
+      const rr = (0.213 + 0.787 * S).toFixed(4), rg = (0.715 - 0.715 * S).toFixed(4), rb = (0.072 - 0.072 * S).toFixed(4);
+      const gr = (0.213 - 0.213 * S).toFixed(4), gg = (0.715 + 0.285 * S).toFixed(4), gb = (0.072 - 0.072 * S).toFixed(4);
+      const br = (0.213 - 0.213 * S).toFixed(4), bg = (0.715 - 0.715 * S).toFixed(4), bb = (0.072 + 0.928 * S).toFixed(4);
+      stages.push(`colorchannelmixer=rr=${rr}:rg=${rg}:rb=${rb}:gr=${gr}:gg=${gg}:gb=${gb}:br=${br}:bg=${bg}:bb=${bb}`);
     }
-    return fs.length ? ',' + fs.join(',') : '';
+    return ',' + stages.join(',');
   }
   function fadeFrag(kind, obj) {
     const name = kind === 'v' ? 'fade' : 'afade';
