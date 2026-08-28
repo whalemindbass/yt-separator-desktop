@@ -3868,10 +3868,17 @@ body { background: var(--bg) !important; }
 .ve-tbtn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .ve-time { font: 500 12.5px/1 var(--mono); color: var(--tx-2); min-width: 84px; text-align: center; }
 
-.ve-preview-wrap {
-  position: relative; flex: 0 0 auto; background: var(--video-bg);
-  display: flex; align-items: center; justify-content: center;
+/* 미리보기 + 왼쪽 효과 패널을 한 행으로 묶는다 — 높이/아래 테두리는 여기서만 관리하고
+   .ve-preview-wrap 은 그 안에서 남는 폭을 그대로 쓴다(패널 폭만큼 자연히 줄어듦).
+   sizePreviewFrame() 은 #ve-preview-wrap 의 clientWidth/Height 로 렌더 프레임 크기를
+   재는데, 패널이 이 행의 형제(자식이 아님)라 그 계산에 패널 폭이 섞이지 않는다. */
+.ve-preview-row {
+  display: flex; flex: 0 0 auto; align-items: stretch;
   height: 34vh; min-height: 200px; max-height: 420px; border-bottom: 1px solid var(--border);
+}
+.ve-preview-wrap {
+  position: relative; flex: 1 1 auto; min-width: 0; background: var(--video-bg);
+  display: flex; align-items: center; justify-content: center;
 }
 /* #ve-preview 는 실제 렌더(내보내기) 프레임 그 자체다 — JS 가 선택된 해상도 비율대로
    정확한 px 크기를 매겨준다(sizePreviewFrame). 그 바깥(ve-preview-wrap 의 나머지 공간)은
@@ -3891,6 +3898,77 @@ body { background: var(--bg) !important; }
 }
 .ve-empty p { color: var(--tx-3); font-size: 13px; }
 .ve-empty[hidden] { display: none; }
+
+/* ── 효과 체인 패널(미리보기 왼쪽, 상시 표시) ──────────────────────
+   선택된 클립의 effects[] 를 리졸브/프리미어식 스택으로 보여준다 — 위가 먼저 적용,
+   아래로 갈수록 나중에 적용(순서가 실제 결과를 바꾼다, moveClipEffect 주석 참고). */
+.ve-fx-panel {
+  flex: 0 0 252px; min-width: 0; display: flex; flex-direction: column;
+  background: var(--surface); border-right: 1px solid var(--border);
+}
+.ve-fx-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 10px; border-bottom: 1px solid var(--border);
+}
+.ve-fx-title { font: 600 12px/1 var(--sans); color: var(--tx-1); }
+.ve-fx-add-wrap { position: relative; }
+.ve-fx-add-btn {
+  width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-2);
+  cursor: pointer; font-size: 14px; line-height: 1; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.ve-fx-add-btn:hover { background: var(--elev-2); color: var(--tx-1); }
+.ve-fx-add-btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+.ve-fx-add-menu {
+  position: absolute; top: 30px; right: 0; z-index: 20; min-width: 130px;
+  background: var(--elev); border: 1px solid var(--border-mid); border-radius: 8px;
+  padding: 4px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 1px;
+}
+.ve-fx-add-menu[hidden] { display: none; }
+.ve-fx-add-item {
+  text-align: left; padding: 7px 9px; border-radius: 5px; border: 0; background: transparent;
+  color: var(--tx-2); font: 500 12px/1 var(--sans); cursor: pointer;
+}
+.ve-fx-add-item:hover { background: var(--elev-2); color: var(--tx-1); }
+
+.ve-fx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ve-fx-empty { color: var(--tx-3); font: 400 12px/1.6 var(--sans); text-align: center; margin-top: 18px; padding: 0 6px; }
+
+.ve-fx-row {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--elev);
+  padding: 7px 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.ve-fx-row.off { opacity: .55; }
+.ve-fx-row-top { display: flex; align-items: center; gap: 6px; }
+.ve-fx-name {
+  flex: 1 1 auto; min-width: 0; font: 600 12px/1.2 var(--sans); color: var(--tx-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ve-fx-val { flex: 0 0 auto; font: 500 11px/1 var(--mono); color: var(--tx-2); min-width: 26px; text-align: right; }
+
+/* 사소한 활성/비활성 스위치 — 설정 탭의 .switch 와 같은 생김새를 절반 크기로 */
+.ve-fx-onoff {
+  flex: 0 0 auto; width: 28px; height: 16px; border-radius: 16px; border: 1px solid var(--border-mid);
+  background: var(--input); cursor: pointer; position: relative; padding: 0;
+}
+.ve-fx-onoff::before {
+  content: ''; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--tx-2); transition: transform var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.ve-fx-onoff[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+.ve-fx-onoff[aria-pressed="true"]::before { transform: translateX(12px); background: var(--accent-fg); }
+
+.ve-fx-order { flex: 0 0 auto; display: flex; gap: 2px; }
+.ve-fx-mv, .ve-fx-del {
+  width: 19px; height: 19px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; border: 1px solid var(--border); background: var(--elev-2); color: var(--tx-3);
+  cursor: pointer; font-size: 9px; line-height: 1; flex: 0 0 auto;
+}
+.ve-fx-mv:hover, .ve-fx-del:hover { color: var(--tx-1); }
+.ve-fx-mv:disabled { opacity: .35; cursor: default; pointer-events: none; }
+.ve-fx-del { font-size: 12px; }
+.ve-fx-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.ve-fx-slider { width: 100%; }
 
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }

@@ -295,6 +295,94 @@ function migrateClipEffects(clip) {
   clip.effects = list;
   delete clip.color; delete clip.fx;
 }
+
+// ── 효과 체인 패널(미리보기 왼쪽, 상시 표시) ──────────────────────────
+// updateClipToolbarUI() 가 선택이 바뀔 때마다(또는 목록이 다시 그려질 때마다) 이 함수를
+// 호출한다. 여긴 항상 DOM 을 통째로 다시 그린다 — 구조 변경(추가/삭제/재배치/on-off)이
+// 잦은 편이라 부분 갱신보다 단순함이 이득이다. 다만 슬라이더 드래그 중(input 이벤트)엔
+// 여길 다시 부르지 않는다(포커스/드래그가 끊긴다) — 값 표시만 그 자리에서 직접 갱신.
+function closeFxAddMenu() {
+  const menu = $('ve-fx-add-menu');
+  if (menu) menu.hidden = true;
+  document.removeEventListener('pointerdown', _onFxAddOutside, true);
+}
+function _onFxAddOutside(e) {
+  const menu = $('ve-fx-add-menu'), btn = $('ve-fx-add-btn');
+  if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== btn) closeFxAddMenu();
+}
+function toggleFxAddMenu(clip) {
+  const menu = $('ve-fx-add-menu'); if (!menu || !clip || clip.isAudioOnly) return;
+  if (!menu.hidden) { closeFxAddMenu(); return; }
+  menu.innerHTML = '';
+  Object.keys(EFFECT_TYPES).forEach((type) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 've-fx-add-item'; b.textContent = tr(EFFECT_TYPES[type].i18n);
+    b.addEventListener('click', () => { addClipEffect(clip, type); closeFxAddMenu(); renderEffectPanel(clip); });
+    menu.appendChild(b);
+  });
+  menu.hidden = false;
+  setTimeout(() => document.addEventListener('pointerdown', _onFxAddOutside, true), 0);
+}
+function renderEffectPanel(clip) {
+  const body = $('ve-fx-body'), addBtn = $('ve-fx-add-btn');
+  if (!body) return;
+  closeFxAddMenu();
+  if (!clip) {
+    if (addBtn) addBtn.disabled = true;
+    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxNoClip'))}</p>`;
+    return;
+  }
+  if (clip.isAudioOnly) {
+    if (addBtn) addBtn.disabled = true;
+    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxAudioOnly'))}</p>`;
+    return;
+  }
+  if (addBtn) addBtn.disabled = false;
+  const list = clip.effects || [];
+  if (!list.length) {
+    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`;
+    return;
+  }
+  body.innerHTML = '';
+  list.forEach((eff, i) => {
+    const def = EFFECT_TYPES[eff.type]; if (!def) return;
+    const isRange = def.kind === 'range';
+    const val = eff.value ?? def.def ?? 0;
+    const enabled = eff.enabled !== false;
+    const row = document.createElement('div');
+    row.className = 've-fx-row' + (enabled ? '' : ' off');
+    row.dataset.id = String(eff.id);
+    row.innerHTML = `
+      <div class="ve-fx-row-top">
+        <button type="button" class="ve-fx-onoff" aria-pressed="${enabled}" title="${esc(tr('video.fxToggleTitle'))}"></button>
+        <span class="ve-fx-name">${esc(tr(def.i18n))}</span>
+        ${isRange ? `<span class="ve-fx-val">${val > 0 ? '+' : ''}${val}</span>` : ''}
+        <div class="ve-fx-order">
+          <button type="button" class="ve-fx-mv" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="${esc(tr('video.fxMoveUp'))}">▲</button>
+          <button type="button" class="ve-fx-mv" data-dir="1" ${i === list.length - 1 ? 'disabled' : ''} title="${esc(tr('video.fxMoveDown'))}">▼</button>
+        </div>
+        <button type="button" class="ve-fx-del" title="${esc(tr('video.fxRemove'))}">×</button>
+      </div>
+      ${isRange ? `<input type="range" class="ve-fx-slider" min="${def.min}" max="${def.max}" step="1" value="${val}">` : ''}
+    `;
+    row.querySelector('.ve-fx-onoff').addEventListener('click', () => { toggleClipEffect(clip, eff.id); renderEffectPanel(clip); });
+    row.querySelectorAll('.ve-fx-mv').forEach((b) => {
+      b.addEventListener('click', () => { moveClipEffect(clip, eff.id, Number(b.dataset.dir)); renderEffectPanel(clip); });
+    });
+    row.querySelector('.ve-fx-del').addEventListener('click', () => { removeClipEffect(clip, eff.id); renderEffectPanel(clip); });
+    const slider = row.querySelector('.ve-fx-slider');
+    if (slider) {
+      const valEl = row.querySelector('.ve-fx-val');
+      slider.addEventListener('input', () => {
+        const v = Number(slider.value);
+        setClipEffectValue(clip, eff.id, v);
+        if (valEl) valEl.textContent = (v > 0 ? '+' : '') + v;
+      });
+    }
+    body.appendChild(row);
+  });
+}
+
 function clipAt(trackId, t) {
   return _veClips.find(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur) || null;
 }
@@ -1177,6 +1265,10 @@ function wire() {
   $('ve-redo')?.addEventListener('click', () => doRedo());
   $('ve-flip-h')?.addEventListener('click', () => flipSelected('h'));
   $('ve-flip-v')?.addEventListener('click', () => flipSelected('v'));
+  $('ve-fx-add-btn')?.addEventListener('click', () => {
+    const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
+    toggleFxAddMenu(c);
+  });
   $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));

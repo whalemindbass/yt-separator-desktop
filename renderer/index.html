@@ -1197,11 +1197,25 @@
         <button id="ve-export" class="btn primary btn-sm" type="button" data-i18n="video.export">내보내기</button>
       </div>
     </div>
-    <div class="ve-preview-wrap" id="ve-preview-wrap">
-      <div id="ve-preview" class="ve-preview"></div>
-      <div id="ve-empty" class="ve-empty">
-        <p data-i18n="video.emptyTitle">아직 영상이 없습니다</p>
-        <button id="ve-empty-import" class="btn primary" type="button" data-i18n="video.import">임포트</button>
+    <div class="ve-preview-row" id="ve-preview-row">
+      <aside class="ve-fx-panel" id="ve-fx-panel">
+        <div class="ve-fx-head">
+          <span class="ve-fx-title" data-i18n="video.fxPanelTitle">효과</span>
+          <div class="ve-fx-add-wrap">
+            <button id="ve-fx-add-btn" class="ve-fx-add-btn" type="button" disabled data-i18n-title="video.fxAddTitle" title="효과 추가">＋</button>
+            <div id="ve-fx-add-menu" class="ve-fx-add-menu" hidden></div>
+          </div>
+        </div>
+        <div class="ve-fx-body" id="ve-fx-body">
+          <p class="ve-fx-empty" data-i18n="video.fxNoClip">클립을 선택하세요</p>
+        </div>
+      </aside>
+      <div class="ve-preview-wrap" id="ve-preview-wrap">
+        <div id="ve-preview" class="ve-preview"></div>
+        <div id="ve-empty" class="ve-empty">
+          <p data-i18n="video.emptyTitle">아직 영상이 없습니다</p>
+          <button id="ve-empty-import" class="btn primary" type="button" data-i18n="video.import">임포트</button>
+        </div>
       </div>
     </div>
     <div class="ve-tscroll" id="ve-tscroll">
