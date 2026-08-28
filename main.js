@@ -885,16 +885,29 @@ ipcMain.handle('audio:transcode', async (_ev, src, dst, opts) => {
 // 본다 — 없는데 있다고 착각하면 내보내기가 에러로 죽지만, 있는데 없다고 착각하면 진짜
 // 오디오가 조용히 빠져버린다. 안전한 쪽으로 기운다.
 ipcMain.handle('video:probeAudio', async (_ev, file) => {
-  if (typeof file !== 'string' || !fs.existsSync(file)) return { hasAudio: true };
+  if (typeof file !== 'string' || !fs.existsSync(file)) return { hasAudio: true, isHDR: false };
   return await new Promise((resolve) => {
     let proc;
     try {
-      proc = spawn(FFPROBE_BIN, ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file], { windowsHide: true });
-    } catch { return resolve({ hasAudio: true }); }
+      proc = spawn(FFPROBE_BIN, ['-v', 'error', '-show_entries', 'stream=codec_type,color_transfer', '-of', 'json', file], { windowsHide: true });
+    } catch { return resolve({ hasAudio: true, isHDR: false }); }
     let out = '';
     proc.stdout.on('data', (d) => out += d);
-    proc.on('error', () => resolve({ hasAudio: true }));
-    proc.on('close', (code) => resolve({ hasAudio: code !== 0 ? true : out.trim().length > 0 }));
+    proc.on('error', () => resolve({ hasAudio: true, isHDR: false }));
+    proc.on('close', (code) => {
+      if (code !== 0) return resolve({ hasAudio: true, isHDR: false });
+      // isHDR: false 아니면 ffprobe 의 color_transfer 이름 그대로('smpte2084' PQ 또는
+      // 'arib-std-b67' HLG) — 이 이름이 export 쪽 zscale 필터의 transfer= 값으로 그대로 들어간다.
+      let hasAudio = false, isHDR = false;
+      try {
+        const streams = JSON.parse(out).streams || [];
+        for (const s of streams) {
+          if (s.codec_type === 'audio') hasAudio = true;
+          if (s.codec_type === 'video' && (s.color_transfer === 'smpte2084' || s.color_transfer === 'arib-std-b67')) isHDR = s.color_transfer;
+        }
+      } catch {}
+      resolve({ hasAudio, isHDR });
+    });
   });
 });
 // 영상 편집 탭 내보내기(v2) — 컷 편집 + 트랙 겹침(PIP overlay) + 여러 오디오 트랙 믹스.
@@ -944,6 +957,17 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 모든 [vN] 이 같은 크기여야 하니, 비율은 유지한 채(왜곡 없이) 검은 여백으로 맞춰 넣는다.
   function scalePad(w, h) {
     return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+  }
+  // HDR(PQ/HLG) 소스를 SDR 로 그냥 변환하면 화면이 허옇게 씻겨나간다 — 표준 톤매핑
+  // 체인(zscale 로 선형 변환 → tonemap(hable) → 다시 bt709/tv 로) 을 거쳐야 한다.
+  // trim 바로 다음(원본 픽셀 그대로일 때) 걸어야 한다 — 밝기/대비 등 우리 자체 보정은
+  // 이미 SDR 로 바뀐 결과에 적용되는 게 맞다(그래야 슬라이더 값이 익숙한 범위로 먹힌다).
+  function hdrFrag(hdrTransfer) {
+    if (!hdrTransfer) return '';
+    // 소스 파일에 색 정보 태그가 없는 경우(흔하다 — 실제로 우리 테스트 픽스처도 그랬다)
+    // zscale 이 "no path between colorspaces" 로 죽는다 — setparams 로 우리가 이미 probe 로
+    // 알고 있는 실제 전송특성(PQ/HLG)을 프레임에 먼저 태그해 준 다음 zscale 이 그걸 읽게 한다.
+    return `,setparams=color_trc=${hdrTransfer}:colorspace=bt2020nc:color_primaries=bt2020,zscale=transfer=linear:npl=100,format=gbrpf32le,zscale=primaries=bt709,tonemap=tonemap=hable:desat=0,zscale=transfer=bt709:matrix=bt709:range=tv,format=yuv420p`;
   }
   // 클립 단위 좌우/상하 반전 — 필터 체인에 끼워 넣을 조각(없으면 빈 문자열).
   function flipFrag(flipH, flipV) {
@@ -1019,8 +1043,8 @@ ipcMain.handle('video:export', async (event, payload) => {
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${eqFrag(s.colorA)},${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${eqFrag(s.colorB)},${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${eqFrag(s.colorA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${eqFrag(s.colorB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
@@ -1043,7 +1067,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${eqFrag(layer.color)},scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${eqFrag(layer.color)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1060,7 +1084,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${eqFrag(s.color)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${eqFrag(s.color)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });

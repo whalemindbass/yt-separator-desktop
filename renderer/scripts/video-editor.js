@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr })),
       resolution: _veResolution,
     });
   }, 600);
@@ -940,7 +940,7 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, ...fadeFieldsFor(c) };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a,
       });
@@ -955,15 +955,15 @@ function buildEDL() {
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color, hdrA: outC.hdr,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color, hdrB: inC.hdr,
           refW, refH,
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, hdr: c.hdr, ...fadeFieldsFor(c) });
       continue;
     }
 
@@ -1026,7 +1026,7 @@ async function importVideoFiles(paths, trackId) {
   for (const p of paths) {
     const meta = await probeVideo(p);
     if (!meta.dur) continue;
-    const { hasAudio } = await api.video.probeAudio(p);
+    const { hasAudio, isHDR } = await api.video.probeAudio(p);
     const name = p.split(/[\\/]/).pop();
     // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
     // 얹고 싶을 때를 위해 받되, 썸네일·내보내기는 이 클립엔 다르게 처리해야 한다.
@@ -1040,7 +1040,10 @@ async function importVideoFiles(paths, trackId) {
       continue;
     }
 
-    const vClip = { id: nextClipId(), trackId: tid, file: p, name, start: videoCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false };
+    // HDR(PQ/HLG) 소스 — 내보낼 때 SDR 로 그냥 바꾸면 화면이 씻겨나가서 톤매핑이 필요하다.
+    // hdr 값은 false 아니면 ffprobe 의 color_transfer 이름 그대로('smpte2084'/'arib-std-b67')
+    // — main.js 가 이 이름을 zscale 필터에 그대로 넘긴다.
+    const vClip = { id: nextClipId(), trackId: tid, file: p, name, start: videoCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false, hdr: isHDR || false };
     if (hasAudio) {
       ensureAudioTrack();
       const groupId = vClip.id;
