@@ -955,12 +955,25 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 클립 페이드인/아웃 — buildEDL() 이 원본 파일의 절대 시각 기준 st(시작)/d(길이) 로 넘겨준다.
   // trim/atrim 은 PTS 를 안 건드리므로, asetpts/setpts 로 리셋하기 *전에* 걸어야 세그먼트가
   // 잘게 쪼개져도(다른 트랙・PIP・구간 지정 등으로) 페이드 경계에서 끊기지 않고 이어진다.
-  // 색보정(밝기/대비/채도) — 렌더러 미리보기의 CSS filter(brightness/contrast/saturate,
-  // 전부 "1 기준 배율")와 같은 값을 ffmpeg eq 필터에 그대로 넣는다.
+  // 색보정(밝기/대비/채도) — 미리보기는 CSS filter(brightness/contrast/saturate, 전부
+  // "1 기준 배율"). ffmpeg eq 의 brightness 는 겉보기와 달리 -1~1 범위를 그대로 "더하는"
+  // 값이라(배율이 아니라 오프셋), CSS brightness() 와 정도가 완전히 달라진다(중간 밝기만
+  // 돼도 흰색으로 날아가 버림) — 실제로 이 불일치가 "미리보기랑 결과물이 다르다" 버그였다.
+  // CSS brightness() 와 정확히 같은 "0 기준 순수 배율"을 내려면 eq 대신 colorchannelmixer
+  // (rr/gg/bb 대각선만 채운 순수 채널별 곱셈)를 쓴다. 대비・채도는 eq 의 정의(중간톤 0.5
+  // 기준 배율)가 CSS 와 같은 뜻이라 그대로 둔다.
   function eqFrag(color) {
     if (!color || (!color.b && !color.c && !color.s)) return '';
-    const b = (color.b || 0) / 100, c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
-    return `,eq=brightness=${b}:contrast=${c}:saturation=${s}`;
+    const fs = [];
+    if (color.b) {
+      const k = Math.max(0, 1 + color.b / 100);
+      fs.push(`colorchannelmixer=rr=${k}:gg=${k}:bb=${k}`);
+    }
+    if (color.c || color.s) {
+      const c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
+      fs.push(`eq=contrast=${c}:saturation=${s}`);
+    }
+    return fs.length ? ',' + fs.join(',') : '';
   }
   function fadeFrag(kind, obj) {
     const name = kind === 'v' ? 'fade' : 'afade';

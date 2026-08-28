@@ -22,7 +22,7 @@ if (!fs.existsSync(SRC)) throw new Error('ffmpeg 로 테스트 mp4 생성 실패
 
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [SRC] });
 
-const { bootMain, expect, section, wait, finish } = require('./harness');
+const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
 function frameBrightness(file, t) {
   const raw = file + `.${t}.raw`;
@@ -72,9 +72,15 @@ function frameBrightness(file, t) {
   }
   expect('출력 파일 생김', fs.existsSync(OUT), true);
   if (fs.existsSync(OUT)) {
+    // "확실히 밝아졌다" 정도의 느슨한 문턱값만 보면 안 된다 — ffmpeg eq=brightness 는
+    // (겉보기와 달리) 배율이 아니라 -1~1 오프셋을 그대로 더하는 값이라, CSS brightness()
+    // 와 같은 슬라이더 값을 넣어도 훨씬 과하게(거의 흰색으로 날아가도록) 밝아지는 버그가
+    // 실제로 있었다 — 그 버그는 이 문턱값 검사를 그냥 통과했을 것이다. 미리보기가 쓰는
+    // CSS brightness(1.6) 과 "정확히 같은 배율"인지(±허용오차) 직접 계산해서 비교한다.
     const srcB = frameBrightness(SRC, 0.5);
     const outB = frameBrightness(OUT, 0.5);
-    expect('밝기 +60 준 결과물이 원본보다 확실히 밝음', outB > srcB + 20, true);
+    const expected = Math.min(255, srcB * 1.6);   // CSS brightness(1.6) 와 같은 배율
+    near('밝기 +60 결과물이 CSS brightness(1.6) 과 같은 배율(과하게 날아가지 않음)', outB, expected, 12);
   }
 
   section('4) 초기화 버튼 — 팝오버 값 되돌리고 버튼 off');
