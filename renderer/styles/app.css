@@ -3960,6 +3960,12 @@ body { background: var(--bg) !important; }
 .ve-fx-preset-del:hover { background: var(--elev); color: var(--danger); }
 .ve-fx-preset-empty { padding: 8px 9px; color: var(--tx-3); font: 400 11.5px/1.5 var(--sans); }
 
+.ve-fx-hist-wrap {
+  flex: 0 0 auto; padding: 10px 10px 0; border-bottom: 1px solid var(--border);
+}
+.ve-fx-hist-wrap[hidden] { display: none; }
+.ve-fx-hist { display: block; width: 100%; height: 40px; margin-bottom: 10px; background: var(--elev); border-radius: 6px; }
+
 .ve-fx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .ve-fx-empty { color: var(--tx-3); font: 400 12px/1.6 var(--sans); text-align: center; margin-top: 18px; padding: 0 6px; }
 
