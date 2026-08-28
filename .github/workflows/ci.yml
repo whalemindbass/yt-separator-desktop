@@ -1,0 +1,55 @@
+# 매 push/PR 마다 테스트 게이트.
+#
+# release.js 는 실제 배포 직전에 npm test 를 돌리지만(--skip-tests 로 건너뛸 수 있음),
+# 그 확인은 릴리즈 시점에만 일어난다. 이 워크플로는 main 에 뭔가 들어갈 때마다 독립적으로
+# 돌아서, 깨진 커밋이 릴리즈 때까지 묻혀있지 않게 한다.
+#
+# ffmpeg 는 choco 로 설치해 vendor/ffmpeg 에 복사하고, 오디오 엔진(JUCE)은 engine/build.ps1
+# 로 직접 빌드한다 — 둘 다 저장소에 커밋되지 않는 바이너리라 CI 에서 매번 준비해야 한다.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install ffmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $ffmpeg = (Get-Command ffmpeg).Source
+          $ffprobe = (Get-Command ffprobe).Source
+          New-Item -ItemType Directory -Force -Path vendor\ffmpeg | Out-Null
+          Copy-Item $ffmpeg vendor\ffmpeg\ffmpeg.exe -Force
+          Copy-Item $ffprobe vendor\ffmpeg\ffprobe.exe -Force
+
+      - name: Cache JUCE / engine build
+        uses: actions/cache@v4
+        with:
+          path: C:\yss\build
+          key: engine-build-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/Main.cpp') }}
+
+      - name: Build audio engine (no ASIO — SDK not on runner)
+        shell: pwsh
+        run: .\engine\build.ps1
+
+      - name: Run tests
+        run: npm test

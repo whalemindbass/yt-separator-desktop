@@ -4,6 +4,13 @@
 #   - 태그(v*) push  → Setup.exe + Portable.exe artifact 업로드
 #   - 수동 실행       → 동일
 #
+# 참고: 실제 배포는 scripts/release.js 가 로컬에서 electron-builder --publish always 로
+# GitHub Releases 에 직접 올린다 — 이 워크플로는 그 경로를 대신하지 않는다. 여기서 만든
+# artifact 는 다운로드해서 수동으로 확인/배포하는 용도. vendor/ffmpeg 와 engine/bin 은
+# 저장소에 없는 바이너리라 아래에서 CI 안에서 새로 준비하고, 패키징 전에 npm test 로
+# 한 번 더 게이트한다 — 이게 없으면 이 workflow 산출물은 ffmpeg/엔진이 빠진 채 조용히
+# 만들어지거나(빈 extraResources), 테스트 없이 나갈 수 있었다.
+#
 # SignPath Foundation 승인 후 아래 서명 스텝을 추가할 예정.
 # https://about.signpath.io/documentation/foundation
 
@@ -18,6 +25,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +37,29 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install ffmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $ffmpeg = (Get-Command ffmpeg).Source
+          $ffprobe = (Get-Command ffprobe).Source
+          New-Item -ItemType Directory -Force -Path vendor\ffmpeg | Out-Null
+          Copy-Item $ffmpeg vendor\ffmpeg\ffmpeg.exe -Force
+          Copy-Item $ffprobe vendor\ffmpeg\ffprobe.exe -Force
+
+      - name: Cache JUCE / engine build
+        uses: actions/cache@v4
+        with:
+          path: C:\yss\build
+          key: engine-build-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/Main.cpp') }}
+
+      - name: Build audio engine (no ASIO — SDK not on runner)
+        shell: pwsh
+        run: .\engine\build.ps1
+
+      - name: Run tests
+        run: npm test
 
       - name: Build (unsigned)
         env:
