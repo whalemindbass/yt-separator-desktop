@@ -147,6 +147,22 @@ const FFMPEG_BIN = vendorPath('ffmpeg', 'ffmpeg.exe');
 const FFMPEG_DIR = vendorPath('ffmpeg');
 const FFPROBE_BIN = vendorPath('ffmpeg', 'ffprobe.exe');
 
+// ── 텍스트/타이틀 오버레이용 폰트 — 한글이 필요해서(자막·타이틀) 시스템 폰트를 못 찾으면
+// export 가 아예 안 된다. 우리 폰트를 새로 번들하는 대신, Windows 가 Vista 이후 기본으로
+// 까는 맑은 고딕 경로를 그대로 쓴다(재배포 없이 참조만 — 라이선스 문제 없음). 캐시해서
+// 매 export 마다 fs.existsSync 를 반복하지 않는다.
+const DRAWTEXT_FONT_CANDIDATES = [
+  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'malgun.ttf'),
+  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'malgunbd.ttf'),
+  path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'arial.ttf'),
+];
+let _drawtextFontPath;   // undefined=아직 확인 안 함, null=못 찾음, string=경로
+function resolveDrawtextFont() {
+  if (_drawtextFontPath !== undefined) return _drawtextFontPath;
+  _drawtextFontPath = DRAWTEXT_FONT_CANDIDATES.find(p => { try { return fs.existsSync(p); } catch { return false; } }) || null;
+  return _drawtextFontPath;
+}
+
 // 진단 로그 — main 프로세스 콘솔에만. 파일 기록·렌더러 전달 없음
 function dlog(...args) { console.log(...args); }
 
@@ -919,6 +935,46 @@ ipcMain.handle('video:export', async (event, payload) => {
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
   const fmt = ['mp4', 'mov', 'webm'].includes(format) ? format : 'mp4';
 
+  // 텍스트/타이틀 오버레이 — 하나라도 있으면 폰트를 확인하고, drawtext 가 상대경로로
+  // fontfile/textfile 을 찾을 수 있게 전용 임시 폴더를 만든다. 드라이브 문자가 들어간
+  // 절대경로("C:\...")를 filter_complex 문자열 안에 넣으면 이스케이프를 어떻게 해도
+  // (\: 이스케이프, 작은따옴표 감싸기 다 시도해봤다) 이 ffmpeg 빌드의 옵션 파서가
+  // 드라이브 콜론에서 깨진다 — 실측으로 확인한 우회법은 ffmpeg 의 cwd 를 그 폴더로 두고
+  // 파일명만(콜론 없이) 넘기는 것뿐이었다.
+  const hasTexts = segments.some(s => s.texts && s.texts.length);
+  let drawtextDir = null;
+  if (hasTexts) {
+    const font = resolveDrawtextFont();
+    if (!font) return { ok: false, error: '텍스트 오버레이용 폰트를 찾을 수 없습니다(맑은 고딕/Arial 없음)' };
+    drawtextDir = path.join(app.getPath('temp'), 'yss-drawtext-' + crypto.randomBytes(4).toString('hex'));
+    fs.mkdirSync(drawtextDir, { recursive: true });
+    fs.copyFileSync(font, path.join(drawtextDir, 'font.ttf'));
+  }
+  let _capSeq = 0;
+  function writeCaptionFile(content) {
+    const name = `cap${_capSeq++}.txt`;
+    fs.writeFileSync(path.join(drawtextDir, name), content || '', 'utf-8');
+    return name;
+  }
+  // 세그먼트에 텍스트가 있으면 그 세그먼트의 최종 [vN] 라벨 위에 drawtext 를 하나 더
+  // 쌓고, 새 라벨을 돌려준다(같은 라벨을 두 번 정의할 수 없어서) — 없으면 원래 라벨 그대로.
+  function textFrag(texts, w, h, srcLabel, i) {
+    // 내용이 빈 캡션은 걸러낸다 — drawtext 의 textfile 이 빈 파일을 가리키면 "could not be
+    // read or is empty" 로 필터그래프 전체가 죽는다(실측으로 확인).
+    const active = (texts || []).filter(t => (t.content || '').trim());
+    if (!active.length) return srcLabel;
+    const dstLabel = `${srcLabel}_txt`;
+    const stages = active.map((t) => {
+      const file = writeCaptionFile(t.content);
+      const size = Math.max(1, Math.round(t.size || 42));
+      const x = `(w*${(t.x ?? 0.5).toFixed(4)}-text_w/2)`;
+      const y = `(h*${(t.y ?? 0.85).toFixed(4)}-text_h/2)`;
+      return `drawtext=fontfile=font.ttf:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
+    });
+    parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
+    return dstLabel;
+  }
+
   const allFiles = new Set();
   for (const s of segments) {
     if (s.xfade) { allFiles.add(s.fileA); allFiles.add(s.fileB); }
@@ -1049,6 +1105,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
   }
 
+  const vLabels = segments.map((_, i) => `v${i}`);   // textFrag() 가 텍스트 있는 세그먼트만 바꿔치기한다
   segments.forEach((s, i) => {
     if (s.xfade) {
       // 같은 트랙에서 클립 두 개가 겹치도록 끌어다 놓은 구간 — 각자 겹친 부분만큼만 잘라서
@@ -1066,6 +1123,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
         : `[${ix.b}:a]atrim=start=${s.bIn}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
+      vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i);
     } else if (s.layers) {
       // 트랙 겹침(PIP) — 검은 배경부터 시작해 아래→위 순서로 overlay 를 쌓는다.
       // s.layers 는 위(화면 앞)→아래 순서로 와 있으니 뒤집어서 처리.
@@ -1087,6 +1145,7 @@ ipcMain.handle('video:export', async (event, payload) => {
       });
       parts.push(`[${base}]null[v${i}]`);
       buildAudio(s.audioSources, s.dur, `a${i}`);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
     } else if (s.isAudioOnly) {
       // 영상 트랙이 없는 구간(mp3/wav 단독) — 공용 검은 화면을 이 구간 길이만큼 잘라 쓴다.
       const w = s.refW || 1280, h = s.refH || 720;
@@ -1094,14 +1153,16 @@ ipcMain.handle('video:export', async (event, payload) => {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       parts.push(`[${bIdx}:v]trim=duration=${dur.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
       parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
     }
   });
-  const concatIn = segments.map((_, i) => `[v${i}][a${i}]`).join('');
+  const concatIn = segments.map((_, i) => `[${vLabels[i]}][a${i}]`).join('');
   parts.push(`${concatIn}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
   args.push('-filter_complex', parts.join(';'), '-map', '[outv]', '-map', '[outa]');
 
@@ -1112,9 +1173,13 @@ ipcMain.handle('video:export', async (event, payload) => {
   }
   args.push('-progress', 'pipe:1', outPath);
 
+  // drawtextDir(폰트 사본 + 캡션 txt) 은 이 export 안에서만 필요하다 — 끝나면(성공/실패
+  // 상관없이) 지운다. cwd 를 여기로 두는 게 드라이브 콜론 이스케이프 문제를 피하는
+  // 유일하게 검증된 방법이라(위 주석 참고), 텍스트가 있는 export 만 cwd 가 바뀐다.
+  function cleanupDrawtextDir() { if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} } }
   return await new Promise((resolve) => {
-    let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
-    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true, cwd: drawtextDir || undefined }); }
+    catch (e) { cleanupDrawtextDir(); return resolve({ ok: false, error: String(e.message || e) }); }
     let stderr = '', outBuf = '';
     proc.stdout.on('data', (d) => {
       outBuf += d;
@@ -1126,8 +1191,9 @@ ipcMain.handle('video:export', async (event, payload) => {
       }
     });
     proc.stderr.on('data', (d) => stderr += d);
-    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('error', (e) => { cleanupDrawtextDir(); resolve({ ok: false, error: String(e.message || e) }); });
     proc.on('close', (code) => {
+      cleanupDrawtextDir();
       if (code === 0) { grantWrite(outPath); resolve({ ok: true, outPath }); }
       else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) });
     });

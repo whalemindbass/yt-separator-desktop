@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color })),
       resolution: _veResolution,
     });
   }, 600);
@@ -140,29 +140,42 @@ const _layerEls = new Map();   // trackId → {a,b: <video>}
 function ensureLayers() {
   const host = $('ve-preview'); if (!host) return;
   const wanted = new Set(_veTracks.map(t => t.id));
-  for (const [id, pair] of _layerEls) if (!wanted.has(id)) { pair.a.remove(); pair.b.remove(); _layerEls.delete(id); }
+  for (const [id, pair] of _layerEls) {
+    if (wanted.has(id)) continue;
+    if (pair.text) pair.text.remove(); else { pair.a.remove(); pair.b.remove(); }
+    _layerEls.delete(id);
+  }
   // Vegas Pro 관례: 트랙 목록 맨 위(배열 0번)가 합성에서 맨 앞(최상위 레이어)이 된다.
   // 오디오 트랙은 화면에 아무것도 안 그려야 한다(영상 트랙 위를 덮으면 안 됨) — opacity:0 으로
   // 고정해 두고 재생/정지만 다룬다(hidden 은 안 건드린다 — display:none 이 오디오까지 멈추는
-  // 경우를 피하려고).
+  // 경우를 피하려고). 텍스트 트랙은 <video> 가 아니라 절대위치 컨테이너 하나 — 클립 텍스트를
+  // syncPreview() 가 그때그때 채워 넣는다(크로스페이드용 이중 버퍼가 필요 없다).
   _veTracks.forEach((t, i) => {
     let pair = _layerEls.get(t.id);
     if (!pair) {
-      const isAudio = t.kind === 'audio';
-      const mk = () => {
-        const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto';
-        // crossOrigin 없이 로드하면(ytsep:// 커스텀 프로토콜이 Access-Control-Allow-Origin: *
-        // 를 줘도) 캔버스가 "tainted by cross-origin data" 로 막힌다 — 히스토그램처럼
-        // drawImage+getImageData 로 프레임을 읽어야 하는 기능은 이게 없으면 조용히 아무것도
-        // 못 그리고 예외만 삼킨다(실측하다 잡은 버그).
-        v.crossOrigin = 'anonymous';
-        if (isAudio) v.style.opacity = '0';
-        host.appendChild(v); return v;
-      };
-      pair = { a: mk(), b: mk() };
+      if (t.kind === 'text') {
+        const div = document.createElement('div');
+        div.className = 've-text-layer';
+        host.appendChild(div);
+        pair = { text: div };
+      } else {
+        const isAudio = t.kind === 'audio';
+        const mk = () => {
+          const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto';
+          // crossOrigin 없이 로드하면(ytsep:// 커스텀 프로토콜이 Access-Control-Allow-Origin: *
+          // 를 줘도) 캔버스가 "tainted by cross-origin data" 로 막힌다 — 히스토그램처럼
+          // drawImage+getImageData 로 프레임을 읽어야 하는 기능은 이게 없으면 조용히 아무것도
+          // 못 그리고 예외만 삼킨다(실측하다 잡은 버그).
+          v.crossOrigin = 'anonymous';
+          if (isAudio) v.style.opacity = '0';
+          host.appendChild(v); return v;
+        };
+        pair = { a: mk(), b: mk() };
+      }
       _layerEls.set(t.id, pair);
     }
     const z = String(_veTracks.length - i);
+    if (pair.text) { pair.text.style.zIndex = z; return; }
     pair.a.style.zIndex = z; pair.b.style.zIndex = z;
     applyTrackTransform(pair, t);
   });
@@ -285,7 +298,7 @@ function moveClipEffect(clip, effectId, dir) {
 }
 // 예전 clip.color/clip.fx(고정 슬롯 3+3개) 프로젝트를 새 effects[] 체인으로 한 번만 옮긴다.
 function migrateClipEffects(clip) {
-  if (clip.effects) return;
+  if (clip.effects || clip.isText) return;   // 텍스트 클립엔 효과 체인 개념이 없다
   const list = [];
   if (clip.color) {
     if (clip.color.b) list.push({ id: nextEffectId(), type: 'brightness', value: clip.color.b, enabled: true });
@@ -346,7 +359,7 @@ function _onFxAddOutside(e) {
   if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== btn) closeFxAddMenu();
 }
 function toggleFxAddMenu(clip) {
-  const menu = $('ve-fx-add-menu'); if (!menu || !clip || clip.isAudioOnly) return;
+  const menu = $('ve-fx-add-menu'); if (!menu || !clip || clip.isAudioOnly || clip.isText) return;
   if (!menu.hidden) { closeFxAddMenu(); return; }
   menu.innerHTML = '';
   Object.keys(EFFECT_TYPES).forEach((type) => {
@@ -408,7 +421,7 @@ function buildFxPresetMenu(clip) {
   }
 }
 function toggleFxPresetMenu(clip) {
-  const menu = $('ve-fx-preset-menu'); if (!menu || !clip || clip.isAudioOnly) return;
+  const menu = $('ve-fx-preset-menu'); if (!menu || !clip || clip.isAudioOnly || clip.isText) return;
   if (!menu.hidden) { closeFxPresetMenu(); return; }
   buildFxPresetMenu(clip);
   menu.hidden = false;
@@ -490,12 +503,12 @@ function renderEffectPanel(clip) {
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxNoClip'))}</p>`;
     return;
   }
-  if (clip.isAudioOnly) {
+  if (clip.isAudioOnly || clip.isText) {
     if (addBtn) addBtn.disabled = true;
     if (presetBtn) presetBtn.disabled = true;
     if (histWrap) histWrap.hidden = true;
     stopHistLoop();
-    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxAudioOnly'))}</p>`;
+    body.innerHTML = `<p class="ve-fx-empty">${esc(tr(clip.isText ? 'video.fxNoText' : 'video.fxAudioOnly'))}</p>`;
     return;
   }
   if (addBtn) addBtn.disabled = false;
@@ -582,10 +595,32 @@ function fadeMul(clip, t) {
   if (clip.fadeOut) m *= Math.max(0, Math.min(1, (clip.start + clip.dur - t) / clip.fadeOut));
   return m;
 }
+// 텍스트 트랙 컨테이너 갱신 — 그 순간 재생 위치를 덮는 텍스트 클립들을 (보통 0~1개,
+// 겹쳐 놓았으면 여러 개) 그려 넣는다. 페이드 핸들은 텍스트 클립엔 안 붙이므로(내보내기가
+// 아직 못 따라가는 반쪽 기능은 만들지 않는다) opacity 는 항상 1.
+function syncTextLayer(container, track, t) {
+  const here = clipsAt(track.id, t);
+  container.innerHTML = '';
+  for (const c of here) {
+    const el = document.createElement('div');
+    el.className = 've-text-item';
+    el.style.left = (c.xPct * 100) + '%';
+    el.style.top = (c.yPct * 100) + '%';
+    el.style.fontSize = (c.size || 42) + 'px';
+    el.style.color = c.color || '#ffffff';
+    el.textContent = c.text || '';
+    container.appendChild(el);
+  }
+}
 function syncPreview(t) {
   let any = false;
   for (const track of _veTracks) {
     const pair = _layerEls.get(track.id); if (!pair) continue;
+    if (pair.text) {
+      if (track.hidden) { pair.text.innerHTML = ''; continue; }
+      syncTextLayer(pair.text, track, t);
+      continue;
+    }
     const { a, b } = pair;
     const visual = track.kind !== 'audio';   // 영상 트랙만 화면에 그린다 — 오디오 트랙은 소리만.
     if (track.hidden) { hideLayer(a, visual); hideLayer(b, visual); continue; }
@@ -759,13 +794,32 @@ function newAudioTrack(pushHistory = true) {
   renderLanes();
   return id;
 }
-// 이름 없는 트랙의 기본 이름 — 영상/오디오 각자 자기 종류 안에서 순번을 센다
+// 텍스트/타이틀 트랙 — 영상 트랙처럼 맨 위(합성 맨 앞, 화면 최상단)에 들어간다. 텍스트는
+// 항상 다른 모든 레이어(PIP 포함) 위에 그려져야 자막·타이틀 구실을 한다.
+function newTextTrack(pushHistory = true) {
+  const id = nextTrackId();
+  const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
+  const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false, kind: 'text' };
+  _veTracks.unshift(track);
+  if (pushHistory) {
+    pushUndo(
+      () => { _veTracks = _veTracks.filter(t => t.id !== id); _veClips = _veClips.filter(c => c.trackId !== id); },
+      () => { _veTracks.unshift(track); },
+    );
+  }
+  ensureLayers();
+  renderLanes();
+  return id;
+}
+// 이름 없는 트랙의 기본 이름 — 영상/오디오/텍스트 각자 자기 종류 안에서 순번을 센다
 // (Vegas 처럼 영상 트랙 구역과 오디오 트랙 구역이 따로다).
 function trackLabel(vt) {
   if (vt.name) return vt.name;
-  const sameKind = _veTracks.filter(t => (t.kind === 'audio') === (vt.kind === 'audio'));
+  const sameKind = _veTracks.filter(t => t.kind === vt.kind);
   const n = sameKind.indexOf(vt) + 1;
-  return vt.kind === 'audio' ? tr('video.audioTrackN', { n }) : tr('video.trackN', { n });
+  if (vt.kind === 'audio') return tr('video.audioTrackN', { n });
+  if (vt.kind === 'text') return tr('video.textTrackN', { n });
+  return tr('video.trackN', { n });
 }
 
 function renderLanes() {
@@ -773,7 +827,7 @@ function renderLanes() {
   lanes.querySelectorAll('.ve-lane').forEach(el => el.remove());
   _veTracks.forEach((vt) => {
     const lane = document.createElement('div');
-    lane.className = 've-lane' + (vt.kind === 'audio' ? ' audio' : '');
+    lane.className = 've-lane' + (vt.kind === 'audio' ? ' audio' : vt.kind === 'text' ? ' text' : '');
     lane.style.setProperty('--c', vt.color);
     if (vt.height) lane.style.height = vt.height + 'px';
     lane.dataset.trackId = String(vt.id);
@@ -785,7 +839,7 @@ function renderLanes() {
           <span class="lbl" data-i18n-title="video.rename" title="이름 변경">${esc(trackLabel(vt))}</span>
         </div>
         <div class="ve-ctrls">
-          ${vt.kind === 'audio' ? '' : `<button class="ve-hs ve-pip${vt.transform ? ' on' : ''}" data-i18n-title="video.pip" title="위치/크기(PIP)">▭</button>`}
+          ${vt.kind === 'video' ? `<button class="ve-hs ve-pip${vt.transform ? ' on' : ''}" data-i18n-title="video.pip" title="위치/크기(PIP)">▭</button>` : ''}
           <button class="ve-hs ve-hide${vt.hidden ? ' on' : ''}" data-i18n-title="video.hide" title="숨기기">H</button>
           <button class="ve-hs ve-del" data-i18n-title="video.deleteTrack" title="트랙 삭제">✕</button>
         </div>
@@ -874,6 +928,88 @@ function paintThumbs(clip) {
   if (!el || !clip._thumbUrls) return;
   el.innerHTML = clip._thumbUrls.map(u => `<img src="${u}" draggable="false">`).join('');
 }
+// ── 텍스트/타이틀 클립 ────────────────────────────────
+// srcDur 를 넉넉히 큰 값으로 잡아둔다 — wireTrim 의 오른쪽 트림 상한(c.srcDur - c.inOff)이
+// 영상 클립처럼 "소스 길이"를 의미 있게 가질 필요가 텍스트엔 없어서, 사실상 무제한으로 늘릴
+// 수 있게 하는 값이다(Infinity 는 JSON.stringify 가 null 로 뭉개버려 프로젝트 저장이 깨진다).
+const TEXT_CLIP_SRC_DUR = 86400;
+function addTextClipAt(trackId, atSec) {
+  const clip = {
+    id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: TEXT_CLIP_SRC_DUR,
+    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff',
+  };
+  _veClips.push(clip);
+  pushUndo(
+    () => { _veClips = _veClips.filter(x => x !== clip); },
+    () => { _veClips.push(clip); },
+  );
+  _selClipId = clip.id;
+  layout();
+  return clip;
+}
+// "+텍스트" 툴바 버튼 — 이미 텍스트 트랙이 있으면 거기 재사용(오디오처럼 매번 새 트랙을
+// 만들면 클릭할 때마다 자막 레인이 늘어난다), 없으면 새로 만든다. 만들자마자 편집
+// 팝오버를 열어서 바로 타이핑할 수 있게 한다 — "추가 → 뭐라고 써야 하지" 텀을 없앤다.
+function addText() {
+  let tid = _veTracks.find(t => t.kind === 'text')?.id;
+  if (tid == null) tid = newTextTrack();
+  const clip = addTextClipAt(tid, nowSec());
+  const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
+  if (el) openTextPopover(clip, el);
+}
+let _textPopoverEl = null;
+function onOutsideTextPopover(e) { if (_textPopoverEl && !_textPopoverEl.contains(e.target)) closeTextPopover(); }
+function closeTextPopover() {
+  if (!_textPopoverEl) return;
+  _textPopoverEl.remove(); _textPopoverEl = null;
+  document.removeEventListener('pointerdown', onOutsideTextPopover, true);
+}
+// 텍스트 클립 더블클릭 시 여는 속성 편집 팝오버 — PIP 팝오버(openPipPopover)와 같은 패턴.
+// 내용은 입력하는 대로 바로 미리보기/저장에 반영(디바운스 없음 — 텍스트 편집은 PIP 숫자
+// 슬라이더만큼 잦지 않다).
+function openTextPopover(clip, anchorEl) {
+  closeTextPopover(); closePipPopover();
+  const r = anchorEl.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 've-text-pop';
+  pop.style.left = Math.max(4, r.left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  pop.innerHTML = `
+    <textarea id="tx-content" rows="2" maxlength="200">${esc(clip.text || '')}</textarea>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.textX')}<input type="number" id="tx-x" min="0" max="100" step="1" value="${Math.round(clip.xPct * 100)}"></label>
+      <label>${tr('video.textY')}<input type="number" id="tx-y" min="0" max="100" step="1" value="${Math.round(clip.yPct * 100)}"></label>
+    </div>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.textSize')}<input type="number" id="tx-size" min="8" max="200" step="1" value="${clip.size}"></label>
+      <label>${tr('video.textColor')}<input type="color" id="tx-color" value="${clip.color}"></label>
+    </div>
+    <button class="ve-text-pop-del" id="tx-delete">${tr('video.fxRemove')}</button>`;
+  document.body.appendChild(pop);
+  _textPopoverEl = pop;
+  const lblEl = anchorEl.querySelector('.ve-clip-lbl');
+  const apply = () => {
+    clip.text = pop.querySelector('#tx-content').value;
+    clip.xPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-x').value) || 0)) / 100;
+    clip.yPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-y').value) || 0)) / 100;
+    clip.size = Math.max(1, Number(pop.querySelector('#tx-size').value) || 42);
+    clip.color = pop.querySelector('#tx-color').value;
+    if (lblEl) lblEl.textContent = (clip.text || '').split('\n')[0] || tr('video.textDefault');
+    syncPreview(nowSec());
+    scheduleSave();
+  };
+  pop.querySelector('#tx-content').addEventListener('input', apply);
+  pop.querySelector('#tx-x').addEventListener('input', apply);
+  pop.querySelector('#tx-y').addEventListener('input', apply);
+  pop.querySelector('#tx-size').addEventListener('input', apply);
+  pop.querySelector('#tx-color').addEventListener('input', apply);
+  pop.querySelector('#tx-delete').addEventListener('click', () => {
+    closeTextPopover();
+    _selClipId = clip.id;
+    deleteSelected();
+  });
+  pop.querySelector('#tx-content').focus();
+  setTimeout(() => document.addEventListener('pointerdown', onOutsideTextPopover, true), 0);
+}
 function renderClips() {
   document.querySelectorAll('.ve-lane').forEach(lane => {
     const trackId = Number(lane.dataset.trackId);
@@ -881,35 +1017,45 @@ function renderClips() {
     area.innerHTML = '';
     for (const c of _veClips.filter(x => x.trackId === trackId)) {
       const el = document.createElement('div');
-      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.id === _selClipId ? ' sel' : '');
+      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.id === _selClipId ? ' sel' : '');
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
-      // 오디오 전용(mp3/wav 등, 영상 트랙 없음) 클립은 캡처할 프레임 자체가 없다 —
-      // 필름스트립 대신 음표 표시만 둔다.
-      el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
-        + `<span class="ve-clip-lbl">${esc(c.name)}</span>
-        <div class="ve-fade l"></div><div class="ve-fade r"></div>
-        <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
-        <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
+      if (c.isText) {
+        // 텍스트 클립엔 소스 파일이 없다 — 썸네일/페이드 핸들 없이 내용 미리보기 라벨과
+        // 트림 핸들만. 페이드는 내보내기(main.js drawtext)가 아직 못 따라가므로 일부러 뺐다
+        // (미리보기만 되고 내보내기엔 안 먹히는 반쪽짜리를 만들지 않으려고).
+        el.innerHTML = `<span class="ve-clip-lbl">${esc((c.text || '').split('\n')[0] || tr('video.textDefault'))}</span>
+          <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
+      } else {
+        // 오디오 전용(mp3/wav 등, 영상 트랙 없음) 클립은 캡처할 프레임 자체가 없다 —
+        // 필름스트립 대신 음표 표시만 둔다.
+        el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
+          + `<span class="ve-clip-lbl">${esc(c.name)}</span>
+          <div class="ve-fade l"></div><div class="ve-fade r"></div>
+          <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
+          <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
+      }
       el.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('ve-trim') || e.target.classList.contains('ve-fadeh')) return;
         _selClipId = c.id;
         wireMove(e, c, el);
       });
-      el.addEventListener('dblclick', () => { seekTo(c.start); });
+      el.addEventListener('dblclick', () => { if (c.isText) openTextPopover(c, el); else seekTo(c.start); });
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
-      const paintFade = () => {
-        const wi = (c.fadeIn || 0) * _pxPerSec, wo = (c.fadeOut || 0) * _pxPerSec;
-        el.querySelector('.ve-fade.l').style.width = wi + 'px'; el.querySelector('.ve-fadeh.l').style.left = wi + 'px';
-        el.querySelector('.ve-fade.r').style.width = wo + 'px'; el.querySelector('.ve-fadeh.r').style.right = wo + 'px';
-      };
-      paintFade();
-      wireFade(el.querySelector('.ve-fadeh.l'), c, paintFade, -1);
-      wireFade(el.querySelector('.ve-fadeh.r'), c, paintFade, +1);
+      if (!c.isText) {
+        const paintFade = () => {
+          const wi = (c.fadeIn || 0) * _pxPerSec, wo = (c.fadeOut || 0) * _pxPerSec;
+          el.querySelector('.ve-fade.l').style.width = wi + 'px'; el.querySelector('.ve-fadeh.l').style.left = wi + 'px';
+          el.querySelector('.ve-fade.r').style.width = wo + 'px'; el.querySelector('.ve-fadeh.r').style.right = wo + 'px';
+        };
+        paintFade();
+        wireFade(el.querySelector('.ve-fadeh.l'), c, paintFade, -1);
+        wireFade(el.querySelector('.ve-fadeh.r'), c, paintFade, +1);
+      }
       area.appendChild(el);
-      if (!c.isAudioOnly) {
+      if (!c.isAudioOnly && !c.isText) {
         const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
         if (cached) paintThumbs(c);
       }
@@ -960,7 +1106,12 @@ function wireMove(e, c, el) {
     const laneUnder = laneEls.find(l => { const r = l.getBoundingClientRect(); return ev.clientY >= r.top && ev.clientY <= r.bottom; });
     if (laneUnder) {
       const tid = Number(laneUnder.dataset.trackId);
-      if (tid !== c.trackId) {
+      // 텍스트 클립엔 file 이 없다 — 비디오/오디오 트랙으로 넘어가면 video 태그 src 가
+      // undefined 로 깨진다. 반대로 텍스트 트랙은 video 클립을 받을 그림도 없다. 클립
+      // 종류와 트랙 종류가 맞을 때만(텍스트↔텍스트, 그 외↔그 외) 옮긴다.
+      const targetTrack = _veTracks.find(t => t.id === tid);
+      const kindMatches = targetTrack && (c.isText ? targetTrack.kind === 'text' : targetTrack.kind !== 'text');
+      if (tid !== c.trackId && kindMatches) {
         c.trackId = tid;
         renderClips();
         const fresh = document.querySelector(`.ve-clip[data-clip-id="${c.id}"]`);
@@ -1135,7 +1286,7 @@ function ungroupSelected() {
 // 같은 사소한 시각 속성 취급이라(PIP 위치와 같은 이유) undo 스택엔 안 담는다.
 function flipSelected(axis) {
   if (_selClipId == null) return;
-  const c = _veClips.find(x => x.id === _selClipId); if (!c || c.isAudioOnly) return;
+  const c = _veClips.find(x => x.id === _selClipId); if (!c || c.isAudioOnly || c.isText) return;
   const key = axis === 'h' ? 'flipH' : 'flipV';
   c[key] = !c[key];
   syncPreview(nowSec());
@@ -1144,7 +1295,7 @@ function flipSelected(axis) {
 }
 function updateClipToolbarUI() {
   const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
-  const canFlip = !!c && !c.isAudioOnly;
+  const canFlip = !!c && !c.isAudioOnly && !c.isText;
   const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v');
   if (hBtn) { hBtn.disabled = !canFlip; hBtn.classList.toggle('on', !!c?.flipH); }
   if (vBtn) { vBtn.disabled = !canFlip; vBtn.classList.toggle('on', !!c?.flipV); }
@@ -1175,8 +1326,23 @@ function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
   const { w: refW, h: refH } = getResolution();
-  const videoTracks = _veTracks.filter(t => t.kind !== 'audio');
+  const videoTracks = _veTracks.filter(t => t.kind === 'video');
   const audioTracks = _veTracks.filter(t => t.kind === 'audio');
+  const textTracks = _veTracks.filter(t => t.kind === 'text');
+  // 텍스트 트랙은 화면 합성(PIP/크로스페이드)과 완전히 독립된 오버레이라, 세그먼트가 어떤
+  // 모양(plain/xfade/layers/audioOnly)이든 상관없이 그 세그먼트의 실제 중간 시각 하나로
+  // 샘플링해서 붙인다 — sampleT 는 호출부가 그 세그먼트의 진짜 [start,end) 중간을 넘긴다
+  // (크로스페이드는 여러 breakpoint 창을 하나로 합치므로 바깥 루프의 mid 와 다를 수 있다).
+  function collectTexts(sampleT) {
+    const out = [];
+    for (const track of textTracks) {
+      if (track.hidden) continue;
+      for (const tc of clipsAt(track.id, sampleT)) {
+        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color });
+      }
+    }
+    return out;
+  }
 
   // 눈금자에서 지정한 내보내기 구간 — 경계값 자체를 breakpoint 로 넣어 두면 그 지점에서
   // 정확히 구간이 갈라져서, 걸치는 클립을 따로 잘라 넣을 필요 없이 범위 밖 구간만 건너뛰면 된다.
@@ -1225,7 +1391,7 @@ function buildEDL() {
           const c = clips[0];
           return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
-        audioSources, refW, refH, dur: b - a,
+        audioSources, refW, refH, dur: b - a, texts: collectTexts(mid),
       });
       continue;
     }
@@ -1240,19 +1406,20 @@ function buildEDL() {
           xfade: true, dur: overlapEnd - overlapStart,
           fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, effectsA: outC.effects, hdrA: outC.hdr,
           fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, effectsB: inC.effects, hdrB: inC.hdr,
-          refW, refH,
+          refW, refH, texts: collectTexts((overlapStart + overlapEnd) / 2),
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
       continue;
     }
 
     // 영상 트랙엔 아무도 없다 — 오디오 트랙만 있으면 검은 화면 + 그 오디오들로 채운다.
-    if (!audioSources.length) continue;   // 아무것도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
-    segs.push({ isAudioOnly: true, audioSources, refW, refH, dur: b - a });
+    const texts = collectTexts(mid);
+    if (!audioSources.length && !texts.length) continue;   // 아무것도 없는 구간은 건너뛴다(내보낸 결과엔 그 틈이 없다)
+    segs.push({ isAudioOnly: true, audioSources, refW, refH, dur: b - a, texts });
   }
   return segs;
 }
@@ -1367,7 +1534,7 @@ async function pickImportVideo() {
   if (!r || !r.ok || !r.filePaths?.length) return;
   // 방금 만든(맨 위) 영상 트랙이 아직 비어 있으면 거기로, 아니면 새 트랙을 만든다 —
   // "+트랙" 누르고 바로 "임포트" 눌렀을 때 트랙이 두 개로 늘어나지 않도록.
-  const top = _veTracks.find(t => t.kind !== 'audio');
+  const top = _veTracks.find(t => t.kind === 'video');
   const reuse = top && !_veClips.some(c => c.trackId === top.id);
   importVideoFiles(r.filePaths, reuse ? top.id : null);
 }
@@ -1425,6 +1592,7 @@ function wire() {
   if (_wired) return; _wired = true;
   $('ve-add-track')?.addEventListener('click', () => newVideoTrack());
   $('ve-add-audio-track')?.addEventListener('click', () => pickImportAudioTrack());
+  $('ve-add-text')?.addEventListener('click', () => addText());
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-undo')?.addEventListener('click', () => doUndo());
   $('ve-redo')?.addEventListener('click', () => doRedo());
