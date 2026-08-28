@@ -979,44 +979,45 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 클립 페이드인/아웃 — buildEDL() 이 원본 파일의 절대 시각 기준 st(시작)/d(길이) 로 넘겨준다.
   // trim/atrim 은 PTS 를 안 건드리므로, asetpts/setpts 로 리셋하기 *전에* 걸어야 세그먼트가
   // 잘게 쪼개져도(다른 트랙・PIP・구간 지정 등으로) 페이드 경계에서 끊기지 않고 이어진다.
-  // 색보정(밝기/대비/채도) — 미리보기는 CSS filter(brightness/contrast/saturate). ffmpeg
-  // eq 필터는 밝기를 배율이 아니라 -1~1 오프셋으로 더하고(그래서 살짝만 올려도 결과물이
-  // 흰색으로 날아감), 대비・채도도 RGB 가 아니라 YUV(휘도/색차 평면) 기준이라 컬러풀한
-  // 영상에서 CSS 와 다르게 보인다 — colorchannelmixer 로 밝기만 고쳤을 때도(1차 시도) 대비・
-  // 채도가 여전히 안 맞아서 결과물이 계속 달라 보였다. CSS 명세식 그대로 RGB 공간에서
-  // 직접 계산해서 완전히 맞춘다:
-  //  - format=rgb24 로 먼저 RGB 로 강제 변환(YUV 기준 연산이 섞이지 않게)
-  //  - 밝기+대비: val -> clip((val*B - 128)*C + 128, 0, 255) 를 R/G/B 각각에 (lutrgb)
-  //  - 채도: CSS/SVG saturate() 표준 휘도보존 3x3 행렬 그대로 (colorchannelmixer)
-  // (출력은 어차피 -pix_fmt yuv420p 로 인코딩되니 마지막에 다시 YUV 로 안 돌려도 된다.)
-  function eqFrag(color) {
-    if (!color || (!color.b && !color.c && !color.s)) return '';
-    const B = Math.max(0, 1 + (color.b || 0) / 100);
-    const C = 1 + (color.c || 0) / 100;
-    const S = 1 + (color.s || 0) / 100;
-    const stages = ['format=rgb24'];
-    if (color.b || color.c) {
-      const expr = `clip((val*${B}-128)*${C}+128\\,0\\,255)`;
-      stages.push(`lutrgb=r='${expr}':g='${expr}':b='${expr}'`);
+  // 클립 효과 체인(밝기/대비/채도/흑백/세피아/블러) — 렌더러의 EFFECT_TYPES/effects[] 와
+  // 1:1 대응. 미리보기는 CSS filter 함수를 체인 순서 그대로 적용하니, 여기서도 같은 순서로
+  // 필터를 하나씩 쌓는다(효과 순서가 바뀌면 결과도 달라진다 — 흑백 다음 세피아 ≠ 세피아
+  // 다음 흑백). 각 효과의 ffmpeg 등가식은 크로미움 실제 CSS 필터 출력과 직접 대조해
+  // 정확히 맞춘 것들이다(밝기: eq 의 brightness 는 배율이 아니라 오프셋이라 다르게
+  // 보이던 버그가 있었다 — colorchannelmixer 로 교체. 대비・채도: eq 는 YUV 기준이라 컬러
+  // 영상에서 어긋났다 — RGB 공간에서 CSS 명세식 그대로 계산).
+  function effectFrag(eff) {
+    const type = eff.type, v = eff.value;
+    if (type === 'brightness') {
+      if (!v) return '';
+      const B = Math.max(0, 1 + v / 100);
+      return `colorchannelmixer=rr=${B}:gg=${B}:bb=${B}`;
     }
-    if (color.s) {
+    if (type === 'contrast') {
+      if (!v) return '';
+      const C = 1 + v / 100;
+      const expr = `clip((val-128)*${C}+128\\,0\\,255)`;
+      return `lutrgb=r='${expr}':g='${expr}':b='${expr}'`;
+    }
+    if (type === 'saturation') {
+      if (!v) return '';
+      const S = 1 + v / 100;
       const rr = (0.213 + 0.787 * S).toFixed(4), rg = (0.715 - 0.715 * S).toFixed(4), rb = (0.072 - 0.072 * S).toFixed(4);
       const gr = (0.213 - 0.213 * S).toFixed(4), gg = (0.715 + 0.285 * S).toFixed(4), gb = (0.072 - 0.072 * S).toFixed(4);
       const br = (0.213 - 0.213 * S).toFixed(4), bg = (0.715 - 0.715 * S).toFixed(4), bb = (0.072 + 0.928 * S).toFixed(4);
-      stages.push(`colorchannelmixer=rr=${rr}:rg=${rg}:rb=${rb}:gr=${gr}:gg=${gg}:gb=${gb}:br=${br}:bg=${bg}:bb=${bb}`);
+      return `colorchannelmixer=rr=${rr}:rg=${rg}:rb=${rb}:gr=${gr}:gg=${gg}:gb=${gb}:br=${br}:bg=${bg}:bb=${bb}`;
     }
-    return ',' + stages.join(',');
+    if (type === 'bw') return 'colorchannelmixer=rr=0.213:rg=0.715:rb=0.072:gr=0.213:gg=0.715:gb=0.072:br=0.213:bg=0.715:bb=0.072';
+    if (type === 'sepia') return 'colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131';
+    if (type === 'blur') return v ? `gblur=sigma=${(v / 2).toFixed(2)}` : '';
+    return '';
   }
-  // FX(대표 효과) — 흑백/세피아/블러. CSS grayscale()/sepia()/blur() 와 같은 뜻의 필터로.
-  // eqFrag 처럼 format=rgb24 를 다시 앞세운다 — 색보정이 이미 rgb24 로 바꿔놨어도 중복
-  // format 변환은 그냥 무해하게 스킵된다.
-  function fxFrag(fx) {
-    if (!fx || (!fx.bw && !fx.sepia && !fx.blur)) return '';
-    const stages = ['format=rgb24'];
-    if (fx.bw) stages.push('colorchannelmixer=rr=0.213:rg=0.715:rb=0.072:gr=0.213:gg=0.715:gb=0.072:br=0.213:bg=0.715:bb=0.072');
-    if (fx.sepia) stages.push('colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131');
-    if (fx.blur) stages.push(`gblur=sigma=${(fx.blur / 2).toFixed(2)}`);
-    return ',' + stages.join(',');
+  function chainFrag(effects) {
+    if (!effects || !effects.length) return '';
+    const active = (effects || []).filter(e => e.enabled !== false);
+    const stages = active.map(effectFrag).filter(Boolean);
+    if (!stages.length) return '';
+    return ',format=rgb24,' + stages.join(',');
   }
   function fadeFrag(kind, obj) {
     const name = kind === 'v' ? 'fade' : 'afade';
@@ -1054,8 +1055,8 @@ ipcMain.handle('video:export', async (event, payload) => {
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${eqFrag(s.colorA)}${fxFrag(s.fxA)},${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${eqFrag(s.colorB)}${fxFrag(s.fxB)},${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
@@ -1078,7 +1079,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${eqFrag(layer.color)}${fxFrag(layer.fx)},scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1095,7 +1096,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${eqFrag(s.color)}${fxFrag(s.fx)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
     }
   });

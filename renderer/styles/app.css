@@ -3974,18 +3974,6 @@ body { background: var(--bg) !important; }
   color: var(--tx-1); font: 500 12px/1 var(--sans); text-align: right;
 }
 .ve-pip-pop button.mini { align-self: flex-end; }
-.ve-color-pop {
-  position: fixed; z-index: 200; background: var(--elev); border: 1px solid var(--border-mid); border-radius: 9px;
-  padding: 10px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 8px; width: 190px;
-}
-.ve-color-pop label { display: flex; align-items: center; gap: 8px; font: 500 11.5px/1 var(--sans); color: var(--tx-2); }
-.ve-color-pop label span:first-child { flex: 0 0 34px; }
-.ve-color-pop input[type="range"] { flex: 1 1 auto; }
-.ve-color-pop label > span:last-child { flex: 0 0 28px; text-align: right; font: 500 11.5px/1 var(--mono); color: var(--tx-1); }
-.ve-color-pop button.mini { align-self: flex-end; }
-.ve-color-sep { height: 1px; background: var(--border); margin: 2px 0; }
-.ve-color-chk { cursor: pointer; }
-.ve-color-chk input[type="checkbox"] { flex: 0 0 auto; }
 .ve-audio-icon {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 20px; color: color-mix(in srgb, var(--c, var(--accent)) 70%, var(--tx-3)); opacity: .5; pointer-events: none;

@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr, fx }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, color, hdr, fx })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr })),
       resolution: _veResolution,
     });
   }, 600);
@@ -72,6 +72,8 @@ async function loadProject() {
     _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
     _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
     _veResolution = p.resolution || null;
+    for (const c of _veClips) migrateClipEffects(c);
+    _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
     ensureLayers();
   }
   syncResUI();
@@ -215,82 +217,83 @@ function openPipPopover(track, anchorEl) {
   });
   setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
-// ── 색보정(밝기/대비/채도) — 클립 단위. 0 = 보정 없음. 미리보기는 CSS filter(brightness/
-// contrast/saturate, 전부 "1 기준 배율"), 내보내기는 ffmpeg eq 필터로 같은 값을 쓴다 —
-// 픽셀 단위로 완전히 똑같진 않지만(CPU/CSS 구현이 다르니) 같은 방향·정도로 보정된다.
-let _colorPopoverEl = null;
-function onOutsideColor(e) { if (_colorPopoverEl && !_colorPopoverEl.contains(e.target)) closeColorPopover(); }
-function closeColorPopover() {
-  if (!_colorPopoverEl) return;
-  _colorPopoverEl.remove(); _colorPopoverEl = null;
-  document.removeEventListener('pointerdown', onOutsideColor, true);
+// ── 클립 효과 체인 — 밝기/대비/채도/흑백/세피아/블러를 순서 있는 목록으로 추가·제거·
+// 재배치·on/off 할 수 있다(리졸브/프리미어의 이펙트 스택과 같은 개념). 순서가 결과에
+//영향을 준다(흑백 다음 세피아 vs 세피아 다음 흑백은 다른 그림이 나온다). 미리보기는 CSS
+// filter 함수, 내보내기는 크로미움 실측과 맞춘 ffmpeg 필터(main.js) — 정밀도는 이미
+// 각각 검증되어 있다(밝기/대비/채도·흑백/세피아 전부 오차 0~1픽셀 이내).
+// UI(왼쪽 패널)는 이 함수들만 호출하면 된다 — 매번 syncPreview+scheduleSave 까지 알아서 한다.
+const EFFECT_TYPES = {
+  brightness: { i18n: 'video.colorBrightness', kind: 'range', min: -100, max: 100, def: 0 },
+  contrast:   { i18n: 'video.colorContrast',   kind: 'range', min: -100, max: 100, def: 0 },
+  saturation: { i18n: 'video.colorSaturation', kind: 'range', min: -100, max: 100, def: 0 },
+  bw:         { i18n: 'video.fxBw',    kind: 'toggle' },
+  sepia:      { i18n: 'video.fxSepia', kind: 'toggle' },
+  blur:       { i18n: 'video.fxBlur',  kind: 'range', min: 0, max: 20, def: 0 },
+};
+let _effectSeq = 0;
+function nextEffectId() { return ++_effectSeq; }
+function effectCssFrag(eff) {
+  const def = EFFECT_TYPES[eff.type]; if (!def) return '';
+  if (def.kind === 'toggle') return eff.type === 'bw' ? 'grayscale(1)' : eff.type === 'sepia' ? 'sepia(1)' : '';
+  const v = eff.value ?? def.def;
+  if (!v) return '';
+  if (eff.type === 'brightness') return `brightness(${1 + v / 100})`;
+  if (eff.type === 'contrast') return `contrast(${1 + v / 100})`;
+  if (eff.type === 'saturation') return `saturate(${1 + v / 100})`;
+  if (eff.type === 'blur') return `blur(${v}px)`;
+  return '';
 }
-function colorFilterCss(color) {
-  if (!color) return '';
-  const b = 1 + (color.b || 0) / 100, c = 1 + (color.c || 0) / 100, s = 1 + (color.s || 0) / 100;
-  if (b === 1 && c === 1 && s === 1) return '';
-  return `brightness(${b}) contrast(${c}) saturate(${s})`;
+function effectsChainCss(effects) {
+  if (!effects || !effects.length) return '';
+  return effects.filter(e => e.enabled !== false).map(effectCssFrag).filter(Boolean).join(' ');
 }
-// FX(대표 효과) — 흑백/세피아/블러. CSS 함수(grayscale/sepia/blur)가 그대로 있어서
-// 내보내기 쪽(ffmpeg)도 같은 뜻의 필터로 맞추면 된다(색보정 때와 같은 방식).
-function fxFilterCss(fx) {
-  if (!fx) return '';
-  const parts = [];
-  if (fx.bw) parts.push('grayscale(1)');
-  if (fx.sepia) parts.push('sepia(1)');
-  if (fx.blur) parts.push(`blur(${fx.blur}px)`);
-  return parts.join(' ');
+// 클립에 새 효과 추가 — 같은 타입 여러 개도 허용한다(예: 블러 두 번 겹쳐 더 강하게).
+function addClipEffect(clip, type) {
+  if (!EFFECT_TYPES[type]) return;
+  clip.effects = clip.effects || [];
+  clip.effects.push({ id: nextEffectId(), type, value: EFFECT_TYPES[type].def, enabled: true });
+  syncPreview(nowSec()); scheduleSave();
 }
-function openColorPopover(clip, anchorEl) {
-  closeColorPopover();
-  const col = clip.color || { b: 0, c: 0, s: 0 };
-  const fx = clip.fx || { bw: false, sepia: false, blur: 0 };
-  const r = anchorEl.getBoundingClientRect();
-  const pop = document.createElement('div');
-  pop.className = 've-color-pop';
-  pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + 6) + 'px';
-  pop.innerHTML = `
-    <label><span>${tr('video.colorBrightness')}</span><input type="range" id="cc-b" min="-100" max="100" step="1" value="${col.b}"><span id="cc-b-v">${col.b}</span></label>
-    <label><span>${tr('video.colorContrast')}</span><input type="range" id="cc-c" min="-100" max="100" step="1" value="${col.c}"><span id="cc-c-v">${col.c}</span></label>
-    <label><span>${tr('video.colorSaturation')}</span><input type="range" id="cc-s" min="-100" max="100" step="1" value="${col.s}"><span id="cc-s-v">${col.s}</span></label>
-    <div class="ve-color-sep"></div>
-    <label class="ve-color-chk"><input type="checkbox" id="cc-bw" ${fx.bw ? 'checked' : ''}><span>${tr('video.fxBw')}</span></label>
-    <label class="ve-color-chk"><input type="checkbox" id="cc-sepia" ${fx.sepia ? 'checked' : ''}><span>${tr('video.fxSepia')}</span></label>
-    <label><span>${tr('video.fxBlur')}</span><input type="range" id="cc-blur" min="0" max="20" step="1" value="${fx.blur}"><span id="cc-blur-v">${fx.blur}</span></label>
-    <button class="mini" id="cc-reset">${tr('video.pipReset')}</button>`;
-  document.body.appendChild(pop);
-  _colorPopoverEl = pop;
-  const apply = () => {
-    const b = Number(pop.querySelector('#cc-b').value) || 0;
-    const c = Number(pop.querySelector('#cc-c').value) || 0;
-    const s = Number(pop.querySelector('#cc-s').value) || 0;
-    pop.querySelector('#cc-b-v').textContent = b; pop.querySelector('#cc-c-v').textContent = c; pop.querySelector('#cc-s-v').textContent = s;
-    const isDefault = b === 0 && c === 0 && s === 0;
-    clip.color = isDefault ? null : { b, c, s };
-
-    const bw = pop.querySelector('#cc-bw').checked;
-    const sepia = pop.querySelector('#cc-sepia').checked;
-    const blur = Number(pop.querySelector('#cc-blur').value) || 0;
-    pop.querySelector('#cc-blur-v').textContent = blur;
-    const fxDefault = !bw && !sepia && !blur;
-    clip.fx = fxDefault ? null : { bw, sepia, blur };
-
-    anchorEl.classList.toggle('on', !isDefault || !fxDefault);
-    syncPreview(nowSec());
-    scheduleSave();
-  };
-  pop.querySelector('#cc-b').addEventListener('input', apply);
-  pop.querySelector('#cc-c').addEventListener('input', apply);
-  pop.querySelector('#cc-s').addEventListener('input', apply);
-  pop.querySelector('#cc-bw').addEventListener('input', apply);
-  pop.querySelector('#cc-sepia').addEventListener('input', apply);
-  pop.querySelector('#cc-blur').addEventListener('input', apply);
-  pop.querySelector('#cc-reset').addEventListener('click', () => {
-    pop.querySelector('#cc-b').value = 0; pop.querySelector('#cc-c').value = 0; pop.querySelector('#cc-s').value = 0;
-    pop.querySelector('#cc-bw').checked = false; pop.querySelector('#cc-sepia').checked = false; pop.querySelector('#cc-blur').value = 0;
-    apply();
-  });
-  setTimeout(() => document.addEventListener('pointerdown', onOutsideColor, true), 0);
+function removeClipEffect(clip, effectId) {
+  if (!clip.effects) return;
+  clip.effects = clip.effects.filter(e => e.id !== effectId);
+  syncPreview(nowSec()); scheduleSave();
+}
+function toggleClipEffect(clip, effectId) {
+  const e = clip.effects?.find(x => x.id === effectId); if (!e) return;
+  e.enabled = !e.enabled;
+  syncPreview(nowSec()); scheduleSave();
+}
+function setClipEffectValue(clip, effectId, value) {
+  const e = clip.effects?.find(x => x.id === effectId); if (!e) return;
+  e.value = value;
+  syncPreview(nowSec()); scheduleSave();
+}
+// dir: -1 = 체인에서 앞으로(먼저 적용) · +1 = 뒤로(나중 적용)
+function moveClipEffect(clip, effectId, dir) {
+  if (!clip.effects) return;
+  const i = clip.effects.findIndex(e => e.id === effectId); if (i < 0) return;
+  const j = i + dir; if (j < 0 || j >= clip.effects.length) return;
+  [clip.effects[i], clip.effects[j]] = [clip.effects[j], clip.effects[i]];
+  syncPreview(nowSec()); scheduleSave();
+}
+// 예전 clip.color/clip.fx(고정 슬롯 3+3개) 프로젝트를 새 effects[] 체인으로 한 번만 옮긴다.
+function migrateClipEffects(clip) {
+  if (clip.effects) return;
+  const list = [];
+  if (clip.color) {
+    if (clip.color.b) list.push({ id: nextEffectId(), type: 'brightness', value: clip.color.b, enabled: true });
+    if (clip.color.c) list.push({ id: nextEffectId(), type: 'contrast', value: clip.color.c, enabled: true });
+    if (clip.color.s) list.push({ id: nextEffectId(), type: 'saturation', value: clip.color.s, enabled: true });
+  }
+  if (clip.fx) {
+    if (clip.fx.bw) list.push({ id: nextEffectId(), type: 'bw', enabled: true });
+    if (clip.fx.sepia) list.push({ id: nextEffectId(), type: 'sepia', enabled: true });
+    if (clip.fx.blur) list.push({ id: nextEffectId(), type: 'blur', value: clip.fx.blur, enabled: true });
+  }
+  clip.effects = list;
+  delete clip.color; delete clip.fx;
 }
 function clipAt(trackId, t) {
   return _veClips.find(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur) || null;
@@ -306,7 +309,7 @@ function driveLayer(el, clip, t, visual) {
     el.hidden = false;
     const sx = clip.flipH ? -1 : 1, sy = clip.flipV ? -1 : 1;
     el.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
-    el.style.filter = [colorFilterCss(clip.color), fxFilterCss(clip.fx)].filter(Boolean).join(' ');
+    el.style.filter = effectsChainCss(clip.effects);
   }
   // 영상 클립이 짝(groupId, 오디오 트랙의 오디오 클립)을 가지고 있으면 소리는 그 짝이
   // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
@@ -890,11 +893,12 @@ function flipSelected(axis) {
 function updateClipToolbarUI() {
   const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
   const canFlip = !!c && !c.isAudioOnly;
-  const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v'), colorBtn = $('ve-color');
+  const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v');
   if (hBtn) { hBtn.disabled = !canFlip; hBtn.classList.toggle('on', !!c?.flipH); }
   if (vBtn) { vBtn.disabled = !canFlip; vBtn.classList.toggle('on', !!c?.flipV); }
-  if (colorBtn) { colorBtn.disabled = !canFlip; colorBtn.classList.toggle('on', !!c?.color || !!c?.fx); }
-  closeColorPopover();   // 선택이 바뀌면(또는 목록이 다시 그려지면) 열려 있던 팝오버는 닫는다 — 다른 클립을 보여줄 순 없다
+  // 효과 체인 패널(미리보기 왼쪽) — 선택이 바뀌거나 목록이 다시 그려질 때마다 여기서
+  // 같이 새로고침한다. 패널 자체의 렌더 함수는 UI 쪽에서 정의.
+  if (typeof renderEffectPanel === 'function') renderEffectPanel(c);
 }
 
 // ── 내보내기 ────────────────────────────────────────
@@ -967,7 +971,7 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, color: c.color, fx: c.fx, hdr: c.hdr, ...fadeFieldsFor(c) };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a,
       });
@@ -982,15 +986,15 @@ function buildEDL() {
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, colorA: outC.color, fxA: outC.fx, hdrA: outC.hdr,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, colorB: inC.color, fxB: inC.fx, hdrB: inC.hdr,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, effectsA: outC.effects, hdrA: outC.hdr,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, effectsB: inC.effects, hdrB: inC.hdr,
           refW, refH,
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, color: c.color, fx: c.fx, hdr: c.hdr, ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) });
       continue;
     }
 
@@ -1173,11 +1177,6 @@ function wire() {
   $('ve-redo')?.addEventListener('click', () => doRedo());
   $('ve-flip-h')?.addEventListener('click', () => flipSelected('h'));
   $('ve-flip-v')?.addEventListener('click', () => flipSelected('v'));
-  $('ve-color')?.addEventListener('click', (e) => {
-    const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
-    if (!c || c.isAudioOnly) return;
-    openColorPopover(c, e.currentTarget);
-  });
   $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
