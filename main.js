@@ -252,7 +252,13 @@ function createMainWindow() {
   mainWindow.on('focus',      () => mainWindow.webContents.send('window:focus'));
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.once('ready-to-show', () => {
-    if (mainWindow) mainWindow.show();
+    if (!mainWindow) return;
+    // 테스트 중엔 showInactive() — 창은 뜨되(테스트가 스크린샷 없이 executeJavaScript 로만
+    // 조작하니 실제 OS 포커스는 필요 없다) 사용자가 다른 모니터에서 하던 작업의 포커스를
+    // 뺏지 않는다. devtools(별도 분리창) 는 우리가 위치를 못 옮기니 아예 안 띄운다 —
+    // 안 그러면 그게 기본 모니터 한복판에 튀어나와서 방해된다.
+    if (isTestRun) { mainWindow.showInactive(); return; }
+    mainWindow.show();
     if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
   });
   // 파일을 더블클릭해 실행한 경우 — 렌더러가 "받을 준비가 됐다"고 말할 때 건넨다.
@@ -990,21 +996,18 @@ ipcMain.handle('video:export', async (event, payload) => {
     const active = (texts || []).filter(t => (t.content || '').trim());
     if (!active.length) return srcLabel;
     const dstLabel = `${srcLabel}_txt`;
-    // 사용자가 오른쪽/왼쪽 끝쪽으로 옮겨도 텍스트(와 박스 배경)가 화면 밖으로 잘려서
-    // 폭이 줄어든 것처럼 보이면 안 된다 — 크기는 오직 사용자가 fontsize 로만 바꾼다.
-    // 그래서 중심 좌표를 그대로 안 쓰고, min/max 로 항상 프레임(과 박스 여백 BOX_PAD)
-    // 안에 완전히 들어오게 자리를 밀어 넣는다(실측: 자연 폭 40px 짜리가 클램프 없이
-    // 오른쪽 끝으로 가면 26px 로 잘려 보였는데, 이 식을 쓰면 40px 그대로 끝에 붙는다).
-    const BOX_PAD = 8;
+    // PIP 와 같은 자유도 — 프레임 테두리에 자리를 묶지 않는다, 밖으로 나간 만큼은
+    // 그냥 잘려 보인다(drawtext 가 프레임 밖 좌표를 알아서 클리핑, PIP overlay 때와
+    // 동일하게 실측 확인됨). 폭이 줄어들지 않는 건 이 위치 계산과는 별개 문제였다 —
+    // 렌더러 쪽 CSS shrink-to-fit 버그(positionTextItem 주석 참고)가 원인이었고 거긴
+    // 이미 고쳐져 있다. 여긴 그냥 중심 좌표 그대로.
     const stages = active.map((t) => {
       const file = writeCaptionFile(t.content);
       const fontFile = ensureFontCopied(t.fontKey) || 'malgun.ttf';
       const size = Math.max(1, Math.round(t.size || 42));
-      const xc = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
-      const yc = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
-      const x = `max(${BOX_PAD}\\,min(${xc}\\,w-text_w-${BOX_PAD}))`;
-      const y = `max(${BOX_PAD}\\,min(${yc}\\,h-text_h-${BOX_PAD}))`;
-      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=${BOX_PAD}`;
+      const x = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
+      const y = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
+      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
     return dstLabel;

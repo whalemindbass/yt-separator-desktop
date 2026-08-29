@@ -708,27 +708,22 @@ function syncTextLayer(container, track, t) {
     positionTextItem(el, c.xPct, c.yPct);   // fontSize·글꼴이 다 적용된 뒤라야 실제 크기를 잴 수 있다
   }
 }
-// 텍스트가 프레임 가장자리에 붙으면 폭이 잘려서 좁아 보이던 문제 — 사용자가 리사이즈
-// 핸들/크기 입력으로 명시적으로 줄이지 않는 한 항상 온전한 크기로 보이게, 위치만
-// 프레임 안으로 밀어 넣는다. main.js 의 drawtext x/y 클램프(min/max(text_w/h) 식)와
-// 같은 목적, 같은 결과.
-//
-// left 를 퍼센트(또는 오른쪽 끝에 가까운 값)로 그냥 두면, position:absolute + width:auto
-// 인 엘리먼트는 CSS 스펙상 "containing block 폭 - left 값" 을 shrink-to-fit 계산의 가용
-// 폭으로 쓴다 — translate(-50%) 로 가운데 정렬하기 전에 이미 그 좁은 폭 기준으로 줄바꿈
-// 되어 실제로 더 좁게 렌더된다(자간이 아니라 CJK 줄바꿈이 늘어나서). 그래서 el 을 먼저
-// left:0(여유 있는 자리)에 놓고 진짜 자연 크기를 잰 다음, 그 크기를 기준으로 최종 좌표를
-// 직접 계산해서 넣는다 — transform 정렬에 기대지 않는다(그래서 CSS 의 translate(-50%)
-// 도 뺐다).
+// PIP 박스와 같은 자유도 — 프레임 테두리에 위치를 묶지 않는다, 밖으로 드래그해서
+// 잘려 보여도 상관없다(자연스러운 결과, main.js 의 drawtext 도 똑같이 그냥 잘라준다).
+// 크기가 줄어드는 건 위치와는 별개 문제였다 — position:absolute + width:auto 인
+// 엘리먼트는 CSS 스펙상 "containing block 폭 - left 값" 을 shrink-to-fit 계산의 가용
+// 폭으로 쓴다. 예전에 transform:translate(-50%) 로 가운데 정렬했을 때, 그 translate 로
+// 옮기기 *전에* 이미 (오른쪽 끝처럼 남은 공간이 적은) left 값 기준으로 줄바꿈되어 실제보다
+// 좁게 렌더됐다(실측: 텍스트를 오른쪽 끝으로 옮기면 159.6px → 75.6px 로 줄고 1줄이 3줄이
+// 됨). 그래서 el 을 먼저 left:0(여유 있는 자리)에 놓고 진짜 자연 크기를 잰 다음, 그
+// 크기로 최종 좌표를 직접 계산해서 넣는다(transform 정렬 없이) — 위치 자체는 안 자른다.
 function positionTextItem(el, xPct, yPct) {
   const host = $('ve-preview'); if (!host) return;
   const hostRect = host.getBoundingClientRect();
   el.style.left = '0px'; el.style.top = '0px';
   const natural = el.getBoundingClientRect();
-  let left = xPct * hostRect.width - natural.width / 2;
-  let top = yPct * hostRect.height - natural.height / 2;
-  left = Math.max(0, Math.min(hostRect.width - natural.width, left));
-  top = Math.max(0, Math.min(hostRect.height - natural.height, top));
+  const left = xPct * hostRect.width - natural.width / 2;
+  const top = yPct * hostRect.height - natural.height / 2;
   el.style.left = left + 'px';
   el.style.top = top + 'px';
 }
@@ -749,8 +744,8 @@ function wireTextItemDrag(el, c) {
     const startX = e.clientX, startY = e.clientY;
     try { el.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
-      c.xPct = Math.max(0, Math.min(1, x0 + (ev.clientX - startX) / hostRect.width));
-      c.yPct = Math.max(0, Math.min(1, y0 + (ev.clientY - startY) / hostRect.height));
+      c.xPct = x0 + (ev.clientX - startX) / hostRect.width;
+      c.yPct = y0 + (ev.clientY - startY) / hostRect.height;
       positionTextItem(el, c.xPct, c.yPct);
       syncTextPopoverFields(c);
     };
@@ -1179,8 +1174,8 @@ function openTextPopover(clip, anchorEl) {
     <textarea id="tx-content" rows="2" maxlength="200">${esc(clip.text || '')}</textarea>
     <label class="ve-text-pop-full">${tr('video.textFont')}<select id="tx-font">${fontOptions}</select></label>
     <div class="ve-text-pop-row">
-      <label>${tr('video.textX')}<input type="number" id="tx-x" min="0" max="100" step="1" value="${Math.round(clip.xPct * 100)}"></label>
-      <label>${tr('video.textY')}<input type="number" id="tx-y" min="0" max="100" step="1" value="${Math.round(clip.yPct * 100)}"></label>
+      <label>${tr('video.textX')}<input type="number" id="tx-x" min="-200" max="200" step="1" value="${Math.round(clip.xPct * 100)}"></label>
+      <label>${tr('video.textY')}<input type="number" id="tx-y" min="-200" max="200" step="1" value="${Math.round(clip.yPct * 100)}"></label>
     </div>
     <div class="ve-text-pop-row">
       <label>${tr('video.textSize')}<input type="number" id="tx-size" min="8" max="200" step="1" value="${clip.size}"></label>
@@ -1193,8 +1188,9 @@ function openTextPopover(clip, anchorEl) {
   const apply = () => {
     clip.text = pop.querySelector('#tx-content').value;
     clip.fontKey = pop.querySelector('#tx-font').value;
-    clip.xPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-x').value) || 0)) / 100;
-    clip.yPct = Math.max(0, Math.min(100, Number(pop.querySelector('#tx-y').value) || 0)) / 100;
+    // 테두리 기준 상한 없음(PIP 와 같은 자유도) — 프레임 밖으로 나가면 그냥 잘려 보인다.
+    clip.xPct = (Number(pop.querySelector('#tx-x').value) || 0) / 100;
+    clip.yPct = (Number(pop.querySelector('#tx-y').value) || 0) / 100;
     clip.size = Math.max(1, Number(pop.querySelector('#tx-size').value) || 42);
     clip.color = pop.querySelector('#tx-color').value;
     if (lblEl) lblEl.textContent = (clip.text || '').split('\n')[0] || tr('video.textDefault');
