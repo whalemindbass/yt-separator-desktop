@@ -104,5 +104,13 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('컨트롤 칸 자체가 트랙 헤드와 같은 x 에 고정됨', ctrlAfterX, headX);
   expect('스크롤 전후로도 그대로', ctrlAfterX, ctrlBeforeX);
 
+  section('8) 트랙 구분선 — 헤드/영역 공용(반투명) 선 대신 각자 선을 가져야 함(재생선 틈새 방지)');
+  expect('.ve-lane 자체엔 구분선 없음(헤드/영역이 각자 그림)',
+    await js(`getComputedStyle(document.querySelector('.ve-lane')).borderBottomWidth`), '0px');
+  const headBorderColor = await js(`getComputedStyle(document.querySelector('.ve-head')).borderBottomColor`);
+  const alphaMatch = /rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(?:,\s*([\d.]+)\s*)?\)/.exec(headBorderColor);
+  const headBorderAlpha = alphaMatch && alphaMatch[1] != null ? Number(alphaMatch[1]) : 1;
+  expect('헤드 구분선은 불투명(알파 1) — 재생선이 안 새어 보임', headBorderAlpha, 1);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

@@ -20,6 +20,7 @@ let _veTracks = [];   // [{id, name, color, height, hidden}]
 let _veClips = [];    // [{id, trackId, file, name, start, inOff, srcDur, dur, w, h}]
 let _trackSeq = 0, _clipSeq = 0;
 let _pxPerSec = 40;
+let _veExtraSec = 0;   // 오른쪽 끝까지 스크롤해서 유기적으로 늘어난 여유분(초) — growTimelineIfNeeded()
 let _selClipId = null;
 let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
 let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
@@ -74,6 +75,7 @@ function applyVideoProjectData(p) {
   _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
   _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
   _veResolution = p.resolution || null;
+  _veExtraSec = 0;
   for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); }
   _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
   ensureLayers();
@@ -947,9 +949,18 @@ function fullSec() {
   const vw = sc ? sc.clientWidth - HEAD_W : 800;
   let content = 4;
   for (const c of _veClips) content = Math.max(content, c.start + c.dur);
-  return Math.max(content + 4, vw / _pxPerSec);
+  return Math.max(content + 4 + _veExtraSec, vw / _pxPerSec);
 }
 const timelineW = () => Math.max(1, fullSec() * _pxPerSec);
+// 오른쪽 끝까지 가로 스크롤하면 트랙(타임라인)이 유기적으로 더 늘어난다 — 클립 길이에
+// 맞춰 미리 다 그려두는 대신, 끝에 가까워질 때만 여유분을 얹고 다시 그린다.
+function growTimelineIfNeeded() {
+  const sc = $('ve-tscroll');
+  if (!sc) return;
+  if (sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 200) return;   // 아직 끝에서 여유 있음
+  _veExtraSec += 20;
+  layout();
+}
 
 function layout() {
   const w = timelineW();
@@ -1968,12 +1979,23 @@ function wire() {
   // 미리보기 패널 크기가 바뀔 때마다(창 크기 조절 등) 렌더 프레임 틀도 다시 맞춘다.
   const previewWrap = $('ve-preview-wrap');
   if (previewWrap) new ResizeObserver(() => sizePreviewFrame()).observe(previewWrap);
+  // Ctrl+휠 = 배율. 트랙 컨트롤(헤드) 위 = 네이티브 세로 스크롤(트랙 많을 때 목록 훑기용).
+  // 그 외(타임라인 위) = 가로 스크롤 — 스튜디오와 같은 패턴.
   $('ve-tscroll')?.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey) return;
+    const sc = $('ve-tscroll');
+    if (e.ctrlKey) {
+      e.preventDefault();
+      _pxPerSec = Math.max(4, Math.min(400, _pxPerSec * (e.deltaY < 0 ? 1.08 : 0.93)));
+      layout();
+      return;
+    }
+    if (e.target.closest('.ve-head, .ve-ruler-ctrl')) return;
     e.preventDefault();
-    _pxPerSec = Math.max(4, Math.min(400, _pxPerSec * (e.deltaY < 0 ? 1.08 : 0.93)));
-    layout();
+    sc.scrollLeft += (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX);
+    growTimelineIfNeeded();
   }, { passive: false });
+  // 스크롤바를 직접 끌 때도(휠이 아니어도) 끝에 가까워지면 마찬가지로 늘어나야 한다.
+  $('ve-tscroll')?.addEventListener('scroll', () => growTimelineIfNeeded());
   document.addEventListener('keydown', (e) => {
     const view = document.querySelector('.video-body');
     if (!view || view.hidden) return;

@@ -1,7 +1,7 @@
 'use strict';
 // YT Separator Desktop — Electron main process
 
-const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog, session, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog, session } = require('electron');
 // 테스트 실행 중인지 — test/run.js 가 electron 에 <이름>.test.js 경로를 인자로 넘긴다.
 // 테스트가 창을 계속 띄우는데, 모니터가 여러 대면 항상 주 모니터에 떠서 작업을 방해한다 —
 // 보조 모니터가 있으면 거기로 보낸다(없으면 그냥 평소대로, 실사용에는 전혀 영향 없다).
@@ -236,14 +236,6 @@ function createMainWindow() {
       webviewTag: true,            // 커뮤니티 임베드용
     },
   };
-  if (isTestRun) {
-    const displays = screen.getAllDisplays();
-    const secondary = displays.find(d => d.id !== screen.getPrimaryDisplay().id);
-    if (secondary) {
-      winOpts.x = secondary.bounds.x + 40;
-      winOpts.y = secondary.bounds.y + 40;
-    }
-  }
   mainWindow = new BrowserWindow(winOpts);
   // 화면이 통째로 죽는 경우 — 자바스크립트 예외로는 잡히지 않는다
   mainWindow.webContents.on('render-process-gone', (_e, d) => {
@@ -255,11 +247,11 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow) return;
-    // 테스트 중엔 showInactive() — 창은 뜨되(테스트가 스크린샷 없이 executeJavaScript 로만
-    // 조작하니 실제 OS 포커스는 필요 없다) 사용자가 다른 모니터에서 하던 작업의 포커스를
-    // 뺏지 않는다. devtools(별도 분리창) 는 우리가 위치를 못 옮기니 아예 안 띄운다 —
-    // 안 그러면 그게 기본 모니터 한복판에 튀어나와서 방해된다.
-    if (isTestRun) { mainWindow.showInactive(); return; }
+    // 테스트 중엔 아예 안 띄운다 — 테스트는 executeJavaScript 로만 조작해서 창이 보일
+    // 필요가 없다. 예전엔 showInactive() 로 보조 모니터에 띄웠는데, 모니터가 하나뿐이거나
+    // 창이 뜨고 옮겨지는 그 짧은 순간에도 화면이 깜빡여 거슬린다는 지적이 있었다 — 안
+    // 띄우면 그 자체가 원천적으로 안 생긴다. devtools 도 당연히 안 띄운다.
+    if (isTestRun) return;
     mainWindow.show();
     if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
   });

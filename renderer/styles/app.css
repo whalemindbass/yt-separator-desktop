@@ -4049,10 +4049,16 @@ body { background: var(--bg) !important; }
 .ve-ruler .tk span { position: absolute; top: 3px; left: 4px; font: 400 10px/1 var(--mono); color: var(--tx-3); }
 
 .ve-lanes { position: relative; min-width: 100%; width: max-content; }
-.ve-lane { display: grid; grid-template-columns: 172px 1fr; height: 72px; border-bottom: 1px solid var(--border); }
+/* 레인 구분선을 레인 자체(헤드+영역 공용)에 두면 안 된다 — var(--border) 가 반투명이라
+   헤드 쪽·영역 쪽에서 서로 다른 배경이 비쳐서 그 1px 줄이 양쪽에서 다르게 보이고, 정확히
+   그 줄 위를 재생선이 지날 때도 살짝 새어 보인다(스튜디오 .daw-lane/.daw-head 에서 이미
+   겪고 고친 것과 같은 패턴 — 거기 주석 참고). 헤드는 자기 배경에 맞춘 불투명 선으로
+   확실히 덮고, 영역은 타임라인 톤의 반투명 선을 따로 둔다. */
+.ve-lane { display: grid; grid-template-columns: 172px 1fr; height: 72px; }
 .ve-head {
   flex: 0 0 172px; display: flex; flex-direction: column; justify-content: center; gap: 4px;
   padding: 6px 10px; background: var(--surface); border-right: 1px solid var(--border);
+  border-bottom: 1px solid color-mix(in srgb, var(--surface) 82%, #000);
   position: sticky; left: 0; z-index: 2;
 }
 .ve-head .nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -4068,7 +4074,7 @@ body { background: var(--bg) !important; }
 .ve-hs.on { background: var(--mute); border-color: var(--mute); color: #1a1400; }
 .ve-hs.ve-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
-.ve-area { position: relative; background: var(--timeline); }
+.ve-area { position: relative; background: var(--timeline); border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
 .ve-lane-resize { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; z-index: 4; }
 
 .ve-clip {
