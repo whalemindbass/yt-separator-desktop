@@ -3895,7 +3895,11 @@ body { background: var(--bg) !important; }
    PIP 박스·핸들·텍스트 오버레이는 여기 안 넣는다, 자르면 프레임 밖으로 옮긴 걸 다시
    드래그해서 되돌릴 손잡이가 안 보이게 된다. */
 .ve-video-layers { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
-.ve-video-layers video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* 트랙 레이어 한 칸 — 영상(<video>) 또는 이미지(<img>) 둘 중 하나를 담는다(클립 종류에
+   따라 driveLayer() 가 토글). 위치/크기(PIP transform)는 이 래퍼에 걸린다 — 예전엔
+   <video> 에 직접 걸었는데, 안쪽에 두 태그가 같이 있으니 바깥 한 겹으로 옮겼다. */
+.ve-video-layers .ve-layer-slot { position: absolute; inset: 0; }
+.ve-video-layers .ve-layer-slot video, .ve-video-layers .ve-layer-slot img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .ve-res-select {
   height: 30px; box-sizing: border-box; font: 500 12px/1 var(--sans); color: var(--tx-1);
   background: var(--elev); border: 1px solid var(--border); border-radius: 7px; padding: 0 8px;

@@ -87,7 +87,8 @@ const DIALOG_TEXT = {
     pickMediaFiles: '분리할 영상/오디오 파일 선택 (여러 개 가능)',
     importAudio: '오디오 파일 임포트', importVideo: '영상 파일 임포트',
     importVideoFiles: '영상 파일 임포트 (여러 개 가능)',
-    fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fAll: '모든 파일', fProject: 'YSS 프로젝트',
+    importImageFiles: '이미지 파일 임포트 (여러 개 가능)',
+    fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fImage: '이미지', fAll: '모든 파일', fProject: 'YSS 프로젝트',
     fVideoProject: 'Dr.studio 영상 프로젝트',
   },
   en: {
@@ -101,7 +102,8 @@ const DIALOG_TEXT = {
     pickMediaFiles: 'Choose video/audio files to separate (multiple allowed)',
     importAudio: 'Import audio file', importVideo: 'Import video file',
     importVideoFiles: 'Import video files (multiple allowed)',
-    fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fAll: 'All files', fProject: 'YSS project',
+    importImageFiles: 'Import image files (multiple allowed)',
+    fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fImage: 'Image', fAll: 'All files', fProject: 'YSS project',
     fVideoProject: 'Dr.studio video project',
   },
 };
@@ -112,6 +114,8 @@ function mimeFor(p) {
   return {
     '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
     '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.flac': 'audio/flac',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+    '.bmp': 'image/bmp', '.gif': 'image/gif',
   }[ext] || 'application/octet-stream';
 }
 
@@ -782,6 +786,7 @@ ipcMain.handle('dialog:pickVideoFile', async () => {
 ipcMain.handle('dialog:pickVideoFiles', async (_ev, kind) => {
   const videoExts = ['mp4','mkv','webm','mov','avi','m4v'];
   const audioExts = ['mp3','wav','flac','ogg','aif','aiff','m4a','aac'];
+  const imageExts = ['png','jpg','jpeg','webp','bmp','gif'];
   const filters = kind === 'audio'
     ? [
         { name: td('fAudio'), extensions: audioExts },
@@ -790,12 +795,17 @@ ipcMain.handle('dialog:pickVideoFiles', async (_ev, kind) => {
         { name: td('fVideo'), extensions: videoExts },
         { name: td('fAll'), extensions: ['*'] },
       ]
+    : kind === 'image'
+    ? [
+        { name: td('fImage'), extensions: imageExts },
+        { name: td('fAll'), extensions: ['*'] },
+      ]
     : [
         { name: td('fVideo'), extensions: videoExts },
         { name: td('fAll'), extensions: ['*'] },
       ];
   const res = await dialog.showOpenDialog(mainWindow || null, {
-    title: td('importVideoFiles'),
+    title: kind === 'image' ? td('importImageFiles') : td('importVideoFiles'),
     properties: ['openFile', 'multiSelections'],
     filters,
   });
@@ -1070,9 +1080,14 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 같은 파일이 여러 구간·레이어·오디오소스에서 반복 참조될 수 있다 — 파일당 -i 하나만 열고
   // filter_complex 안에서 같은 입력 인덱스를 여러 번(다른 trim 범위로) 재사용한다.
   const fileIdx = new Map();
+  const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
   function inputIndexFor(file) {
     if (fileIdx.has(file)) return fileIdx.get(file);
-    args.push('-i', file);
+    // 이미지는 -loop 1 로 무한 스트림처럼 열어야 trim=start:end 가 어떤 구간을 요청해도
+    // (클립을 몇 초짜리로 늘려 놨든) 항상 프레임이 있다 — 정지 이미지는 어차피 어디를
+    // 잘라도 같은 그림이라 이 방식이 실제 seek 와 동일하게 동작한다.
+    if (IMAGE_EXTS.has(path.extname(file).toLowerCase())) args.push('-loop', '1', '-framerate', '30', '-i', file);
+    else args.push('-i', file);
     const idx = nextInput++;
     fileIdx.set(file, idx);
     return idx;

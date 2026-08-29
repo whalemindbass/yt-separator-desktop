@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep: https://ytseparator.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com;" />
+    content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: ytsep:; font-src 'self' data:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep: https://ytseparator.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com;" />
   <title>Dr.studio</title>
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
@@ -1166,6 +1166,7 @@
             <button type="button" class="ve-fx-add-item" data-kind="video" data-i18n="video.trackKindVideo">영상</button>
             <button type="button" class="ve-fx-add-item" data-kind="audio" data-i18n="video.trackKindAudio">오디오</button>
             <button type="button" class="ve-fx-add-item" data-kind="text" data-i18n="video.trackKindText">텍스트</button>
+            <button type="button" class="ve-fx-add-item" data-kind="image" data-i18n="video.trackKindImage">이미지</button>
           </div>
         </div>
         <button id="ve-import" class="btn btn-sm" type="button" data-i18n="video.import">임포트</button>

@@ -57,8 +57,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage })),
     resolution: _veResolution,
   };
 }
@@ -227,15 +227,21 @@ function ensureLayers() {
         pair = { text: div };
       } else {
         const isAudio = t.kind === 'audio';
+        // 슬롯 하나 = <video> + <img> 를 같이 담는 래퍼. 그 순간 활성 클립이 영상이냐
+        // 이미지냐에 따라 driveLayer() 가 둘 중 하나만 보여준다(둘 다 같은 위치/크기를
+        // 받아야 하므로 PIP transform 은 이 래퍼에 건다 — applyTrackTransform 참고).
         const mk = () => {
+          const wrap = document.createElement('div'); wrap.className = 've-layer-slot';
           const v = document.createElement('video'); v.playsInline = true; v.preload = 'auto';
           // crossOrigin 없이 로드하면(ytsep:// 커스텀 프로토콜이 Access-Control-Allow-Origin: *
           // 를 줘도) 캔버스가 "tainted by cross-origin data" 로 막힌다 — 히스토그램처럼
           // drawImage+getImageData 로 프레임을 읽어야 하는 기능은 이게 없으면 조용히 아무것도
           // 못 그리고 예외만 삼킨다(실측하다 잡은 버그).
           v.crossOrigin = 'anonymous';
-          if (isAudio) v.style.opacity = '0';
-          videoHost.appendChild(v); return v;
+          const img = document.createElement('img'); img.hidden = true; img.crossOrigin = 'anonymous';
+          wrap.appendChild(v); wrap.appendChild(img);
+          if (isAudio) wrap.style.opacity = '0';
+          videoHost.appendChild(wrap); return wrap;
         };
         pair = { a: mk(), b: mk() };
       }
@@ -677,25 +683,48 @@ function clipsAt(trackId, t) {
     .filter(c => c.trackId === trackId && t >= c.start && t < c.start + c.dur)
     .sort((x, y) => x.start - y.start);
 }
+// el 은 슬롯 래퍼(.ve-layer-slot, <video>+<img> 둘 다 담음) — 클립이 이미지면 <img> 를,
+// 아니면 <video> 를 보여준다. 나머지 하나는 숨기고(이미지면 비디오는 멈춰 둔다) 반대로.
+function layerVideo(el) { return el.querySelector('video'); }
 function driveLayer(el, clip, t, visual) {
+  const v = el.querySelector('video'), img = el.querySelector('img');
+  if (visual) el.hidden = false;
+  if (clip.isImage) {
+    if (visual) {
+      v.hidden = true; img.hidden = false;
+      const flip = chainFlip(clip.effects);
+      const sx = flip.h ? -1 : 1, sy = flip.v ? -1 : 1;
+      img.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
+      img.style.filter = effectsChainCss(clip.effects);
+    }
+    if (!v.paused) v.pause();
+    if (img.dataset.loadedSrc !== clip.file) { img.src = toYtsepUrl(clip.file); img.dataset.loadedSrc = clip.file; }
+    return;
+  }
   if (visual) {
-    el.hidden = false;
+    img.hidden = true; v.hidden = false;
     const flip = chainFlip(clip.effects);
     const sx = flip.h ? -1 : 1, sy = flip.v ? -1 : 1;
-    el.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
-    el.style.filter = effectsChainCss(clip.effects);
+    v.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
+    v.style.filter = effectsChainCss(clip.effects);
   }
   // 영상 클립이 짝(groupId, 오디오 트랙의 오디오 클립)을 가지고 있으면 소리는 그 짝이
   // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
   // 짝이 없는(예전 프로젝트 등) 클립은 자기 소리를 그대로 낸다.
-  el.muted = visual && !!clip.groupId;
-  if (el.dataset.loadedSrc !== clip.file) { el.src = toYtsepUrl(clip.file); el.dataset.loadedSrc = clip.file; }
-  const target = Math.min(clip.inOff + (t - clip.start), (el.duration || clip.srcDur) - 0.02);
-  if (Math.abs(el.currentTime - target) > 0.1) { try { el.currentTime = Math.max(0, target); } catch {} }
-  if (_playing && el.paused) el.play().catch(() => {});
-  if (!_playing && !el.paused) el.pause();
+  v.muted = visual && !!clip.groupId;
+  if (v.dataset.loadedSrc !== clip.file) { v.src = toYtsepUrl(clip.file); v.dataset.loadedSrc = clip.file; }
+  const target = Math.min(clip.inOff + (t - clip.start), (v.duration || clip.srcDur) - 0.02);
+  if (Math.abs(v.currentTime - target) > 0.1) { try { v.currentTime = Math.max(0, target); } catch {} }
+  if (_playing && v.paused) v.play().catch(() => {});
+  if (!_playing && !v.paused) v.pause();
 }
-function hideLayer(el, visual) { if (visual) { el.hidden = true; el.style.opacity = ''; } if (!el.paused) el.pause(); }
+function hideLayer(el, visual) {
+  const v = el.querySelector('video'), img = el.querySelector('img');
+  // 래퍼(el)뿐 아니라 안쪽 태그 자체의 hidden 도 맞춰 둔다 — video:not([hidden]) 같은
+  // 자손 셀렉터는 조상이 hidden 이어도 그 태그 자신의 속성만 본다.
+  if (visual) { el.hidden = true; el.style.opacity = ''; v.hidden = true; img.hidden = true; }
+  if (!v.paused) v.pause();
+}
 // 클립 자체 페이드인/아웃 배율(0~1) — 같은 트랙 크로스페이드 믹스와 곱해서 합성한다.
 function fadeMul(clip, t) {
   let m = 1;
@@ -848,12 +877,12 @@ function syncPreview(t) {
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
       const fa = (1 - mix) * fadeMul(outClip, t), fb = mix * fadeMul(inClip, t);
-      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(fa); a.volume = fa;
-      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(fb); b.volume = fb;
+      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(fa); layerVideo(a).volume = fa;
+      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(fb); layerVideo(b).volume = fb;
       any = true;
     } else if (here.length === 1) {
       const f = fadeMul(here[0], t);
-      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = String(f); a.volume = f;
+      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = String(f); layerVideo(a).volume = f;
       hideLayer(b, visual);
       any = true;
     } else {
@@ -1186,12 +1215,12 @@ const TEXT_FONTS = {
   consolas: { label: 'Consolas',         css: "Consolas, monospace" },
 };
 // srcDur 를 넉넉히 큰 값으로 잡아둔다 — wireTrim 의 오른쪽 트림 상한(c.srcDur - c.inOff)이
-// 영상 클립처럼 "소스 길이"를 의미 있게 가질 필요가 텍스트엔 없어서, 사실상 무제한으로 늘릴
-// 수 있게 하는 값이다(Infinity 는 JSON.stringify 가 null 로 뭉개버려 프로젝트 저장이 깨진다).
-const TEXT_CLIP_SRC_DUR = 86400;
+// 영상 클립처럼 "소스 길이"를 의미 있게 가질 필요가 텍스트·이미지엔 없어서, 사실상 무제한으로
+// 늘릴 수 있게 하는 값이다(Infinity 는 JSON.stringify 가 null 로 뭉개버려 프로젝트 저장이 깨진다).
+const HUGE_CLIP_SRC_DUR = 86400;
 function addTextClipAt(trackId, atSec) {
   const clip = {
-    id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: TEXT_CLIP_SRC_DUR,
+    id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
     text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
   };
   _veClips.push(clip);
@@ -1288,7 +1317,7 @@ function renderClips() {
     area.innerHTML = '';
     for (const c of _veClips.filter(x => x.trackId === trackId)) {
       const el = document.createElement('div');
-      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.id === _selClipId ? ' sel' : '');
+      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.isImage ? ' image' : '') + (c.id === _selClipId ? ' sel' : '');
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
@@ -1327,7 +1356,12 @@ function renderClips() {
         wireFade(el.querySelector('.ve-fadeh.r'), c, paintFade, +1);
       }
       area.appendChild(el);
-      if (!c.isAudioOnly && !c.isText) {
+      if (c.isImage) {
+        // 이미지는 정지 그림 하나뿐이라 필름스트립(여러 프레임 seek) 대신 그 그림 자체를
+        // 통째로 채워 넣는다 — getClipThumb 은 <video> seek 전제라 이미지엔 안 맞는다.
+        const box = el.querySelector('.ve-thumbs');
+        if (box) box.innerHTML = `<img src="${esc(toYtsepUrl(c.file))}">`;
+      } else if (!c.isAudioOnly && !c.isText) {
         const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
         if (cached) paintThumbs(c);
       }
@@ -1830,6 +1864,64 @@ async function pickImportVideo() {
   const reuse = top && !_veClips.some(c => c.trackId === top.id);
   importVideoFiles(r.filePaths, reuse ? top.id : null);
 }
+const IMAGE_CLIP_DEFAULT_DUR = 5;   // 이미지는 영상과 달리 고유 길이가 없다 — 기본 5초, 트림으로 늘리고 줄인다.
+function probeImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth || 0, h: img.naturalHeight || 0 });
+    img.onerror = () => resolve({ w: 0, h: 0 });
+    img.src = toYtsepUrl(file);
+  });
+}
+// 이미지는 영상 트랙 위 클립으로 들어간다(별도 트랙 종류를 안 둔다) — PIP 위치/크기·
+// 트랙 순서=z-index·효과 체인(밝기/대비/반전 등)을 전부 그대로 물려받는다. 소스 길이가
+// 없어(HUGE_CLIP_SRC_DUR) 트림으로 원하는 만큼 늘리거나 줄일 수 있다.
+async function importImageFiles(paths, trackId) {
+  let tid = trackId;
+  const createdVideoTrack = tid == null;
+  if (createdVideoTrack) tid = newVideoTrack(false);
+  const videoTrackRef = createdVideoTrack ? _veTracks.find(t => t.id === tid) : null;
+  let cursor = 0;
+  for (const c of _veClips.filter(x => x.trackId === tid)) cursor = Math.max(cursor, c.start + c.dur);
+
+  const added = [];
+  for (const p of paths) {
+    const meta = await probeImage(p);
+    if (!meta.w || !meta.h) continue;
+    const name = p.split(/[\\/]/).pop();
+    const clip = {
+      id: nextClipId(), trackId: tid, isImage: true, file: p, name,
+      start: cursor, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR, dur: IMAGE_CLIP_DEFAULT_DUR,
+      w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false, effects: [],
+    };
+    _veClips.push(clip); added.push(clip);
+    cursor += IMAGE_CLIP_DEFAULT_DUR;
+  }
+
+  if (added.length) {
+    pushUndo(
+      () => {
+        _veClips = _veClips.filter(c => !added.includes(c));
+        if (createdVideoTrack) _veTracks = _veTracks.filter(t => t !== videoTrackRef);
+      },
+      () => {
+        if (createdVideoTrack) _veTracks.unshift(videoTrackRef);
+        _veClips.push(...added);
+      },
+    );
+  }
+  ensureLayers();
+  layout();
+  if (added.length) flash(tr('video.importing', { n: added.length }));
+  else flash(tr('video.needImport'));
+}
+async function pickImportImage() {
+  const r = await api.dialog.pickVideoFiles('image');
+  if (!r || !r.ok || !r.filePaths?.length) return;
+  const top = _veTracks.find(t => t.kind === 'video');
+  const reuse = top && !_veClips.some(c => c.trackId === top.id);
+  importImageFiles(r.filePaths, reuse ? top.id : null);
+}
 // "+오디오" 전용 임포트 — 항상 새 오디오 트랙을 만들어 그 안에만 채운다. 일반 "임포트"
 // 버튼(pickImportVideo→importVideoFiles)의 ensureAudioTrack() 은 오디오 클립이 생길 때마다
 // "이미 있는 오디오 트랙"을 재사용해서, 트랙을 여러 개 만들어 겹치게(배경음악+대사처럼
@@ -1890,6 +1982,7 @@ function wire() {
       if (kind === 'video') newVideoTrack();
       else if (kind === 'audio') pickImportAudioTrack();
       else if (kind === 'text') addText();
+      else if (kind === 'image') pickImportImage();
     });
   });
   $('ve-import')?.addEventListener('click', () => pickImportVideo());

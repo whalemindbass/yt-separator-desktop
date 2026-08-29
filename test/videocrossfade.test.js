@@ -65,7 +65,9 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('3) 미리보기 — 겹친 구간 중간에서 두 레이어가 50/50 으로 섞임');
   await js(`document.querySelector('.ve-area').dispatchEvent(new PointerEvent('pointerdown', { clientX: 172 + 2.5 * 40, clientY: 10, bubbles: true })); true`);
   await wait(300);
-  const layers = await js(`[...document.querySelectorAll('#ve-preview video')].map(v => ({ hidden: v.hidden, opacity: parseFloat(v.style.opacity || '1') }))`);
+  // hidden/opacity 는 슬롯 래퍼(.ve-layer-slot)에 걸린다 — 그 안의 <video>/<img> 는 클립
+  // 종류에 따라 driveLayer() 가 토글만 한다(이미지 오버레이 지원 추가하며 한 겹 더 생김).
+  const layers = await js(`[...document.querySelectorAll('#ve-preview .ve-layer-slot')].map(v => ({ hidden: v.hidden, opacity: parseFloat(v.style.opacity || '1') }))`);
   const visible = layers.filter(l => !l.hidden);
   expect('두 레이어 다 보임(겹친 구간)', visible.length, 2);
   if (visible.length === 2) {
