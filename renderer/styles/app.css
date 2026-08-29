@@ -4017,8 +4017,11 @@ body { background: var(--bg) !important; }
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
 .ve-ruler-ctrl {
-  flex: 0 0 172px; border-right: 1px solid var(--border);
-  display: flex; align-items: center; gap: 4px; padding: 0 6px;
+  /* .ve-head(트랙 컨트롤, sticky left:0)처럼 가로 스크롤에도 안 밀려야 한다 — 안 그러면
+     스크롤할 때마다 이 버튼들만 화면 밖으로 사라지고, 그 자리에 눈금자 내용이 그대로
+     비쳐서(아래 각 트랙의 head 는 계속 고정돼 있으니) 줄이 안 맞아 보인다. */
+  position: sticky; left: 0; z-index: 2; flex: 0 0 172px; border-right: 1px solid var(--border);
+  display: flex; align-items: center; gap: 4px; padding: 0 6px; background: var(--surface);
 }
 /* 26px 짜리 눈금자 줄 안이라 기본 .ve-tbtn(30px)보다 작게 맞춘다. */
 .ve-ruler-ctrl .ve-tbtn { width: 22px; height: 22px; font-size: 11px; border-radius: 5px; }

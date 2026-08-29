@@ -90,5 +90,19 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await wait(150);
   expect('Shift 없이도 구간 지정됨', await js(`document.getElementById('ve-erange').hidden`), false);
 
+  section('7) 눈금자 컨트롤(영역선택/줌 버튼) — 가로 스크롤해도 트랙 헤드처럼 제자리에 고정');
+  for (let i = 0; i < 8; i++) await js(`document.getElementById('ve-zoom-in').click(); true`);   // 스크롤 생기도록 확대
+  await wait(100);
+  const beforeX = await js(`document.getElementById('ve-range-mode').getBoundingClientRect().x`);
+  const ctrlBeforeX = await js(`document.querySelector('.ve-ruler-ctrl').getBoundingClientRect().x`);
+  await js(`(() => { document.getElementById('ve-tscroll').scrollLeft = 300; })(); true`);
+  await wait(100);
+  const afterX = await js(`document.getElementById('ve-range-mode').getBoundingClientRect().x`);
+  const ctrlAfterX = await js(`document.querySelector('.ve-ruler-ctrl').getBoundingClientRect().x`);
+  const headX = await js(`document.querySelector('.ve-head').getBoundingClientRect().x`);
+  expect('가로로 스크롤해도 버튼 위치 그대로', afterX, beforeX);
+  expect('컨트롤 칸 자체가 트랙 헤드와 같은 x 에 고정됨', ctrlAfterX, headX);
+  expect('스크롤 전후로도 그대로', ctrlAfterX, ctrlBeforeX);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
