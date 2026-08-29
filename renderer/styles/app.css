@@ -4078,7 +4078,11 @@ body { background: var(--bg) !important; }
 .ve-hs.on { background: var(--mute); border-color: var(--mute); color: #1a1400; }
 .ve-hs.ve-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
-.ve-area { position: relative; background: var(--timeline); border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
+/* z-index:0 을 명시해 독립 스태킹 컨텍스트를 만든다 — 안에 있는 클립의 페이드 손잡이
+   (.ve-fadeh, z:3)·트림(.ve-trim, z:2) 같은 값들이 이 컨텍스트에 갇혀서, 트랙 헤드
+   (.ve-head, z:2, 이 밖의 형제) 위로 새어 보이지 않는다. 클립끼리의 내부 순서(트림/페이드
+   손잡이)는 그대로 유지된다 — 그 안에서만 비교되니까. */
+.ve-area { position: relative; z-index: 0; background: var(--timeline); border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
 .ve-lane-resize { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; z-index: 4; }
 
 .ve-clip {

@@ -112,5 +112,43 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   const headBorderAlpha = alphaMatch && alphaMatch[1] != null ? Number(alphaMatch[1]) : 1;
   expect('헤드 구분선은 불투명(알파 1) — 재생선이 안 새어 보임', headBorderAlpha, 1);
 
+  section('9) 페이드 손잡이 — 트랙 헤드(컨트롤) 칸 위로 스크롤돼 와도 그 아래 깔려야 함');
+  for (let i = 0; i < 6; i++) await js(`document.getElementById('ve-zoom-in').click(); true`);
+  await wait(80);
+  await js(`(() => {
+    const h = document.querySelector('.ve-fadeh.l');
+    const r = h.getBoundingClientRect();
+    h.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left, clientY: r.top, bubbles: true, pointerId: 20 }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 20, clientY: r.top, pointerId: 20 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 20, clientY: r.top, pointerId: 20 }));
+  })(); true`);
+  await js(`(() => {
+    const c = document.querySelector('.ve-clip');
+    const r = c.getBoundingClientRect();
+    c.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 100, clientY: r.top + 30, bubbles: true, pointerId: 21 }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 100 + 500, clientY: r.top + 30, pointerId: 21 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 100 + 500, clientY: r.top + 30, pointerId: 21 }));
+  })(); true`);
+  await wait(80);
+  await js(`(() => {
+    const sc = document.getElementById('ve-tscroll');
+    const c = document.querySelector('.ve-clip');
+    sc.scrollLeft = parseFloat(c.style.left) + 60;   // fadeh 가 헤드 칸(x 0~172) 안쪽으로 오도록
+  })(); true`);
+  await wait(80);
+  const fadeInHead = await js(`(() => {
+    const h = document.querySelector('.ve-fadeh.l');
+    const r = h.getBoundingClientRect();
+    return r.left < 172 && r.left >= 0;
+  })()`);
+  expect('손잡이가 실제로 헤드 칸 x 범위 안에 옴(테스트 전제)', fadeInHead, true);
+  const topElementIsFadeh = await js(`(() => {
+    const h = document.querySelector('.ve-fadeh.l');
+    const r = h.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!(top && top.closest('.ve-fadeh'));
+  })()`);
+  expect('그 지점에서 실제로 클릭되는 건 손잡이가 아니라 헤드(안 덮임)', topElementIsFadeh, false);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
