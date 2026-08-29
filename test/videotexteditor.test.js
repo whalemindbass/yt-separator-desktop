@@ -17,7 +17,7 @@ const FFMPEG = path.join(ROOT, 'vendor', 'ffmpeg', 'ffmpeg.exe');
 const FFPROBE = path.join(ROOT, 'vendor', 'ffmpeg', 'ffprobe.exe');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'yss-vetexted-'));
 
-const { bootMain, expect, section, wait, finish } = require('./harness');
+const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
 (async () => {
   const { app, js } = await bootMain({ settle: 1500 });
@@ -52,7 +52,16 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
     document.getElementById('tx-color').dispatchEvent(new Event('input', { bubbles: true }));
   })(); true`);
   await wait(80);
-  expect('미리보기 폰트 크기 반영', await js(`document.querySelector('.ve-text-item')?.style.fontSize`), '60px');
+  // clip.size 는 "출력 해상도 기준 px" 라 미리보기 CSS font-size 는 화면 축소 배율만큼
+  // 줄어서 렌더된다(videotextsize.test.js 에서 이 배율 자체를 검증함) — 여긴 그 배율을
+  // 반영한 값으로 실제 반영됐는지만 본다.
+  const fsInfo = await js(`(() => {
+    const host = document.getElementById('ve-preview');
+    const el = document.querySelector('.ve-text-item');
+    return JSON.stringify({ previewW: host.clientWidth, css: parseFloat(getComputedStyle(el).fontSize) });
+  })()`);
+  const { previewW: fsPreviewW, css: fsCss } = JSON.parse(fsInfo);
+  near('미리보기 폰트 크기 반영(60 × 화면축소배율)', fsCss, 60 * (fsPreviewW / 1280), 0.5);
   expect('미리보기 색상 반영', await js(`document.querySelector('.ve-text-item')?.style.color`), 'rgb(255, 0, 255)');
 
   section('3) 저장 파일에 텍스트 클립 필드가 실제로 남는가');

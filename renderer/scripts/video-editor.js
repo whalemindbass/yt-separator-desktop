@@ -685,14 +685,26 @@ function fadeMul(clip, t) {
 // 아직 못 따라가는 반쪽 기능은 만들지 않는다) opacity 는 항상 1. 항목 자체를 미리보기
 // 위에서 바로 드래그(위치)·모서리 핸들 드래그(크기)할 수 있게 만든다 — CapCut/Canva 류
 // 편집기처럼, 숫자 입력칸(팝오버)에 의존하지 않고도 조정 가능해야 한다는 요청 반영.
+// clip.size 는 "내보내기 실제 해상도 기준 px" 다(main.js 가 fontsize= 에 그대로 쓴다).
+// #ve-preview 는 그 해상도를 화면 크기에 맞춰 축소해서 보여주는 창일 뿐이라, CSS
+// font-size 에 raw px 를 그대로 넣으면 미리보기 프레임이 작을 때(거의 항상 그렇다 —
+// 1080p 출력이 화면엔 수백 px 로만 뜬다) 실제 결과물보다 글자가 훨씬 커 보인다. 이
+// 배율로 나눠서(=화면에 맞게 줄여서) 넣어야 미리보기와 export 글자 크기가 같은 비율로
+// 보인다.
+function previewScale() {
+  const host = $('ve-preview'); if (!host || !host.clientWidth) return 1;
+  const { w } = getResolution();
+  return w ? host.clientWidth / w : 1;
+}
 function syncTextLayer(container, track, t) {
   const here = clipsAt(track.id, t);
   container.innerHTML = '';
+  const scale = previewScale();
   for (const c of here) {
     const font = TEXT_FONTS[c.fontKey] || TEXT_FONTS.malgun;
     const el = document.createElement('div');
     el.className = 've-text-item' + (c.id === _selClipId ? ' sel' : '');
-    el.style.fontSize = (c.size || 42) + 'px';
+    el.style.fontSize = ((c.size || 42) * scale) + 'px';
     el.style.color = c.color || '#ffffff';
     el.style.fontFamily = font.css;
     el.style.fontWeight = font.weight || '400';
@@ -710,18 +722,22 @@ function syncTextLayer(container, track, t) {
 }
 // PIP 박스와 같은 자유도 — 프레임 테두리에 위치를 묶지 않는다, 밖으로 드래그해서
 // 잘려 보여도 상관없다(자연스러운 결과, main.js 의 drawtext 도 똑같이 그냥 잘라준다).
+//
 // 크기가 줄어드는 건 위치와는 별개 문제였다 — position:absolute + width:auto 인
 // 엘리먼트는 CSS 스펙상 "containing block 폭 - left 값" 을 shrink-to-fit 계산의 가용
-// 폭으로 쓴다. 예전에 transform:translate(-50%) 로 가운데 정렬했을 때, 그 translate 로
-// 옮기기 *전에* 이미 (오른쪽 끝처럼 남은 공간이 적은) left 값 기준으로 줄바꿈되어 실제보다
-// 좁게 렌더됐다(실측: 텍스트를 오른쪽 끝으로 옮기면 159.6px → 75.6px 로 줄고 1줄이 3줄이
-// 됨). 그래서 el 을 먼저 left:0(여유 있는 자리)에 놓고 진짜 자연 크기를 잰 다음, 그
-// 크기로 최종 좌표를 직접 계산해서 넣는다(transform 정렬 없이) — 위치 자체는 안 자른다.
+// 폭으로 쓴다. left:0 에서 자연 크기를 재고 최종 위치의 left/top 만 다시 넣어봤지만
+// (지난 시도), width 를 auto 로 그냥 두면 브라우저가 그 "최종" left 값으로 또다시
+// shrink-to-fit 을 재계산한다 — 화면 밖 멀리(예: 프레임 절반 밖) 보낼수록 left 가 커져서
+// (혹은 음수여서) 가용폭이 계속 좁게 나와 매번 다시 줄바꿈됐다(실측으로 재현: 위치를
+// 옮길 때마다 폭이 또 줄어듦). 그래서 자연 크기를 잰 뒤 width 를 px 로 고정해서 박아
+// 넣는다 — 그러면 브라우저가 shrink-to-fit 을 다시 계산할 일 자체가 없다. box-sizing:
+// border-box(CSS) 라 이 width 가 getBoundingClientRect() 값과 그대로 맞는다.
 function positionTextItem(el, xPct, yPct) {
   const host = $('ve-preview'); if (!host) return;
   const hostRect = host.getBoundingClientRect();
-  el.style.left = '0px'; el.style.top = '0px';
+  el.style.width = 'auto'; el.style.left = '0px'; el.style.top = '0px';
   const natural = el.getBoundingClientRect();
+  el.style.width = natural.width + 'px';
   const left = xPct * hostRect.width - natural.width / 2;
   const top = yPct * hostRect.height - natural.height / 2;
   el.style.left = left + 'px';
@@ -764,12 +780,13 @@ function wireTextItemResize(handle, c) {
     e.preventDefault(); e.stopPropagation();
     const size0 = c.size || 42;
     const startX = e.clientX, startY = e.clientY;
+    const scale = previewScale() || 1;   // 화면 드래그 픽셀 ↔ 실제(출력 해상도 기준) size 단위 환산
     try { handle.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
       const d = (ev.clientX - startX) + (ev.clientY - startY);
-      c.size = Math.max(8, Math.min(300, Math.round(size0 + d / 2)));
+      c.size = Math.max(8, Math.min(300, Math.round(size0 + d / 2 / scale)));
       const el = handle.parentElement;
-      if (el) { el.style.fontSize = c.size + 'px'; positionTextItem(el, c.xPct, c.yPct); }   // 크기 바뀌면 클램프도 다시
+      if (el) { el.style.fontSize = (c.size * scale) + 'px'; positionTextItem(el, c.xPct, c.yPct); }   // 크기 바뀌면 클램프도 다시
       syncTextPopoverFields(c);
     };
     const up = () => {

@@ -114,7 +114,16 @@ async function dragBy(js, selector, dx, dy) {
   await wait(80);
   const size1 = Number(await js(`document.getElementById('tx-size').value`));
   expect('리사이즈 핸들 드래그(바깥쪽) → 글자 크기 커짐', size1 > size0, true);
-  expect('미리보기 요소 폰트 크기도 실제로 커짐', await js(`parseFloat(document.querySelector('.ve-text-item.sel').style.fontSize)`) === size1, true);
+  // clip.size 는 출력 해상도 기준 px 라, 미리보기 CSS font-size 는 화면 축소 배율만큼
+  // 줄어서 렌더된다(videotextsize.test.js 에서 배율 자체를 따로 검증함) — 여긴 raw size1
+  // 이 아니라 그 배율을 반영한 값과 같은지 본다.
+  const fontInfo = await js(`(() => {
+    const host = document.getElementById('ve-preview');
+    const el = document.querySelector('.ve-text-item.sel');
+    return JSON.stringify({ previewW: host.clientWidth, css: parseFloat(el.style.fontSize) });
+  })()`);
+  const { previewW: fiPreviewW, css: fiCss } = JSON.parse(fontInfo);
+  near('미리보기 요소 폰트 크기도 실제로 커짐(배율 반영, 소스 320x240 기준)', fiCss, size1 * (fiPreviewW / W), 0.5);
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
