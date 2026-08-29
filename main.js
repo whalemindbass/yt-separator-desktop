@@ -1,7 +1,11 @@
 'use strict';
 // YT Separator Desktop — Electron main process
 
-const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, protocol, net, clipboard, dialog, session, screen } = require('electron');
+// 테스트 실행 중인지 — test/run.js 가 electron 에 <이름>.test.js 경로를 인자로 넘긴다.
+// 테스트가 창을 계속 띄우는데, 모니터가 여러 대면 항상 주 모니터에 떠서 작업을 방해한다 —
+// 보조 모니터가 있으면 거기로 보낸다(없으면 그냥 평소대로, 실사용에는 전혀 영향 없다).
+const isTestRun = process.argv.some(a => /\.test\.js$/i.test(a));
 const { autoUpdater } = require('electron-updater');
 const { pathToFileURL } = require('url');
 const { Readable } = require('stream');
@@ -211,7 +215,7 @@ function isInsideDir(parent, child) {
 }
 
 function createMainWindow() {
-  mainWindow = new BrowserWindow({
+  const winOpts = {
     width: 1180,
     height: 780,
     minWidth: 900,
@@ -229,7 +233,16 @@ function createMainWindow() {
       webSecurity: true,
       webviewTag: true,            // 커뮤니티 임베드용
     },
-  });
+  };
+  if (isTestRun) {
+    const displays = screen.getAllDisplays();
+    const secondary = displays.find(d => d.id !== screen.getPrimaryDisplay().id);
+    if (secondary) {
+      winOpts.x = secondary.bounds.x + 40;
+      winOpts.y = secondary.bounds.y + 40;
+    }
+  }
+  mainWindow = new BrowserWindow(winOpts);
   // 화면이 통째로 죽는 경우 — 자바스크립트 예외로는 잡히지 않는다
   mainWindow.webContents.on('render-process-gone', (_e, d) => {
     noteCrash('renderer', null, { message: `화면 프로세스 종료: ${d.reason}`, reason: d.reason, exitCode: d.exitCode });
@@ -977,13 +990,21 @@ ipcMain.handle('video:export', async (event, payload) => {
     const active = (texts || []).filter(t => (t.content || '').trim());
     if (!active.length) return srcLabel;
     const dstLabel = `${srcLabel}_txt`;
+    // 사용자가 오른쪽/왼쪽 끝쪽으로 옮겨도 텍스트(와 박스 배경)가 화면 밖으로 잘려서
+    // 폭이 줄어든 것처럼 보이면 안 된다 — 크기는 오직 사용자가 fontsize 로만 바꾼다.
+    // 그래서 중심 좌표를 그대로 안 쓰고, min/max 로 항상 프레임(과 박스 여백 BOX_PAD)
+    // 안에 완전히 들어오게 자리를 밀어 넣는다(실측: 자연 폭 40px 짜리가 클램프 없이
+    // 오른쪽 끝으로 가면 26px 로 잘려 보였는데, 이 식을 쓰면 40px 그대로 끝에 붙는다).
+    const BOX_PAD = 8;
     const stages = active.map((t) => {
       const file = writeCaptionFile(t.content);
       const fontFile = ensureFontCopied(t.fontKey) || 'malgun.ttf';
       const size = Math.max(1, Math.round(t.size || 42));
-      const x = `(w*${(t.x ?? 0.5).toFixed(4)}-text_w/2)`;
-      const y = `(h*${(t.y ?? 0.85).toFixed(4)}-text_h/2)`;
-      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
+      const xc = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
+      const yc = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
+      const x = `max(${BOX_PAD}\\,min(${xc}\\,w-text_w-${BOX_PAD}))`;
+      const y = `max(${BOX_PAD}\\,min(${yc}\\,h-text_h-${BOX_PAD}))`;
+      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=${BOX_PAD}`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
     return dstLabel;

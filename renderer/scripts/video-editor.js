@@ -692,8 +692,6 @@ function syncTextLayer(container, track, t) {
     const font = TEXT_FONTS[c.fontKey] || TEXT_FONTS.malgun;
     const el = document.createElement('div');
     el.className = 've-text-item' + (c.id === _selClipId ? ' sel' : '');
-    el.style.left = (c.xPct * 100) + '%';
-    el.style.top = (c.yPct * 100) + '%';
     el.style.fontSize = (c.size || 42) + 'px';
     el.style.color = c.color || '#ffffff';
     el.style.fontFamily = font.css;
@@ -707,7 +705,32 @@ function syncTextLayer(container, track, t) {
       wireTextItemResize(handle, c);
     }
     container.appendChild(el);
+    positionTextItem(el, c.xPct, c.yPct);   // fontSize·글꼴이 다 적용된 뒤라야 실제 크기를 잴 수 있다
   }
+}
+// 텍스트가 프레임 가장자리에 붙으면 폭이 잘려서 좁아 보이던 문제 — 사용자가 리사이즈
+// 핸들/크기 입력으로 명시적으로 줄이지 않는 한 항상 온전한 크기로 보이게, 위치만
+// 프레임 안으로 밀어 넣는다. main.js 의 drawtext x/y 클램프(min/max(text_w/h) 식)와
+// 같은 목적, 같은 결과.
+//
+// left 를 퍼센트(또는 오른쪽 끝에 가까운 값)로 그냥 두면, position:absolute + width:auto
+// 인 엘리먼트는 CSS 스펙상 "containing block 폭 - left 값" 을 shrink-to-fit 계산의 가용
+// 폭으로 쓴다 — translate(-50%) 로 가운데 정렬하기 전에 이미 그 좁은 폭 기준으로 줄바꿈
+// 되어 실제로 더 좁게 렌더된다(자간이 아니라 CJK 줄바꿈이 늘어나서). 그래서 el 을 먼저
+// left:0(여유 있는 자리)에 놓고 진짜 자연 크기를 잰 다음, 그 크기를 기준으로 최종 좌표를
+// 직접 계산해서 넣는다 — transform 정렬에 기대지 않는다(그래서 CSS 의 translate(-50%)
+// 도 뺐다).
+function positionTextItem(el, xPct, yPct) {
+  const host = $('ve-preview'); if (!host) return;
+  const hostRect = host.getBoundingClientRect();
+  el.style.left = '0px'; el.style.top = '0px';
+  const natural = el.getBoundingClientRect();
+  let left = xPct * hostRect.width - natural.width / 2;
+  let top = yPct * hostRect.height - natural.height / 2;
+  left = Math.max(0, Math.min(hostRect.width - natural.width, left));
+  top = Math.max(0, Math.min(hostRect.height - natural.height, top));
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
 }
 // 본문 드래그 = 위치(xPct/yPct) 이동. #ve-preview 크기를 기준으로 비율 델타를 계산해서
 // 미리보기 해상도가 바뀌어도(세로 프리셋 등) 항상 맞게 움직인다.
@@ -728,8 +751,7 @@ function wireTextItemDrag(el, c) {
     const mv = (ev) => {
       c.xPct = Math.max(0, Math.min(1, x0 + (ev.clientX - startX) / hostRect.width));
       c.yPct = Math.max(0, Math.min(1, y0 + (ev.clientY - startY) / hostRect.height));
-      el.style.left = (c.xPct * 100) + '%';
-      el.style.top = (c.yPct * 100) + '%';
+      positionTextItem(el, c.xPct, c.yPct);
       syncTextPopoverFields(c);
     };
     const up = () => {
@@ -751,7 +773,8 @@ function wireTextItemResize(handle, c) {
     const mv = (ev) => {
       const d = (ev.clientX - startX) + (ev.clientY - startY);
       c.size = Math.max(8, Math.min(300, Math.round(size0 + d / 2)));
-      const el = handle.parentElement; if (el) el.style.fontSize = c.size + 'px';
+      const el = handle.parentElement;
+      if (el) { el.style.fontSize = c.size + 'px'; positionTextItem(el, c.xPct, c.yPct); }   // 크기 바뀌면 클램프도 다시
       syncTextPopoverFields(c);
     };
     const up = () => {
