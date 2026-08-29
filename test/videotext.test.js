@@ -60,14 +60,28 @@ function probeFrameCounts(file) {
   })()`);
   expect('텍스트 있는 내보내기 성공', res?.ok, true);
   if (!res?.ok) console.log('  export error:', res?.error);
+  let cText = null;
   if (fs.existsSync(OUT_TEXT)) {
-    const c = probeFrameCounts(OUT_TEXT);
-    expect('노란 글자 픽셀 있음(#ffff00 fontcolor)', c.yellow > 20, true);
-    expect('반투명 검정 박스 배경도 있음(box=1)', c.boxDark > 50, true);
+    cText = probeFrameCounts(OUT_TEXT);
+    expect('노란 글자 픽셀 있음(#ffff00 fontcolor)', cText.yellow > 20, true);
   }
   if (fs.existsSync(OUT_NOTEXT)) {
     const c0 = probeFrameCounts(OUT_NOTEXT);
     expect('텍스트 없는 쪽엔 노란 픽셀 없음', c0.yellow, 0);
+  }
+
+  section('1b) 배경 상자(bg) — 기본은 꺼짐(글자만), 켜면 반투명 검정 상자가 실제로 붙음');
+  const OUT_BG = path.join(TMP, 'out_bg.mp4');
+  res = await js(`(async () => {
+    try { return await yssApi.video.export(${JSON.stringify({ segments: [{ ...baseSeg, texts: [{ ...texts[0], bg: true }] }], outPath: OUT_BG, format: 'mp4' })}); }
+    catch (e) { return { ok: false, error: String(e && (e.stack || e.message || e)) }; }
+  })()`);
+  expect('bg:true 내보내기 성공', res?.ok, true);
+  if (fs.existsSync(OUT_BG) && cText) {
+    const cBg = probeFrameCounts(OUT_BG);
+    // 글자 안티에일리어싱 가장자리도 boxDark 문턱에 약간 걸릴 수 있어(폰트마다 다름)
+    // 절대 0 근처를 기대하진 않는다 — bg:true 로 상자가 켜지면 뚜렷이 더 늘어나는지만 본다.
+    expect('bg:true 로 켜면 어두운 상자 픽셀이 뚜렷이 늘어남(기본보다 훨씬 넓은 면적)', cBg.boxDark > cText.boxDark + 200, true);
   }
 
   section('2) 빈 내용 캡션은 조용히 건너뜀(drawtext textfile 빈 파일 크래시 방지)');

@@ -56,8 +56,8 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     api.videoProject.save({
       tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey })),
+      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
+        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
       resolution: _veResolution,
     });
   }, 600);
@@ -512,94 +512,24 @@ function toggleFxPresetMenu(clip) {
   menu.hidden = false;
   setTimeout(() => document.addEventListener('pointerdown', _onFxPresetOutside, true), 0);
 }
-// ── 미니 히스토그램 — 밝기/대비 슬라이더 옆에서 감이 아니라 눈으로 명암 분포를 본다.
-// 선택된 클립 소스를 다시 디코드하지 않고, 이미 미리보기에 떠 있는 <video> 레이어(현재
-// 재생 위치의 실제 프레임)에서 그대로 샘플링한다 — 클립이 지금 재생 위치를 덮고 있을
-// 때만 값이 나온다(안 덮으면 빈 눈금만). 매 프레임(syncPreview) 이 아니라 250ms 간격
-// 타이머로만 다시 그린다 — 재생 중 매 프레임 getImageData 는 무겁다(로드맵에서 미리
-// 지적한 부분, 실측 없이 "저비용"이라 단정하지 않고 스로틀부터 넣었다).
-let _histTimer = null, _histClipId = null;
-const _histSample = document.createElement('canvas');
-_histSample.width = 64; _histSample.height = 36;
-const _histSampleCtx = _histSample.getContext('2d', { willReadFrequently: true });
-function findClipVideoEl(clip) {
-  const pair = _layerEls.get(clip.trackId); if (!pair) return null;
-  if (pair.a.dataset.loadedSrc === clip.file && !pair.a.hidden) return pair.a;
-  if (pair.b.dataset.loadedSrc === clip.file && !pair.b.hidden) return pair.b;
-  return null;
-}
-function accentColor() {
-  try { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#35d1a6'; }
-  catch { return '#35d1a6'; }
-}
-function drawHistogram(clip) {
-  const canvas = $('ve-fx-hist'); if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-  const el = findClipVideoEl(clip);
-  if (!el || !el.videoWidth) {
-    ctx.fillStyle = 'rgba(127,127,127,.18)';
-    for (let x = 0; x < w; x += 5) ctx.fillRect(x, h - 2, 3, 2);
-    return;
-  }
-  let data;
-  try {
-    _histSampleCtx.drawImage(el, 0, 0, 64, 36);
-    data = _histSampleCtx.getImageData(0, 0, 64, 36).data;
-  } catch { return; }   // 코덱/타이밍 때문에 아직 못 그릴 프레임 — 다음 tick 에 다시 시도
-  const bins = new Uint32Array(32);
-  for (let i = 0; i < data.length; i += 4) {
-    const lum = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
-    bins[Math.min(31, (lum / 8) | 0)]++;
-  }
-  const max = Math.max(1, ...bins);
-  const bw = w / bins.length;
-  ctx.fillStyle = accentColor(); ctx.globalAlpha = .55;
-  bins.forEach((v, i) => {
-    const bh = Math.max(1, (v / max) * (h - 2));
-    ctx.fillRect(i * bw, h - bh, Math.max(1, bw - 1), bh);
-  });
-  ctx.globalAlpha = 1;
-}
-function startHistLoop(clip) {
-  if (_histClipId === clip.id && _histTimer) return;
-  stopHistLoop();
-  _histClipId = clip.id;
-  drawHistogram(clip);
-  _histTimer = setInterval(() => drawHistogram(clip), 250);
-}
-function stopHistLoop() {
-  if (_histTimer) clearInterval(_histTimer);
-  _histTimer = null; _histClipId = null;
-  const canvas = $('ve-fx-hist');
-  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-}
 function renderEffectPanel(clip) {
   const body = $('ve-fx-body'), addBtn = $('ve-fx-add-btn'), presetBtn = $('ve-fx-preset-btn');
-  const histWrap = $('ve-fx-hist-wrap');
   if (!body) return;
   closeFxAddMenu(); closeFxPresetMenu();
   if (!clip) {
     if (addBtn) addBtn.disabled = true;
     if (presetBtn) presetBtn.disabled = true;
-    if (histWrap) histWrap.hidden = true;
-    stopHistLoop();
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxNoClip'))}</p>`;
     return;
   }
   if (clip.isAudioOnly || clip.isText) {
     if (addBtn) addBtn.disabled = true;
     if (presetBtn) presetBtn.disabled = true;
-    if (histWrap) histWrap.hidden = true;
-    stopHistLoop();
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr(clip.isText ? 'video.fxNoText' : 'video.fxAudioOnly'))}</p>`;
     return;
   }
   if (addBtn) addBtn.disabled = false;
   if (presetBtn) presetBtn.disabled = false;
-  if (histWrap) histWrap.hidden = false;
-  startHistLoop(clip);
   const list = clip.effects || [];
   if (!list.length) {
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`;
@@ -703,7 +633,7 @@ function syncTextLayer(container, track, t) {
   for (const c of here) {
     const font = TEXT_FONTS[c.fontKey] || TEXT_FONTS.malgun;
     const el = document.createElement('div');
-    el.className = 've-text-item' + (c.id === _selClipId ? ' sel' : '');
+    el.className = 've-text-item' + (c.bg ? ' bg' : '') + (c.id === _selClipId ? ' sel' : '');
     el.style.fontSize = ((c.size || 42) * scale) + 'px';
     el.style.color = c.color || '#ffffff';
     el.style.fontFamily = font.css;
@@ -1142,7 +1072,7 @@ const TEXT_CLIP_SRC_DUR = 86400;
 function addTextClipAt(trackId, atSec) {
   const clip = {
     id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: TEXT_CLIP_SRC_DUR,
-    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun',
+    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
   };
   _veClips.push(clip);
   pushUndo(
@@ -1198,6 +1128,7 @@ function openTextPopover(clip, anchorEl) {
       <label>${tr('video.textSize')}<input type="number" id="tx-size" min="8" max="200" step="1" value="${clip.size}"></label>
       <label>${tr('video.textColor')}<input type="color" id="tx-color" value="${clip.color}"></label>
     </div>
+    <label class="ve-text-pop-full">${tr('video.textBg')}<input type="checkbox" id="tx-bg" ${clip.bg ? 'checked' : ''}></label>
     <button class="ve-text-pop-del" id="tx-delete">${tr('video.fxRemove')}</button>`;
   document.body.appendChild(pop);
   _textPopoverEl = pop; _textPopoverCurrentId = clip.id;
@@ -1210,6 +1141,7 @@ function openTextPopover(clip, anchorEl) {
     clip.yPct = (Number(pop.querySelector('#tx-y').value) || 0) / 100;
     clip.size = Math.max(1, Number(pop.querySelector('#tx-size').value) || 42);
     clip.color = pop.querySelector('#tx-color').value;
+    clip.bg = pop.querySelector('#tx-bg').checked;
     if (lblEl) lblEl.textContent = (clip.text || '').split('\n')[0] || tr('video.textDefault');
     syncPreview(nowSec());
     scheduleSave();
@@ -1220,6 +1152,7 @@ function openTextPopover(clip, anchorEl) {
   pop.querySelector('#tx-y').addEventListener('input', apply);
   pop.querySelector('#tx-size').addEventListener('input', apply);
   pop.querySelector('#tx-color').addEventListener('input', apply);
+  pop.querySelector('#tx-bg').addEventListener('change', apply);
   pop.querySelector('#tx-delete').addEventListener('click', () => {
     closeTextPopover();
     _selClipId = clip.id;
@@ -1556,7 +1489,7 @@ function buildEDL() {
     for (const track of textTracks) {
       if (track.hidden) continue;
       for (const tc of clipsAt(track.id, sampleT)) {
-        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color, fontKey: tc.fontKey });
+        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color, fontKey: tc.fontKey, bg: tc.bg });
       }
     }
     return out;
@@ -1748,7 +1681,7 @@ async function importVideoFiles(paths, trackId) {
   else flash(tr('video.needImport'));
 }
 async function pickImportVideo() {
-  const r = await api.dialog.pickVideoFiles();
+  const r = await api.dialog.pickVideoFiles('video');
   if (!r || !r.ok || !r.filePaths?.length) return;
   // 방금 만든(맨 위) 영상 트랙이 아직 비어 있으면 거기로, 아니면 새 트랙을 만든다 —
   // "+트랙" 누르고 바로 "임포트" 눌렀을 때 트랙이 두 개로 늘어나지 않도록.
@@ -1762,7 +1695,7 @@ async function pickImportVideo() {
 // 동시에 섞이게) 두는 방법이 없었다 — 버튼을 누를 때마다 매번 독립된 트랙이 생겨야
 // 여러 오디오를 동시에 쓸 수 있다.
 async function pickImportAudioTrack() {
-  const r = await api.dialog.pickVideoFiles();
+  const r = await api.dialog.pickVideoFiles('audio');
   if (!r || !r.ok || !r.filePaths?.length) return;
   await importAudioFiles(r.filePaths);
 }

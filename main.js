@@ -746,23 +746,29 @@ ipcMain.handle('dialog:pickVideoFile', async () => {
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0] };
 });
-// 영상 편집: 비디오 파일 여러 개 임포트 (트랙 클립)
-ipcMain.handle('dialog:pickVideoFiles', async () => {
+// 영상 편집: 비디오/오디오 파일 임포트 (트랙 클립) — 트랙 종류에 안 맞는 파일을 넣으면
+// 아무것도 재생되지 않는데(영상 트랙에 오디오 파일 넣으면 화면도 소리도 안 남,
+// 반대도 마찬가지) 그걸 굳이 필터로 허용해 둘 이유가 없다 — kind 로 트랙에 맞는
+// 확장자만 보여준다.
+ipcMain.handle('dialog:pickVideoFiles', async (_ev, kind) => {
   const videoExts = ['mp4','mkv','webm','mov','avi','m4v'];
   const audioExts = ['mp3','wav','flac','ogg','aif','aiff','m4a','aac'];
+  const filters = kind === 'audio'
+    ? [
+        { name: td('fAudio'), extensions: audioExts },
+        // 오디오 트랙은 영상 파일에서도 소리만 뽑아 쓸 수 있다(:a 스트림만 참조) — 그래서
+        // 영상 확장자도 옵션으로 남겨둔다(기본은 아니다).
+        { name: td('fVideo'), extensions: videoExts },
+        { name: td('fAll'), extensions: ['*'] },
+      ]
+    : [
+        { name: td('fVideo'), extensions: videoExts },
+        { name: td('fAll'), extensions: ['*'] },
+      ];
   const res = await dialog.showOpenDialog(mainWindow || null, {
     title: td('importVideoFiles'),
     properties: ['openFile', 'multiSelections'],
-    // 기본 필터가 영상 확장자만이라 배경음악 등 오디오 파일 하나 넣으려 해도 매번
-    // "모든 파일"로 바꿔야 했다 — 기본값 자체를 영상+오디오 합친 목록으로 바꿨다
-    // (다른 곳의 fMedia 필터와 같은 방향). 영상만/오디오만 따로 고르고 싶을 때를
-    // 위해 그 둘도 옵션으로 남겨둔다.
-    filters: [
-      { name: td('fMedia'), extensions: [...videoExts, ...audioExts] },
-      { name: td('fVideo'), extensions: videoExts },
-      { name: td('fAudio'), extensions: audioExts },
-      { name: td('fAll'), extensions: ['*'] },
-    ],
+    filters,
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePaths: res.filePaths };
@@ -1007,7 +1013,9 @@ ipcMain.handle('video:export', async (event, payload) => {
       const size = Math.max(1, Math.round(t.size || 42));
       const x = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
       const y = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
-      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}:box=1:boxcolor=#000000@0.45:boxborderw=8`;
+      // 반투명 검정 배경(box)은 기본이 아니다 — 렌더러 팝오버에서 켠 클립만 넣는다.
+      const box = t.bg ? ':box=1:boxcolor=#000000@0.45:boxborderw=8' : '';
+      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}${box}`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
     return dstLabel;

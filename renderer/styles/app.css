@@ -3964,12 +3964,6 @@ body { background: var(--bg) !important; }
 .ve-fx-preset-del:hover { background: var(--elev); color: var(--danger); }
 .ve-fx-preset-empty { padding: 8px 9px; color: var(--tx-3); font: 400 11.5px/1.5 var(--sans); }
 
-.ve-fx-hist-wrap {
-  flex: 0 0 auto; padding: 10px 10px 0; border-bottom: 1px solid var(--border);
-}
-.ve-fx-hist-wrap[hidden] { display: none; }
-.ve-fx-hist { display: block; width: 100%; height: 40px; margin-bottom: 10px; background: var(--elev); border-radius: 6px; }
-
 .ve-fx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .ve-fx-empty { color: var(--tx-3); font: 400 12px/1.6 var(--sans); text-align: center; margin-top: 18px; padding: 0 6px; }
 
@@ -4123,9 +4117,11 @@ body { background: var(--bg) !important; }
      화면 밖으로 멀리 보낼수록 계속 줄바꿈되며 좁아졌다(위치를 옮길 때마다 재발). 고정폭을
      getBoundingClientRect() 값과 어긋나지 않게 box-sizing 도 border-box 로 맞춘다. */
   position: absolute; box-sizing: border-box; white-space: pre-wrap; text-align: center;
-  font-family: var(--sans); line-height: 1.3; background: rgba(0, 0, 0, .45); padding: .15em .4em;
-  border-radius: 3px; max-width: 90%; pointer-events: auto; cursor: move; user-select: none;
+  font-family: var(--sans); line-height: 1.3; max-width: 90%; pointer-events: auto; cursor: move; user-select: none;
 }
+/* 반투명 검정 배경은 기본이 아니다(요청) — 팝오버에서 켜야 나온다. main.js 의
+   drawtext box=1 도 이 상태와 짝을 맞춰 같이 켜진다. */
+.ve-text-item.bg { background: rgba(0, 0, 0, .45); padding: .15em .4em; border-radius: 3px; }
 .ve-text-item.sel { outline: 1.5px dashed var(--accent); outline-offset: 3px; }
 .ve-text-item-rs {
   position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%;
@@ -4141,6 +4137,7 @@ body { background: var(--bg) !important; }
   padding: 6px 8px; color: var(--tx-1); font: 500 12.5px/1.4 var(--sans);
 }
 .ve-text-pop-full { display: flex; align-items: center; justify-content: space-between; gap: 6px; font: 500 11.5px/1 var(--sans); color: var(--tx-2); }
+.ve-text-pop-full input[type="checkbox"] { cursor: pointer; }
 .ve-text-pop-full select, .ve-text-pop select {
   flex: 1; max-width: 130px; background: var(--input); border: 1px solid var(--border); border-radius: 5px;
   padding: 4px 6px; color: var(--tx-1); font: 500 12px/1 var(--sans);

@@ -64,6 +64,16 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   near('미리보기 폰트 크기 반영(60 × 화면축소배율)', fsCss, 60 * (fsPreviewW / 1280), 0.5);
   expect('미리보기 색상 반영', await js(`document.querySelector('.ve-text-item')?.style.color`), 'rgb(255, 0, 255)');
 
+  section('2b) 배경 상자 — 기본은 꺼짐, 팝오버에서 켜면 미리보기에도 바로 반영');
+  expect('기본값은 배경 상자 꺼짐', await js(`document.getElementById('tx-bg').checked`), false);
+  expect('꺼진 상태에선 .bg 클래스 없음', await js(`document.querySelector('.ve-text-item')?.classList.contains('bg')`), false);
+  await js(`(() => {
+    const el = document.getElementById('tx-bg'); el.checked = true;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  })(); true`);
+  await wait(80);
+  expect('켜면 .bg 클래스 붙음', await js(`document.querySelector('.ve-text-item')?.classList.contains('bg')`), true);
+
   section('3) 저장 파일에 텍스트 클립 필드가 실제로 남는가');
   await wait(1000);   // scheduleSave 디바운스(600ms)
   const saved = readSaved();
@@ -72,6 +82,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('내용 저장됨', savedClip?.text, '자막 테스트');
   expect('크기 저장됨', savedClip?.size, 60);
   expect('색상 저장됨', savedClip?.color, '#ff00ff');
+  expect('배경 상자 on 저장됨', savedClip?.bg, true);
   expect('트랙 kind=text 로 저장됨', (saved?.tracks || []).some(t => t.kind === 'text'), true);
 
   section('4) 팝오버 바깥 클릭하면 닫힘');

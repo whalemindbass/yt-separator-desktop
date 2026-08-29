@@ -52,7 +52,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     pickMediaFiles: ()           => ipcRenderer.invoke('dialog:pickMediaFiles'),
     pickAudioFiles: ()           => ipcRenderer.invoke('dialog:pickAudioFiles'),
     pickVideoFile:  ()           => ipcRenderer.invoke('dialog:pickVideoFile'),
-    pickVideoFiles: ()           => ipcRenderer.invoke('dialog:pickVideoFiles'),
+    pickVideoFiles: (kind)       => ipcRenderer.invoke('dialog:pickVideoFiles', kind),
     saveAs:     (name, exts)     => ipcRenderer.invoke('dialog:saveAs', name, exts),
     pickFolder: (title)          => ipcRenderer.invoke('dialog:pickFolder', title),
   },
