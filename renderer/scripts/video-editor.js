@@ -7,6 +7,7 @@ import { t as tr } from './i18n.js';
 import { esc } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
 import { getClipThumb } from './video-thumbs.js';
+import { BoxTracker } from './video-tracker.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -264,6 +265,20 @@ function applyTrackTransform(pair, track) {
     el.style.width = (tf.scale * 100) + '%';
     el.style.height = (tf.scale * 100) + '%';
   }
+}
+// 클립 단위(이미지/도형 개별 배치, 추적 키프레임) 위치 — 매 tick 마다 다시 계산해야
+// 한다(트랙 PIP 와 달리 시간에 따라 바뀔 수 있어서, ensureLayers 때 한 번만 하면 안 된다).
+// 우선순위: 추적 키프레임(보간) > 클립 자체 transform > 트랙 전체 PIP > 기본(풀프레임).
+function applyClipTransform(el, clip, track, t) {
+  let tf;
+  if (clip.trackKeyframes && clip.trackKeyframes.length) tf = interpolateKeyframes(clip.trackKeyframes, t - clip.start);
+  else tf = clip.transform || track.transform || defaultTransform();
+  const w = tf.w != null ? tf.w : (tf.scale != null ? tf.scale : 1);
+  const h = tf.h != null ? tf.h : (tf.scale != null ? tf.scale : 1);
+  el.style.left = (tf.x * 100) + '%';
+  el.style.top = (tf.y * 100) + '%';
+  el.style.width = (w * 100) + '%';
+  el.style.height = (h * 100) + '%';
 }
 // ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다. 레이어처럼 구석에 작게 놓거나
 // 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나). 숫자 입력칸과 함께, 미리보기
@@ -629,12 +644,13 @@ function renderEffectPanel(clip) {
   }
   if (addBtn) addBtn.disabled = false;
   if (presetBtn) presetBtn.disabled = false;
+  body.innerHTML = '';
+  if (clip.isImage || clip.isShape) body.appendChild(renderTrackSection(clip));
   const list = clip.effects || [];
   if (!list.length) {
-    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`;
+    body.insertAdjacentHTML('beforeend', `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`);
     return;
   }
-  body.innerHTML = '';
   list.forEach((eff, i) => {
     const def = EFFECT_TYPES[eff.type]; if (!def) return;
     const isRange = def.kind === 'range';
@@ -672,6 +688,181 @@ function renderEffectPanel(clip) {
     }
     body.appendChild(row);
   });
+}
+
+// ── 따라다니기(추적) ────────────────────────────────────
+// 소스 영상의 자연 해상도(sw,sh) 가 출력 캔버스(cw,ch) 안에서 letterbox 로 어떻게 앉는지
+// (ffmpeg scalePad 의 force_original_aspect_ratio=decrease + pad 중앙정렬과 동일한 계산) —
+// 미리보기 화면 좌표 ↔ 소스 픽셀 좌표를 서로 바꿀 때 이 하나로 양쪽 다 쓴다.
+function letterboxRect(sw, sh, cw, ch) {
+  const scale = Math.min(cw / sw, ch / sh);
+  const dispW = sw * scale, dispH = sh * scale;
+  return { scale, offX: (cw - dispW) / 2, offY: (ch - dispH) / 2 };
+}
+// 이 오버레이 클립 시작 시각에, 그 아래(트랙 순서상 뒤) 깔린 영상 클립 — 추적 대상.
+// 자기 트랙보다 뒤(배열 인덱스가 큰) 트랙들 중 맨 앞(가장 작은 인덱스)의 활성 클립.
+function findTrackingSource(overlayClip) {
+  const myIdx = _veTracks.findIndex(t => t.id === overlayClip.trackId);
+  for (let i = myIdx + 1; i < _veTracks.length; i++) {
+    const t = _veTracks[i];
+    if (t.kind !== 'video' || t.hidden) continue;
+    const c = clipAt(t.id, overlayClip.start);
+    if (c && !c.isText && c.w && c.h) return c;
+  }
+  return null;
+}
+let _trackDrawClip = null;
+function cancelTrackDrawMode() {
+  if (!_trackDrawClip) return;
+  _trackDrawClip = null;
+  const host = $('ve-preview');
+  host?.classList.remove('ve-track-draw-mode');
+  $('ve-track-draw-box')?.remove();
+}
+// "추적할 영역 지정" 누르면 클립 시작 시각으로 이동하고, 미리보기 위에서 드래그로 박스
+// 하나를 그리게 한다 — 놓는 즉시 분석을 시작한다(확인 단계 없이 바로).
+function startTrackDrawMode(clip) {
+  const source = findTrackingSource(clip);
+  if (!source) { flash(tr('video.trackNoSource')); return; }
+  cancelTrackDrawMode();
+  seekTo(clip.start);
+  _trackDrawClip = clip;
+  const host = $('ve-preview');
+  host.classList.add('ve-track-draw-mode');
+  flash(tr('video.trackDrawHint'));
+  const box = document.createElement('div'); box.id = 've-track-draw-box'; box.hidden = true;
+  host.appendChild(box);
+  const onDown = (e) => {
+    if (_trackDrawClip !== clip) return;
+    e.preventDefault();
+    const hostRect = host.getBoundingClientRect();
+    const startX = e.clientX - hostRect.left, startY = e.clientY - hostRect.top;
+    box.hidden = false;
+    const paint = (x0, y0, x1, y1) => {
+      box.style.left = Math.min(x0, x1) + 'px'; box.style.top = Math.min(y0, y1) + 'px';
+      box.style.width = Math.abs(x1 - x0) + 'px'; box.style.height = Math.abs(y1 - y0) + 'px';
+    };
+    paint(startX, startY, startX, startY);
+    const mv = (ev) => paint(startX, startY, ev.clientX - hostRect.left, ev.clientY - hostRect.top);
+    const up = (ev) => {
+      document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      const endX = ev.clientX - hostRect.left, endY = ev.clientY - hostRect.top;
+      const cssBox = { x: Math.min(startX, endX), y: Math.min(startY, endY), w: Math.abs(endX - startX), h: Math.abs(endY - startY) };
+      host.removeEventListener('pointerdown', onDown);
+      host.classList.remove('ve-track-draw-mode');
+      box.remove();
+      _trackDrawClip = null;
+      if (cssBox.w < 6 || cssBox.h < 6) return;   // 너무 작게 그리면 취소로 본다
+      runTracking(clip, source, host.getBoundingClientRect(), cssBox);
+    };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  };
+  host.addEventListener('pointerdown', onDown);
+}
+// 숨은 <video> 로 소스 파일을 프레임마다 seek 해가며 트래커를 돌린다 — video-thumbs.js 의
+// 썸네일용 풀과는 별개 인스턴스(동시에 쓰이면 서로 seek 를 가로챈다).
+let _trackVideo = null;
+function ensureTrackVideo() {
+  if (_trackVideo) return _trackVideo;
+  const v = document.createElement('video');
+  v.preload = 'auto'; v.muted = true; v.playsInline = true; v.crossOrigin = 'anonymous';
+  v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;';
+  document.body.appendChild(v);
+  _trackVideo = v;
+  return v;
+}
+function seekVideoOnce(v, t) {
+  return new Promise((resolve) => {
+    const onSeeked = () => { v.removeEventListener('seeked', onSeeked); resolve(); };
+    v.addEventListener('seeked', onSeeked);
+    try { v.currentTime = t; } catch { resolve(); }
+  });
+}
+function loadVideoOnce(v, src) {
+  if (v.dataset.src === src && v.readyState >= 1) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onMeta = () => { v.removeEventListener('loadedmetadata', onMeta); v.removeEventListener('error', onErr); resolve(); };
+    const onErr = () => { v.removeEventListener('loadedmetadata', onMeta); v.removeEventListener('error', onErr); resolve(); };
+    v.addEventListener('loadedmetadata', onMeta);
+    v.addEventListener('error', onErr);
+    v.src = src; v.dataset.src = src;
+  });
+}
+const TRACK_SAMPLE_INTERVAL = 0.3;   // 초 — 실측해보니 프레임 seek(디코드) 자체가 느려서(샘플당 대략 0.3~0.8초)
+// 이보다 촘촘하면 짧은 클립도 분석에 십수 초가 걸린다. 성기면 애니메이션이 계단져 보이지만
+// 이 정도면 완만한 움직임엔 충분하다.
+async function runTracking(clip, source, previewHostRect, cssBox) {
+  const { w: cw, h: ch } = getResolution();
+  // 미리보기 화면 좌표(cssBox, #ve-preview 기준) → 소스 영상 자연 해상도 픽셀 좌표.
+  // #ve-preview 자체가 이미 출력 해상도 비율 그대로(sizePreviewFrame) 니, CSS px → 캔버스
+  // 프랙션은 그냥 hostRect 로 나누면 되고, 거기서 소스 픽셀로는 letterbox 역산.
+  const previewLb = letterboxRect(source.w, source.h, previewHostRect.width, previewHostRect.height);
+  const srcBox0 = {
+    x: (cssBox.x - previewLb.offX) / previewLb.scale,
+    y: (cssBox.y - previewLb.offY) / previewLb.scale,
+    w: cssBox.w / previewLb.scale,
+    h: cssBox.h / previewLb.scale,
+  };
+  const v = ensureTrackVideo();
+  await loadVideoOnce(v, toYtsepUrl(source.file));
+  const canvas = document.createElement('canvas'); canvas.width = source.w; canvas.height = source.h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const n = Math.max(1, Math.round(clip.dur / TRACK_SAMPLE_INTERVAL));
+  const btn = document.querySelector('.ve-track-start-btn');
+  if (btn) btn.disabled = true;
+  const outLb = letterboxRect(source.w, source.h, cw, ch);   // 소스 픽셀 → 최종 출력 캔버스 프랙션
+  const toCanvasFrac = (b) => ({
+    x: (outLb.offX + b.x * outLb.scale) / cw, y: (outLb.offY + b.y * outLb.scale) / ch,
+    w: (b.w * outLb.scale) / cw, h: (b.h * outLb.scale) / ch,
+  });
+  const keyframes = [];
+  let tracker = null;
+  try {
+    for (let i = 0; i <= n; i++) {
+      const localT = Math.min(clip.dur, i * TRACK_SAMPLE_INTERVAL);
+      // 오버레이 클립의 로컬 시각 → 절대 시각 → 소스 클립 자신의(inOff 반영) 재생 시각.
+      const absT = clip.start + localT;
+      const srcT = Math.max(0, Math.min((v.duration || source.srcDur || clip.dur) - 0.02, source.inOff + (absT - source.start)));
+      await seekVideoOnce(v, srcT);
+      ctx.drawImage(v, 0, 0, source.w, source.h);
+      let box;
+      if (!tracker) { tracker = new BoxTracker(ctx, srcBox0); box = { ...srcBox0 }; }
+      else box = tracker.update(ctx);
+      keyframes.push({ t: localT, ...toCanvasFrac(box) });
+      if (btn) btn.textContent = tr('video.trackAnalyzing', { pct: Math.round((i / n) * 100) });
+      // 프레임마다 렌더러가 완전히 멈추지 않도록 한 틱 양보한다.
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+  } catch { /* 분석 중 실패하면 그때까지 모은 키프레임만 쓴다 */ }
+  if (keyframes.length >= 2) {
+    clip.trackKeyframes = keyframes;
+    clip.transform = null;   // 키프레임이 있으면 정적 transform 은 안 쓴다(clipTransformAt 우선순위)
+  }
+  syncPreview(nowSec());
+  renderClips();
+  renderEffectPanel(clip);
+  scheduleSave();
+  flash(tr('video.trackDone'));
+}
+// 효과 패널 맨 위에 붙는 "따라다니기" 섹션 — 이미지/도형 클립에만(영상 자체를 추적 대상
+// 삼는 건 범위 밖). 상태에 따라 시작/다시 지정/해제 버튼이 바뀐다.
+function renderTrackSection(clip) {
+  const wrap = document.createElement('div');
+  wrap.className = 've-track-section';
+  const has = clip.trackKeyframes && clip.trackKeyframes.length;
+  wrap.innerHTML = `
+    <div class="ve-track-head">${esc(tr('video.trackFollowTitle'))}</div>
+    ${has ? `<div class="ve-track-status">${esc(tr('video.trackActive', { n: clip.trackKeyframes.length }))}</div>` : ''}
+    <div class="ve-track-btns">
+      <button type="button" class="mini ve-track-start-btn">${esc(tr(has ? 'video.trackRedo' : 'video.trackStart'))}</button>
+      ${has ? `<button type="button" class="mini ve-track-clear-btn">${esc(tr('video.trackClear'))}</button>` : ''}
+    </div>`;
+  wrap.querySelector('.ve-track-start-btn').addEventListener('click', () => startTrackDrawMode(clip));
+  wrap.querySelector('.ve-track-clear-btn')?.addEventListener('click', () => {
+    clip.trackKeyframes = null;
+    syncPreview(nowSec()); renderEffectPanel(clip); scheduleSave();
+  });
+  return wrap;
 }
 
 function clipAt(trackId, t) {
@@ -877,12 +1068,12 @@ function syncPreview(t) {
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
       const fa = (1 - mix) * fadeMul(outClip, t), fb = mix * fadeMul(inClip, t);
-      driveLayer(a, outClip, t, visual); if (visual) a.style.opacity = String(fa); layerVideo(a).volume = fa;
-      driveLayer(b, inClip, t, visual); if (visual) b.style.opacity = String(fb); layerVideo(b).volume = fb;
+      driveLayer(a, outClip, t, visual); if (visual) { a.style.opacity = String(fa); applyClipTransform(a, outClip, track, t); } layerVideo(a).volume = fa;
+      driveLayer(b, inClip, t, visual); if (visual) { b.style.opacity = String(fb); applyClipTransform(b, inClip, track, t); } layerVideo(b).volume = fb;
       any = true;
     } else if (here.length === 1) {
       const f = fadeMul(here[0], t);
-      driveLayer(a, here[0], t, visual); if (visual) a.style.opacity = String(f); layerVideo(a).volume = f;
+      driveLayer(a, here[0], t, visual); if (visual) { a.style.opacity = String(f); applyClipTransform(a, here[0], track, t); } layerVideo(a).volume = f;
       hideLayer(b, visual);
       any = true;
     } else {
