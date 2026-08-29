@@ -4032,10 +4032,13 @@ body { background: var(--bg) !important; }
 .ve-ruler { position: relative; height: 26px; flex: 1 0 auto; min-width: 100%; cursor: pointer; }
 .ve-ruler-wrap.range-mode { cursor: crosshair; }
 .ve-erange {
+  /* .ve-ruler-ctrl(영역선택/줌 버튼, sticky, z:2) 보다 낮아야 한다 — 안 그러면 구간이
+     0초 근처에 있을 때 그 버튼들 위로 덮여 보인다(트랙 헤드 위로 재생선/eband 새어
+     보이던 것과 같은 종류의 버그). */
   position: absolute; top: 0; height: 26px; background: color-mix(in srgb, var(--accent) 26%, transparent);
-  border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); z-index: 3; pointer-events: none;
+  border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); z-index: 1; pointer-events: none;
 }
-.ve-eh { position: absolute; top: 0; width: 12px; height: 26px; pointer-events: auto; cursor: ew-resize; z-index: 4; }
+.ve-eh { position: absolute; top: 0; width: 12px; height: 26px; pointer-events: auto; cursor: ew-resize; z-index: 1; }
 .ve-eh.l { left: -6px; } .ve-eh.r { right: -6px; }
 .ve-eh::before { content: ""; position: absolute; top: 0; width: 0; height: 0; border-style: solid; }
 .ve-eh.l::before { left: 6px; border-width: 8px 8px 0 0; border-color: var(--accent) transparent transparent transparent; }
