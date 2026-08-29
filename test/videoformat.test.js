@@ -1,5 +1,5 @@
 'use strict';
-// 내보내기 포맷 다양화(MP4/MOV/WebM) — 포맷 선택 UI(저장 대화상자 확장자까지 맞는지)
+// 내보내기 포맷 다양화(MP4/WebM) — 포맷 선택 UI(저장 대화상자 확장자까지 맞는지)
 // 와 실제 내보낸 파일이 그 포맷에 맞는 스트림 구성(WebM=VP9+Opus)인지 ffprobe 로 검증한다.
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
@@ -40,8 +40,8 @@ function probe(file) {
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`document.getElementById('ve-export').click(); true`);
   await wait(50);
-  expect('모달 포맷 선택에 mp4/mov/webm 옵션 있음',
-    await js(`[...document.getElementById('ve-exp-fmt').options].map(o => o.value).sort().join(',')`), 'mov,mp4,webm');
+  expect('모달 포맷 선택에 mp4/webm 옵션 있음',
+    await js(`[...document.getElementById('ve-exp-fmt').options].map(o => o.value).sort().join(',')`), 'mp4,webm');
   expect('기본값 mp4', await js(`document.getElementById('ve-exp-fmt').value`), 'mp4');
   await js(`document.getElementById('ve-modal').querySelector('.x').click(); true`);
   let savedName = null;
@@ -67,29 +67,6 @@ function probe(file) {
     const info = probe(OUT_WEBM);
     expect('WebM 영상 코덱 VP9', info.includes('codec_name=vp9'), true);
     expect('WebM 오디오 코덱 Opus', info.includes('codec_name=opus'), true);
-  }
-
-  section('3) MOV 내보내기 — H.264 그대로, 컨테이너만 MOV');
-  const OUT_MOV = path.join(TMP, 'out.mov');
-  dialog.showSaveDialog = async (win, opts) => { savedName = opts.defaultPath; return { canceled: false, filePath: OUT_MOV }; };
-  await js(`document.getElementById('ve-export').click(); true`);
-  await wait(50);
-  await js(`(() => {
-    const sel = document.getElementById('ve-exp-fmt');
-    sel.value = 'mov';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    document.getElementById('ve-exp-go').click();
-  })(); true`);
-  for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(OUT_MOV)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
-    await wait(500);
-  }
-  expect('저장 대화상자 기본 파일명이 .mov', (savedName || '').endsWith('.mov'), true);
-  expect('MOV 출력 파일 생김', fs.existsSync(OUT_MOV), true);
-  if (fs.existsSync(OUT_MOV)) {
-    const info = probe(OUT_MOV);
-    expect('MOV 영상 코덱 H.264', info.includes('codec_name=h264'), true);
-    expect('MOV 오디오 코덱 AAC', info.includes('codec_name=aac'), true);
   }
 
   finish(app);

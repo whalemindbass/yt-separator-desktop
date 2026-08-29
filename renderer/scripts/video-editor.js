@@ -1684,7 +1684,6 @@ function openExportModal() {
     <div class="daw-modal-list" style="padding:16px">
       <div class="dev-field"><span>${tr('video.exportFormat')}</span><select id="ve-exp-fmt">
         <option value="mp4">MP4 · H.264</option>
-        <option value="mov">MOV · H.264</option>
         <option value="webm">WebM · VP9</option>
       </select></div>
       <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportQuality')}</span><select id="ve-exp-q">

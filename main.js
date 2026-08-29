@@ -1002,8 +1002,8 @@ ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath, format, quality, fps } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
-  const fmt = ['mp4', 'mov', 'webm'].includes(format) ? format : 'mp4';
-  // 화질 프리셋 — h264(mp4/mov)/vp9(webm) 각각 CRF 값. medium 이 기존 하드코딩 값(20/32)과 동일해
+  const fmt = ['mp4', 'webm'].includes(format) ? format : 'mp4';
+  // 화질 프리셋 — h264(mp4)/vp9(webm) 각각 CRF 값. medium 이 기존 하드코딩 값(20/32)과 동일해
   // "설정 안 바꾸면 예전과 같은 결과"가 보장된다.
   const QUALITY_CRF = { high: { h264: 18, vp9: 24 }, medium: { h264: 20, vp9: 32 }, low: { h264: 26, vp9: 40 } };
   const crf = QUALITY_CRF[quality] || QUALITY_CRF.medium;
@@ -1263,7 +1263,7 @@ ipcMain.handle('video:export', async (event, payload) => {
 
   if (fmt === 'webm') {
     args.push('-c:v', 'libvpx-vp9', '-crf', String(crf.vp9), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
-  } else {   // mp4/mov — 코덱은 똑같이 h264+aac, 컨테이너만 확장자로 자동 결정된다
+  } else {   // mp4 — h264+aac
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf.h264), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k');
   }
   args.push('-progress', 'pipe:1', outPath);
