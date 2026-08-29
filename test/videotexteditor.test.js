@@ -93,7 +93,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('5) 영상 클립 없이 텍스트만 있는 프로젝트 — 실제 내보내기 버튼으로 타이틀 카드 export');
   const OUT = path.join(TMP, 'titlecard.mp4');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

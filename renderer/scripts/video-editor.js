@@ -1676,10 +1676,39 @@ function buildEDL() {
   }
   return segs;
 }
-async function runExport() {
+const VIDEO_FPS_OPTS = ['auto', '24', '30', '60'];
+function openExportModal() {
+  if (!_veClips.length) { flash(tr('video.needImport')); return; }
+  const host = $('ve-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.export')}</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" style="padding:16px">
+      <div class="dev-field"><span>${tr('video.exportFormat')}</span><select id="ve-exp-fmt">
+        <option value="mp4">MP4 · H.264</option>
+        <option value="mov">MOV · H.264</option>
+        <option value="webm">WebM · VP9</option>
+      </select></div>
+      <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportQuality')}</span><select id="ve-exp-q">
+        <option value="high">${tr('video.qualityHigh')}</option>
+        <option value="medium" selected>${tr('video.qualityMedium')}</option>
+        <option value="low">${tr('video.qualityLow')}</option>
+      </select></div>
+      <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportFps')}</span><select id="ve-exp-fps">
+        ${VIDEO_FPS_OPTS.map(v => `<option value="${v}">${v === 'auto' ? tr('video.fpsAuto') : v}</option>`).join('')}
+      </select></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="ve-exp-go">${tr('video.export')}</button></div>
+    </div></div>`;
+  host.hidden = false;
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
+  $('ve-exp-go').addEventListener('click', () => {
+    host.hidden = true;
+    runExport($('ve-exp-fmt').value, $('ve-exp-q').value, $('ve-exp-fps').value);
+  });
+}
+async function runExport(format, quality, fps) {
   const segs = buildEDL();
   if (!segs.length) { flash(tr('video.needImport')); return; }
-  const format = $('ve-format')?.value || 'mp4';
+  format = format || 'mp4';
   const r = await api.dialog.saveAs(`export.${format}`, [format]);
   if (!r || !r.ok) return;
   setPlaying(false);
@@ -1691,7 +1720,7 @@ async function runExport() {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
   let res;
-  try { res = await api.video.export({ segments: segs, outPath: r.filePath, format }); }
+  try { res = await api.video.export({ segments: segs, outPath: r.filePath, format, quality, fps }); }
   finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
   flash(res.ok ? tr('video.exportDone') : tr('video.exportFail', { err: res.error || '' }));
 }
@@ -1871,7 +1900,7 @@ function wire() {
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
-  $('ve-export')?.addEventListener('click', () => runExport());
+  $('ve-export')?.addEventListener('click', () => openExportModal());
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
   // Shift+드래그(또는 영역 선택 모드)면 재생선 대신 내보내기 구간을 지정한다(스튜디오와 동일).

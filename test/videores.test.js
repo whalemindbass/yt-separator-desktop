@@ -54,7 +54,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
   section('3) 세로 해상도로 내보내기 — 결과물이 실제로 1080x1920 인지');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_V });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_V)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
@@ -82,7 +82,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('사용자 지정 칸이 보임', customHidden, false);
 
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_C });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_C)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

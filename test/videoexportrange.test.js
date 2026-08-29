@@ -61,7 +61,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
   section('4) 구간 있는 상태로 내보내기 — 결과물 길이가 구간(2초)만큼만');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

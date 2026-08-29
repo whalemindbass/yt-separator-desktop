@@ -112,7 +112,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
     set('pip-x', 70); set('pip-y', 10); set('pip-scale', 25);
   })(); true`);
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT2)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

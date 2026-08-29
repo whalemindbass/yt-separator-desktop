@@ -72,7 +72,7 @@ const isGreen = (p) => p.g > p.r + 60 && p.g > p.b + 60;
 
   section('3) 좌우 반전 내보내기 — 실제 픽셀이 뒤집혔는가(좌상단이 이제 파랑)');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_H });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_H)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
@@ -97,7 +97,7 @@ const isGreen = (p) => p.g > p.r + 60 && p.g > p.b + 60;
   const tf2 = await js(`document.querySelector('#ve-preview video:not([hidden])')?.style.transform`);
   expect('레이어 transform = scale(1, -1)(좌우는 꺼졌으니 세로만)', tf2, 'scale(1, -1)');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_V });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_V)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

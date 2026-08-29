@@ -61,7 +61,7 @@ function frameStats(file) {
   section('2) 내보내기 — HDR 클립이면 자동으로 톤매핑돼야 함(실제 export 필터체인 경유)');
   const OUT_HDR = path.join(TMP, 'out_hdr.mp4');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_HDR });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_HDR)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

@@ -126,7 +126,7 @@ function windowVolume(file, start, dur) {
 
   section('7) 내보내기 — 실제 결과물에서 가장자리가 어둡고(페이드) 조용한가(음량)');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

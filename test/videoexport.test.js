@@ -54,7 +54,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('클립 2개 임포트됨', n, 2);
 
   section('2) 내보내기');
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   let btnLabel = '';
   for (let i = 0; i < 60; i++) {
     btnLabel = await js(`document.getElementById('ve-export').textContent`);

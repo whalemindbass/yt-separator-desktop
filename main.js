@@ -999,10 +999,14 @@ ipcMain.handle('video:probeAudio', async (_ev, file) => {
 // 렌더러 buildEDL() 이 구간별로 layers(겹친 영상 트랙들)/audioSources(N개 오디오 트랙)를
 // 미리 계산해서 넘긴다 — 여기선 그 구간 정보를 filter_complex 로 옮기기만 한다.
 ipcMain.handle('video:export', async (event, payload) => {
-  const { segments, outPath, format } = payload || {};
+  const { segments, outPath, format, quality, fps } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
   const fmt = ['mp4', 'mov', 'webm'].includes(format) ? format : 'mp4';
+  // 화질 프리셋 — h264(mp4/mov)/vp9(webm) 각각 CRF 값. medium 이 기존 하드코딩 값(20/32)과 동일해
+  // "설정 안 바꾸면 예전과 같은 결과"가 보장된다.
+  const QUALITY_CRF = { high: { h264: 18, vp9: 24 }, medium: { h264: 20, vp9: 32 }, low: { h264: 26, vp9: 40 } };
+  const crf = QUALITY_CRF[quality] || QUALITY_CRF.medium;
 
   // 텍스트/타이틀 오버레이 — 하나라도 있으면 폰트를 확인하고, drawtext 가 상대경로로
   // fontfile/textfile 을 찾을 수 있게 전용 임시 폴더를 만든다. 드라이브 문자가 들어간
@@ -1247,12 +1251,20 @@ ipcMain.handle('video:export', async (event, payload) => {
   });
   const concatIn = segments.map((_, i) => `[${vLabels[i]}][a${i}]`).join('');
   parts.push(`${concatIn}concat=n=${segments.length}:v=1:a=1[outv][outa]`);
-  args.push('-filter_complex', parts.join(';'), '-map', '[outv]', '-map', '[outa]');
+  // fps 강제 지정 — 출력 -r 대신 필터로 건다(프레임 보간/드롭이 필터그래프 안에서 확실히
+  // 끝나야 뒤이은 concat 라벨 매핑과 어긋나지 않는다).
+  let outvLabel = 'outv';
+  const fpsNum = Number(fps);
+  if (fps && fps !== 'auto' && Number.isFinite(fpsNum) && fpsNum > 0) {
+    parts.push(`[outv]fps=${fpsNum}[outvfps]`);
+    outvLabel = 'outvfps';
+  }
+  args.push('-filter_complex', parts.join(';'), '-map', `[${outvLabel}]`, '-map', '[outa]');
 
   if (fmt === 'webm') {
-    args.push('-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
+    args.push('-c:v', 'libvpx-vp9', '-crf', String(crf.vp9), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
   } else {   // mp4/mov — 코덱은 똑같이 h264+aac, 컨테이너만 확장자로 자동 결정된다
-    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k');
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf.h264), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k');
   }
   args.push('-progress', 'pipe:1', outPath);
 

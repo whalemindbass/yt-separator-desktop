@@ -74,7 +74,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   }
 
   section('4) 내보내기 — xfade/acrossfade 필터가 실제로 성공하는가');
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   let btnLabel = '';
   for (let i = 0; i < 60; i++) {
     btnLabel = await js(`document.getElementById('ve-export').textContent`);

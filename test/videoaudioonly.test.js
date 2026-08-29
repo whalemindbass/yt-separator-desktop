@@ -67,7 +67,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('미리보기 <video> 전부 음소거 아님', muted.every(m => m === false), true);
 
   section('3) 내보내기 — 오디오 전용 구간은 검은 화면 + 오디오로 채워짐');
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   let btnLabel = '';
   for (let i = 0; i < 80; i++) {
     btnLabel = await js(`document.getElementById('ve-export').textContent`);

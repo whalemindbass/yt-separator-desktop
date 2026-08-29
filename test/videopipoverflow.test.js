@@ -66,7 +66,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   section('2) export — 실제로 잘려서 나오는지(overlay 가 프레임 밖 좌표를 알아서 클리핑)');
   const OUT = path.join(TMP, 'out.mp4');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

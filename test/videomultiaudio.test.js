@@ -60,7 +60,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
   section('4) 실제 내보내기 — 오디오 트랙 3개가 진짜로 동시에 섞이는가');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

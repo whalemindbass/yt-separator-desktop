@@ -77,7 +77,7 @@ async function dragBy(js, selector, dx, dy) {
   section('2) 실제 export 에도 캔버스 드래그 결과가 반영되는가(픽셀 검증)');
   const OUT = path.join(TMP, 'out_pip.mp4');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
-  await js(`document.getElementById('ve-export').click(); true`);
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);

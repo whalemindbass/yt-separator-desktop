@@ -38,20 +38,25 @@ function probe(file) {
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
-  expect('포맷 선택에 mp4/mov/webm 옵션 있음',
-    await js(`[...document.getElementById('ve-format').options].map(o => o.value).sort().join(',')`), 'mov,mp4,webm');
-  expect('기본값 mp4', await js(`document.getElementById('ve-format').value`), 'mp4');
+  await js(`document.getElementById('ve-export').click(); true`);
+  await wait(50);
+  expect('모달 포맷 선택에 mp4/mov/webm 옵션 있음',
+    await js(`[...document.getElementById('ve-exp-fmt').options].map(o => o.value).sort().join(',')`), 'mov,mp4,webm');
+  expect('기본값 mp4', await js(`document.getElementById('ve-exp-fmt').value`), 'mp4');
+  await js(`document.getElementById('ve-modal').querySelector('.x').click(); true`);
   let savedName = null;
 
   section('2) WebM 내보내기 — VP9 영상 + Opus 오디오');
-  await js(`(() => {
-    const sel = document.getElementById('ve-format');
-    sel.value = 'webm';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-  })(); true`);
   const OUT_WEBM = path.join(TMP, 'out.webm');
   dialog.showSaveDialog = async (win, opts) => { savedName = opts.defaultPath; return { canceled: false, filePath: OUT_WEBM }; };
   await js(`document.getElementById('ve-export').click(); true`);
+  await wait(50);
+  await js(`(() => {
+    const sel = document.getElementById('ve-exp-fmt');
+    sel.value = 'webm';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    document.getElementById('ve-exp-go').click();
+  })(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_WEBM)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
@@ -65,14 +70,16 @@ function probe(file) {
   }
 
   section('3) MOV 내보내기 — H.264 그대로, 컨테이너만 MOV');
-  await js(`(() => {
-    const sel = document.getElementById('ve-format');
-    sel.value = 'mov';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-  })(); true`);
   const OUT_MOV = path.join(TMP, 'out.mov');
   dialog.showSaveDialog = async (win, opts) => { savedName = opts.defaultPath; return { canceled: false, filePath: OUT_MOV }; };
   await js(`document.getElementById('ve-export').click(); true`);
+  await wait(50);
+  await js(`(() => {
+    const sel = document.getElementById('ve-exp-fmt');
+    sel.value = 'mov';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    document.getElementById('ve-exp-go').click();
+  })(); true`);
   for (let i = 0; i < 60; i++) {
     if (fs.existsSync(OUT_MOV)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
