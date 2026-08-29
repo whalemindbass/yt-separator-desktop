@@ -3889,7 +3889,11 @@ body { background: var(--bg) !important; }
   background: #000;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, .22), 0 2px 20px rgba(0, 0, 0, .45);
 }
-.ve-preview video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* 영상/PIP 레이어만 프레임 밖으로 못 나가게 자른다(내보내기 overlay 도 그렇게 자른다) —
+   PIP 박스·핸들·텍스트 오버레이는 여기 안 넣는다, 자르면 프레임 밖으로 옮긴 걸 다시
+   드래그해서 되돌릴 손잡이가 안 보이게 된다. */
+.ve-video-layers { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+.ve-video-layers video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .ve-res-select { font-size: 12px; }
 .ve-res-custom { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tx-3); }
 .ve-res-custom input { width: 64px; }

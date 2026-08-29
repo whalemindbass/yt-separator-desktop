@@ -137,8 +137,19 @@ function fmtTC(sec) {
 // 놓으면(Vegas Pro 관례) 그 겹친 구간만큼 자동으로 크로스페이드된다 — 트랜지션을 따로
 // "추가"하는 UI 없이 겹친 정도가 곧 페이드 길이다. z-index = 트랙 순서(뒤에 올린 트랙이 위).
 const _layerEls = new Map();   // trackId → {a,b: <video>}
+// 영상/PIP 만 프레임 밖으로 못 나가게 자르는 전용 래퍼(overflow:hidden, CSS 에서) — PIP
+// 박스·핸들·텍스트 오버레이는 이 안에 넣지 않는다(#ve-preview 에 직접 붙인다). 그래야
+// PIP 를 프레임 밖으로 드래그해도(요청대로 "잘려도 상관없이" 자유롭게) 손잡이가 항상
+// 보여서 다시 끌고 돌아올 수 있다 — 화면(영상)만 export 의 overlay 클리핑과 똑같이 잘린다.
+function ensureVideoLayersHost() {
+  const host = $('ve-preview'); if (!host) return null;
+  let wrap = host.querySelector(':scope > .ve-video-layers');
+  if (!wrap) { wrap = document.createElement('div'); wrap.className = 've-video-layers'; host.appendChild(wrap); }
+  return wrap;
+}
 function ensureLayers() {
   const host = $('ve-preview'); if (!host) return;
+  const videoHost = ensureVideoLayersHost(); if (!videoHost) return;
   const wanted = new Set(_veTracks.map(t => t.id));
   for (const [id, pair] of _layerEls) {
     if (wanted.has(id)) continue;
@@ -148,7 +159,7 @@ function ensureLayers() {
   // Vegas Pro 관례: 트랙 목록 맨 위(배열 0번)가 합성에서 맨 앞(최상위 레이어)이 된다.
   // 오디오 트랙은 화면에 아무것도 안 그려야 한다(영상 트랙 위를 덮으면 안 됨) — opacity:0 으로
   // 고정해 두고 재생/정지만 다룬다(hidden 은 안 건드린다 — display:none 이 오디오까지 멈추는
-  // 경우를 피하려고). 텍스트 트랙은 <video> 가 아니라 절대위치 컨테이너 하나 — 클립 텍스트를
+  // 경우을 피하려고). 텍스트 트랙은 <video> 가 아니라 절대위치 컨테이너 하나 — 클립 텍스트를
   // syncPreview() 가 그때그때 채워 넣는다(크로스페이드용 이중 버퍼가 필요 없다).
   _veTracks.forEach((t, i) => {
     let pair = _layerEls.get(t.id);
@@ -168,7 +179,7 @@ function ensureLayers() {
           // 못 그리고 예외만 삼킨다(실측하다 잡은 버그).
           v.crossOrigin = 'anonymous';
           if (isAudio) v.style.opacity = '0';
-          host.appendChild(v); return v;
+          videoHost.appendChild(v); return v;
         };
         pair = { a: mk(), b: mk() };
       }
@@ -229,8 +240,11 @@ function createPipBox(track, onChange) {
     const startX = e.clientX, startY = e.clientY;
     try { box.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
-      const nx = Math.max(0, Math.min(1 - tf0.scale, tf0.x + (ev.clientX - startX) / hostRect.width));
-      const ny = Math.max(0, Math.min(1 - tf0.scale, tf0.y + (ev.clientY - startY) / hostRect.height));
+      // 프레임 테두리에 안 묶는다(요청대로) — 밖으로 나간 만큼은 export 의 overlay 와
+      // 똑같이 그냥 잘려 보인다(.ve-video-layers 의 overflow:hidden). 박스/손잡이 자체는
+      // #ve-preview 바로 밑이라 안 잘리니 언제든 다시 끌고 돌아올 수 있다.
+      const nx = tf0.x + (ev.clientX - startX) / hostRect.width;
+      const ny = tf0.y + (ev.clientY - startY) / hostRect.height;
       track.transform = { x: nx, y: ny, scale: tf0.scale };
       syncPipBoxFromTransform(track);
       onChange(false);
@@ -246,7 +260,8 @@ function createPipBox(track, onChange) {
     try { e.target.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
       const d = ((ev.clientX - startX) / hostRect.width + (ev.clientY - startY) / hostRect.height) / 2;
-      const scale = Math.max(0.1, Math.min(1 - Math.max(tf0.x, tf0.y), tf0.scale + d));
+      // 위치와 마찬가지로 테두리 기준 상한은 없다 — 0 이하/뒤집힘만 막는 최소한의 안전장치.
+      const scale = Math.max(0.05, Math.min(4, tf0.scale + d));
       track.transform = { x: tf0.x, y: tf0.y, scale };
       syncPipBoxFromTransform(track);
       onChange(false);
@@ -263,16 +278,17 @@ function openPipPopover(track, anchorEl) {
   pop.className = 've-pip-pop';
   pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + 6) + 'px';
   pop.innerHTML = `
-    <label>${tr('video.pipX')}<input type="number" id="pip-x" min="0" max="100" step="1" value="${Math.round(tf.x * 100)}">%</label>
-    <label>${tr('video.pipY')}<input type="number" id="pip-y" min="0" max="100" step="1" value="${Math.round(tf.y * 100)}">%</label>
-    <label>${tr('video.pipScale')}<input type="number" id="pip-scale" min="10" max="100" step="1" value="${Math.round(tf.scale * 100)}">%</label>
+    <label>${tr('video.pipX')}<input type="number" id="pip-x" min="-200" max="200" step="1" value="${Math.round(tf.x * 100)}">%</label>
+    <label>${tr('video.pipY')}<input type="number" id="pip-y" min="-200" max="200" step="1" value="${Math.round(tf.y * 100)}">%</label>
+    <label>${tr('video.pipScale')}<input type="number" id="pip-scale" min="5" max="400" step="1" value="${Math.round(tf.scale * 100)}">%</label>
     <button class="mini" id="pip-reset">${tr('video.pipReset')}</button>`;
   document.body.appendChild(pop);
   _pipPopoverEl = pop;
   const apply = () => {
-    const x = Math.max(0, Math.min(100, Number(pop.querySelector('#pip-x').value) || 0)) / 100;
-    const y = Math.max(0, Math.min(100, Number(pop.querySelector('#pip-y').value) || 0)) / 100;
-    const scale = Math.max(0.1, Math.min(1, (Number(pop.querySelector('#pip-scale').value) || 100) / 100));
+    // 테두리 기준 상한 없음(요청대로) — 프레임 밖으로 나가면 export 도 미리보기도 그냥 잘린다.
+    const x = (Number(pop.querySelector('#pip-x').value) || 0) / 100;
+    const y = (Number(pop.querySelector('#pip-y').value) || 0) / 100;
+    const scale = Math.max(0.05, Math.min(4, (Number(pop.querySelector('#pip-scale').value) || 100) / 100));
     const isDefault = x === 0 && y === 0 && scale === 1;
     track.transform = isDefault ? null : { x, y, scale };
     const pair = _layerEls.get(track.id);
