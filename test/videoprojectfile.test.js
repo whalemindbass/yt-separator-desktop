@@ -35,7 +35,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await js(`document.getElementById('ve-add-track-btn').click(); true`);
   await wait(50);
   expect('버튼 누르면 메뉴 열림', await js(`document.getElementById('ve-add-track-menu').hidden`), false);
-  expect('메뉴 항목 4개(영상/오디오/텍스트/이미지)', await js(`document.querySelectorAll('#ve-add-track-menu [data-kind]').length`), 4);
+  expect('메뉴 항목 5개(영상/오디오/텍스트/이미지/도형)', await js(`document.querySelectorAll('#ve-add-track-menu [data-kind]').length`), 5);
   const menuBounds = await js(`(() => {
     const r = document.getElementById('ve-add-track-menu').getBoundingClientRect();
     return JSON.stringify({ left: r.left, right: r.right, winW: window.innerWidth });

@@ -57,8 +57,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth })),
     resolution: _veResolution,
   };
 }
@@ -333,7 +333,7 @@ function createPipBox(track, onChange) {
   });
 }
 function openPipPopover(track, anchorEl) {
-  closePipPopover();
+  closePipPopover(); closeShapePopover();
   const tf = track.transform || defaultTransform();
   const r = anchorEl.getBoundingClientRect();
   const pop = document.createElement('div');
@@ -1310,6 +1310,122 @@ function openTextPopover(clip, anchorEl) {
   pop.querySelector('#tx-content').focus();
   setTimeout(() => document.addEventListener('pointerdown', onOutsideTextPopover, true), 0);
 }
+
+// ── 도형(사각형/타원) — 트랙 순서=z-index 원칙을 그대로 따라야 해서(요청) 텍스트처럼
+// 항상 맨 위 고정이 아니라 "이미지 클립"으로 만든다 — <canvas> 로 그린 걸 PNG 로 저장해
+// 실제 이미지 파일처럼 취급하면, 위치/크기(PIP)·효과·-loop 1 내보내기까지 새 코드 없이
+// 이미지 파이프라인을 그대로 탄다. 색·모양이 바뀔 때마다 같은 파일을 덮어쓴다.
+function renderShapeDataUrl(clip, pxW, pxH) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(2, Math.round(pxW)); canvas.height = Math.max(2, Math.round(pxH));
+  const ctx = canvas.getContext('2d');
+  const sw = Math.max(0, Number(clip.strokeWidth) || 0);
+  const inset = sw / 2;
+  ctx.lineWidth = sw;
+  if (clip.shapeType === 'ellipse') {
+    ctx.beginPath();
+    ctx.ellipse(canvas.width / 2, canvas.height / 2, Math.max(0.5, canvas.width / 2 - inset), Math.max(0.5, canvas.height / 2 - inset), 0, 0, Math.PI * 2);
+    if (clip.fillColor) { ctx.fillStyle = clip.fillColor; ctx.fill(); }
+    if (clip.strokeColor && sw > 0) { ctx.strokeStyle = clip.strokeColor; ctx.stroke(); }
+  } else {
+    const w = Math.max(1, canvas.width - sw), h = Math.max(1, canvas.height - sw);
+    if (clip.fillColor) { ctx.fillStyle = clip.fillColor; ctx.fillRect(inset, inset, w, h); }
+    if (clip.strokeColor && sw > 0) { ctx.strokeStyle = clip.strokeColor; ctx.strokeRect(inset, inset, w, h); }
+  }
+  return canvas.toDataURL('image/png');
+}
+// 실제 파일로 저장해야 이미지 파이프라인(내보내기 -loop 1 등)을 그대로 탄다 — data: URL 은
+// ffmpeg -i 가 못 읽는다. 클립 id 를 파일명으로 써서 다시 그릴 때마다 같은 파일을 덮어쓴다.
+async function regenerateShapeFile(clip) {
+  const { w: rw, h: rh } = getResolution();
+  const pxW = Math.max(4, Math.round(rw * (clip.wPct || 0.3)));
+  const pxH = Math.max(4, Math.round(rh * (clip.hPct || 0.2)));
+  const dataUrl = renderShapeDataUrl(clip, pxW, pxH);
+  const base64 = dataUrl.split(',')[1] || '';
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const res = await api.video.saveShapeImage(`shape-${clip.id}`, bytes);
+  if (res?.ok) { clip.file = res.path; clip.w = pxW; clip.h = pxH; }
+}
+function addShapeClipAt(trackId, atSec) {
+  const clip = {
+    id: nextClipId(), trackId, isShape: true, isImage: true, shapeType: 'rect',
+    name: tr('video.shapeRect'), start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
+    wPct: 0.3, hPct: 0.2, fillColor: '#35d1a6', strokeColor: '', strokeWidth: 0,
+    hasAudio: false, isAudioOnly: false, effects: [], file: null, w: 0, h: 0,
+  };
+  _veClips.push(clip);
+  pushUndo(
+    () => { _veClips = _veClips.filter(x => x !== clip); },
+    () => { _veClips.push(clip); },
+  );
+  _selClipId = clip.id;
+  layout();
+  return clip;
+}
+// "+트랙" 메뉴의 "도형" 항목 — 항상 새 영상 트랙을 만든다(위치/크기는 그 트랙의 기존
+// PIP 버튼으로 조정하므로, 다른 클립과 트랙을 공유하면 그 클립까지 같이 움직여 버린다).
+async function addShape() {
+  const tid = newVideoTrack();
+  const clip = addShapeClipAt(tid, nowSec());
+  await regenerateShapeFile(clip);
+  ensureLayers(); syncPreview(nowSec()); renderClips();
+  const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
+  if (el) openShapePopover(clip, el);
+}
+let _shapePopoverEl = null;
+function onOutsideShapePopover(e) {
+  if (_shapePopoverEl && !_shapePopoverEl.contains(e.target)) closeShapePopover();
+}
+function closeShapePopover() {
+  if (!_shapePopoverEl) return;
+  _shapePopoverEl.remove(); _shapePopoverEl = null;
+  document.removeEventListener('pointerdown', onOutsideShapePopover, true);
+}
+function openShapePopover(clip, anchorEl) {
+  closeShapePopover(); closeTextPopover(); closePipPopover();
+  const r = anchorEl.getBoundingClientRect();
+  const pop = document.createElement('div');
+  pop.className = 've-text-pop';   // 텍스트 팝오버와 같은 상자 스타일 재사용
+  pop.style.left = Math.max(4, r.left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  pop.innerHTML = `
+    <label class="ve-text-pop-full">${tr('video.shapeType')}<select id="sh-type">
+      <option value="rect" ${clip.shapeType === 'rect' ? 'selected' : ''}>${tr('video.shapeRect')}</option>
+      <option value="ellipse" ${clip.shapeType === 'ellipse' ? 'selected' : ''}>${tr('video.shapeEllipse')}</option>
+    </select></label>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.shapeFill')}<input type="color" id="sh-fill" value="${clip.fillColor || '#35d1a6'}"></label>
+      <label>${tr('video.shapeStroke')}<input type="color" id="sh-stroke" value="${clip.strokeColor || '#ffffff'}"></label>
+    </div>
+    <label class="ve-text-pop-full">${tr('video.shapeStrokeWidth')}<input type="number" id="sh-sw" min="0" max="60" step="1" value="${clip.strokeWidth || 0}"></label>
+    <button class="ve-text-pop-del" id="sh-delete">${tr('video.fxRemove')}</button>`;
+  document.body.appendChild(pop);
+  _shapePopoverEl = pop;
+  const lblEl = anchorEl.querySelector('.ve-clip-lbl');
+  const apply = async () => {
+    clip.shapeType = pop.querySelector('#sh-type').value;
+    clip.fillColor = pop.querySelector('#sh-fill').value;
+    const sw = Math.max(0, Number(pop.querySelector('#sh-sw').value) || 0);
+    clip.strokeColor = sw > 0 ? pop.querySelector('#sh-stroke').value : '';
+    clip.strokeWidth = sw;
+    clip.name = clip.shapeType === 'ellipse' ? tr('video.shapeEllipse') : tr('video.shapeRect');
+    if (lblEl) lblEl.textContent = clip.name;
+    await regenerateShapeFile(clip);
+    syncPreview(nowSec());
+    renderClips();
+    scheduleSave();
+  };
+  pop.querySelector('#sh-type').addEventListener('change', apply);
+  pop.querySelector('#sh-fill').addEventListener('input', apply);
+  pop.querySelector('#sh-stroke').addEventListener('input', apply);
+  pop.querySelector('#sh-sw').addEventListener('input', apply);
+  pop.querySelector('#sh-delete').addEventListener('click', () => {
+    closeShapePopover();
+    _selClipId = clip.id;
+    deleteSelected();
+  });
+  setTimeout(() => document.addEventListener('pointerdown', onOutsideShapePopover, true), 0);
+}
+
 function renderClips() {
   document.querySelectorAll('.ve-lane').forEach(lane => {
     const trackId = Number(lane.dataset.trackId);
@@ -1342,7 +1458,7 @@ function renderClips() {
         _selClipId = c.id;
         wireMove(e, c, el);
       });
-      el.addEventListener('dblclick', () => { if (c.isText) openTextPopover(c, el); else seekTo(c.start); });
+      el.addEventListener('dblclick', () => { if (c.isText) openTextPopover(c, el); else if (c.isShape) openShapePopover(c, el); else seekTo(c.start); });
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
       if (!c.isText) {
@@ -1983,6 +2099,7 @@ function wire() {
       else if (kind === 'audio') pickImportAudioTrack();
       else if (kind === 'text') addText();
       else if (kind === 'image') pickImportImage();
+      else if (kind === 'shape') addShape();
     });
   });
   $('ve-import')?.addEventListener('click', () => pickImportVideo());

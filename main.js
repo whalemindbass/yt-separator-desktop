@@ -727,6 +727,19 @@ ipcMain.handle('fs:writeBuffer', async (_ev, p, data) => {
   try { fs.writeFileSync(p, Buffer.from(data)); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
+// 도형(사각형/타원) 오버레이 — 렌더러가 <canvas> 로 그려서 PNG 로 넘기면, 그걸 그냥
+// 일반 "이미지 클립"처럼 파일로 저장해 둔다(같은 clip id 로 계속 덮어쓴다 — 색·모양을
+// 바꿀 때마다 새 파일이 쌓이지 않는다). 그 뒤로는 이미지 임포트 파이프라인을 100% 그대로 탄다
+// (PIP 위치/크기, 효과, -loop 1 내보내기까지 새 코드 없이 재사용).
+ipcMain.handle('video:saveShapeImage', async (_ev, key, data) => {
+  try {
+    const dir = path.join(app.getPath('userData'), 'shapes');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `${String(key).replace(/[^a-zA-Z0-9_-]/g, '_')}.png`);
+    fs.writeFileSync(p, Buffer.from(data));
+    return { ok: true, path: p };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
 
 ipcMain.handle('dialog:pickMedia', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {

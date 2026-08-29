@@ -92,6 +92,7 @@ contextBridge.exposeInMainWorld('yssApi', {
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),
     export: (payload) => ipcRenderer.invoke('video:export', payload),
+    saveShapeImage: (key, data) => ipcRenderer.invoke('video:saveShapeImage', key, data),
     onExportProgress: (fn) => {
       const h = (_ev, data) => fn(data);
       ipcRenderer.on('video:exportProgress', h);
