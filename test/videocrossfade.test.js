@@ -36,7 +36,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('1) 임포트 (연속 배치: red 0~3초, blue 3~5초)');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(150);
   await js(`document.getElementById('ve-import').click(); true`);
   let n = 0;

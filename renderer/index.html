@@ -1160,10 +1160,17 @@
   <main class="body view video-body" data-view="video" hidden>
     <div class="ve-toolbar">
       <div class="ve-toolbar-l">
-        <button id="ve-add-track" class="btn btn-sm" type="button" data-i18n="video.addTrack">＋ 트랙</button>
-        <button id="ve-add-audio-track" class="btn btn-sm" type="button" data-i18n="video.addAudioTrack">＋ 오디오</button>
-        <button id="ve-add-text" class="btn btn-sm" type="button" data-i18n="video.addText">＋ 텍스트</button>
+        <div class="ve-fx-add-wrap">
+          <button id="ve-add-track-btn" class="btn btn-sm" type="button" data-i18n="video.addTrack">＋ 트랙</button>
+          <div id="ve-add-track-menu" class="ve-fx-add-menu" hidden>
+            <button type="button" class="ve-fx-add-item" data-kind="video" data-i18n="video.trackKindVideo">영상</button>
+            <button type="button" class="ve-fx-add-item" data-kind="audio" data-i18n="video.trackKindAudio">오디오</button>
+            <button type="button" class="ve-fx-add-item" data-kind="text" data-i18n="video.trackKindText">텍스트</button>
+          </div>
+        </div>
         <button id="ve-import" class="btn btn-sm" type="button" data-i18n="video.import">임포트</button>
+        <button id="ve-save-project" class="btn btn-sm" type="button" data-i18n="video.saveProject">저장</button>
+        <button id="ve-open-project" class="btn btn-sm" type="button" data-i18n="video.openProject">열기</button>
         <button id="ve-undo" class="ve-tbtn" type="button" data-i18n-title="video.undo" title="되돌리기">↶</button>
         <button id="ve-redo" class="ve-tbtn" type="button" data-i18n-title="video.redo" title="다시 실행">↷</button>
         <button id="ve-flip-h" class="ve-tbtn" type="button" disabled data-i18n-title="video.flipH" title="좌우 반전">⇋</button>

@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('yssApi', {
   fs: {
     copyFile:    (src, dst)      => ipcRenderer.invoke('fs:copyFile', src, dst),
     writeBuffer: (path, data)    => ipcRenderer.invoke('fs:writeBuffer', path, data),
+    checkExists: (paths)         => ipcRenderer.invoke('fs:checkExists', paths),
   },
   project: {
     save: (json, name, path) => ipcRenderer.invoke('project:save', json, name, path),
@@ -84,6 +85,9 @@ contextBridge.exposeInMainWorld('yssApi', {
   videoProject: {
     load: ()     => ipcRenderer.invoke('videoProject:load'),
     save: (data) => ipcRenderer.invoke('videoProject:save', data),
+    // .dsvproj — 사용자가 직접 저장 위치를 고르는 쪽(자동 저장인 위 load/save 와 별개).
+    saveAs: (json, name, path) => ipcRenderer.invoke('video:project:save', json, name, path),
+    open:   ()                 => ipcRenderer.invoke('video:project:open'),
   },
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),

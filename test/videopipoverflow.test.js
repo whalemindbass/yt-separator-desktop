@@ -30,7 +30,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   section('1) scale=50% 로 두고 오른쪽 아래로 한참(프레임 절반 이상) 드래그');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);

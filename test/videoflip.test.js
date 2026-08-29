@@ -50,7 +50,7 @@ const isGreen = (p) => p.g > p.r + 60 && p.g > p.b + 60;
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   expect('선택 전 좌우반전 버튼 비활성', await js(`document.getElementById('ve-flip-h').disabled`), true);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`(() => {

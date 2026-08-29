@@ -39,7 +39,7 @@ makeClip(BLUE, 'testsrc2', 2);
   expect('빈 상태 문구 보임', s.빈상태, true);
 
   section('2) 트랙 추가 + 임포트(스텁 경로 2개, 실제 mp4 디코드)');
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(100);
   s = await js(`({ 트랙수: document.querySelectorAll('.ve-lane').length })`);
   expect('트랙 1개 생김', s.트랙수, 1);
@@ -70,7 +70,7 @@ makeClip(BLUE, 'testsrc2', 2);
   expect('빈 상태 숨음', s.빈상태숨음, true);
 
   section('4) 두 번째 트랙 — 새 트랙은 목록 맨 위(Vegas 관례)');
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(100);
   s = await js(`({
     트랙수: document.querySelectorAll('.ve-lane').length,
@@ -137,7 +137,7 @@ makeClip(BLUE, 'testsrc2', 2);
   expect('Ctrl+Shift+Z 로 다시 삭제됨', afterRedo, afterDel);
   // 트랙 추가도 되돌릴 수 있어야 한다
   const tracksBefore = await js(`document.querySelectorAll('.ve-lane').length`);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(80);
   await js(`document.getElementById('ve-undo').click(); true`);
   await wait(80);

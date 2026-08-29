@@ -51,32 +51,84 @@ function doRedo() {
 // ── 자동 저장/복원 — library.json 처럼 실제 파일로(usageLog.json 과 같은 패턴). 프로젝트가
 // 하나뿐이라 "저장" 버튼 없이 편집할 때마다 조용히 저장하고, 탭에 들어올 때 그대로 복원한다.
 let _saveTimer = null;
+// tracks/clips 를 저장 가능한 순수 객체로 뽑는다 — 조용한 자동 저장(scheduleSave)과
+// 사용자가 직접 누르는 .dsvproj 저장(saveProjectAs)이 같은 모양을 쓴다.
+function buildVideoProjectData() {
+  return {
+    tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
+    resolution: _veResolution,
+  };
+}
 function scheduleSave() {
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    api.videoProject.save({
-      tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-      clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
-        ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
-      resolution: _veResolution,
-    });
-  }, 600);
+  _saveTimer = setTimeout(() => api.videoProject.save(buildVideoProjectData()), 600);
+}
+// 불러온 데이터(자동 저장이든 .dsvproj 든 모양이 같다)를 실제 상태로 반영 — 시퀀스 번호도
+// 다시 맞춰야 새로 만드는 트랙/클립/효과 id 가 기존 것과 안 겹친다.
+function applyVideoProjectData(p) {
+  if (!p?.tracks?.length) return false;
+  _veTracks = p.tracks;
+  _veClips = p.clips || [];
+  _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
+  _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
+  _veResolution = p.resolution || null;
+  for (const c of _veClips) migrateClipEffects(c);
+  _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
+  ensureLayers();
+  return true;
 }
 let _loaded = false;
 async function loadProject() {
   if (_loaded) return; _loaded = true;
   const p = await api.videoProject.load();
-  if (p?.tracks?.length) {
-    _veTracks = p.tracks;
-    _veClips = p.clips || [];
-    _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
-    _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
-    _veResolution = p.resolution || null;
-    for (const c of _veClips) migrateClipEffects(c);
-    _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
-    ensureLayers();
-  }
+  applyVideoProjectData(p);
   syncResUI();
+  checkMissingFiles();
+}
+// 불러온(자동 복원이든 .dsvproj 열기든) 클립이 가리키는 원본 파일이 그새 삭제/이동됐는지
+// 확인한다 — 타임라인에서 빨간 X로 바로 보여야 "왜 이 클립이 안 나오지" 헤매지 않는다.
+// 텍스트 클립은 파일이 없으니 대상에서 뺀다.
+async function checkMissingFiles() {
+  const files = [...new Set(_veClips.filter(c => c.file && !c.isText).map(c => c.file))];
+  if (!files.length) return;
+  let result;
+  try { result = await api.fs.checkExists(files); } catch { return; }
+  let changed = false;
+  for (const c of _veClips) {
+    if (!c.file || c.isText) continue;
+    const missing = result[c.file] === false;
+    if (c.fileMissing !== missing) { c.fileMissing = missing; changed = true; }
+  }
+  if (changed) renderClips();
+}
+
+// ── 프로젝트 저장(.dsvproj)/열기 — 조용한 자동 저장(scheduleSave, userData 안)과 별개로
+// 사용자가 원하는 위치에 파일로 남긴다. 같은 세션에서 "저장"을 다시 누르면(경로를 이미
+// 안다) 대화상자 없이 그 파일에 덮어쓴다 — 다른 파일에 저장하려면 지금은 이 세션을
+// 새로 시작하는 수밖에 없다(별도 "다른 이름으로 저장"은 요청 범위 밖).
+let _dsvprojPath = null;
+async function saveProjectAs() {
+  const json = JSON.stringify(buildVideoProjectData(), null, 2);
+  const res = await api.videoProject.saveAs(json, '영상 프로젝트', _dsvprojPath);
+  if (!res?.ok) return;
+  _dsvprojPath = res.path;
+  flash(tr('video.projectSaved'));
+}
+async function openProjectFile() {
+  const res = await api.videoProject.open();
+  if (!res?.ok) return;
+  let data;
+  try { data = JSON.parse(res.data); } catch { return; }
+  if (!applyVideoProjectData(data)) return;
+  _dsvprojPath = res.path;
+  _undoStack = []; _redoStack = [];   // 다른 프로젝트로 바꿨으니 이전 히스토리는 의미 없다
+  _selClipId = null;
+  syncResUI();
+  renderLanes();   // 트랙 개수 자체가 바뀌었을 수 있다 — layout() 만으론 레인 DOM 이 안 갱신된다
+  flash(tr('video.projectOpened'));
+  checkMissingFiles();
 }
 
 // ── 재생 시계 (엔진 없음 — rAF 로 직접 잰다) ──────────────
@@ -886,6 +938,23 @@ function layout() {
 }
 
 // ── 트랙/레인 ────────────────────────────────────────
+// "+트랙" 하나로 통일 — 영상/오디오/텍스트 세 종류를 따로 버튼 세 개 두지 않고 클릭하면
+// 뜨는 메뉴에서 고른다(효과 추가 메뉴, toggleFxAddMenu 와 같은 패턴).
+function closeAddTrackMenu() {
+  const menu = $('ve-add-track-menu');
+  if (menu) menu.hidden = true;
+  document.removeEventListener('pointerdown', _onAddTrackMenuOutside, true);
+}
+function _onAddTrackMenuOutside(e) {
+  const menu = $('ve-add-track-menu'), btn = $('ve-add-track-btn');
+  if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== btn) closeAddTrackMenu();
+}
+function toggleAddTrackMenu() {
+  const menu = $('ve-add-track-menu'); if (!menu) return;
+  if (!menu.hidden) { closeAddTrackMenu(); return; }
+  menu.hidden = false;
+  setTimeout(() => document.addEventListener('pointerdown', _onAddTrackMenuOutside, true), 0);
+}
 function newVideoTrack(pushHistory = true) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
@@ -1183,6 +1252,7 @@ function renderClips() {
         // 필름스트립 대신 음표 표시만 둔다.
         el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
           + `<span class="ve-clip-lbl">${esc(c.name)}</span>
+          ${c.fileMissing ? `<span class="ve-clip-missing" title="${esc(tr('video.fileMissing'))}">✕</span>` : ''}
           <div class="ve-fade l"></div><div class="ve-fade r"></div>
           <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
           <div class="ve-trim l"></div><div class="ve-trim r"></div>`;
@@ -1741,10 +1811,19 @@ function flash(msg) {
 // ── 초기화 ──────────────────────────────────────────
 function wire() {
   if (_wired) return; _wired = true;
-  $('ve-add-track')?.addEventListener('click', () => newVideoTrack());
-  $('ve-add-audio-track')?.addEventListener('click', () => pickImportAudioTrack());
-  $('ve-add-text')?.addEventListener('click', () => addText());
+  $('ve-add-track-btn')?.addEventListener('click', () => toggleAddTrackMenu());
+  $('ve-add-track-menu')?.querySelectorAll('[data-kind]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      closeAddTrackMenu();
+      const kind = btn.dataset.kind;
+      if (kind === 'video') newVideoTrack();
+      else if (kind === 'audio') pickImportAudioTrack();
+      else if (kind === 'text') addText();
+    });
+  });
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
+  $('ve-save-project')?.addEventListener('click', () => saveProjectAs());
+  $('ve-open-project')?.addEventListener('click', () => openProjectFile());
   $('ve-undo')?.addEventListener('click', () => doUndo());
   $('ve-redo')?.addEventListener('click', () => doRedo());
   $('ve-flip-h')?.addEventListener('click', () => flipSelected('h'));

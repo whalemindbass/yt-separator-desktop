@@ -80,7 +80,7 @@ function measureSpan(file) {
   section('3) 렌더러 미리보기 — 아직 안 잘리는 자리(x=85%)에선 폭 그대로, 완전히 밖(x=150%)이면 자유롭게 나감');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-text').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="text"]').click(); true`);
   await wait(150);
   const w0 = await js(`document.querySelector('.ve-text-item.sel').getBoundingClientRect().width`);
   await js(`(() => {

@@ -3894,7 +3894,13 @@ body { background: var(--bg) !important; }
    드래그해서 되돌릴 손잡이가 안 보이게 된다. */
 .ve-video-layers { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
 .ve-video-layers video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.ve-res-select { font-size: 12px; }
+.ve-res-select {
+  height: 30px; box-sizing: border-box; font: 500 12px/1 var(--sans); color: var(--tx-1);
+  background: var(--elev); border: 1px solid var(--border); border-radius: 7px; padding: 0 8px;
+  cursor: pointer; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.ve-res-select:hover { background: var(--elev-2); color: var(--tx-1); }
+.ve-res-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ve-res-custom { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--tx-3); }
 .ve-res-custom input { width: 64px; }
 .ve-empty {
@@ -4060,6 +4066,10 @@ body { background: var(--bg) !important; }
   position: absolute; top: 3px; left: 6px; right: 6px; font: 600 10.5px/1.2 var(--sans); color: var(--tx-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
   text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.ve-clip-missing {
+  position: absolute; top: 2px; right: 5px; z-index: 3; color: var(--danger); font: 700 10px/1 var(--sans);
+  text-shadow: 0 1px 2px rgba(0,0,0,.6); pointer-events: none;
 }
 .ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }

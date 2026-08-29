@@ -37,7 +37,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await wait(300);
   async function addTrackAndImport(file, expectTotal) {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
-    await js(`document.getElementById('ve-add-track').click(); true`);
+    await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
     await wait(150);
     await js(`document.getElementById('ve-import').click(); true`);
     for (let i = 0; i < 40; i++) {

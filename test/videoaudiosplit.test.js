@@ -45,7 +45,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('1) 임포트 — 영상 클립 + 짝지어진 오디오 클립으로 자동 분리');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(150);
   await js(`document.getElementById('ve-import').click(); true`);
   let info = null;

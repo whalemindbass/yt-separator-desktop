@@ -54,7 +54,7 @@ function selectVideoClipByIndex(idx, pid) {
   section('1) 클립 A — 효과 2개(밝기, 세피아) 넣고 프리셋으로 저장');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   expect('클립 A 임포트됨(영상+오디오)', await js(`document.querySelectorAll('.ve-clip').length`), 2);
@@ -94,7 +94,7 @@ function selectVideoClipByIndex(idx, pid) {
   expect('밝기 값도 그대로(25)', stored[0].effects[0].value, 25);
 
   section('3) 클립 B(새 트랙, 빈 체인) 에 프리셋 적용');
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 4) break; await wait(300); }
   expect('클립 B 도 임포트됨(총 4개 .ve-clip)', await js(`document.querySelectorAll('.ve-clip').length`), 4);

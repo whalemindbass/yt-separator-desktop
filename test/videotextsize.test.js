@@ -18,7 +18,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('1) 프리뷰 글자 크기 = clip.size × (미리보기 화면폭 / 출력 해상도 폭)');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-text').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="text"]').click(); true`);
   await wait(150);
 
   const info = await js(`(() => {

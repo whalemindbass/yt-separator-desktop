@@ -88,6 +88,7 @@ const DIALOG_TEXT = {
     importAudio: '오디오 파일 임포트', importVideo: '영상 파일 임포트',
     importVideoFiles: '영상 파일 임포트 (여러 개 가능)',
     fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fAll: '모든 파일', fProject: 'YSS 프로젝트',
+    fVideoProject: 'Dr.studio 영상 프로젝트',
   },
   en: {
     saveClose: 'Save and close', discardClose: 'Close without saving', cancel: 'Cancel',
@@ -101,6 +102,7 @@ const DIALOG_TEXT = {
     importAudio: 'Import audio file', importVideo: 'Import video file',
     importVideoFiles: 'Import video files (multiple allowed)',
     fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fAll: 'All files', fProject: 'YSS project',
+    fVideoProject: 'Dr.studio video project',
   },
 };
 const td = (k) => (DIALOG_TEXT[uiLocale] || DIALOG_TEXT.ko)[k] || k;
@@ -653,6 +655,41 @@ ipcMain.handle('project:open', async () => {
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
   catch (e) { return { ok: false, error: e.message }; }
+});
+// 영상 편집 프로젝트(.dsvproj) — 스튜디오의 .yssproj(project:save/open) 와 같은 패턴이지만
+// 확장자가 다르고, videoProject:save/load(사용자가 못 보는 자동 저장, userData 안)와도
+// 별개다 — 이건 사용자가 "저장" 을 직접 눌러서 원하는 위치에 남기는 파일.
+ipcMain.handle('video:project:save', async (_ev, json, name, existingPath) => {
+  let target = existingPath;
+  if (!target) {
+    const res = await dialog.showSaveDialog(mainWindow || null, {
+      title: td('projectSave'),
+      defaultPath: (name || '영상 프로젝트') + '.dsvproj',
+      filters: [{ name: td('fVideoProject'), extensions: ['dsvproj'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    target = res.filePath;
+  }
+  try { fs.writeFileSync(target, String(json), 'utf8'); return { ok: true, path: target }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('video:project:open', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: td('projectOpen'),
+    properties: ['openFile'],
+    filters: [{ name: td('fVideoProject'), extensions: ['dsvproj'] }],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+// 클립이 가리키는 원본 파일이 그새 삭제/이동됐는지 — 여러 개를 한 번에 확인(임포트 때마다
+// 매번 IPC 왕복하지 않게). 결과는 그 순간의 스냅샷일 뿐 캐시하지 않는다(파일은 언제든
+// 다시 사라지거나 나타날 수 있다).
+ipcMain.handle('fs:checkExists', (_ev, paths) => {
+  const out = {};
+  for (const p of paths || []) { try { out[p] = fs.existsSync(p); } catch { out[p] = false; } }
+  return out;
 });
 ipcMain.handle('dialog:pickFolder', async (_ev, title) => {
   const res = await dialog.showOpenDialog(mainWindow || null, {

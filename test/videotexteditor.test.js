@@ -27,7 +27,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   section('1) "+텍스트" — 트랙+클립 생성, 편집 팝오버 바로 열림, 기본값 확인');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-text').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="text"]').click(); true`);
   await wait(150);
   expect('텍스트 클립 1개 생김', await js(`document.querySelectorAll('.ve-clip.text').length`), 1);
   expect('편집 팝오버 열림', await js(`!!document.querySelector('.ve-text-pop')`), true);

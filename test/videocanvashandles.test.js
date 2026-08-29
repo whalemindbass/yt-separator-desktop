@@ -47,7 +47,7 @@ async function dragBy(js, selector, dx, dy) {
   section('1) PIP 박스 — 미리보기 위 드래그로 위치/크기, 숫자칸과 양방향 동기화');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
@@ -96,7 +96,7 @@ async function dragBy(js, selector, dx, dy) {
   }
 
   section('3) 텍스트 — 미리보기에서 바로 드래그(위치)·리사이즈 핸들(크기)');
-  await js(`document.getElementById('ve-add-text').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="text"]').click(); true`);
   await wait(150);
   expect('선택된 텍스트 아이템에 리사이즈 핸들 있음', await js(`!!document.querySelector('.ve-text-item.sel .ve-text-item-rs')`), true);
   const x0 = Number(await js(`document.getElementById('tx-x').value`));

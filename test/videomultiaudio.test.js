@@ -37,7 +37,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [RED] });
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(150);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
@@ -46,14 +46,14 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
   section('2) "+오디오" 첫 번째 클릭 — 영상 임포트 후에도 막히지 않고 새 트랙에 들어감');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [BG1] });
-  await js(`document.getElementById('ve-add-audio-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="audio"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 3) break; await wait(300); }
   expect('클립 3개로 늘어남(배경음악1 추가)', await js(`document.querySelectorAll('.ve-clip').length`), 3);
   expect('오디오 트랙 2개(재사용 아니라 새로 생김)', await js(`document.querySelectorAll('.ve-lane.audio').length`), 2);
 
   section('3) "+오디오" 두 번째 클릭 — 또 새 트랙(다중 오디오)');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [BG2] });
-  await js(`document.getElementById('ve-add-audio-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="audio"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 4) break; await wait(300); }
   expect('클립 4개로 늘어남(배경음악2 추가)', await js(`document.querySelectorAll('.ve-clip').length`), 4);
   expect('오디오 트랙 3개', await js(`document.querySelectorAll('.ve-lane.audio').length`), 3);

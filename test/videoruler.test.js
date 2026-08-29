@@ -26,7 +26,7 @@ function toSec(tc) {   // "M:SS.mmm" → 초
   section('1) 임포트');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
-  await js(`document.getElementById('ve-add-track').click(); true`);
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await js(`document.getElementById('ve-import').click(); true`);
   for (let i = 0; i < 40; i++) {
     if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break;
