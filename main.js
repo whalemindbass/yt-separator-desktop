@@ -999,14 +999,16 @@ ipcMain.handle('video:probeAudio', async (_ev, file) => {
 // 렌더러 buildEDL() 이 구간별로 layers(겹친 영상 트랙들)/audioSources(N개 오디오 트랙)를
 // 미리 계산해서 넘긴다 — 여기선 그 구간 정보를 filter_complex 로 옮기기만 한다.
 ipcMain.handle('video:export', async (event, payload) => {
-  const { segments, outPath, format, quality, fps } = payload || {};
+  const { segments, outPath, format, res, fps } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
   const fmt = ['mp4', 'webm'].includes(format) ? format : 'mp4';
-  // 화질 프리셋 — h264(mp4)/vp9(webm) 각각 CRF 값. medium 이 기존 하드코딩 값(20/32)과 동일해
-  // "설정 안 바꾸면 예전과 같은 결과"가 보장된다.
-  const QUALITY_CRF = { high: { h264: 18, vp9: 24 }, medium: { h264: 20, vp9: 32 }, low: { h264: 26, vp9: 40 } };
-  const crf = QUALITY_CRF[quality] || QUALITY_CRF.medium;
+  // CRF 는 고정값 — 이전 기본값(mp4=20/webm=32) 그대로. "화질" 은 이제 이 CRF 를 고르는 대신
+  // 아래 res(해상도)로 명확하게(720p/1080p 처럼) 표현한다.
+  const crf = { h264: 20, vp9: 32 };
+  // 해상도 낮춰 내보내기 — 원본(프로젝트 캔버스) 해상도보다 큰 값은 업스케일하지 않고 무시한다.
+  const RES_HEIGHTS = { '2160': 2160, '1440': 1440, '1080': 1080, '720': 720, '480': 480 };
+  const targetH = RES_HEIGHTS[res];
 
   // 텍스트/타이틀 오버레이 — 하나라도 있으면 폰트를 확인하고, drawtext 가 상대경로로
   // fontfile/textfile 을 찾을 수 있게 전용 임시 폴더를 만든다. 드라이브 문자가 들어간
@@ -1256,8 +1258,15 @@ ipcMain.handle('video:export', async (event, payload) => {
   let outvLabel = 'outv';
   const fpsNum = Number(fps);
   if (fps && fps !== 'auto' && Number.isFinite(fpsNum) && fpsNum > 0) {
-    parts.push(`[outv]fps=${fpsNum}[outvfps]`);
+    parts.push(`[${outvLabel}]fps=${fpsNum}[outvfps]`);
     outvLabel = 'outvfps';
+  }
+  if (targetH) {
+    const curH = Math.max(1, ...segments.map(s => s.refH || 0));
+    if (targetH < curH) {   // 원본보다 낮을 때만 — 업스케일은 화질만 나빠지고 의미 없다
+      parts.push(`[${outvLabel}]scale=-2:${targetH}[outvres]`);
+      outvLabel = 'outvres';
+    }
   }
   args.push('-filter_complex', parts.join(';'), '-map', `[${outvLabel}]`, '-map', '[outa]');
 

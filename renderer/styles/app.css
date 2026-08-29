@@ -3884,10 +3884,12 @@ body { background: var(--bg) !important; }
    정확한 px 크기를 매겨준다(sizePreviewFrame). 그 바깥(ve-preview-wrap 의 나머지 공간)은
    레터박스일 뿐 렌더 영역이 아니라는 걸 테두리로 구분한다. */
 .ve-preview {
-  position: relative; max-width: 100%; max-height: 100%;
+  position: relative; box-sizing: border-box; max-width: 100%; max-height: 100%;
   aspect-ratio: 16 / 9;   /* JS 가 아직 못 잰 순간의 대체값(초기 렌더) */
   background: #000;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22), 0 2px 20px rgba(0, 0, 0, .45);
+  border-left: 1px solid rgba(255, 255, 255, .22);
+  border-right: 1px solid rgba(255, 255, 255, .22);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, .45);
 }
 /* 영상/PIP 레이어만 프레임 밖으로 못 나가게 자른다(내보내기 overlay 도 그렇게 자른다) —
    PIP 박스·핸들·텍스트 오버레이는 여기 안 넣는다, 자르면 프레임 밖으로 옮긴 걸 다시

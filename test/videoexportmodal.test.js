@@ -1,8 +1,9 @@
 'use strict';
-// 내보내기 세부설정 모달 — "내보내기" 버튼 클릭 시 바로 저장 대화상자가 뜨는 대신 화질/포맷/
+// 내보내기 세부설정 모달 — "내보내기" 버튼 클릭 시 바로 저장 대화상자가 뜨는 대신 해상도/포맷/
 // 프레임 설정 모달이 뜨고, 확인을 눌러야 실제 내보내기가 시작되는지. 툴바에서 #ve-format
-// (버튼 좌측 포맷 선택)이 사라졌는지, 화질 설정이 실제로 파일 크기에 반영되는지(CRF 값
-// 차이), 프레임 설정이 실제로 결과물 프레임레이트를 바꾸는지(ffprobe r_frame_rate)까지 검증.
+// (버튼 좌측 포맷 선택)이 사라졌는지, 해상도 설정이 실제로 결과물 픽셀 크기에 반영되는지
+// (720p 소스를 480p 로 축소·2160p 요청은 업스케일하지 않고 무시), 프레임 설정이 실제로
+// 결과물 프레임레이트를 바꾸는지(ffprobe r_frame_rate)까지 검증.
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
 const { spawnSync } = require('child_process');
@@ -14,10 +15,10 @@ const ROOT = path.resolve(__dirname, '..');
 const FFMPEG = path.join(ROOT, 'vendor', 'ffmpeg', 'ffmpeg.exe');
 const FFPROBE = path.join(ROOT, 'vendor', 'ffmpeg', 'ffprobe.exe');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'yss-veexpmodal-'));
-// 화질 차이가 파일 크기로 드러나려면 압축이 어려운(노이즈 많은) 소스가 필요하다 —
-// 단색/단순 패턴은 CRF 를 뭘 줘도 거의 같은 크기로 뭉개진다(실측으로 확인).
-const SRC = path.join(TMP, 'noise.mp4');
-spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'testsrc2=duration=3:size=320x240:rate=30',
+// 720p 소스 — 480p 로 축소되는지, 2160p(더 큼) 요청은 업스케일 안 되고 무시되는지 보려면
+// 소스 자체가 그 중간 어딘가(720)여야 한다.
+const SRC = path.join(TMP, 'src720.mp4');
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'testsrc2=duration=2:size=1280x720:rate=30',
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', SRC], { stdio: 'ignore' });
 if (!fs.existsSync(SRC)) throw new Error('ffmpeg 로 테스트 mp4 생성 실패');
 
@@ -30,6 +31,13 @@ function probeFps(file) {
     'stream=r_frame_rate', '-of', 'default=noprint_wrappers=1:nokey=1', file], { encoding: 'utf-8' });
   const [n, d] = (r.stdout || '').trim().split('/').map(Number);
   return d ? n / d : n;
+}
+function probeSize(file) {
+  const r = spawnSync(FFPROBE, ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
+    'stream=width,height', '-of', 'default=noprint_wrappers=1', file], { encoding: 'utf-8' });
+  const w = Number((/width=(\d+)/.exec(r.stdout || '') || [])[1]);
+  const h = Number((/height=(\d+)/.exec(r.stdout || '') || [])[1]);
+  return { w, h };
 }
 
 (async () => {
@@ -52,38 +60,41 @@ function probeFps(file) {
   await js(`document.getElementById('ve-modal').querySelector('.x').click(); true`);
   expect('닫기(x) 누르면 모달 다시 숨김', await js(`document.getElementById('ve-modal').hidden`), true);
 
-  section('3) 화질 낮음 vs 높음 — 실제 파일 크기 차이(CRF 반영)');
-  const OUT_HI = path.join(TMP, 'out_high.mp4');
-  const OUT_LO = path.join(TMP, 'out_low.mp4');
-  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_HI });
+  section('3) 해상도 480p 로 축소 — 실제 픽셀 크기가 720p 소스보다 줄어듦');
+  const OUT_480 = path.join(TMP, 'out_480p.mp4');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_480 });
   await js(`document.getElementById('ve-export').click(); true`);
   await wait(50);
+  expect('해상도 선택에 원본/2160/1440/1080/720/480 있음',
+    await js(`[...document.getElementById('ve-exp-res').options].map(o => o.value).join(',')`),
+    'source,2160,1440,1080,720,480');
+  expect('기본값은 원본 그대로', await js(`document.getElementById('ve-exp-res').value`), 'source');
   await js(`(() => {
-    document.getElementById('ve-exp-q').value = 'high';
+    document.getElementById('ve-exp-res').value = '480';
     document.getElementById('ve-exp-go').click();
   })(); true`);
   for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(OUT_HI)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
+    if (fs.existsSync(OUT_480)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
   }
-  expect('높은 화질 출력 파일 생김', fs.existsSync(OUT_HI), true);
+  expect('480p 출력 파일 생김', fs.existsSync(OUT_480), true);
+  if (fs.existsSync(OUT_480)) expect('실제 세로 해상도 480', probeSize(OUT_480).h, 480);
 
-  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_LO });
+  section('3b) 해상도 2160p 요청 — 소스(720p)보다 크므로 업스케일 안 하고 무시');
+  const OUT_UP = path.join(TMP, 'out_upreq.mp4');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT_UP });
   await js(`document.getElementById('ve-export').click(); true`);
   await wait(50);
   await js(`(() => {
-    document.getElementById('ve-exp-q').value = 'low';
+    document.getElementById('ve-exp-res').value = '2160';
     document.getElementById('ve-exp-go').click();
   })(); true`);
   for (let i = 0; i < 60; i++) {
-    if (fs.existsSync(OUT_LO)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
+    if (fs.existsSync(OUT_UP)) { const lbl = await js(`document.getElementById('ve-export').textContent`); if (!/%$/.test(lbl)) break; }
     await wait(500);
   }
-  expect('낮은 화질 출력 파일 생김', fs.existsSync(OUT_LO), true);
-  if (fs.existsSync(OUT_HI) && fs.existsSync(OUT_LO)) {
-    const hiSize = fs.statSync(OUT_HI).size, loSize = fs.statSync(OUT_LO).size;
-    expect('낮은 화질이 높은 화질보다 확실히 작음(CRF 차이 반영)', loSize < hiSize, true);
-  }
+  expect('2160p 요청 출력 파일 생김', fs.existsSync(OUT_UP), true);
+  if (fs.existsSync(OUT_UP)) expect('업스케일 안 됨 — 소스(720) 그대로', probeSize(OUT_UP).h, 720);
 
   section('4) 프레임 설정 — 30fps 소스를 24fps 로 강제 내보내기');
   const OUT_FPS = path.join(TMP, 'out_fps24.mp4');

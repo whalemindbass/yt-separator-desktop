@@ -1677,6 +1677,7 @@ function buildEDL() {
   return segs;
 }
 const VIDEO_FPS_OPTS = ['auto', '24', '30', '60'];
+const VIDEO_RES_OPTS = [['2160', '2160p (4K)'], ['1440', '1440p (2K)'], ['1080', '1080p'], ['720', '720p'], ['480', '480p']];
 function openExportModal() {
   if (!_veClips.length) { flash(tr('video.needImport')); return; }
   const host = $('ve-modal');
@@ -1686,10 +1687,9 @@ function openExportModal() {
         <option value="mp4">MP4 · H.264</option>
         <option value="webm">WebM · VP9</option>
       </select></div>
-      <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportQuality')}</span><select id="ve-exp-q">
-        <option value="high">${tr('video.qualityHigh')}</option>
-        <option value="medium" selected>${tr('video.qualityMedium')}</option>
-        <option value="low">${tr('video.qualityLow')}</option>
+      <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportRes')}</span><select id="ve-exp-res">
+        <option value="source" selected>${tr('video.exportResSource')}</option>
+        ${VIDEO_RES_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
       </select></div>
       <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportFps')}</span><select id="ve-exp-fps">
         ${VIDEO_FPS_OPTS.map(v => `<option value="${v}">${v === 'auto' ? tr('video.fpsAuto') : v}</option>`).join('')}
@@ -1701,10 +1701,10 @@ function openExportModal() {
   host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
   $('ve-exp-go').addEventListener('click', () => {
     host.hidden = true;
-    runExport($('ve-exp-fmt').value, $('ve-exp-q').value, $('ve-exp-fps').value);
+    runExport($('ve-exp-fmt').value, $('ve-exp-res').value, $('ve-exp-fps').value);
   });
 }
-async function runExport(format, quality, fps) {
+async function runExport(format, res, fps) {
   const segs = buildEDL();
   if (!segs.length) { flash(tr('video.needImport')); return; }
   format = format || 'mp4';
@@ -1718,10 +1718,10 @@ async function runExport(format, quality, fps) {
   const off = api.video.onExportProgress(({ outTimeMs }) => {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
-  let res;
-  try { res = await api.video.export({ segments: segs, outPath: r.filePath, format, quality, fps }); }
+  let result;
+  try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps }); }
   finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
-  flash(res.ok ? tr('video.exportDone') : tr('video.exportFail', { err: res.error || '' }));
+  flash(result.ok ? tr('video.exportDone') : tr('video.exportFail', { err: result.error || '' }));
 }
 
 // ── 임포트 ──────────────────────────────────────────
