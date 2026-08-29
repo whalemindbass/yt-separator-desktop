@@ -1242,9 +1242,12 @@ ipcMain.handle('video:export', async (event, payload) => {
       parts.push(`[${bIdx}:v]trim=duration=${s.dur.toFixed(3)},setpts=PTS-STARTPTS,scale=${w}:${h}[${base}]`);
       [...s.layers].reverse().forEach((layer, li) => {
         const raw = `v${i}_l${li}`;
+        // transform 은 두 모양을 받는다 — {x,y,scale}(트랙 PIP, 가로세로 같은 비율로만
+        // 확대/축소) 또는 {x,y,w,h}(클립 단위 배치·추적 키프레임, 가로세로 따로 — 트래킹된
+        // 상자는 원본 오버레이 비율과 안 맞을 수 있어 독립적으로 필요하다).
         const tf = layer.transform;
-        const lw = tf ? Math.max(2, Math.round(w * tf.scale)) : w;
-        const lh = tf ? Math.max(2, Math.round(h * tf.scale)) : h;
+        const lw = tf ? Math.max(2, Math.round(w * (tf.w != null ? tf.w : tf.scale))) : w;
+        const lh = tf ? Math.max(2, Math.round(h * (tf.h != null ? tf.h : tf.scale))) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
         parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);

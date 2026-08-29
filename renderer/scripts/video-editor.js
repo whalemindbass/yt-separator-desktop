@@ -57,8 +57,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes })),
     resolution: _veResolution,
   };
 }
@@ -1733,6 +1733,28 @@ function fadeFieldsFor(c) {
   if (c.fadeOut) { f.fadeOutSt = c.inOff + c.dur - c.fadeOut; f.fadeOutD = c.fadeOut; }
   return f;
 }
+// 키프레임(clip.trackKeyframes, 클립 로컬 시각 t 기준 {t,x,y,w,h} 배열)에서 임의 시각의
+// 위치를 선형보간한다 — 배열은 이미 시간순으로 쌓인다(트래킹이 프레임 순서대로 채운다).
+function interpolateKeyframes(kfs, t) {
+  if (!kfs.length) return null;
+  if (t <= kfs[0].t) return kfs[0];
+  if (t >= kfs[kfs.length - 1].t) return kfs[kfs.length - 1];
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const a = kfs[i], b = kfs[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const m = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0;
+      return { x: a.x + (b.x - a.x) * m, y: a.y + (b.y - a.y) * m, w: a.w + (b.w - a.w) * m, h: a.h + (b.h - a.h) * m };
+    }
+  }
+  return kfs[kfs.length - 1];
+}
+// 이 클립이 그 절대 시각(absT)에 화면 어디에 놓이는지 — 추적 키프레임이 있으면 보간값,
+// 없으면 클립 자체 위치(도형/이미지 개별 배치), 그것도 없으면 트랙 전체 PIP 위치.
+function clipTransformAt(c, track, absT) {
+  if (c.trackKeyframes && c.trackKeyframes.length) return interpolateKeyframes(c.trackKeyframes, absT - c.start);
+  if (c.transform) return c.transform;
+  return track.transform;
+}
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
@@ -1759,7 +1781,13 @@ function buildEDL() {
   // 정확히 구간이 갈라져서, 걸치는 클립을 따로 잘라 넣을 필요 없이 범위 밖 구간만 건너뛰면 된다.
   const range = _veExportRange;
   const bounds = new Set([0]);
-  for (const c of _veClips) { bounds.add(c.start); bounds.add(c.start + c.dur); }
+  for (const c of _veClips) {
+    bounds.add(c.start); bounds.add(c.start + c.dur);
+    // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 그래야 그 사이마다 세그먼트가
+    // 잘게 갈라져서 각자 다른(보간된) 위치로 내보내진다("애니메이션"은 여기, 잘게 쪼갠 정적
+    // PIP 세그먼트를 이어붙이는 걸로 구현한다 — ffmpeg 쪽엔 새 코드가 필요 없다).
+    if (c.trackKeyframes) for (const kf of c.trackKeyframes) bounds.add(c.start + kf.t);
+  }
   if (range) { bounds.add(range.start); bounds.add(range.end); }
   const pts = [...bounds].sort((a, b) => a - b);
   const segs = [];
@@ -1778,7 +1806,8 @@ function buildEDL() {
       if (here.length) activeVideo.push({ track, clips: here });
     }
     const top = activeVideo[0];
-    const topFillsFrame = !top || !top.track.transform;   // 기본 transform = 화면 꽉 채움
+    // 기본(트랙 PIP·클립 개별 위치·추적 키프레임 다 없음) = 화면 꽉 채움.
+    const topFillsFrame = !top || !clipTransformAt(top.clips[0], top.track, mid);
     const relevantVideo = topFillsFrame ? (top ? [top] : []) : activeVideo;
 
     // 오디오 소스 모으기 — 화면에 실제로 반영되는 영상 트랙들의 자체 오디오(있으면) +
@@ -1801,7 +1830,7 @@ function buildEDL() {
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
           const flip = chainFlip(c.effects);
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a, texts: collectTexts(mid),
       });
