@@ -36,6 +36,13 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await wait(50);
   expect('버튼 누르면 메뉴 열림', await js(`document.getElementById('ve-add-track-menu').hidden`), false);
   expect('메뉴 항목 3개(영상/오디오/텍스트)', await js(`document.querySelectorAll('#ve-add-track-menu [data-kind]').length`), 3);
+  const menuBounds = await js(`(() => {
+    const r = document.getElementById('ve-add-track-menu').getBoundingClientRect();
+    return JSON.stringify({ left: r.left, right: r.right, winW: window.innerWidth });
+  })()`);
+  const { left: mLeft, right: mRight, winW } = JSON.parse(menuBounds);
+  expect('메뉴가 창 왼쪽 밖으로 안 나감', mLeft >= 0, true);
+  expect('메뉴가 창 오른쪽 밖으로 안 나감', mRight <= winW, true);
   await js(`document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(50);
   expect('선택하면 메뉴 닫힘', await js(`document.getElementById('ve-add-track-menu').hidden`), true);

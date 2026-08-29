@@ -21,11 +21,13 @@ spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=0xDC3C1E:size=${W}x${H}:dur
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', RED], { stdio: 'ignore' });
 if (!fs.existsSync(RED)) throw new Error('ffmpeg 로 테스트 mp4 생성 실패');
 
-// userData 를 부팅 *전에* 준비해서 예전 형식(clip.color/clip.fx 고정 슬롯) 프로젝트를
-// 미리 심어둔다 — loadProject() 가 처음 영상 탭을 열 때 이걸 읽고 마이그레이션해야 한다.
+// 예전 형식(clip.color/clip.fx 고정 슬롯) 프로젝트를 .dsvproj 파일로 준비해 둔다 — 프로그램은
+// 이제 시작할 때 자동으로 아무것도 안 불러오므로(요청), "열기" 버튼으로 직접 열어서
+// migrateClipEffects() 가 그 시점에 잘 옮기는지 확인한다.
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'yss-vefx2-profile-'));
 app.setPath('userData', PROFILE);
-fs.writeFileSync(path.join(PROFILE, 'videoProject.json'), JSON.stringify({
+const LEGACY_PROJ = path.join(TMP, 'legacy.dsvproj');
+fs.writeFileSync(LEGACY_PROJ, JSON.stringify({
   tracks: [{ id: 1, name: '', color: '#35d1a6', height: 72, hidden: false, kind: 'video' }],
   clips: [{
     id: 1, trackId: 1, file: RED, name: 'red.mp4', start: 0, inOff: 0, srcDur: 2, dur: 2, w: W, h: H,
@@ -33,6 +35,7 @@ fs.writeFileSync(path.join(PROFILE, 'videoProject.json'), JSON.stringify({
     color: { b: 20, c: 0, s: -30 }, fx: { bw: false, sepia: true, blur: 5 },
   }],
 }));
+dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [LEGACY_PROJ] });
 
 const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
@@ -56,10 +59,13 @@ async function exportSegments(js, segments, outPath) {
   await wait(500);
 
   section('1) 예전 clip.color/clip.fx(고정 슬롯) 프로젝트 → effects[] 마이그레이션');
-  expect('부팅 시 예전 프로젝트의 클립 1개가 그대로 복원됨', await js(`document.querySelectorAll('.ve-clip').length`), 1);
+  expect('부팅 직후엔 빈 프로젝트(자동 복원 안 함)', await js(`document.querySelectorAll('.ve-clip').length`), 0);
+  await js(`document.getElementById('ve-open-project').click(); true`);
+  await wait(300);
+  expect('"열기"로 예전 프로젝트를 불러오면 클립 1개가 복원됨', await js(`document.querySelectorAll('.ve-clip').length`), 1);
   const projFile = path.join(PROFILE, 'videoProject.json');
-  // 마이그레이션 자체는 로드 시점에 메모리에서 일어난다 — 뭐라도 하나 편집을 트리거해서
-  // scheduleSave 가 새 형식으로 다시 써지게 한다(단순 조회만으론 자동 저장 안 됨).
+  // 마이그레이션 자체는 열기 시점에 메모리에서 일어난다 — 뭐라도 하나 편집을 트리거해서
+  // scheduleSave(조용한 자동 저장 안전망) 가 새 형식으로 다시 써지게 한다.
   await js(`document.getElementById('ve-zoom-in').click(); true`);
   await wait(1000);   // scheduleSave 디바운스(600ms)
   let saved = null;

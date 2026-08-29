@@ -56,8 +56,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, flipH, flipV, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg })),
     resolution: _veResolution,
   };
 }
@@ -74,18 +74,20 @@ function applyVideoProjectData(p) {
   _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
   _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
   _veResolution = p.resolution || null;
-  for (const c of _veClips) migrateClipEffects(c);
+  for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); }
   _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
   ensureLayers();
   return true;
 }
 let _loaded = false;
 async function loadProject() {
+  // 프로그램을 새로 시작하면 항상 빈 프로젝트다 — 예전엔 조용한 자동 저장(userData 의
+  // videoProject.json)을 여기서 그대로 불러왔는데, "언제 뭘 열었는지" 사용자가 통제할 수
+  // 없어 혼란스러웠다(요청). 이제 그 자동 저장은 그냥 안전망으로 계속 쓰기만 하고(기록은
+  // 남지만) 시작할 때 자동으로 반영하지 않는다 — 진짜로 불러오려면 "열기" 로 .dsvproj 를
+  // 직접 골라야 한다.
   if (_loaded) return; _loaded = true;
-  const p = await api.videoProject.load();
-  applyVideoProjectData(p);
   syncResUI();
-  checkMissingFiles();
 }
 // 불러온(자동 복원이든 .dsvproj 열기든) 클립이 가리키는 원본 파일이 그새 삭제/이동됐는지
 // 확인한다 — 타임라인에서 빨간 X로 바로 보여야 "왜 이 클립이 안 나오지" 헤매지 않는다.
@@ -385,6 +387,12 @@ const EFFECT_TYPES = {
   bw:         { i18n: 'video.fxBw',    kind: 'toggle' },
   sepia:      { i18n: 'video.fxSepia', kind: 'toggle' },
   blur:       { i18n: 'video.fxBlur',  kind: 'range', min: 0, max: 20, def: 0 },
+  // 좌우/상하 반전 — 예전엔 툴바 버튼 두 개(클립당 켜짐/꺼짐 하나씩)였는데, 다른 색보정
+  // 효과들처럼 체인에 여러 번 넣었다 뺐다 할 수 있어야 한다는 요청으로 효과 목록에
+  // 편입했다. CSS filter 가 아니라 transform 이라 effectsChainCss 엔 안 들어간다 —
+  // chainFlip() 이 체인을 스캔해서 따로 뽑는다.
+  flipH: { i18n: 'video.flipH', kind: 'toggle' },
+  flipV: { i18n: 'video.flipV', kind: 'toggle' },
 };
 let _effectSeq = 0;
 function nextEffectId() { return ++_effectSeq; }
@@ -403,6 +411,18 @@ function effectsChainCss(effects) {
   if (!effects || !effects.length) return '';
   return effects.filter(e => e.enabled !== false).map(effectCssFrag).filter(Boolean).join(' ');
 }
+// 반전은 CSS filter 가 아니라 transform 이라 위 함수엔 안 들어간다 — 체인에서 켜진
+// flipH/flipV 항목 개수로 홀짝을 따진다(두 번 뒤집으면 원래대로 — 실제 CSS transform:
+// scaleX(-1) 을 두 번 곱하면 1이 되는 것과 같은 동작이라 자연스럽다).
+function chainFlip(effects) {
+  let h = false, v = false;
+  for (const e of effects || []) {
+    if (e.enabled === false) continue;
+    if (e.type === 'flipH') h = !h;
+    else if (e.type === 'flipV') v = !v;
+  }
+  return { h, v };
+}
 // 클립에 새 효과 추가 — 같은 타입 여러 개도 허용한다(예: 블러 두 번 겹쳐 더 강하게).
 function addClipEffect(clip, type) {
   if (!EFFECT_TYPES[type]) return;
@@ -419,6 +439,15 @@ function toggleClipEffect(clip, effectId) {
   const e = clip.effects?.find(x => x.id === effectId); if (!e) return;
   e.enabled = !e.enabled;
   syncPreview(nowSec()); scheduleSave();
+}
+// h/v 단축키 편의 — 체인에 flipH/flipV 항목이 이미 있으면 켜고 끄고, 없으면 새로 넣는다.
+// 매번 새 항목을 추가하면 키를 여러 번 누를수록 체인만 계속 길어진다(효과 자체는 상쇄돼
+// 화면엔 안 보여도 목록이 지저분해진다) — 있는 걸 재사용한다.
+function toggleClipFlip(clip, type) {
+  if (!clip || clip.isAudioOnly || clip.isText) return;
+  const existing = (clip.effects || []).find(e => e.type === type);
+  if (existing) toggleClipEffect(clip, existing.id);
+  else addClipEffect(clip, type);
 }
 function setClipEffectValue(clip, effectId, value) {
   const e = clip.effects?.find(x => x.id === effectId); if (!e) return;
@@ -449,6 +478,16 @@ function migrateClipEffects(clip) {
   }
   clip.effects = list;
   delete clip.color; delete clip.fx;
+}
+// 예전 clip.flipH/clip.flipV(불리언 두 개, 툴바 버튼 시절) → 체인의 flipH/flipV 토글
+// 항목으로. migrateClipEffects() 와 달리 clip.effects 가 이미 있어도(색보정 마이그레이션
+// 이후 이 세션 내내 그래왔다) 실행해야 한다 — 그래서 별도 함수, 별도 가드(플래그
+// 자체가 남아있는지)로 뗐다.
+function migrateClipFlip(clip) {
+  if (clip.isText) return;
+  if (clip.flipH) { clip.effects = clip.effects || []; clip.effects.push({ id: nextEffectId(), type: 'flipH', enabled: true }); }
+  if (clip.flipV) { clip.effects = clip.effects || []; clip.effects.push({ id: nextEffectId(), type: 'flipV', enabled: true }); }
+  delete clip.flipH; delete clip.flipV;
 }
 
 // ── 효과 체인 프리셋 — 클립이 아니라 앱 전역(localStorage)에 저장한다. 프로젝트를
@@ -639,7 +678,8 @@ function clipsAt(trackId, t) {
 function driveLayer(el, clip, t, visual) {
   if (visual) {
     el.hidden = false;
-    const sx = clip.flipH ? -1 : 1, sy = clip.flipV ? -1 : 1;
+    const flip = chainFlip(clip.effects);
+    const sx = flip.h ? -1 : 1, sy = flip.v ? -1 : 1;
     el.style.transform = (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : '';
     el.style.filter = effectsChainCss(clip.effects);
   }
@@ -1503,23 +1543,12 @@ function ungroupSelected() {
   );
   flash(tr('video.ungrouped'));
 }
-// 좌우/상하 반전 — 클립 단위(트랙 전체가 아니라 선택된 클립 하나만). 색·이름·숨김과
-// 같은 사소한 시각 속성 취급이라(PIP 위치와 같은 이유) undo 스택엔 안 담는다.
-function flipSelected(axis) {
-  if (_selClipId == null) return;
-  const c = _veClips.find(x => x.id === _selClipId); if (!c || c.isAudioOnly || c.isText) return;
-  const key = axis === 'h' ? 'flipH' : 'flipV';
-  c[key] = !c[key];
-  syncPreview(nowSec());
-  updateClipToolbarUI();
-  scheduleSave();
-}
+// 좌우/상하 반전은 이제 툴바 버튼이 아니라 효과 체인의 토글 항목(flipH/flipV,
+// EFFECT_TYPES) 이다 — addClipEffect(clip,'flipH') 로 켠다. 다른 색보정 효과처럼 순서
+// 상관없이 여러 번 넣었다 뺐다 할 수 있고(두 번 넣으면 서로 상쇄), 효과 패널에서만
+// 다룬다. 여기 있던 별도 flipSelected()/툴바 상태 갱신은 그래서 다 지웠다.
 function updateClipToolbarUI() {
   const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
-  const canFlip = !!c && !c.isAudioOnly && !c.isText;
-  const hBtn = $('ve-flip-h'), vBtn = $('ve-flip-v');
-  if (hBtn) { hBtn.disabled = !canFlip; hBtn.classList.toggle('on', !!c?.flipH); }
-  if (vBtn) { vBtn.disabled = !canFlip; vBtn.classList.toggle('on', !!c?.flipV); }
   // 효과 체인 패널(미리보기 왼쪽) — 선택이 바뀌거나 목록이 다시 그려질 때마다 여기서
   // 같이 새로고침한다. 패널 자체의 렌더 함수는 UI 쪽에서 정의.
   if (typeof renderEffectPanel === 'function') renderEffectPanel(c);
@@ -1610,7 +1639,8 @@ function buildEDL() {
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
+          const flip = chainFlip(c.effects);
+          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: track.transform, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
         }),
         audioSources, refW, refH, dur: b - a, texts: collectTexts(mid),
       });
@@ -1623,17 +1653,19 @@ function buildEDL() {
         // 같은 트랙 안 크로스페이드(겹쳐 끌어다 놓은 두 클립).
         const outC = clips[0], inC = clips[1];
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
+        const flipA = chainFlip(outC.effects), flipB = chainFlip(inC.effects);
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: outC.flipH, flipVA: outC.flipV, effectsA: outC.effects, hdrA: outC.hdr,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: inC.flipH, flipVB: inC.flipV, effectsB: inC.effects, hdrB: inC.hdr,
+          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: flipA.h, flipVA: flipA.v, effectsA: outC.effects, hdrA: outC.hdr,
+          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: flipB.h, flipVB: flipB.v, effectsB: inC.effects, hdrB: inC.hdr,
           refW, refH, texts: collectTexts((overlapStart + overlapEnd) / 2),
         });
         skipUntil = overlapEnd;
         continue;
       }
       const c = clips[0];
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: c.flipH, flipV: c.flipV, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
+      const flip = chainFlip(c.effects);
+      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
       continue;
     }
 
@@ -1826,8 +1858,6 @@ function wire() {
   $('ve-open-project')?.addEventListener('click', () => openProjectFile());
   $('ve-undo')?.addEventListener('click', () => doUndo());
   $('ve-redo')?.addEventListener('click', () => doRedo());
-  $('ve-flip-h')?.addEventListener('click', () => flipSelected('h'));
-  $('ve-flip-v')?.addEventListener('click', () => flipSelected('v'));
   $('ve-fx-add-btn')?.addEventListener('click', () => {
     const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
     toggleFxAddMenu(c);
@@ -1925,8 +1955,8 @@ function wire() {
     else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); doRedo(); }
     else if (e.key === 's' || e.key === 'S') splitAtPlayhead();
     else if (e.key === 'u' || e.key === 'U') ungroupSelected();   // Vegas Pro 와 같은 단축키
-    else if (e.key === 'h' || e.key === 'H') flipSelected('h');
-    else if (e.key === 'v' || e.key === 'V') flipSelected('v');
+    else if (e.key === 'h' || e.key === 'H') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipH'); renderEffectPanel(c); }
+    else if (e.key === 'v' || e.key === 'V') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipV'); renderEffectPanel(c); }
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
   });
   // 파일 드래그&드롭 — 빈 영역/기존 트랙 위 모두 받는다

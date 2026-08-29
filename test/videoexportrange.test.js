@@ -53,6 +53,12 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   const w = await js(`parseFloat(document.getElementById('ve-erange').style.width)`);
   near('구간 폭 ≈ 80px(2초)', w, 80, 3);
 
+  section('3b) 범위 선택 배경(eband) z-index — 트랙 헤드(컨트롤) 위로 안 덮여야 함');
+  expect('eband 보임', await js(`document.getElementById('ve-eband').hidden`), false);
+  const zBand = await js(`getComputedStyle(document.getElementById('ve-eband')).zIndex`);
+  const zHead2 = await js(`getComputedStyle(document.querySelector('.ve-head')).zIndex`);
+  expect('범위 배경 z-index < 헤드 z-index(재생선 때와 같은 버그)', Number(zBand) < Number(zHead2), true);
+
   section('4) 구간 있는 상태로 내보내기 — 결과물 길이가 구간(2초)만큼만');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
   await js(`document.getElementById('ve-export').click(); true`);

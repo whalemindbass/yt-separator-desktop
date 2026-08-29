@@ -1173,8 +1173,6 @@
         <button id="ve-open-project" class="btn btn-sm" type="button" data-i18n="video.openProject">열기</button>
         <button id="ve-undo" class="ve-tbtn" type="button" data-i18n-title="video.undo" title="되돌리기">↶</button>
         <button id="ve-redo" class="ve-tbtn" type="button" data-i18n-title="video.redo" title="다시 실행">↷</button>
-        <button id="ve-flip-h" class="ve-tbtn" type="button" disabled data-i18n-title="video.flipH" title="좌우 반전">⇋</button>
-        <button id="ve-flip-v" class="ve-tbtn" type="button" disabled data-i18n-title="video.flipV" title="상하 반전">⇵</button>
         <select id="ve-res" class="ve-res-select">
           <option value="auto" data-i18n="video.resAuto">자동(첫 클립 기준)</option>
           <option value="1920x1080">16:9 · 1920×1080</option>
@@ -1197,11 +1195,6 @@
         <span id="ve-time" class="ve-time">0:00.000</span>
       </div>
       <div class="ve-toolbar-r">
-        <button id="ve-range-mode" class="ve-tbtn" type="button" aria-pressed="false" data-i18n-title="video.rangeModeTitle" title="영역 선택 모드 — 눈금자를 드래그해 내보내기 구간 지정">
-          <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg>
-        </button>
-        <button id="ve-zoom-out" class="ve-tbtn" type="button" title="−">−</button>
-        <button id="ve-zoom-in" class="ve-tbtn" type="button" title="＋">＋</button>
         <select id="ve-format" class="ve-res-select" data-i18n-title="video.formatTitle" title="내보내기 포맷">
           <option value="mp4">MP4 · H.264</option>
           <option value="mov">MOV · H.264</option>
@@ -1239,7 +1232,13 @@
     </div>
     <div class="ve-tscroll" id="ve-tscroll">
       <div class="ve-ruler-wrap" id="ve-ruler-wrap">
-        <div class="ve-ruler-ctrl"></div>
+        <div class="ve-ruler-ctrl">
+          <button id="ve-range-mode" class="ve-tbtn" type="button" aria-pressed="false" data-i18n-title="video.rangeModeTitle" title="영역 선택 모드 — 눈금자를 드래그해 내보내기 구간 지정">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg>
+          </button>
+          <button id="ve-zoom-out" class="ve-tbtn" type="button" title="−">−</button>
+          <button id="ve-zoom-in" class="ve-tbtn" type="button" title="＋">＋</button>
+        </div>
         <div class="ve-ruler" id="ve-ruler"></div>
       </div>
       <div class="ve-lanes" id="ve-lanes">
