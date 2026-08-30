@@ -40,6 +40,9 @@ let _lyricStarts = [];
 let _lyricIdx = 0;
 let _lyricLinesPerClip = 1;   // 자막 한 덩어리에 몇 줄씩 같이 보여줄지(1~3) — 화면에 한 줄만 뜨면
                               // 밋밋하다는 요청으로, 다음 줄 미리보기처럼 여러 줄을 묶어 보여줄 수 있게 했다.
+let _lyricChunkSize = 1;     // startLyricTiming() 시점에 _lyricLinesPerClip 을 고정해 둔 값 —
+                              // 3으로 설정했으면 Enter 한 번에 3줄이 통째로 다음으로 넘어가야
+                              // 한다("3줄로 설정했으면 엔터당 3줄씩 넘어가야지" 피드백 반영).
 
 function nextTrackId() { return ++_trackSeq; }
 function nextClipId() { return ++_clipSeq; }
@@ -2393,13 +2396,21 @@ function renderLyricPanel() {
     body.querySelector('#ve-lyric-start').addEventListener('click', startLyricTiming);
     body.querySelector('#ve-lyric-srt').addEventListener('click', exportSrt);
   } else {
+    // _lyricIdx/_lyricStarts 는 이제 "줄" 단위가 아니라 "덩어리(_lyricChunkSize 줄씩)"
+    // 단위다 — 3줄로 설정했으면 Enter 한 번에 3줄이 통째로 armed→기록 상태로 넘어가야
+    // 한다(한 줄씩 넘어가면 설정한 줄 수가 의미가 없다). 같은 덩어리에 속한 줄들은
+    // 전부 같이 강조되고, 지나간 덩어리는 그 덩어리가 기록된 시각을 같이 보여준다.
     const rows = _lyricLines.map((line, i) => {
-      const done = i < _lyricIdx, cur = i === _lyricIdx;
-      const ts = _lyricStarts[i] != null ? fmtTC(_lyricStarts[i]) : '';
+      const chunkIdx = Math.floor(i / _lyricChunkSize);
+      const done = chunkIdx < _lyricIdx, cur = chunkIdx === _lyricIdx;
+      const ts = _lyricStarts[chunkIdx] != null ? fmtTC(_lyricStarts[chunkIdx]) : '';
       return `<div class="ve-lyric-row${cur ? ' cur' : ''}${done ? ' done' : ''}"><span class="ve-lyric-ts">${ts}</span><span class="ve-lyric-txt">${esc(line)}</span></div>`;
     }).join('');
+    const hint = _lyricChunkSize > 1
+      ? tr('video.lyricTimingHintN', { n: _lyricChunkSize })
+      : tr('video.lyricTimingHint');
     body.innerHTML = `
-      <p class="ve-lyric-hint">${tr('video.lyricTimingHint')}</p>
+      <p class="ve-lyric-hint">${esc(hint)}</p>
       <div class="ve-lyric-list" id="ve-lyric-list">${rows}</div>
       <div style="display:flex;justify-content:flex-end;margin-top:12px">
         <button class="mini" id="ve-lyric-cancel">${tr('video.cancel')}</button>
@@ -2413,18 +2424,23 @@ function startLyricTiming() {
   const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
   if (!lines.length) { flash(tr('video.lyricEmpty')); return; }
   _lyricLines = lines; _lyricStarts = []; _lyricIdx = 0; _lyricTiming = true;
+  // 세션 도중엔 선택지 자체가 화면에서 사라지니(타이밍 뷰로 바뀜) 바뀔 일이 없지만,
+  // 그래도 그때그때 _lyricLinesPerClip 을 다시 읽지 않고 시작 시점 값으로 고정해 둔다.
+  _lyricChunkSize = Math.max(1, Math.min(3, _lyricLinesPerClip || 1));
   // 텍스트칸에 포커스가 남아 있으면 전역 keydown 가드(INPUT/TEXTAREA 는 단축키 무시)가
   // Enter/Esc 를 막아버린다 — 타이밍을 시작하는 순간 포커스를 놓는다.
   document.activeElement?.blur?.();
   renderLyricPanel();
 }
-// Enter — "지금 armed 된 줄"이 바로 이 순간(재생선 위치)부터 시작한다고 찍고 다음 줄로.
-// 줄 수만큼 누르면 끝(마지막 줄의 끝은 다음 줄이 없으니 기본 3초로 채운다 — finishLyricTiming).
+// Enter — "지금 armed 된 덩어리"(_lyricChunkSize 줄)가 바로 이 순간(재생선 위치)부터
+// 시작한다고 통째로 찍고 다음 덩어리로. 덩어리 수만큼 누르면 끝(마지막 덩어리의 끝은
+// 다음이 없으니 기본 3초로 채운다 — finishLyricTiming).
+function totalLyricChunks() { return Math.ceil(_lyricLines.length / _lyricChunkSize); }
 function stepLyricTiming() {
   if (!_lyricTiming) return;
   _lyricStarts[_lyricIdx] = nowSec();
   _lyricIdx++;
-  if (_lyricIdx >= _lyricLines.length) { finishLyricTiming(false); return; }
+  if (_lyricIdx >= totalLyricChunks()) { finishLyricTiming(false); return; }
   renderLyricPanel();
 }
 function finishLyricTiming(cancel) {
@@ -2436,19 +2452,16 @@ function finishLyricTiming(cancel) {
     if (createdTrack) tid = newTextTrack(false);
     const trackRef = createdTrack ? _veTracks.find(t => t.id === tid) : null;
     const created = [];
-    // 한 덩어리에 몇 줄씩 묶을지(1~3, _lyricLinesPerClip) — 찍은 줄들을 그 수만큼 순서대로
-    // 묶어 자막 하나로 만든다. 덩어리의 끝은 다음 덩어리 첫 줄이 시작하는 시각(없으면
-    // 그 덩어리 마지막 줄 시각 + 기본 3초)까지다.
-    const k = Math.max(1, Math.min(3, _lyricLinesPerClip || 1));
-    for (let i = 0; i < _lyricStarts.length; i += k) {
-      const chunkEnd = Math.min(i + k, _lyricStarts.length);
-      const start = _lyricStarts[i];
-      const nextStart = _lyricStarts[chunkEnd];
-      const lastInChunk = _lyricStarts[chunkEnd - 1];
-      const dur = Math.max(0.3, (nextStart != null ? nextStart : lastInChunk + 3) - start);
+    // 덩어리마다 Enter 를 한 번씩만 눌렀으니 시각도 하나뿐이다 — 끝은 다음 덩어리가
+    // 시작하는 시각(없으면 이 덩어리 자기 시각 + 기본 3초)까지.
+    for (let ci = 0; ci < _lyricStarts.length; ci++) {
+      const start = _lyricStarts[ci];
+      const nextStart = _lyricStarts[ci + 1];
+      const dur = Math.max(0.3, (nextStart != null ? nextStart : start + 3) - start);
+      const lineStart = ci * _lyricChunkSize, lineEnd = Math.min(_lyricLines.length, lineStart + _lyricChunkSize);
       const clip = {
         id: nextClipId(), trackId: tid, isText: true, start, dur, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
-        text: _lyricLines.slice(i, chunkEnd).join('\n'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
+        text: _lyricLines.slice(lineStart, lineEnd).join('\n'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
       };
       _veClips.push(clip); created.push(clip);
     }
@@ -2457,7 +2470,7 @@ function finishLyricTiming(cancel) {
       () => { if (createdTrack) _veTracks.unshift(trackRef); _veClips.push(...created); },
     );
     ensureLayers(); layout();
-    flash(tr('video.lyricDone', { n: _lyricStarts.length }));
+    flash(tr('video.lyricDone', { n: created.length }));
   }
   const panel = $('ve-lyric-panel'); if (panel) panel.hidden = true;
 }

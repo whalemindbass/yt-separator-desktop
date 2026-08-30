@@ -129,7 +129,7 @@ function panelHidden(js) { return js(`document.getElementById('ve-lyric-panel').
   await wait(80);
   expect('✕ 버튼으로 닫힘', await panelHidden(js), true);
 
-  section('7) "한 번에 보여줄 줄 수"=2 — 4줄을 2줄씩 묶어서 자막 2개로');
+  section('7) "한 번에 보여줄 줄 수"=2 — Enter 한 번에 2줄씩 통째로 넘어감(4줄 → Enter 2번만)');
   await js(`document.getElementById('ve-lyrics').click(); true`);
   await wait(100);
   await js(`(() => { document.getElementById('ve-lyric-lpc').value = '2';
@@ -137,21 +137,22 @@ function panelHidden(js) { return js(`document.getElementById('ve-lyric-panel').
   await js(`(() => { document.getElementById('ve-lyric-text').value = 'A줄\\nB줄\\nC줄\\nD줄'; })(); true`);
   await js(`document.getElementById('ve-lyric-start').click(); true`);
   await wait(100);
-  await seekViaRuler(js, 10, pxPerSec); await pressEnter(js); await wait(80);   // A
-  await seekViaRuler(js, 12, pxPerSec); await pressEnter(js); await wait(80);   // B
-  await seekViaRuler(js, 15, pxPerSec); await pressEnter(js); await wait(80);   // C
-  await seekViaRuler(js, 20, pxPerSec); await pressEnter(js); await wait(200);  // D(자동 완료)
+  const hint2 = await js(`document.querySelector('.ve-lyric-hint')?.textContent`);
+  expect('안내 문구가 "2줄씩" 넘어간다고 알려줌', hint2?.includes('2줄'), true);
+  await seekViaRuler(js, 10, pxPerSec); await pressEnter(js); await wait(80);   // A+B 덩어리
+  const curAfter1 = await js(`[...document.querySelectorAll('.ve-lyric-row.cur')].map(el => el.querySelector('.ve-lyric-txt').textContent)`);
+  expect('첫 Enter 한 번으로 다음 덩어리(C,D 두 줄)가 한꺼번에 강조됨', curAfter1, ['C줄', 'D줄']);
+  await seekViaRuler(js, 15, pxPerSec); await pressEnter(js); await wait(200);  // C+D 덩어리(마지막 → 자동 완료)
 
   const grouped = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll('.ve-clip.text')].map(el => ({
     left: parseFloat(el.style.left), width: parseFloat(el.style.width),
   })))`));
   const newOnes = grouped.filter(c => c.left >= 9 * pxPerSec).sort((a, b) => a.left - b.left);
-  expect('4줄을 2줄씩 묶어서 자막 2개만 새로 생김', newOnes.length, 2);
-  near('첫 덩어리(A+B) 시작 ≈ 10초', newOnes[0].left / pxPerSec, 10, 0.15);
-  near('첫 덩어리 길이 ≈ 5초(다음 덩어리 C 시작까지)', newOnes[0].width / pxPerSec, 5, 0.15);
-  near('둘째 덩어리(C+D) 시작 ≈ 15초', newOnes[1].left / pxPerSec, 15, 0.15);
-  // C=15초, D=20초 — 다음 덩어리가 없으니 "마지막 줄(D) 시각 + 기본 3초"까지: 23-15=8초.
-  near('둘째 덩어리 길이 = D 시각(20)+기본 3초 - 시작(15) = 8초', newOnes[1].width / pxPerSec, 8, 0.15);
+  expect('4줄을 2줄씩 묶어서 자막 2개만 새로 생김(Enter 2번으로 끝)', newOnes.length, 2);
+  near('첫 덩어리(A+B) 시작 ≈ 10초(첫 Enter 시각)', newOnes[0].left / pxPerSec, 10, 0.15);
+  near('첫 덩어리 길이 ≈ 5초(둘째 덩어리 Enter 시각까지)', newOnes[0].width / pxPerSec, 5, 0.15);
+  near('둘째 덩어리(C+D) 시작 ≈ 15초(둘째 Enter 시각)', newOnes[1].left / pxPerSec, 15, 0.15);
+  near('마지막 덩어리 길이 = 기본 3초(다음이 없어서)', newOnes[1].width / pxPerSec, 3, 0.15);
 
   section('8) SRT로 내보내기 — 표준 타임코드 형식으로 실제 파일에 저장되는지(그룹 자막의 여러 줄도 포함)');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: SRT_OUT });
