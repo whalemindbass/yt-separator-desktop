@@ -53,10 +53,12 @@ async function dragBy(js, selector, dx, dy) {
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
   expect('PIP 박스가 미리보기에 나타남', await js(`!!document.querySelector('.ve-pip-box')`), true);
-  // 처음엔 scale=1(풀프레임)이라 이동 여지가 없다 — 먼저 숫자칸으로 축소.
+  // 처음엔 w=h=100%(풀프레임)이라 이동 여지가 없다 — 먼저 숫자칸으로 축소.
   await js(`(() => {
-    const el = document.getElementById('pip-scale'); el.value = 30;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('pip-w').value = 30;
+    document.getElementById('pip-w').dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('pip-h').value = 30;
+    document.getElementById('pip-h').dispatchEvent(new Event('input', { bubbles: true }));
   })(); true`);
   await wait(80);
   expect('숫자칸 축소가 박스 크기에도 반영됨', await js(`document.querySelector('.ve-pip-box').style.width`), '30%');
@@ -68,11 +70,14 @@ async function dragBy(js, selector, dx, dy) {
   expect('박스 드래그(오른쪽 아래)로 pip-x 증가', pipX1 > 0, true);
   expect('박스 드래그로 pip-y 증가', pipY1 > 0, true);
 
-  const scaleBefore = Number(await js(`document.getElementById('pip-scale').value`));
+  const wBefore = Number(await js(`document.getElementById('pip-w').value`));
+  const hBefore = Number(await js(`document.getElementById('pip-h').value`));
   await dragBy(js, '.ve-pip-box-handle', 30, 30);
   await wait(80);
-  const scaleAfter = Number(await js(`document.getElementById('pip-scale').value`));
-  expect('모서리 핸들 드래그로 pip-scale 커짐', scaleAfter > scaleBefore, true);
+  const wAfter = Number(await js(`document.getElementById('pip-w').value`));
+  const hAfter = Number(await js(`document.getElementById('pip-h').value`));
+  expect('모서리 핸들 드래그로 폭 커짐', wAfter > wBefore, true);
+  expect('모서리 핸들 드래그로 높이도 커짐', hAfter > hBefore, true);
 
   section('2) 실제 export 에도 캔버스 드래그 결과가 반영되는가(픽셀 검증)');
   const OUT = path.join(TMP, 'out_pip.mp4');

@@ -56,8 +56,8 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await js(`(() => {
     const btns = document.querySelectorAll('.ve-lane .ve-pip');
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    btns[0].click(); set('pip-x', 0); set('pip-y', 0); set('pip-scale', 25);
-    btns[1].click(); set('pip-x', 75); set('pip-y', 0); set('pip-scale', 25);
+    btns[0].click(); set('pip-x', 0); set('pip-y', 0); set('pip-w', 25); set('pip-h', 25);
+    btns[1].click(); set('pip-x', 75); set('pip-y', 0); set('pip-w', 25); set('pip-h', 25);
   })(); true`);
   await wait(200);
 

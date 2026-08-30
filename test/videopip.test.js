@@ -110,7 +110,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 70); set('pip-y', 10); set('pip-scale', 25);
+    set('pip-x', 70); set('pip-y', 10); set('pip-w', 25); set('pip-h', 25);
   })(); true`);
   await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {

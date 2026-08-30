@@ -37,7 +37,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await wait(100);
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-scale', 50);
+    set('pip-w', 50); set('pip-h', 50);
   })(); true`);
   await wait(80);
   // 미리보기 실제 폭 기준으로, "옛날 클램프였다면 최대 50%(=100-scale)까지만" 이었을 값을
@@ -58,10 +58,12 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await wait(80);
   const pipX = Number(await js(`document.getElementById('pip-x').value`));
   const pipY = Number(await js(`document.getElementById('pip-y').value`));
-  const pipScale = Number(await js(`document.getElementById('pip-scale').value`));
+  const pipW = Number(await js(`document.getElementById('pip-w').value`));
+  const pipH = Number(await js(`document.getElementById('pip-h').value`));
   expect('scale=50 일 때 예전 클램프 상한(50)을 넘어감 — 테두리에 안 묶임', pipX > 50, true);
   expect('세로도 마찬가지로 상한을 넘어감', pipY > 50, true);
-  expect('scale 자체는 안 바뀜(위치만 드래그)', pipScale, 50);
+  expect('폭 자체는 안 바뀜(위치만 드래그)', pipW, 50);
+  expect('높이 자체도 안 바뀜(위치만 드래그)', pipH, 50);
 
   section('2) export — 실제로 잘려서 나오는지(overlay 가 프레임 밖 좌표를 알아서 클리핑)');
   const OUT = path.join(TMP, 'out.mp4');
@@ -84,7 +86,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
     const total = d.length / 3;
     expect('클램프 없었다면 나왔을 25%보다 훨씬 적게 보임(실제로 잘림)', blue < total * 0.2, true);
     expect('그래도 조금은 보임(완전히 사라지진 않음)', blue > 0, true);
-    console.log(`  blue px ${blue} / ${total} (${(blue / total * 100).toFixed(1)}%) — pip-x=${pipX} pip-y=${pipY} scale=${pipScale}`);
+    console.log(`  blue px ${blue} / ${total} (${(blue / total * 100).toFixed(1)}%) — pip-x=${pipX} pip-y=${pipY} w=${pipW} h=${pipH}`);
   }
 
   finish(app);

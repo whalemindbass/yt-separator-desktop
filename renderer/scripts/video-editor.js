@@ -77,6 +77,7 @@ function applyVideoProjectData(p) {
   _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
   _veResolution = p.resolution || null;
   _veExtraSec = 0;
+  for (const t of _veTracks) migrateTrackTransform(t);
   for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); migrateClipShapeTransform(c); }
   _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
   ensureLayers();
@@ -255,15 +256,17 @@ function ensureLayers() {
   });
 }
 // 트랙 단위 위치/크기(PIP) — 레이어 그림을 다루듯 구석에 작게 놓거나 확대할 수 있게.
-// 애니메이션(키프레임)은 v1 범위 밖 — 트랙 전체에 고정값 하나만 적용한다.
-function defaultTransform() { return { x: 0, y: 0, scale: 1 }; }
+// 애니메이션(키프레임)은 v1 범위 밖 — 트랙 전체에 고정값 하나만 적용한다. w/h 를 따로
+// 가진다(항상 정사각 비율로만 확대·축소하던 예전 scale 방식에서 바꿈 — "가로세로 비율을
+// 못 바꾼다"는 요청 반영) — lock 이 켜졌을 때만 비율을 유지한다.
+function defaultTransform() { return { x: 0, y: 0, w: 1, h: 1, lock: false }; }
 function applyTrackTransform(pair, track) {
   const tf = track.transform || defaultTransform();
   for (const el of [pair.a, pair.b]) {
     el.style.left = (tf.x * 100) + '%';
     el.style.top = (tf.y * 100) + '%';
-    el.style.width = (tf.scale * 100) + '%';
-    el.style.height = (tf.scale * 100) + '%';
+    el.style.width = (tf.w * 100) + '%';
+    el.style.height = (tf.h * 100) + '%';
     // 기본값(트랙 전체 채움)일 땐 CSS object-fit:contain 이 main.js 의 scalePad(비율 유지
     // 레터박스)와 맞는다. 트랙 PIP 가 걸리면 main.js 는 그 자리에 scale=lw:lh 로 그냥
     // 늘려 넣는다(비율 무시) — 미리보기도 똑같이 늘려야 실제 결과랑 어긋나지 않는다.
@@ -288,40 +291,33 @@ function applyClipTransform(el, clip, track, t) {
   // 위치/트랙 PIP) main.js 는 그 자리에서 비율 무시하고 늘려 넣는다.
   el.classList.toggle('ve-stretch', !!(hasKf || clip.transform || track.transform));
 }
-// ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다. 레이어처럼 구석에 작게 놓거나
-// 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나). 숫자 입력칸과 함께, 미리보기
-// 위에 직접 드래그(이동)·모서리 드래그(크기)할 수 있는 박스도 같이 띄운다 — 다른 편집기
-// 처럼 "숫자로만"이 아니라 화면 보면서 바로 조정 가능해야 한다는 요청 반영. 박스도
-// 숫자 입력칸도 같은 track.transform 을 보고 있어서 어느 쪽을 조작해도 서로 즉시 맞는다.
-let _pipPopoverEl = null, _pipBoxEl = null;
-function onOutsidePip(e) {
-  if (_pipPopoverEl && !_pipPopoverEl.contains(e.target) && !(_pipBoxEl && _pipBoxEl.contains(e.target))) closePipPopover();
+// ── 위치/크기 박스 — 미리보기 위에서 직접 드래그(이동)·모서리 드래그(크기)할 수 있다.
+// 트랙 PIP(비디오 레이어 전체)와 도형/이미지 클립 개별 배치가 똑같은 박스·손잡이 UI 를
+// 쓴다 — get()/set() 으로 어느 transform 을 다루는지만 다르게 넘긴다. "가로세로 비율
+// 고정" 은 이제 선택 사항(tf.lock) — 켜져 있으면 손잡이를 어느 방향으로 끌어도 시작
+// 시점의 w/h 비율을 그대로 유지하고(예전 scale 방식과 같은 감각), 꺼져 있으면 가로/세로를
+// 완전히 따로 늘릴 수 있다(도형처럼 원본 비율에 안 묶여도 되는 경우를 위한 요청 반영).
+let _boxEl = null;
+function closeResizeBox() { if (_boxEl) { _boxEl.remove(); _boxEl = null; } }
+function syncResizeBox(getTf) {
+  if (!_boxEl) return;
+  const tf = getTf();
+  _boxEl.style.left = (tf.x * 100) + '%'; _boxEl.style.top = (tf.y * 100) + '%';
+  _boxEl.style.width = (tf.w * 100) + '%'; _boxEl.style.height = (tf.h * 100) + '%';
 }
-function closePipPopover() {
-  if (_pipBoxEl) { _pipBoxEl.remove(); _pipBoxEl = null; }
-  if (!_pipPopoverEl) return;
-  _pipPopoverEl.remove(); _pipPopoverEl = null;
-  document.removeEventListener('pointerdown', onOutsidePip, true);
-}
-function syncPipBoxFromTransform(track) {
-  if (!_pipBoxEl) return;
-  const tf = track.transform || defaultTransform();
-  _pipBoxEl.style.left = (tf.x * 100) + '%'; _pipBoxEl.style.top = (tf.y * 100) + '%';
-  _pipBoxEl.style.width = (tf.scale * 100) + '%'; _pipBoxEl.style.height = (tf.scale * 100) + '%';
-}
-function createPipBox(track, onChange) {
+function createResizeBox(getTf, setTf, onChange) {
   const host = $('ve-preview'); if (!host) return;
   const box = document.createElement('div');
   box.className = 've-pip-box';
   box.innerHTML = `<div class="ve-pip-box-handle"></div>`;
   host.appendChild(box);
-  _pipBoxEl = box;
-  syncPipBoxFromTransform(track);
+  _boxEl = box;
+  syncResizeBox(getTf);
   box.addEventListener('pointerdown', (e) => {
     if (e.target.classList.contains('ve-pip-box-handle')) return;
     e.preventDefault(); e.stopPropagation();
     const hostRect = host.getBoundingClientRect();
-    const tf0 = track.transform || defaultTransform();
+    const tf0 = getTf();
     const startX = e.clientX, startY = e.clientY;
     try { box.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
@@ -330,8 +326,8 @@ function createPipBox(track, onChange) {
       // #ve-preview 바로 밑이라 안 잘리니 언제든 다시 끌고 돌아올 수 있다.
       const nx = tf0.x + (ev.clientX - startX) / hostRect.width;
       const ny = tf0.y + (ev.clientY - startY) / hostRect.height;
-      track.transform = { x: nx, y: ny, scale: tf0.scale };
-      syncPipBoxFromTransform(track);
+      setTf({ ...tf0, x: nx, y: ny });
+      syncResizeBox(getTf);
       onChange(false);
     };
     const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
@@ -340,20 +336,46 @@ function createPipBox(track, onChange) {
   box.querySelector('.ve-pip-box-handle').addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const hostRect = host.getBoundingClientRect();
-    const tf0 = track.transform || defaultTransform();
+    const tf0 = getTf();
     const startX = e.clientX, startY = e.clientY;
     try { e.target.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
-      const d = ((ev.clientX - startX) / hostRect.width + (ev.clientY - startY) / hostRect.height) / 2;
-      // 위치와 마찬가지로 테두리 기준 상한은 없다 — 0 이하/뒤집힘만 막는 최소한의 안전장치.
-      const scale = Math.max(0.05, Math.min(4, tf0.scale + d));
-      track.transform = { x: tf0.x, y: tf0.y, scale };
-      syncPipBoxFromTransform(track);
+      const dxF = (ev.clientX - startX) / hostRect.width;
+      const dyF = (ev.clientY - startY) / hostRect.height;
+      let w, h;
+      if (tf0.lock) {
+        // 대각선 이동량 평균을 확대율처럼 써서 가로세로를 같은 비율로 늘린다(예전 scale
+        // 방식과 같은 감각) — w/h 비율 자체는 드래그를 시작한 시점 값을 그대로 지킨다.
+        const factor = 1 + (dxF + dyF) / Math.max(0.02, tf0.w + tf0.h);
+        w = Math.max(0.02, tf0.w * factor); h = Math.max(0.02, tf0.h * factor);
+      } else {
+        w = Math.max(0.02, tf0.w + dxF); h = Math.max(0.02, tf0.h + dyF);
+      }
+      setTf({ ...tf0, w, h });
+      syncResizeBox(getTf);
       onChange(false);
     };
     const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
   });
+}
+// ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다.
+let _pipPopoverEl = null;
+function onOutsidePip(e) {
+  if (_pipPopoverEl && !_pipPopoverEl.contains(e.target) && !(_boxEl && _boxEl.contains(e.target))) closePipPopover();
+}
+function closePipPopover() {
+  closeResizeBox();
+  if (!_pipPopoverEl) return;
+  _pipPopoverEl.remove(); _pipPopoverEl = null;
+  document.removeEventListener('pointerdown', onOutsidePip, true);
+}
+function syncPipPopoverFields(tf) {
+  if (!_pipPopoverEl) return;
+  _pipPopoverEl.querySelector('#pip-x').value = Math.round(tf.x * 100);
+  _pipPopoverEl.querySelector('#pip-y').value = Math.round(tf.y * 100);
+  _pipPopoverEl.querySelector('#pip-w').value = Math.round(tf.w * 100);
+  _pipPopoverEl.querySelector('#pip-h').value = Math.round(tf.h * 100);
 }
 function openPipPopover(track, anchorEl) {
   closePipPopover(); closeShapePopover();
@@ -365,44 +387,50 @@ function openPipPopover(track, anchorEl) {
   pop.innerHTML = `
     <label>${tr('video.pipX')}<input type="number" id="pip-x" min="-200" max="200" step="1" value="${Math.round(tf.x * 100)}">%</label>
     <label>${tr('video.pipY')}<input type="number" id="pip-y" min="-200" max="200" step="1" value="${Math.round(tf.y * 100)}">%</label>
-    <label>${tr('video.pipScale')}<input type="number" id="pip-scale" min="5" max="400" step="1" value="${Math.round(tf.scale * 100)}">%</label>
+    <label>${tr('video.shapeW')}<input type="number" id="pip-w" min="2" max="400" step="1" value="${Math.round(tf.w * 100)}">%</label>
+    <label>${tr('video.shapeH')}<input type="number" id="pip-h" min="2" max="400" step="1" value="${Math.round(tf.h * 100)}">%</label>
+    <label class="ve-pip-lock">${tr('video.lockAspect')}<input type="checkbox" id="pip-lock" ${tf.lock ? 'checked' : ''}></label>
     <button class="mini" id="pip-reset">${tr('video.pipReset')}</button>`;
   document.body.appendChild(pop);
   _pipPopoverEl = pop;
-  const apply = () => {
-    // 테두리 기준 상한 없음(요청대로) — 프레임 밖으로 나가면 export 도 미리보기도 그냥 잘린다.
+  const getTf = () => track.transform || defaultTransform();
+  const setTf = (nextTf) => {
+    const isDefault = nextTf.x === 0 && nextTf.y === 0 && nextTf.w === 1 && nextTf.h === 1;
+    track.transform = isDefault ? null : nextTf;
+    const pair = _layerEls.get(track.id);
+    if (pair) applyTrackTransform(pair, track);
+    anchorEl.classList.toggle('on', !isDefault);
+  };
+  // whichChanged 를 알아야 락 상태에서 반대쪽 값을 그 비율로 계산할 수 있다(폭을 바꿨으면
+  // 높이를 그 비율로, 높이를 바꿨으면 폭을 그 비율로 — 드래그 손잡이와 같은 감각).
+  const applyFromInputs = (whichChanged) => {
+    const prev = getTf();
     const x = (Number(pop.querySelector('#pip-x').value) || 0) / 100;
     const y = (Number(pop.querySelector('#pip-y').value) || 0) / 100;
-    const scale = Math.max(0.05, Math.min(4, (Number(pop.querySelector('#pip-scale').value) || 100) / 100));
-    const isDefault = x === 0 && y === 0 && scale === 1;
-    track.transform = isDefault ? null : { x, y, scale };
-    const pair = _layerEls.get(track.id);
-    if (pair) applyTrackTransform(pair, track);
-    syncPipBoxFromTransform(track);
-    anchorEl.classList.toggle('on', !isDefault);
+    const lock = pop.querySelector('#pip-lock').checked;
+    let w = Math.max(0.02, (Number(pop.querySelector('#pip-w').value) || 100) / 100);
+    let h = Math.max(0.02, (Number(pop.querySelector('#pip-h').value) || 100) / 100);
+    if (lock && whichChanged && prev.w > 0 && prev.h > 0) {
+      if (whichChanged === 'w') h = w * (prev.h / prev.w); else w = h * (prev.w / prev.h);
+      pop.querySelector('#pip-w').value = Math.round(w * 100);
+      pop.querySelector('#pip-h').value = Math.round(h * 100);
+    }
+    setTf({ x, y, w, h, lock });
+    syncResizeBox(getTf);
     scheduleSave();
   };
-  pop.querySelector('#pip-x').addEventListener('input', apply);
-  pop.querySelector('#pip-y').addEventListener('input', apply);
-  pop.querySelector('#pip-scale').addEventListener('input', apply);
+  pop.querySelector('#pip-x').addEventListener('input', () => applyFromInputs(null));
+  pop.querySelector('#pip-y').addEventListener('input', () => applyFromInputs(null));
+  pop.querySelector('#pip-w').addEventListener('input', () => applyFromInputs('w'));
+  pop.querySelector('#pip-h').addEventListener('input', () => applyFromInputs('h'));
+  pop.querySelector('#pip-lock').addEventListener('change', () => applyFromInputs(null));
   pop.querySelector('#pip-reset').addEventListener('click', () => {
-    pop.querySelector('#pip-x').value = 0; pop.querySelector('#pip-y').value = 0; pop.querySelector('#pip-scale').value = 100;
-    apply();
+    pop.querySelector('#pip-x').value = 0; pop.querySelector('#pip-y').value = 0;
+    pop.querySelector('#pip-w').value = 100; pop.querySelector('#pip-h').value = 100;
+    applyFromInputs(null);
   });
   // 박스를 드래그/리사이즈했을 때 숫자 입력칸도 같이 맞춘다(반대 방향 동기화).
-  createPipBox(track, (committed) => {
-    const pair = _layerEls.get(track.id);
-    if (pair) applyTrackTransform(pair, track);
-    const tfNow = track.transform || defaultTransform();
-    pop.querySelector('#pip-x').value = Math.round(tfNow.x * 100);
-    pop.querySelector('#pip-y').value = Math.round(tfNow.y * 100);
-    pop.querySelector('#pip-scale').value = Math.round(tfNow.scale * 100);
-    if (committed) {
-      const isDefault = tfNow.x === 0 && tfNow.y === 0 && tfNow.scale === 1;
-      anchorEl.classList.toggle('on', !isDefault);
-      scheduleSave();
-    }
-  });
+  createResizeBox(getTf, (nextTf) => { setTf(nextTf); syncPipPopoverFields(nextTf); }, (committed) => { if (committed) scheduleSave(); });
   setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
 // ── 클립 효과 체인 — 밝기/대비/채도/흑백/세피아/블러를 순서 있는 목록으로 추가·제거·
@@ -527,7 +555,15 @@ function migrateClipFlip(clip) {
 // 여기서 같은 기본값을 채워 넣는다.
 function migrateClipShapeTransform(clip) {
   if (!clip.isShape || clip.transform || (clip.trackKeyframes && clip.trackKeyframes.length)) return;
-  clip.transform = { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2 };
+  clip.transform = { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2, lock: false };
+}
+// 예전 트랙 PIP 은 {x,y,scale}(항상 정사각 비율) 이었다 — 지금은 {x,y,w,h,lock} 이다.
+// scale 을 w=h 로 그대로 옮기고, 예전엔 선택지 없이 항상 비율이 고정돼 있었으니 lock:true
+// 로 시작한다(사용자가 이미 맞춰 둔 비율을 프로젝트를 열자마자 망가뜨리지 않기 위해).
+function migrateTrackTransform(track) {
+  const tf = track.transform;
+  if (!tf || tf.w != null) return;
+  track.transform = { x: tf.x, y: tf.y, w: tf.scale, h: tf.scale, lock: true };
 }
 
 // ── 효과 체인 프리셋 — 클립이 아니라 앱 전역(localStorage)에 저장한다. 프로젝트를
@@ -1595,81 +1631,25 @@ async function addShape() {
   const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
   if (el) openShapePopover(clip, el);
 }
-let _shapePopoverEl = null, _shapeBoxEl = null;
+let _shapePopoverEl = null;
 function onOutsideShapePopover(e) {
-  if (_shapePopoverEl && !_shapePopoverEl.contains(e.target) && !(_shapeBoxEl && _shapeBoxEl.contains(e.target))) closeShapePopover();
+  if (_shapePopoverEl && !_shapePopoverEl.contains(e.target) && !(_boxEl && _boxEl.contains(e.target))) closeShapePopover();
 }
 function closeShapePopover() {
-  if (_shapeBoxEl) { _shapeBoxEl.remove(); _shapeBoxEl = null; }
+  closeResizeBox();
   if (!_shapePopoverEl) return;
   _shapePopoverEl.remove(); _shapePopoverEl = null;
   document.removeEventListener('pointerdown', onOutsideShapePopover, true);
 }
 function shapeTransform(clip) {
-  return clip.transform || { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2 };
+  return clip.transform || { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2, lock: false };
 }
-function syncShapeBoxFromTransform(clip) {
-  if (!_shapeBoxEl) return;
-  const tf = shapeTransform(clip);
-  _shapeBoxEl.style.left = (tf.x * 100) + '%'; _shapeBoxEl.style.top = (tf.y * 100) + '%';
-  _shapeBoxEl.style.width = (tf.w * 100) + '%'; _shapeBoxEl.style.height = (tf.h * 100) + '%';
-}
-// 미리보기 위 위치/크기 박스 — 트랙 PIP 박스(createPipBox)와 같은 모양이지만, 손잡이가
-// 대각선 하나로 가로세로를 "같이" 늘리지 않고 각자 dx/dy 만큼만 늘린다 — 사각형/타원을
-// 정사각 비율에 묶지 않고 자유롭게 늘리고 싶다는 요청 반영.
-function createShapeBox(clip, onChange) {
-  const host = $('ve-preview'); if (!host) return;
-  const box = document.createElement('div');
-  box.className = 've-pip-box';
-  box.innerHTML = `<div class="ve-pip-box-handle"></div>`;
-  host.appendChild(box);
-  _shapeBoxEl = box;
-  syncShapeBoxFromTransform(clip);
-  box.addEventListener('pointerdown', (e) => {
-    if (e.target.classList.contains('ve-pip-box-handle')) return;
-    e.preventDefault(); e.stopPropagation();
-    const hostRect = host.getBoundingClientRect();
-    const tf0 = shapeTransform(clip);
-    const startX = e.clientX, startY = e.clientY;
-    try { box.setPointerCapture(e.pointerId); } catch {}
-    const mv = (ev) => {
-      const nx = tf0.x + (ev.clientX - startX) / hostRect.width;
-      const ny = tf0.y + (ev.clientY - startY) / hostRect.height;
-      clip.transform = { x: nx, y: ny, w: tf0.w, h: tf0.h };
-      syncShapeBoxFromTransform(clip);
-      syncShapePopoverFields(clip);
-      onChange(false);
-    };
-    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
-    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
-  });
-  box.querySelector('.ve-pip-box-handle').addEventListener('pointerdown', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    const hostRect = host.getBoundingClientRect();
-    const tf0 = shapeTransform(clip);
-    const startX = e.clientX, startY = e.clientY;
-    try { e.target.setPointerCapture(e.pointerId); } catch {}
-    const mv = (ev) => {
-      const w = Math.max(0.02, tf0.w + (ev.clientX - startX) / hostRect.width);
-      const h = Math.max(0.02, tf0.h + (ev.clientY - startY) / hostRect.height);
-      clip.transform = { x: tf0.x, y: tf0.y, w, h };
-      syncShapeBoxFromTransform(clip);
-      syncShapePopoverFields(clip);
-      onChange(false);
-    };
-    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
-    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
-  });
-}
-function syncShapePopoverFields(clip) {
+function syncShapePopoverFields(tf) {
   if (!_shapePopoverEl) return;
-  const tf = shapeTransform(clip);
-  const xEl = _shapePopoverEl.querySelector('#sh-x'), yEl = _shapePopoverEl.querySelector('#sh-y');
-  const wEl = _shapePopoverEl.querySelector('#sh-w'), hEl = _shapePopoverEl.querySelector('#sh-h');
-  if (xEl) xEl.value = Math.round(tf.x * 100);
-  if (yEl) yEl.value = Math.round(tf.y * 100);
-  if (wEl) wEl.value = Math.round(tf.w * 100);
-  if (hEl) hEl.value = Math.round(tf.h * 100);
+  _shapePopoverEl.querySelector('#sh-x').value = Math.round(tf.x * 100);
+  _shapePopoverEl.querySelector('#sh-y').value = Math.round(tf.y * 100);
+  _shapePopoverEl.querySelector('#sh-w').value = Math.round(tf.w * 100);
+  _shapePopoverEl.querySelector('#sh-h').value = Math.round(tf.h * 100);
 }
 function openShapePopover(clip, anchorEl) {
   closeShapePopover(); closeTextPopover(); closePipPopover();
@@ -1697,10 +1677,12 @@ function openShapePopover(clip, anchorEl) {
       <label>${tr('video.shapeW')}<input type="number" id="sh-w" min="2" max="400" step="1" value="${Math.round(tf.w * 100)}"></label>
       <label>${tr('video.shapeH')}<input type="number" id="sh-h" min="2" max="400" step="1" value="${Math.round(tf.h * 100)}"></label>
     </div>
+    <label class="ve-text-pop-full ve-pip-lock">${tr('video.lockAspect')}<input type="checkbox" id="sh-lock" ${tf.lock ? 'checked' : ''}></label>
     <button class="ve-text-pop-del" id="sh-delete">${tr('video.fxRemove')}</button>`;
   document.body.appendChild(pop);
   _shapePopoverEl = pop;
   const lblEl = anchorEl.querySelector('.ve-clip-lbl');
+  const getTf = () => shapeTransform(clip);
   // 모양·색·테두리 변경 — 그림 파일 자체를 다시 그려야 하니 무겁다(renderClips 로 썸네일도
   // 새로 붙인다).
   const applyLook = async () => {
@@ -1717,13 +1699,21 @@ function openShapePopover(clip, anchorEl) {
     scheduleSave();
   };
   // 위치/크기 변경 — 그림 파일은 그대로, 배치만 바뀐다(가볍다, renderClips 불필요).
-  const applyTransform = () => {
+  // whichChanged — 락 상태에서 반대쪽 값을 그 비율로 계산하려면 뭐가 바뀌었는지 알아야 한다.
+  const applyTransform = (whichChanged) => {
+    const prev = getTf();
     const x = (Number(pop.querySelector('#sh-x').value) || 0) / 100;
     const y = (Number(pop.querySelector('#sh-y').value) || 0) / 100;
-    const w = Math.max(0.02, (Number(pop.querySelector('#sh-w').value) || 30) / 100);
-    const h = Math.max(0.02, (Number(pop.querySelector('#sh-h').value) || 20) / 100);
-    clip.transform = { x, y, w, h };
-    syncShapeBoxFromTransform(clip);
+    const lock = pop.querySelector('#sh-lock').checked;
+    let w = Math.max(0.02, (Number(pop.querySelector('#sh-w').value) || 30) / 100);
+    let h = Math.max(0.02, (Number(pop.querySelector('#sh-h').value) || 20) / 100);
+    if (lock && whichChanged && prev.w > 0 && prev.h > 0) {
+      if (whichChanged === 'w') h = w * (prev.h / prev.w); else w = h * (prev.w / prev.h);
+      pop.querySelector('#sh-w').value = Math.round(w * 100);
+      pop.querySelector('#sh-h').value = Math.round(h * 100);
+    }
+    clip.transform = { x, y, w, h, lock };
+    syncResizeBox(getTf);
     syncPreview(nowSec());
     scheduleSave();
   };
@@ -1731,16 +1721,17 @@ function openShapePopover(clip, anchorEl) {
   pop.querySelector('#sh-fill').addEventListener('input', applyLook);
   pop.querySelector('#sh-stroke').addEventListener('input', applyLook);
   pop.querySelector('#sh-sw').addEventListener('input', applyLook);
-  pop.querySelector('#sh-x').addEventListener('input', applyTransform);
-  pop.querySelector('#sh-y').addEventListener('input', applyTransform);
-  pop.querySelector('#sh-w').addEventListener('input', applyTransform);
-  pop.querySelector('#sh-h').addEventListener('input', applyTransform);
+  pop.querySelector('#sh-x').addEventListener('input', () => applyTransform(null));
+  pop.querySelector('#sh-y').addEventListener('input', () => applyTransform(null));
+  pop.querySelector('#sh-w').addEventListener('input', () => applyTransform('w'));
+  pop.querySelector('#sh-h').addEventListener('input', () => applyTransform('h'));
+  pop.querySelector('#sh-lock').addEventListener('change', () => applyTransform(null));
   pop.querySelector('#sh-delete').addEventListener('click', () => {
     closeShapePopover();
     _selClipId = clip.id;
     deleteSelected();
   });
-  createShapeBox(clip, (committed) => { if (committed) scheduleSave(); });
+  createResizeBox(getTf, (nextTf) => { clip.transform = nextTf; syncShapePopoverFields(nextTf); syncPreview(nowSec()); }, (committed) => { if (committed) scheduleSave(); });
   setTimeout(() => document.addEventListener('pointerdown', onOutsideShapePopover, true), 0);
 }
 
