@@ -79,7 +79,7 @@ const LOCALES = {
     'video.hide': '숨기기',
     'video.split': '분할',
     'video.delete': '삭제',
-    'video.importing': '영상 {n}개 임포트했습니다',
+    'video.importing': '영상 {n}개가 임포트되었습니다',
     'video.needImport': '먼저 영상을 임포트하세요.',
     'video.exportDone': '내보내기 완료',
     'video.exportFail': '내보내기 실패: {err}',

@@ -2268,7 +2268,13 @@ async function importVideoFiles(paths, trackId) {
   let audioTid = null, audioTrackRef = null, createdAudioTrack = false, audioCursor = 0;
   function ensureAudioTrack() {
     if (audioTid != null) return;
-    const existing = _veTracks.find(t => t.kind === 'audio');
+    // 같은 임포트 배치 안에서는 트랙을 같이 쓴다(영상들을 순서대로 이어붙일 때 그 오디오도
+    // 나란히 이어져야 자연스럽다) — 단, 그 오디오 트랙이 "완전히 비어 있을 때만" 재사용한다.
+    // 예전엔 kind==='audio' 인 트랙을 무조건 재사용해서, 서로 다른(따로따로 실행한) 임포트
+    // 호출의 오디오가 전부 그 하나의 트랙에 계속 쌓였다(영상은 각자 새 트랙이 생기는데
+    // 오디오만 계속 합쳐지는 버그 — 트랙이 이미 비어 있는지를 video 쪽과 똑같은 기준으로
+    // 확인해야 한다).
+    const existing = _veTracks.find(t => t.kind === 'audio' && !_veClips.some(c => c.trackId === t.id));
     if (existing) { audioTid = existing.id; }
     else { audioTid = newAudioTrack(false); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
     for (const c of _veClips.filter(x => x.trackId === audioTid)) audioCursor = Math.max(audioCursor, c.start + c.dur);
