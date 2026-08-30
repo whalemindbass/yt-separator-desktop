@@ -276,6 +276,24 @@ function ensureLayers() {
 // 가진다(항상 정사각 비율로만 확대·축소하던 예전 scale 방식에서 바꿈 — "가로세로 비율을
 // 못 바꾼다"는 요청 반영) — lock 이 켜졌을 때만 비율을 유지한다.
 function defaultTransform() { return { x: 0, y: 0, w: 1, h: 1, lock: false }; }
+// 트랙에 아직 명시적 PIP 위치/크기가 없을 때(track.transform === null) PIP 상자를 항상
+// 풀프레임(0,0,100%,100%)으로 보여주면, 실제 화면은 CSS object-fit:contain 이 원본 비율대로
+// 레터박스(좌우 또는 위아래 여백)하고 있어 상자와 눈에 보이는 그림이 서로 다르다("영역이
+// 화면 전체로 잡혀있으니 좌우 여백이 있는" 상태) — 이 상태에서 상자를 살짝만 옮겨도(위치만
+// 바꿔도) track.transform 이 생기는 순간 object-fit 이 contain→fill 로 바뀌면서(.ve-stretch)
+// 상자와 똑같이 100%/100% 로 그냥 늘어나 버린다(가로세로 비율 고정을 켜 놨어도 시작 크기
+// 자체가 틀렸으니 소용없다 — "처음부터 이미지 크기만큼만 크기 범위가 표시되도록" 요청).
+// PIP 를 처음 여는 순간엔 지금 재생선 위치에 실제로 걸려 있는 클립의 원본 비율로 계산한
+// 레터박스 자리를 기본값으로 쓴다 — 그 값 그대로 처음 transform 이 생겨도 눈에 보이는
+// 크기가 똑같아서(레터박스 여백까지 포함해 상자가 딱 그림에 맞아 있다) 점프가 없다.
+function naturalTransform(track) {
+  const clip = clipAt(track.id, nowSec());
+  if (!clip || clip.isAudioOnly || clip.isText || !clip.w || !clip.h) return defaultTransform();
+  const { w: outW, h: outH } = getResolution();
+  if (!outW || !outH) return defaultTransform();
+  const { scale, offX, offY } = letterboxRect(clip.w, clip.h, outW, outH);
+  return { x: offX / outW, y: offY / outH, w: (clip.w * scale) / outW, h: (clip.h * scale) / outH, lock: false };
+}
 function applyTrackTransform(pair, track) {
   const tf = track.transform || defaultTransform();
   for (const el of [pair.a, pair.b]) {
@@ -395,7 +413,7 @@ function syncPipPopoverFields(tf) {
 }
 function openPipPopover(track, anchorEl) {
   closePipPopover(); closeShapePopover();
-  const tf = track.transform || defaultTransform();
+  const tf = track.transform || naturalTransform(track);
   const r = anchorEl.getBoundingClientRect();
   const pop = document.createElement('div');
   pop.className = 've-pip-pop';
@@ -409,7 +427,7 @@ function openPipPopover(track, anchorEl) {
     <button class="mini" id="pip-reset">${tr('video.pipReset')}</button>`;
   document.body.appendChild(pop);
   _pipPopoverEl = pop;
-  const getTf = () => track.transform || defaultTransform();
+  const getTf = () => track.transform || naturalTransform(track);
   const setTf = (nextTf) => {
     const isDefault = nextTf.x === 0 && nextTf.y === 0 && nextTf.w === 1 && nextTf.h === 1;
     track.transform = isDefault ? null : nextTf;
