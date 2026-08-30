@@ -614,6 +614,15 @@ function toggleFxAddMenu(clip) {
   const menu = $('ve-fx-add-menu'); if (!menu || !clip || clip.isAudioOnly || clip.isText) return;
   if (!menu.hidden) { closeFxAddMenu(); return; }
   menu.innerHTML = '';
+  // 따라다니기 — 색보정과 다른 종류라 위에 따로 하나 놓는다. 이미지/도형에만 있고(영상
+  // 자체를 추적 대상 삼는 건 범위 밖), 이미 추적 중이면 "추가"가 아니라 패널의 "다시
+  // 지정" 버튼을 쓰게 하므로 메뉴엔 안 보인다.
+  if ((clip.isImage || clip.isShape) && !(clip.trackKeyframes && clip.trackKeyframes.length)) {
+    const tb = document.createElement('button');
+    tb.type = 'button'; tb.className = 've-fx-add-item'; tb.textContent = tr('video.trackFollowTitle');
+    tb.addEventListener('click', () => { closeFxAddMenu(); startTrackDrawMode(clip); });
+    menu.appendChild(tb);
+  }
   Object.keys(EFFECT_TYPES).forEach((type) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 've-fx-add-item'; b.textContent = tr(EFFECT_TYPES[type].i18n);
@@ -698,7 +707,11 @@ function renderEffectPanel(clip) {
   if (addBtn) addBtn.disabled = false;
   if (presetBtn) presetBtn.disabled = false;
   body.innerHTML = '';
-  if (clip.isImage || clip.isShape) body.appendChild(renderTrackSection(clip));
+  // "+" 메뉴로 골라서 실제로 추적을 마쳐야만(clip.trackKeyframes 가 생겨야만) 이 섹션이
+  // 보인다 — 이미지/도형이라고 무조건 보이던 것에서 바꿈(요청).
+  if ((clip.isImage || clip.isShape) && clip.trackKeyframes && clip.trackKeyframes.length) {
+    body.appendChild(renderTrackSection(clip));
+  }
   const list = clip.effects || [];
   if (!list.length) {
     body.insertAdjacentHTML('beforeend', `<p class="ve-fx-empty">${esc(tr('video.fxEmpty'))}</p>`);
@@ -897,21 +910,21 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
   scheduleSave();
   flash(tr('video.trackDone'));
 }
-// 효과 패널 맨 위에 붙는 "따라다니기" 섹션 — 이미지/도형 클립에만(영상 자체를 추적 대상
-// 삼는 건 범위 밖). 상태에 따라 시작/다시 지정/해제 버튼이 바뀐다.
+// 효과 패널 맨 위에 붙는 "따라다니기" 섹션 — "+" 효과 추가 메뉴에서 골라야만 생긴다(요청:
+// 기본으로 항상 보이게 두지 말 것). renderEffectPanel 이 clip.trackKeyframes 가 실제로
+// 있을 때만 이걸 부른다 — 그래서 여긴 "이미 추적 중" 상태(다시 지정/해제)만 다룬다.
 function renderTrackSection(clip) {
   const wrap = document.createElement('div');
   wrap.className = 've-track-section';
-  const has = clip.trackKeyframes && clip.trackKeyframes.length;
   wrap.innerHTML = `
     <div class="ve-track-head">${esc(tr('video.trackFollowTitle'))}</div>
-    ${has ? `<div class="ve-track-status">${esc(tr('video.trackActive', { n: clip.trackKeyframes.length }))}</div>` : ''}
+    <div class="ve-track-status">${esc(tr('video.trackActive', { n: clip.trackKeyframes.length }))}</div>
     <div class="ve-track-btns">
-      <button type="button" class="mini ve-track-start-btn">${esc(tr(has ? 'video.trackRedo' : 'video.trackStart'))}</button>
-      ${has ? `<button type="button" class="mini ve-track-clear-btn">${esc(tr('video.trackClear'))}</button>` : ''}
+      <button type="button" class="mini ve-track-start-btn">${esc(tr('video.trackRedo'))}</button>
+      <button type="button" class="mini ve-track-clear-btn">${esc(tr('video.trackClear'))}</button>
     </div>`;
   wrap.querySelector('.ve-track-start-btn').addEventListener('click', () => startTrackDrawMode(clip));
-  wrap.querySelector('.ve-track-clear-btn')?.addEventListener('click', () => {
+  wrap.querySelector('.ve-track-clear-btn').addEventListener('click', () => {
     clip.trackKeyframes = null;
     syncPreview(nowSec()); renderEffectPanel(clip); scheduleSave();
   });

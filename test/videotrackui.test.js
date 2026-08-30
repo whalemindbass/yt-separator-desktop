@@ -1,7 +1,8 @@
 'use strict';
 // 실제 UI 흐름으로 추적 기능 검증 — 배경 영상(움직이는 사각형) 임포트 → 이미지 오버레이
-// 추가 → 효과 패널의 "추적할 영역 지정" → 미리보기 위 드래그로 영역 지정 → 자동 분석 →
-// 내보내기 결과에서 오버레이가 실제로 대상을 따라 움직였는지 실측한다.
+// 추가 → 효과 패널 "+" 추가 메뉴에서 "따라다니기" 선택(기본으로 항상 보이는 게 아니라
+// 이렇게 직접 추가해야만 생긴다는 요청 반영) → 미리보기 위 드래그로 영역 지정 → 자동 분석
+// → 내보내기 결과에서 오버레이가 실제로 대상을 따라 움직였는지 실측한다.
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
 const { spawnSync } = require('child_process');
@@ -53,18 +54,29 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="image"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 1) break; await wait(300); }
 
-  section('2) 클립 선택 → 효과 패널의 "추적할 영역 지정" 버튼');
+  section('2) 클립 선택 — 기본으로는 따라다니기 섹션이 안 보임(요청대로)');
   await js(`(() => {
     const el = document.querySelector('.ve-clip.image');
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
     document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
   })(); true`);
   await wait(150);
-  expect('따라다니기 섹션이 보임', await js(`!!document.querySelector('.ve-track-start-btn')`), true);
+  expect('선택만으론 따라다니기 섹션 안 뜸', await js(`!document.querySelector('.ve-track-start-btn')`), true);
+
+  section('2b) "+" 효과 추가 메뉴에서 "따라다니기" 선택 — 골라야만 그리기 모드로 들어감');
+  await js(`document.getElementById('ve-fx-add-btn').click(); true`);
+  await wait(80);
+  // .ve-fx-add-item 클래스는 "+트랙" 메뉴(#ve-add-track-menu)도 같이 쓴다 — 반드시
+  // #ve-fx-add-menu 안으로 좁혀서 찾는다.
+  const trackItemLabel = await js(`(() => {
+    const items = [...document.querySelectorAll('#ve-fx-add-menu .ve-fx-add-item')];
+    return items[0]?.textContent;
+  })()`);
+  expect('메뉴 맨 위가 따라다니기 항목', trackItemLabel, '따라다니기');
+  await js(`(() => { [...document.querySelectorAll('#ve-fx-add-menu .ve-fx-add-item')][0].click(); })(); true`);
+  await wait(150);
 
   section('3) 미리보기에서 드래그로 영역 지정 → 자동 분석 대기 → 완료 확인');
-  await js(`document.querySelector('.ve-track-start-btn').click(); true`);
-  await wait(150);
   await js(`(() => {
     const host = document.getElementById('ve-preview');
     const r = host.getBoundingClientRect();
