@@ -36,6 +36,8 @@ let _lyricTiming = false;
 let _lyricLines = [];
 let _lyricStarts = [];
 let _lyricIdx = 0;
+let _lyricLinesPerClip = 1;   // 자막 한 덩어리에 몇 줄씩 같이 보여줄지(1~3) — 화면에 한 줄만 뜨면
+                              // 밋밋하다는 요청으로, 다음 줄 미리보기처럼 여러 줄을 묶어 보여줄 수 있게 했다.
 
 function nextTrackId() { return ++_trackSeq; }
 function nextClipId() { return ++_clipSeq; }
@@ -2256,26 +2258,38 @@ async function exportSrt() {
   const res = await api.fs.writeBuffer(r.filePath, new TextEncoder().encode(body));
   flash(res.ok ? tr('video.srtDone') : tr('video.srtFail'));
 }
-function openLyricsModal() {
-  const host = $('ve-modal');
-  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.lyrics')}</span><button class="x">✕</button></div>
-    <div class="daw-modal-list" id="ve-lyric-body" style="padding:16px"></div></div>`;
-  host.hidden = false;
+// 예전엔 #ve-modal(화면 전체를 어둡게 덮는 모달)에 띄웠다 — 재생하면서 재생선을 보고
+// Enter 를 눌러야 하는 도구인데 그 미리보기 자체를 덮어버리면 못 쓴다("배경이 어두우니까
+// 어떻게 쓰는지 모를 수 있음" 피드백). 미리보기 오른쪽에 항상 나란히 붙는 패널(효과
+// 패널과 대칭)로 바꿔서, 열려 있어도 영상이 계속 보이고 그 상태로 재생·타이밍을 한다.
+function toggleLyricsPanel() {
+  const panel = $('ve-lyric-panel'); if (!panel) return;
+  if (panel.hidden) openLyricsPanel(); else finishLyricTiming(true);
+}
+function openLyricsPanel() {
+  const panel = $('ve-lyric-panel'); if (!panel) return;
+  panel.hidden = false;
   _lyricTiming = false; _lyricLines = []; _lyricStarts = []; _lyricIdx = 0;
   renderLyricPanel();
-  host.querySelector('.x').addEventListener('click', () => { finishLyricTiming(true); });
-  host.addEventListener('click', (e) => { if (e.target === host) finishLyricTiming(true); }, { once: true });
 }
 function renderLyricPanel() {
   const body = $('ve-lyric-body'); if (!body) return;
   if (!_lyricTiming) {
     body.innerHTML = `
       <p class="ve-lyric-hint">${tr('video.lyricPasteHint')}</p>
-      <textarea id="ve-lyric-text" rows="10" placeholder="${esc(tr('video.lyricPlaceholder'))}"></textarea>
-      <div style="display:flex;justify-content:space-between;margin-top:12px;gap:8px">
-        <button class="mini" id="ve-lyric-srt">${tr('video.srtExport')}</button>
+      <textarea id="ve-lyric-text" rows="8" placeholder="${esc(tr('video.lyricPlaceholder'))}"></textarea>
+      <label class="ve-lyric-lpc-row">${tr('video.lyricLinesPerClip')}
+        <select id="ve-lyric-lpc">
+          <option value="1" ${_lyricLinesPerClip === 1 ? 'selected' : ''}>1</option>
+          <option value="2" ${_lyricLinesPerClip === 2 ? 'selected' : ''}>2</option>
+          <option value="3" ${_lyricLinesPerClip === 3 ? 'selected' : ''}>3</option>
+        </select>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         <button class="mini" id="ve-lyric-start">${tr('video.lyricStart')}</button>
+        <button class="mini ve-lyric-srt-btn" id="ve-lyric-srt">${tr('video.srtExport')}</button>
       </div>`;
+    body.querySelector('#ve-lyric-lpc').addEventListener('change', (e) => { _lyricLinesPerClip = Number(e.target.value) || 1; });
     body.querySelector('#ve-lyric-start').addEventListener('click', startLyricTiming);
     body.querySelector('#ve-lyric-srt').addEventListener('click', exportSrt);
   } else {
@@ -2322,13 +2336,19 @@ function finishLyricTiming(cancel) {
     if (createdTrack) tid = newTextTrack(false);
     const trackRef = createdTrack ? _veTracks.find(t => t.id === tid) : null;
     const created = [];
-    for (let i = 0; i < _lyricStarts.length; i++) {
+    // 한 덩어리에 몇 줄씩 묶을지(1~3, _lyricLinesPerClip) — 찍은 줄들을 그 수만큼 순서대로
+    // 묶어 자막 하나로 만든다. 덩어리의 끝은 다음 덩어리 첫 줄이 시작하는 시각(없으면
+    // 그 덩어리 마지막 줄 시각 + 기본 3초)까지다.
+    const k = Math.max(1, Math.min(3, _lyricLinesPerClip || 1));
+    for (let i = 0; i < _lyricStarts.length; i += k) {
+      const chunkEnd = Math.min(i + k, _lyricStarts.length);
       const start = _lyricStarts[i];
-      const nextStart = _lyricStarts[i + 1];
-      const dur = Math.max(0.3, (nextStart != null ? nextStart : start + 3) - start);
+      const nextStart = _lyricStarts[chunkEnd];
+      const lastInChunk = _lyricStarts[chunkEnd - 1];
+      const dur = Math.max(0.3, (nextStart != null ? nextStart : lastInChunk + 3) - start);
       const clip = {
         id: nextClipId(), trackId: tid, isText: true, start, dur, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
-        text: _lyricLines[i], xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
+        text: _lyricLines.slice(i, chunkEnd).join('\n'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
       };
       _veClips.push(clip); created.push(clip);
     }
@@ -2337,9 +2357,9 @@ function finishLyricTiming(cancel) {
       () => { if (createdTrack) _veTracks.unshift(trackRef); _veClips.push(...created); },
     );
     ensureLayers(); layout();
-    flash(tr('video.lyricDone', { n: created.length }));
+    flash(tr('video.lyricDone', { n: _lyricStarts.length }));
   }
-  const host = $('ve-modal'); if (host) host.hidden = true;
+  const panel = $('ve-lyric-panel'); if (panel) panel.hidden = true;
 }
 
 function openExportModal() {
@@ -2649,7 +2669,8 @@ function wire() {
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
   $('ve-export')?.addEventListener('click', () => openExportModal());
-  $('ve-lyrics')?.addEventListener('click', () => openLyricsModal());
+  $('ve-lyrics')?.addEventListener('click', () => toggleLyricsPanel());
+  $('ve-lyric-close')?.addEventListener('click', () => finishLyricTiming(true));
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
   // Shift+드래그(또는 영역 선택 모드)면 재생선 대신 내보내기 구간을 지정한다(스튜디오와 동일).

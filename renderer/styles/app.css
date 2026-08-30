@@ -4225,11 +4225,34 @@ body { background: var(--bg) !important; }
 }
 .ve-wave { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
+/* 가사 패널 — 예전엔 화면 전체를 어둡게 덮는 모달이었다. 재생 중에 재생선을 보면서
+   Enter 를 눌러야 하는 도구인데 그 미리보기 자체를 덮어버리면 정작 봐야 할 화면이 안
+   보였다(요청: "배경이 어두우니까 어떻게 쓰는지 모를 수 있음") — 효과 패널(왼쪽)과
+   대칭으로 미리보기 오른쪽에 나란히 붙는 패널로 바꿔서, 열려 있어도 영상이 항상 보인다. */
+.ve-lyric-panel { flex-basis: 300px; border-right: 0; border-left: 1px solid var(--border); }
+/* .ve-fx-panel 의 display:flex 가 있어서 [hidden] 만으로는 안 사라진다(다른 곳의
+   .ve-fx-add-menu[hidden]/.daw-modal[hidden] 과 같은 이유로 명시적으로 덮어써야 한다). */
+.ve-lyric-panel[hidden] { display: none; }
 .ve-lyric-hint { margin: 0 0 10px; font: 500 12px/1.5 var(--sans); color: var(--tx-3); }
 #ve-lyric-text {
-  width: 100%; min-height: 160px; resize: vertical; background: var(--input); border: 1px solid var(--border);
+  width: 100%; min-height: 120px; resize: vertical; background: var(--input); border: 1px solid var(--border);
   border-radius: 8px; padding: 10px; color: var(--tx-1); font: 500 13px/1.6 var(--sans); box-sizing: border-box;
 }
+.ve-lyric-panel .mini {
+  height: 30px; padding: 0 16px; font-size: 12.5px; font-weight: 700; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--accent-fg); border-radius: 6px; cursor: pointer;
+}
+.ve-lyric-panel .mini:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ve-lyric-lpc-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px;
+  font: 500 11.5px/1 var(--sans); color: var(--tx-2);
+}
+.ve-lyric-lpc-row select {
+  background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  color: var(--tx-1); font: 500 12px/1 var(--sans);
+}
+.ve-lyric-panel .ve-lyric-srt-btn { background: transparent; border-color: var(--border-mid); color: var(--tx-2); }
+.ve-lyric-panel .ve-lyric-srt-btn:hover { background: var(--elev-2); border-color: var(--border-mid); color: var(--tx-1); }
 .ve-lyric-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
 .ve-lyric-row {
   display: flex; align-items: baseline; gap: 10px; padding: 7px 9px; border-radius: 6px;
