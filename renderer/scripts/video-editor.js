@@ -1293,32 +1293,42 @@ function toggleAddTrackMenu() {
   menu.hidden = false;
   setTimeout(() => document.addEventListener('pointerdown', _onAddTrackMenuOutside, true), 0);
 }
-function newVideoTrack(pushHistory = true) {
+function newVideoTrack(pushHistory = true, append = false) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
   const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false, kind: 'video' };
-  // Vegas Pro 관례: 새 비디오 트랙은 목록 맨 위(= 합성 맨 앞)에 들어간다.
-  _veTracks.unshift(track);
+  // Vegas Pro 관례: 새 비디오 트랙은 목록 맨 위(= 합성 맨 앞)에 들어간다 — "+트랙" 버튼 등
+  // 일반적인 경우. append=true 는 임포트가 영상+오디오 쌍을 이어 붙일 때만 쓴다(맨 위로
+  // 튀어 올라가면 이미 만든 앞선 쌍들 사이에 끼어들어 순서가 뒤섞인다).
+  if (append) _veTracks.push(track); else _veTracks.unshift(track);
   if (pushHistory) {
     pushUndo(
       () => { _veTracks = _veTracks.filter(t => t.id !== id); _veClips = _veClips.filter(c => c.trackId !== id); },
-      () => { _veTracks.unshift(track); },
+      () => { if (append) _veTracks.push(track); else _veTracks.unshift(track); },
     );
   }
   ensureLayers();
   renderLanes();
   return id;
 }
-function newAudioTrack(pushHistory = true) {
+function newAudioTrack(pushHistory = true, afterTrackId = null) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
   const track = { id, name: '', color, height: DEFAULT_LANE_H, hidden: false, kind: 'audio' };
-  // Vegas Pro 관례: 오디오 트랙은 영상 트랙 구역 아래(목록 맨 아래)에 자리한다.
-  _veTracks.push(track);
+  // 기본은 Vegas Pro 관례대로 맨 아래. afterTrackId 를 주면(임포트가 영상 하나에 짝지어진
+  // 오디오를 만들 때) 그 영상 트랙 바로 다음 자리에 끼워 넣는다 — "영1 오1 영2 오2" 처럼
+  // 쌍이 서로 붙어 있어야 한다는 요청 반영(기본 맨 아래로만 쌓으면 "영1 영2 오1 오2" 가
+  // 되어 버린다).
+  let idx = _veTracks.length;
+  if (afterTrackId != null) {
+    const vi = _veTracks.findIndex(t => t.id === afterTrackId);
+    if (vi >= 0) idx = vi + 1;
+  }
+  _veTracks.splice(idx, 0, track);
   if (pushHistory) {
     pushUndo(
       () => { _veTracks = _veTracks.filter(t => t.id !== id); _veClips = _veClips.filter(c => c.trackId !== id); },
-      () => { _veTracks.push(track); },
+      () => { _veTracks.splice(idx, 0, track); },
     );
   }
   ensureLayers();
@@ -2260,7 +2270,11 @@ function probeVideo(file) {
 async function importVideoFiles(paths, trackId) {
   let tid = trackId;
   const createdVideoTrack = tid == null;
-  if (createdVideoTrack) tid = newVideoTrack(false);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
+  // append=true — 이 트랙은 맨 위로 튀어 오르면 안 된다. 반복해서(파일 하나씩) 임포트할
+  // 때마다 앞서 만든 "영상N/오디오N" 쌍 사이에 새로 끼어들면 순서가 뒤섞이고, 기존
+  // 트랙들의 위치가 밀리면서 번호(trackLabel 이 목록 위치로 매기는 순번)까지 바뀌어
+  // 버린다 — 항상 맨 아래에 이어 붙여야 "영1 오1 영2 오2..." 순서와 기존 번호가 지켜진다.
+  if (createdVideoTrack) tid = newVideoTrack(false, true);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
   const videoTrackRef = createdVideoTrack ? _veTracks.find(t => t.id === tid) : null;
   let videoCursor = 0;
   for (const c of _veClips.filter(x => x.trackId === tid)) videoCursor = Math.max(videoCursor, c.start + c.dur);
@@ -2276,11 +2290,16 @@ async function importVideoFiles(paths, trackId) {
     // 확인해야 한다).
     const existing = _veTracks.find(t => t.kind === 'audio' && !_veClips.some(c => c.trackId === t.id));
     if (existing) { audioTid = existing.id; }
-    else { audioTid = newAudioTrack(false); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
+    // afterTrackId=tid — 이 영상 트랙(tid) 바로 다음 자리에 끼워서 "영1 오1" 처럼 붙어
+    // 있게 한다(요청: "영1 오1 영2 오2" 여야 하는데 "영1 영2 오1 오2" 로 나왔다).
+    else { audioTid = newAudioTrack(false, tid); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
     for (const c of _veClips.filter(x => x.trackId === audioTid)) audioCursor = Math.max(audioCursor, c.start + c.dur);
   }
 
   const added = [];
+  let importedFileCount = 0;   // 토스트에 쓸 "파일 개수" — 영상 1개가 클립 2개(영상+짝지어진
+                                // 오디오)를 만들어도 사용자가 고른 건 1개다("2개가 임포트됐다"고
+                                // 잘못 뜨던 버그).
   for (const p of paths) {
     const meta = await probeVideo(p);
     if (!meta.dur) continue;
@@ -2293,7 +2312,7 @@ async function importVideoFiles(paths, trackId) {
     if (isAudioOnly) {
       ensureAudioTrack();
       const clip = { id: nextClipId(), trackId: audioTid, file: p, name, start: audioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
-      _veClips.push(clip); added.push(clip);
+      _veClips.push(clip); added.push(clip); importedFileCount++;
       audioCursor += meta.dur;
       continue;
     }
@@ -2313,6 +2332,7 @@ async function importVideoFiles(paths, trackId) {
     } else {
       _veClips.push(vClip); added.push(vClip);
     }
+    importedFileCount++;
     videoCursor += meta.dur;
   }
 
@@ -2326,14 +2346,23 @@ async function importVideoFiles(paths, trackId) {
         _veTracks = _veTracks.filter(t => !addedTracks.includes(t));
       },
       () => {
-        for (const t of addedTracks) { if (t.kind === 'audio') _veTracks.push(t); else _veTracks.unshift(t); }
+        // addedTracks 는 [영상(있으면), 오디오(있으면)] 순서로 쌓여 있다 — 영상을 먼저
+        // 되살려야 오디오를 그 바로 다음 자리에 다시 끼워 넣을 기준(tid)을 찾을 수 있다.
+        for (const t of addedTracks) {
+          if (t.kind === 'audio') {
+            const vi = _veTracks.findIndex(x => x.id === tid);
+            _veTracks.splice(vi >= 0 ? vi + 1 : _veTracks.length, 0, t);
+          } else {
+            _veTracks.push(t);
+          }
+        }
         _veClips.push(...added);
       },
     );
   }
   ensureLayers();
   layout();
-  if (added.length) flash(tr('video.importing', { n: added.length }));
+  if (importedFileCount) flash(tr('video.importing', { n: importedFileCount }));
   else flash(tr('video.needImport'));
 }
 async function pickImportVideo() {
