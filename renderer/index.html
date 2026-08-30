@@ -628,12 +628,18 @@
               <div class="metro-row-btns">
                 <button id="metro-toggle" class="btn" data-i18n="mixer.metro.toggle" data-i18n-title="mixer.metro.toggle.title" title="곡 sync 메트로놈 켜기/끄기">클릭</button>
                 <button id="countin-toggle" class="btn" data-i18n="mixer.countin.toggle" data-i18n-title="mixer.countin.toggle.title" title="재생 전 카운트인 (4박)">카운트인</button>
+                <button id="countin-smart-toggle" class="key-btn metro-oct" data-i18n="mixer.countin.smart" data-i18n-title="mixer.countin.smart.title" title="곡 시작 무음 구간을 건너뛰고 실제 소리 시작점 근처에서 재생(끄면 항상 0초부터)" hidden>정렬</button>
                 <span id="metro-bpm" class="metro-bpm" data-i18n-title="mixer.metro.bpm.edit" title="클릭하여 BPM 직접 입력">—</span>
                 <button id="metro-half" class="key-btn metro-oct" data-i18n-title="mixer.metro.half" title="BPM 절반 (÷2)" hidden>÷2</button>
                 <button id="metro-double" class="key-btn metro-oct" data-i18n-title="mixer.metro.double" title="BPM 두 배 (×2)" hidden>×2</button>
               </div>
               <div class="metro-row-vol">
-                <input id="metro-vol" class="metro-vol" type="range" min="0" max="100" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨" />
+                <input id="metro-vol" class="metro-vol" type="range" min="0" max="150" value="60" data-i18n-title="mixer.metro.vol" title="메트로놈 볼륨(100 을 넘기면 원곡보다 또렷하게 들림)" />
+                <select id="metro-accent" class="metro-accent" data-i18n-title="mixer.metro.accent.title" title="클릭음 패턴">
+                  <option value="none" data-i18n="mixer.metro.accent.none">모든 박 동일</option>
+                  <option value="first" data-i18n="mixer.metro.accent.first">첫박만 다른 음</option>
+                  <option value="onethree" data-i18n="mixer.metro.accent.onethree">1·3박만 다른 음</option>
+                </select>
                 <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="mixer.metro.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>
               </div>
             </div>

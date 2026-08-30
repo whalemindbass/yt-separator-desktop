@@ -608,8 +608,14 @@ export class Player {
   setCountInEnabled(v)  { this._countInEnabled = !!v; }
   setCountInBeats(n)    { this._countInBeats = Math.max(1, Math.min(8, +n || 4)); }
   setCountInCallback(fn){ this._countInCallback = fn; }
+  // 스마트 정렬(기본 꺼짐) — 곡 앞의 무음 구간을 감지해 실제 소리 시작점 근처 박으로
+  // 재생 위치를 건너뛰는 기능. 꺼져 있으면(기본값) 처음부터 재생일 땐 항상 0초에서
+  // 시작한다 — "카운트인 켜면 0초가 아니라 1초쯤에서 재생된다" 는 피드백을 보면 대부분
+  // 이 자동 스킵을 원치 않는다(감지가 곡마다 정확하지 않을 수 있어 예측 불가능하게
+  // 느껴진다) — 원하는 사람만 켜서 쓰도록 옵션으로 뺐다.
+  setCountInSmartAlign(v) { this._countInSmartAlign = !!v; }
   getCountInInfo() {
-    return { enabled: !!this._countInEnabled, beats: this._countInBeats || 4 };
+    return { enabled: !!this._countInEnabled, beats: this._countInBeats || 4, smartAlign: !!this._countInSmartAlign };
   }
   isCountingIn() { return !!this._countingIn; }
 
@@ -633,8 +639,8 @@ export class Player {
       if (ts > 0) {
         // 트림 시작점이 설정됐으면 그 지점이 곧 새 0:00 → 자동 스냅 대신 그대로 사용
         target = ts;
-      } else if (cur < 1.0) {
-        // 처음부터 재생.
+      } else if (cur < 1.0 && this._countInSmartAlign) {
+        // 처음부터 재생 + 스마트 정렬 켜짐일 때만.
         // 소리 시작점(audioStart)과 박 그리드(downbeat + n*interval)를 맞춰,
         // audioStart 직전(또는 같은) 박을 시작 지점으로 삼음 → 카운트인 후 인트로부터 자연 재생.
         const anchor = (this._audioStart != null) ? this._audioStart : downbeat;
@@ -649,6 +655,9 @@ export class Player {
         } else {
           target = 0;
         }
+      } else if (cur < 1.0) {
+        // 스마트 정렬 꺼짐(기본값) — 처음부터 재생이면 항상 문자 그대로 0초.
+        target = 0;
       } else if (downbeat >= 0) {
         // 곡 중간에서 재생 → 현재 위치에서 근접한 박으로 스냅
         const beatIdx = Math.max(0, Math.round((cur - downbeat) / interval));
@@ -687,7 +696,7 @@ export class Player {
     const env = ctx.createGain();
     osc.frequency.setValueAtTime(isDown ? 1500 : 900, when);
     env.gain.setValueAtTime(0, when);
-    env.gain.linearRampToValueAtTime(0.9, when + 0.003);
+    env.gain.linearRampToValueAtTime(1.0, when + 0.003);
     env.gain.exponentialRampToValueAtTime(0.001, when + 0.08);
     osc.connect(env);
     env.connect(ctx.destination);
@@ -732,14 +741,32 @@ export class Player {
     if (this._metroEnabled && this._playing) this._startMetroScheduler();
     else this._stopMetroScheduler();
   }
+  // 상한을 1(=슬라이더 100%)이 아니라 1.5 까지 허용한다 — 영상 자체 소리가 큰 곡에서는
+  // 예전 최대치(클릭 피크 0.85)로도 메트로놈이 묻히는 경우가 있었다는 피드백 반영.
+  // 클릭은 짧은 타악기성 소리라 순간적으로 게인이 1을 넘어가도(사실상 살짝 클리핑) 귀에는
+  // 오히려 더 또렷하게 들린다 — 실제 DAW 클릭 사운드들도 흔히 이렇게 튜닝한다.
   setMetronomeVolume(v) {
-    this._metroVolume = Math.max(0, Math.min(1, v));
+    this._metroVolume = Math.max(0, Math.min(1.5, v));
     // 실행 중 실시간 반영 (기존엔 다음 _startMetroScheduler 까지 반영 안 됨)
     if (this._metroGain) {
       try {
         this._metroGain.gain.setTargetAtTime(this._metroVolume, this.audioCtx.currentTime, 0.02);
       } catch {}
     }
+  }
+  // 클릭음 패턴 — 'none'(모든 박 동일) · 'first'(첫박만 다른 음) · 'onethree'(1·3박만 다른 음).
+  // 4/4 박자를 가정한다(대부분의 대중음악 기본값) — beats-per-measure 를 곡마다 따로
+  // 감지/설정하는 건 범위 밖이라, 절대 박 인덱스(downbeat 로부터 몇 번째 박인지)를 4로
+  // 나눈 나머지로 마디 안 위치를 정한다.
+  setMetronomeAccentPattern(v) {
+    this._metroAccentPattern = ['none', 'first', 'onethree'].includes(v) ? v : 'none';
+  }
+  _isAccentBeat(n) {
+    const pat = this._metroAccentPattern || 'none';
+    if (pat === 'none') return false;
+    const posInBar = ((n % 4) + 4) % 4;
+    if (pat === 'first') return posInBar === 0;
+    return posInBar === 0 || posInBar === 2;   // onethree
   }
   getMetronomeInfo() {
     return {
@@ -748,6 +775,7 @@ export class Player {
       // interval 이 유효하면 재생 가능 (수동 BPM 포함)
       hasBeats: !!(this._metroInterval && this._metroInterval > 0),
       volume: this._metroVolume ?? 0.5,
+      accentPattern: this._metroAccentPattern || 'none',
     };
   }
   _startMetroScheduler() {
@@ -784,7 +812,7 @@ export class Player {
     while (nextT <= songNow + lookAhead * rate) {
       if (nextT >= songNow - 0.01) {
         const when = ctxNow + (nextT - songNow) / rate;
-        this._playClick(when, false);
+        this._playClick(when, this._isAccentBeat(n));
         this._metroLastScheduledN = n;
       }
       n++;
@@ -794,12 +822,15 @@ export class Player {
   _playClick(when, isDown) {
     if (!this._metroGain) return;
     const ctx = this.audioCtx;
-    // 짧은 신디사이즈드 클릭 — 강박(현재 unused)/약박 톤 구분
+    // 짧은 신디사이즈드 클릭 — 강박(setMetronomeAccentPattern 으로 고른 박)/약박 톤 구분.
+    // 피크를 1.0(예전 0.85)까지 올렸다 — 곡 소리가 큰 구간에서 메트로놈이 묻힌다는
+    // 피드백 반영(_metroGain 자체 상한도 1.5 까지 늘어났다 — setMetronomeVolume 참고).
+    // 짧은 타악기성 클릭이라 순간적으로 0dBFS 에 닿아도 거슬리게 들리지 않는다.
     const osc = ctx.createOscillator();
     const env = ctx.createGain();
     osc.frequency.setValueAtTime(isDown ? 1600 : 1000, when);
     env.gain.setValueAtTime(0, when);
-    env.gain.linearRampToValueAtTime(0.85, when + 0.002);
+    env.gain.linearRampToValueAtTime(1.0, when + 0.002);
     env.gain.exponentialRampToValueAtTime(0.001, when + 0.06);
     osc.connect(env);
     env.connect(this._metroGain);

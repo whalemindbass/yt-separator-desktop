@@ -34,9 +34,11 @@ const masterVal     = $('master-val');
 const metroToggleEl = $('metro-toggle');
 const metroBpmEl    = $('metro-bpm');
 const metroVolEl    = $('metro-vol');
+const metroAccentEl = $('metro-accent');
 const metroHalfEl   = $('metro-half');
 const metroDoubleEl = $('metro-double');
 const countInToggleEl = $('countin-toggle');
+const countInSmartToggleEl = $('countin-smart-toggle');
 const countInOverlay  = $('countin-overlay');
 const countInNumberEl = $('countin-number');
 
@@ -344,6 +346,7 @@ function destroyPlayer() {
   if (metroHalfEl)   metroHalfEl.hidden = true;
   if (metroDoubleEl) metroDoubleEl.hidden = true;
   if (countInToggleEl) countInToggleEl.classList.remove('on');
+  if (countInSmartToggleEl) { countInSmartToggleEl.classList.remove('on'); countInSmartToggleEl.hidden = true; }
   if (countInOverlay)  countInOverlay.hidden = true;
   // 트림 리셋 (새 곡 로드 시 복원 전 기본값)
   _trimStart = 0; _trimEnd = null;
@@ -498,13 +501,30 @@ metroVolEl?.addEventListener('input', () => {
   saveMetro({ volume: v });
 });
 
+metroAccentEl?.addEventListener('change', () => {
+  currentPlayer?.setMetronomeAccentPattern(metroAccentEl.value);
+  saveMetro({ accent: metroAccentEl.value });
+});
+
 countInToggleEl?.addEventListener('click', () => {
   if (!currentPlayer) return;
   const info = currentPlayer.getCountInInfo();
   const next = !info.enabled;
   currentPlayer.setCountInEnabled(next);
   countInToggleEl.classList.toggle('on', next);
+  if (countInSmartToggleEl) countInSmartToggleEl.hidden = !next;   // 카운트인 켜야만 "정렬" 옵션이 의미 있다
   saveCountIn({ enabled: next, beats: 4 });
+});
+// "정렬" — 기본 꺼짐(항상 0초부터). 켜면 곡 앞 무음 구간을 감지해 실제 소리 시작점
+// 근처 박까지 건너뛴다(카운트인 켜면 재생이 0초가 아니라 1초쯤에서 시작된다는 피드백
+// 반영 — 그 자동 스킵을 원하는 사람만 켜서 쓰게 뺐다. player.js 의 setCountInSmartAlign 참고).
+countInSmartToggleEl?.addEventListener('click', () => {
+  if (!currentPlayer) return;
+  const info = currentPlayer.getCountInInfo();
+  const next = !info.smartAlign;
+  currentPlayer.setCountInSmartAlign(next);
+  countInSmartToggleEl.classList.toggle('on', next);
+  saveCountIn({ smartAlign: next });
 });
 
 async function mountPlayer(item) {
@@ -676,6 +696,10 @@ async function restoreSongSettings(item) {
         currentPlayer?.setMetronomeVolume(s.metro.volume / 100);
         if (metroVolEl) metroVolEl.value = s.metro.volume;
       }
+      if (typeof s.metro.accent === 'string') {
+        currentPlayer?.setMetronomeAccentPattern(s.metro.accent);
+        if (metroAccentEl) metroAccentEl.value = s.metro.accent;
+      }
     }
     // 카운트인 (곡별 상태 · 즉시 반영 가능)
     if (s.countIn) {
@@ -683,6 +707,11 @@ async function restoreSongSettings(item) {
       if (s.countIn.enabled) {
         currentPlayer?.setCountInEnabled(true);
         countInToggleEl?.classList.add('on');
+        if (countInSmartToggleEl) countInSmartToggleEl.hidden = false;
+      }
+      if (s.countIn.smartAlign) {
+        currentPlayer?.setCountInSmartAlign(true);
+        countInSmartToggleEl?.classList.add('on');
       }
     }
     // 트림 (재생 범위)
