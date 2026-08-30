@@ -77,7 +77,7 @@ function applyVideoProjectData(p) {
   _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
   _veResolution = p.resolution || null;
   _veExtraSec = 0;
-  for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); }
+  for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); migrateClipShapeTransform(c); }
   _effectSeq = Math.max(0, ..._veClips.flatMap(c => (c.effects || []).map(e => e.id)));
   ensureLayers();
   return true;
@@ -264,6 +264,10 @@ function applyTrackTransform(pair, track) {
     el.style.top = (tf.y * 100) + '%';
     el.style.width = (tf.scale * 100) + '%';
     el.style.height = (tf.scale * 100) + '%';
+    // 기본값(트랙 전체 채움)일 땐 CSS object-fit:contain 이 main.js 의 scalePad(비율 유지
+    // 레터박스)와 맞는다. 트랙 PIP 가 걸리면 main.js 는 그 자리에 scale=lw:lh 로 그냥
+    // 늘려 넣는다(비율 무시) — 미리보기도 똑같이 늘려야 실제 결과랑 어긋나지 않는다.
+    el.classList.toggle('ve-stretch', !!track.transform);
   }
 }
 // 클립 단위(이미지/도형 개별 배치, 추적 키프레임) 위치 — 매 tick 마다 다시 계산해야
@@ -271,7 +275,8 @@ function applyTrackTransform(pair, track) {
 // 우선순위: 추적 키프레임(보간) > 클립 자체 transform > 트랙 전체 PIP > 기본(풀프레임).
 function applyClipTransform(el, clip, track, t) {
   let tf;
-  if (clip.trackKeyframes && clip.trackKeyframes.length) tf = interpolateKeyframes(clip.trackKeyframes, t - clip.start);
+  const hasKf = clip.trackKeyframes && clip.trackKeyframes.length;
+  if (hasKf) tf = interpolateKeyframes(clip.trackKeyframes, t - clip.start);
   else tf = clip.transform || track.transform || defaultTransform();
   const w = tf.w != null ? tf.w : (tf.scale != null ? tf.scale : 1);
   const h = tf.h != null ? tf.h : (tf.scale != null ? tf.scale : 1);
@@ -279,6 +284,9 @@ function applyClipTransform(el, clip, track, t) {
   el.style.top = (tf.y * 100) + '%';
   el.style.width = (w * 100) + '%';
   el.style.height = (h * 100) + '%';
+  // applyTrackTransform 과 같은 이유 — 실제로 뭔가 걸려 있으면(키프레임/클립 자체
+  // 위치/트랙 PIP) main.js 는 그 자리에서 비율 무시하고 늘려 넣는다.
+  el.classList.toggle('ve-stretch', !!(hasKf || clip.transform || track.transform));
 }
 // ── PIP(위치/크기) 팝오버 — 트랙 헤더 우측 버튼에서 연다. 레이어처럼 구석에 작게 놓거나
 // 확대할 수 있다. 애니메이션은 없다(트랙 전체에 고정값 하나). 숫자 입력칸과 함께, 미리보기
@@ -511,6 +519,15 @@ function migrateClipFlip(clip) {
   if (clip.flipH) { clip.effects = clip.effects || []; clip.effects.push({ id: nextEffectId(), type: 'flipH', enabled: true }); }
   if (clip.flipV) { clip.effects = clip.effects || []; clip.effects.push({ id: nextEffectId(), type: 'flipV', enabled: true }); }
   delete clip.flipH; delete clip.flipV;
+}
+// 예전 도형 클립엔 위치 기본값이 없었다 — transform 이 없으면(트랙 PIP 도 안 걸려 있으면)
+// buildEDL 이 "화면 꽉 채움" 취급해서 도형의 작은 그림을 프레임 전체로 억지로 늘려 붙였다
+// (위아래 시커먼 여백이 그렇게 생겼다 — 실측으로 확인). 새로 만드는 도형은
+// addShapeClipAt 에서 처음부터 transform 을 주지만, 이미 저장된 예전 프로젝트를 열 때도
+// 여기서 같은 기본값을 채워 넣는다.
+function migrateClipShapeTransform(clip) {
+  if (!clip.isShape || clip.transform || (clip.trackKeyframes && clip.trackKeyframes.length)) return;
+  clip.transform = { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2 };
 }
 
 // ── 효과 체인 프리셋 — 클립이 아니라 앱 전역(localStorage)에 저장한다. 프로젝트를
@@ -889,7 +906,8 @@ function driveLayer(el, clip, t, visual) {
       img.style.filter = effectsChainCss(clip.effects);
     }
     if (!v.paused) v.pause();
-    if (img.dataset.loadedSrc !== clip.file) { img.src = toYtsepUrl(clip.file); img.dataset.loadedSrc = clip.file; }
+    const key = clip.file + ':' + (clip._imgRev || 0);
+    if (img.dataset.loadedSrc !== key) { img.src = shapeImgUrl(clip); img.dataset.loadedSrc = key; }
     return;
   }
   if (visual) {
@@ -1535,13 +1553,27 @@ async function regenerateShapeFile(clip) {
   const base64 = dataUrl.split(',')[1] || '';
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const res = await api.video.saveShapeImage(`shape-${clip.id}`, bytes);
-  if (res?.ok) { clip.file = res.path; clip.w = pxW; clip.h = pxH; }
+  // 매번 같은 경로에 덮어쓰므로 파일명만으로는 브라우저가 "이미 봤다"며 새로 안 읽어온다
+  // (실측 확인 — 색·모양을 바꿔도 화면엔 예전 그림 그대로였다). _imgRev 를 올려서 아래
+  // toShapeImgUrl() 이 그때그때 다른 쿼리스트링을 붙이게 한다(파일 경로 자체는 안 바뀐다
+  // — main.js 의 ytsep:// 핸들러는 pathname 만 읽고 querystring 은 무시한다).
+  if (res?.ok) { clip.file = res.path; clip.w = pxW; clip.h = pxH; clip._imgRev = (clip._imgRev || 0) + 1; }
+}
+// 이미지 클립 <img> src — 도형이면 _imgRev 를 캐시버스터로 붙인다(파일이 같은 경로에서
+// 계속 덮어써지므로). 일반 임포트 이미지는 파일 자체가 안 바뀌니 그대로.
+function shapeImgUrl(clip) {
+  const base = toYtsepUrl(clip.file);
+  return clip.isShape ? base + '?v=' + (clip._imgRev || 0) : base;
 }
 function addShapeClipAt(trackId, atSec) {
+  const wPct = 0.3, hPct = 0.2;
   const clip = {
     id: nextClipId(), trackId, isShape: true, isImage: true, shapeType: 'rect',
     name: tr('video.shapeRect'), start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
-    wPct: 0.3, hPct: 0.2, fillColor: '#35d1a6', strokeColor: '', strokeWidth: 0,
+    wPct, hPct, fillColor: '#35d1a6', strokeColor: '', strokeWidth: 0,
+    // 위치를 처음부터 정해 둔다 — 없으면(트랙 PIP 도 없으면) buildEDL 이 "화면 꽉 채움"으로
+    // 보고 이 작은 그림을 프레임 전체로 늘려버린다(위아래 여백 버그의 원인이었다).
+    transform: { x: 0.35, y: 0.4, w: wPct, h: hPct },
     hasAudio: false, isAudioOnly: false, effects: [], file: null, w: 0, h: 0,
   };
   _veClips.push(clip);
@@ -1563,21 +1595,90 @@ async function addShape() {
   const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
   if (el) openShapePopover(clip, el);
 }
-let _shapePopoverEl = null;
+let _shapePopoverEl = null, _shapeBoxEl = null;
 function onOutsideShapePopover(e) {
-  if (_shapePopoverEl && !_shapePopoverEl.contains(e.target)) closeShapePopover();
+  if (_shapePopoverEl && !_shapePopoverEl.contains(e.target) && !(_shapeBoxEl && _shapeBoxEl.contains(e.target))) closeShapePopover();
 }
 function closeShapePopover() {
+  if (_shapeBoxEl) { _shapeBoxEl.remove(); _shapeBoxEl = null; }
   if (!_shapePopoverEl) return;
   _shapePopoverEl.remove(); _shapePopoverEl = null;
   document.removeEventListener('pointerdown', onOutsideShapePopover, true);
 }
+function shapeTransform(clip) {
+  return clip.transform || { x: 0.35, y: 0.4, w: clip.wPct || 0.3, h: clip.hPct || 0.2 };
+}
+function syncShapeBoxFromTransform(clip) {
+  if (!_shapeBoxEl) return;
+  const tf = shapeTransform(clip);
+  _shapeBoxEl.style.left = (tf.x * 100) + '%'; _shapeBoxEl.style.top = (tf.y * 100) + '%';
+  _shapeBoxEl.style.width = (tf.w * 100) + '%'; _shapeBoxEl.style.height = (tf.h * 100) + '%';
+}
+// 미리보기 위 위치/크기 박스 — 트랙 PIP 박스(createPipBox)와 같은 모양이지만, 손잡이가
+// 대각선 하나로 가로세로를 "같이" 늘리지 않고 각자 dx/dy 만큼만 늘린다 — 사각형/타원을
+// 정사각 비율에 묶지 않고 자유롭게 늘리고 싶다는 요청 반영.
+function createShapeBox(clip, onChange) {
+  const host = $('ve-preview'); if (!host) return;
+  const box = document.createElement('div');
+  box.className = 've-pip-box';
+  box.innerHTML = `<div class="ve-pip-box-handle"></div>`;
+  host.appendChild(box);
+  _shapeBoxEl = box;
+  syncShapeBoxFromTransform(clip);
+  box.addEventListener('pointerdown', (e) => {
+    if (e.target.classList.contains('ve-pip-box-handle')) return;
+    e.preventDefault(); e.stopPropagation();
+    const hostRect = host.getBoundingClientRect();
+    const tf0 = shapeTransform(clip);
+    const startX = e.clientX, startY = e.clientY;
+    try { box.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      const nx = tf0.x + (ev.clientX - startX) / hostRect.width;
+      const ny = tf0.y + (ev.clientY - startY) / hostRect.height;
+      clip.transform = { x: nx, y: ny, w: tf0.w, h: tf0.h };
+      syncShapeBoxFromTransform(clip);
+      syncShapePopoverFields(clip);
+      onChange(false);
+    };
+    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+  box.querySelector('.ve-pip-box-handle').addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const hostRect = host.getBoundingClientRect();
+    const tf0 = shapeTransform(clip);
+    const startX = e.clientX, startY = e.clientY;
+    try { e.target.setPointerCapture(e.pointerId); } catch {}
+    const mv = (ev) => {
+      const w = Math.max(0.02, tf0.w + (ev.clientX - startX) / hostRect.width);
+      const h = Math.max(0.02, tf0.h + (ev.clientY - startY) / hostRect.height);
+      clip.transform = { x: tf0.x, y: tf0.y, w, h };
+      syncShapeBoxFromTransform(clip);
+      syncShapePopoverFields(clip);
+      onChange(false);
+    };
+    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
+    document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+  });
+}
+function syncShapePopoverFields(clip) {
+  if (!_shapePopoverEl) return;
+  const tf = shapeTransform(clip);
+  const xEl = _shapePopoverEl.querySelector('#sh-x'), yEl = _shapePopoverEl.querySelector('#sh-y');
+  const wEl = _shapePopoverEl.querySelector('#sh-w'), hEl = _shapePopoverEl.querySelector('#sh-h');
+  if (xEl) xEl.value = Math.round(tf.x * 100);
+  if (yEl) yEl.value = Math.round(tf.y * 100);
+  if (wEl) wEl.value = Math.round(tf.w * 100);
+  if (hEl) hEl.value = Math.round(tf.h * 100);
+}
 function openShapePopover(clip, anchorEl) {
   closeShapePopover(); closeTextPopover(); closePipPopover();
+  seekTo(clip.start);
   const r = anchorEl.getBoundingClientRect();
   const pop = document.createElement('div');
   pop.className = 've-text-pop';   // 텍스트 팝오버와 같은 상자 스타일 재사용
   pop.style.left = Math.max(4, r.left) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  const tf = shapeTransform(clip);
   pop.innerHTML = `
     <label class="ve-text-pop-full">${tr('video.shapeType')}<select id="sh-type">
       <option value="rect" ${clip.shapeType === 'rect' ? 'selected' : ''}>${tr('video.shapeRect')}</option>
@@ -1588,11 +1689,21 @@ function openShapePopover(clip, anchorEl) {
       <label>${tr('video.shapeStroke')}<input type="color" id="sh-stroke" value="${clip.strokeColor || '#ffffff'}"></label>
     </div>
     <label class="ve-text-pop-full">${tr('video.shapeStrokeWidth')}<input type="number" id="sh-sw" min="0" max="60" step="1" value="${clip.strokeWidth || 0}"></label>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.pipX')}<input type="number" id="sh-x" min="-200" max="200" step="1" value="${Math.round(tf.x * 100)}"></label>
+      <label>${tr('video.pipY')}<input type="number" id="sh-y" min="-200" max="200" step="1" value="${Math.round(tf.y * 100)}"></label>
+    </div>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.shapeW')}<input type="number" id="sh-w" min="2" max="400" step="1" value="${Math.round(tf.w * 100)}"></label>
+      <label>${tr('video.shapeH')}<input type="number" id="sh-h" min="2" max="400" step="1" value="${Math.round(tf.h * 100)}"></label>
+    </div>
     <button class="ve-text-pop-del" id="sh-delete">${tr('video.fxRemove')}</button>`;
   document.body.appendChild(pop);
   _shapePopoverEl = pop;
   const lblEl = anchorEl.querySelector('.ve-clip-lbl');
-  const apply = async () => {
+  // 모양·색·테두리 변경 — 그림 파일 자체를 다시 그려야 하니 무겁다(renderClips 로 썸네일도
+  // 새로 붙인다).
+  const applyLook = async () => {
     clip.shapeType = pop.querySelector('#sh-type').value;
     clip.fillColor = pop.querySelector('#sh-fill').value;
     const sw = Math.max(0, Number(pop.querySelector('#sh-sw').value) || 0);
@@ -1605,15 +1716,31 @@ function openShapePopover(clip, anchorEl) {
     renderClips();
     scheduleSave();
   };
-  pop.querySelector('#sh-type').addEventListener('change', apply);
-  pop.querySelector('#sh-fill').addEventListener('input', apply);
-  pop.querySelector('#sh-stroke').addEventListener('input', apply);
-  pop.querySelector('#sh-sw').addEventListener('input', apply);
+  // 위치/크기 변경 — 그림 파일은 그대로, 배치만 바뀐다(가볍다, renderClips 불필요).
+  const applyTransform = () => {
+    const x = (Number(pop.querySelector('#sh-x').value) || 0) / 100;
+    const y = (Number(pop.querySelector('#sh-y').value) || 0) / 100;
+    const w = Math.max(0.02, (Number(pop.querySelector('#sh-w').value) || 30) / 100);
+    const h = Math.max(0.02, (Number(pop.querySelector('#sh-h').value) || 20) / 100);
+    clip.transform = { x, y, w, h };
+    syncShapeBoxFromTransform(clip);
+    syncPreview(nowSec());
+    scheduleSave();
+  };
+  pop.querySelector('#sh-type').addEventListener('change', applyLook);
+  pop.querySelector('#sh-fill').addEventListener('input', applyLook);
+  pop.querySelector('#sh-stroke').addEventListener('input', applyLook);
+  pop.querySelector('#sh-sw').addEventListener('input', applyLook);
+  pop.querySelector('#sh-x').addEventListener('input', applyTransform);
+  pop.querySelector('#sh-y').addEventListener('input', applyTransform);
+  pop.querySelector('#sh-w').addEventListener('input', applyTransform);
+  pop.querySelector('#sh-h').addEventListener('input', applyTransform);
   pop.querySelector('#sh-delete').addEventListener('click', () => {
     closeShapePopover();
     _selClipId = clip.id;
     deleteSelected();
   });
+  createShapeBox(clip, (committed) => { if (committed) scheduleSave(); });
   setTimeout(() => document.addEventListener('pointerdown', onOutsideShapePopover, true), 0);
 }
 
@@ -1650,6 +1777,14 @@ function renderClips() {
         wireMove(e, c, el);
       });
       el.addEventListener('dblclick', () => { if (c.isText) openTextPopover(c, el); else if (c.isShape) openShapePopover(c, el); else seekTo(c.start); });
+      // 우클릭으로도 같은 설정 팝오버가 뜨게 한다 — 더블클릭을 몰라서 매번 클립을 새로
+      // 만들었다는 피드백 반영(도형/텍스트는 이걸로 이미 만든 클립을 다시 편집할 수 있다).
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        _selClipId = c.id; updateClipToolbarUI();
+        if (c.isText) openTextPopover(c, el);
+        else if (c.isShape) openShapePopover(c, el);
+      });
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
       if (!c.isText) {
@@ -1667,7 +1802,7 @@ function renderClips() {
         // 이미지는 정지 그림 하나뿐이라 필름스트립(여러 프레임 seek) 대신 그 그림 자체를
         // 통째로 채워 넣는다 — getClipThumb 은 <video> seek 전제라 이미지엔 안 맞는다.
         const box = el.querySelector('.ve-thumbs');
-        if (box) box.innerHTML = `<img src="${esc(toYtsepUrl(c.file))}">`;
+        if (box) box.innerHTML = `<img src="${esc(shapeImgUrl(c))}">`;
       } else if (!c.isAudioOnly && !c.isText) {
         const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
         if (cached) paintThumbs(c);
