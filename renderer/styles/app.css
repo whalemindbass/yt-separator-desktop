@@ -4084,6 +4084,8 @@ body { background: var(--bg) !important; }
    겪고 고친 것과 같은 패턴 — 거기 주석 참고). 헤드는 자기 배경에 맞춘 불투명 선으로
    확실히 덮고, 영역은 타임라인 톤의 반투명 선을 따로 둔다. */
 .ve-lane { display: grid; grid-template-columns: 172px 1fr; height: 72px; }
+.ve-lane.text .ve-head { cursor: pointer; }
+.ve-lane.sel-track .ve-head { background: color-mix(in srgb, var(--c, var(--accent)) 14%, var(--surface)); cursor: default; }
 .ve-head {
   flex: 0 0 172px; display: flex; flex-direction: column; justify-content: center; gap: 4px;
   padding: 6px 10px; background: var(--surface); border-right: 1px solid var(--border);

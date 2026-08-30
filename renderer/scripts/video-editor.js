@@ -24,6 +24,8 @@ let _trackSeq = 0, _clipSeq = 0;
 let _pxPerSec = 40;
 let _veExtraSec = 0;   // 오른쪽 끝까지 스크롤해서 유기적으로 늘어난 여유분(초) — growTimelineIfNeeded()
 let _selClipId = null;
+let _selTrackId = null;   // 텍스트 트랙 헤드를 클릭해 선택 — 클립 선택과 배타적(효과 패널이
+                          // 그 트랙의 모든 자막을 일괄 편집하는 모드로 바뀐다).
 let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
 let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
@@ -699,20 +701,32 @@ function toggleFxPresetMenu(clip) {
   menu.hidden = false;
   setTimeout(() => document.addEventListener('pointerdown', _onFxPresetOutside, true), 0);
 }
-function renderEffectPanel(clip) {
+function renderEffectPanel(clip, bulkTextTrack) {
   const body = $('ve-fx-body'), addBtn = $('ve-fx-add-btn'), presetBtn = $('ve-fx-preset-btn');
   if (!body) return;
   closeFxAddMenu(); closeFxPresetMenu();
+  if (!clip && bulkTextTrack) {
+    if (addBtn) addBtn.disabled = true;
+    if (presetBtn) presetBtn.disabled = true;
+    renderTextStylePanel(body, bulkTextTrack, null);
+    return;
+  }
   if (!clip) {
     if (addBtn) addBtn.disabled = true;
     if (presetBtn) presetBtn.disabled = true;
     body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxNoClip'))}</p>`;
     return;
   }
-  if (clip.isAudioOnly || clip.isText) {
+  if (clip.isText) {
     if (addBtn) addBtn.disabled = true;
     if (presetBtn) presetBtn.disabled = true;
-    body.innerHTML = `<p class="ve-fx-empty">${esc(tr(clip.isText ? 'video.fxNoText' : 'video.fxAudioOnly'))}</p>`;
+    renderTextStylePanel(body, null, clip);
+    return;
+  }
+  if (clip.isAudioOnly) {
+    if (addBtn) addBtn.disabled = true;
+    if (presetBtn) presetBtn.disabled = true;
+    body.innerHTML = `<p class="ve-fx-empty">${esc(tr('video.fxAudioOnly'))}</p>`;
     return;
   }
   if (addBtn) addBtn.disabled = false;
@@ -1118,16 +1132,9 @@ function wireTextItemResize(handle, c) {
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
   });
 }
-// 미리보기 위 드래그 결과를 열려 있는 편집 팝오버(있고, 지금 그 클립 것이면)의 숫자
-// 입력칸에도 실시간 반영 — input 이벤트를 다시 쏘진 않는다(무한 루프 방지, 그리고 어차피
-// apply() 는 이미 clip 필드를 직접 바꿔놨다).
-function syncTextPopoverFields(c) {
-  if (!_textPopoverEl || _textPopoverCurrentId !== c.id) return;
-  const xEl = _textPopoverEl.querySelector('#tx-x'), yEl = _textPopoverEl.querySelector('#tx-y'), sEl = _textPopoverEl.querySelector('#tx-size');
-  if (xEl) xEl.value = Math.round(c.xPct * 100);
-  if (yEl) yEl.value = Math.round(c.yPct * 100);
-  if (sEl) sEl.value = c.size;
-}
+// syncTextPopoverFields(c) — 미리보기 위 드래그(x/y/size)나 효과 패널의 일괄/개별 편집
+// 결과를 열려 있는 편집 팝오버(있고, 지금 그 클립 것이면)의 입력칸에도 실시간 반영한다.
+// 정의는 아래(자막 스타일 섹션)에 있다 — 거기서 font/color/bg 까지 다 같이 맞춘다.
 function syncPreview(t) {
   let any = false;
   for (const track of _veTracks) {
@@ -1443,6 +1450,17 @@ function renderLanes() {
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
     });
     lane.querySelector('.ve-reorder').addEventListener('pointerdown', (e) => wireReorder(e, vt));
+    // 텍스트 트랙 헤드 클릭 = 그 트랙 선택 — 효과 패널이 "이 트랙의 자막 전부를 한 번에
+    // 편집" 모드로 바뀐다(요청: 트랙 선택 시 일괄, 클립 선택 시 개별). 다른 종류 트랙은
+    // 일괄 편집할 스타일이 없으니(효과 체인은 클립별이라 이미 클립 선택으로 충분하다)
+    // 그대로 둔다 — 예전처럼 아무 일도 안 한다.
+    if (vt.kind === 'text') {
+      lane.querySelector('.ve-head').addEventListener('click', () => {
+        _selTrackId = vt.id; _selClipId = null;
+        document.querySelectorAll('.ve-clip.sel').forEach((el) => el.classList.remove('sel'));
+        updateClipToolbarUI();
+      });
+    }
     // 빈 영역 클릭 = 재생헤드 이동
     lane.querySelector('.ve-area').addEventListener('pointerdown', (e) => {
       if (e.target.closest('.ve-clip')) return;
@@ -1573,6 +1591,7 @@ function openTextPopover(clip, anchorEl) {
     if (lblEl) lblEl.textContent = (clip.text || '').split('\n')[0] || tr('video.textDefault');
     syncPreview(nowSec());
     scheduleSave();
+    syncTextStylePanelFields(clip);   // 효과 패널이 이 클립을 개별 편집 중이면 값도 같이 맞춘다
   };
   pop.querySelector('#tx-content').addEventListener('input', apply);
   pop.querySelector('#tx-font').addEventListener('change', apply);
@@ -1588,6 +1607,82 @@ function openTextPopover(clip, anchorEl) {
   });
   pop.querySelector('#tx-content').focus();
   setTimeout(() => document.addEventListener('pointerdown', onOutsideTextPopover, true), 0);
+}
+
+// ── 자막 스타일 — 효과 패널(미리보기 왼쪽)에서 개별(클립 선택) 또는 일괄(트랙 선택)로
+// 글꼴/위치/크기/색/배경 상자를 편집한다. 팝오버(openTextPopover)와 필드가 같아서
+// 그 사이 값이 어긋나 보이지 않게 서로 값을 밀어준다(아래 sync 두 함수).
+function textStyleFieldsHtml(vals) {
+  const fontOptions = Object.entries(TEXT_FONTS).map(([key, f]) =>
+    `<option value="${key}" ${key === (vals.fontKey || 'malgun') ? 'selected' : ''}>${esc(f.label)}</option>`).join('');
+  return `
+    <label class="ve-text-pop-full">${tr('video.textFont')}<select id="vt-font">${fontOptions}</select></label>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.textX')}<input type="number" id="vt-x" min="-200" max="200" step="1" value="${Math.round((vals.xPct ?? 0.5) * 100)}"></label>
+      <label>${tr('video.textY')}<input type="number" id="vt-y" min="-200" max="200" step="1" value="${Math.round((vals.yPct ?? 0.85) * 100)}"></label>
+    </div>
+    <div class="ve-text-pop-row">
+      <label>${tr('video.textSize')}<input type="number" id="vt-size" min="8" max="200" step="1" value="${vals.size ?? 42}"></label>
+      <label>${tr('video.textColor')}<input type="color" id="vt-color" value="${vals.color || '#ffffff'}"></label>
+    </div>
+    <label class="ve-text-pop-full">${tr('video.textBg')}<input type="checkbox" id="vt-bg" ${vals.bg ? 'checked' : ''}></label>`;
+}
+function wireTextStyleFields(container, applyFn) {
+  const get = () => ({
+    fontKey: container.querySelector('#vt-font').value,
+    xPct: (Number(container.querySelector('#vt-x').value) || 0) / 100,
+    yPct: (Number(container.querySelector('#vt-y').value) || 0) / 100,
+    size: Math.max(1, Number(container.querySelector('#vt-size').value) || 42),
+    color: container.querySelector('#vt-color').value,
+    bg: container.querySelector('#vt-bg').checked,
+  });
+  const onChange = () => applyFn(get());
+  container.querySelector('#vt-font').addEventListener('change', onChange);
+  container.querySelector('#vt-x').addEventListener('input', onChange);
+  container.querySelector('#vt-y').addEventListener('input', onChange);
+  container.querySelector('#vt-size').addEventListener('input', onChange);
+  container.querySelector('#vt-color').addEventListener('input', onChange);
+  container.querySelector('#vt-bg').addEventListener('change', onChange);
+}
+// clip 이 있으면 그 클립 하나만(개별), 없고 bulkTrack 이 있으면 그 트랙의 자막 클립
+// 전부(일괄) — 바뀔 때마다 즉시 적용한다(별도 "적용" 버튼 없음, 팝오버와 같은 방식).
+function renderTextStylePanel(body, bulkTrack, clip) {
+  const isBulk = !!bulkTrack;
+  const clipsForBulk = isBulk ? _veClips.filter(c => c.trackId === bulkTrack.id && c.isText) : [];
+  const sample = isBulk ? (clipsForBulk[0] || {}) : clip;
+  const hint = isBulk ? `<p class="ve-fx-empty" style="margin:0 0 10px;text-align:left;padding:0">${esc(tr('video.textBulkHint', { n: clipsForBulk.length }))}</p>` : '';
+  body.innerHTML = hint + textStyleFieldsHtml(sample);
+  wireTextStyleFields(body, (vals) => {
+    if (isBulk) {
+      for (const c of clipsForBulk) Object.assign(c, vals);
+    } else {
+      Object.assign(clip, vals);
+      syncTextPopoverFields(clip);   // 팝오버가 같은 클립에 열려 있으면 값도 같이 맞춘다
+    }
+    syncPreview(nowSec());
+    scheduleSave();
+  });
+}
+function syncTextPopoverFields(clip) {
+  if (!_textPopoverEl || _textPopoverCurrentId !== clip.id) return;
+  const set = (sel, val) => { const el = _textPopoverEl.querySelector(sel); if (el) el.value = val; };
+  set('#tx-font', clip.fontKey || 'malgun');
+  set('#tx-x', Math.round(clip.xPct * 100));
+  set('#tx-y', Math.round(clip.yPct * 100));
+  set('#tx-size', clip.size);
+  set('#tx-color', clip.color);
+  const bg = _textPopoverEl.querySelector('#tx-bg'); if (bg) bg.checked = !!clip.bg;
+}
+function syncTextStylePanelFields(clip) {
+  if (_selClipId !== clip.id) return;
+  const body = $('ve-fx-body'); if (!body || !body.querySelector('#vt-font')) return;
+  const set = (sel, val) => { const el = body.querySelector(sel); if (el) el.value = val; };
+  set('#vt-font', clip.fontKey || 'malgun');
+  set('#vt-x', Math.round(clip.xPct * 100));
+  set('#vt-y', Math.round(clip.yPct * 100));
+  set('#vt-size', clip.size);
+  set('#vt-color', clip.color);
+  const bg = body.querySelector('#vt-bg'); if (bg) bg.checked = !!clip.bg;
 }
 
 // ── 도형(사각형/타원) — 트랙 순서=z-index 원칙을 그대로 따라야 해서(요청) 텍스트처럼
@@ -2078,9 +2173,14 @@ function ungroupSelected() {
 // 다룬다. 여기 있던 별도 flipSelected()/툴바 상태 갱신은 그래서 다 지웠다.
 function updateClipToolbarUI() {
   const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
+  if (c) _selTrackId = null;   // 클립을 고르면 트랙 일괄 편집 모드는 자동으로 풀린다
+  document.querySelectorAll('.ve-lane').forEach((l) => {
+    l.classList.toggle('sel-track', !c && _selTrackId != null && Number(l.dataset.trackId) === _selTrackId);
+  });
+  const bulkTrack = (!c && _selTrackId != null) ? _veTracks.find(t => t.id === _selTrackId && t.kind === 'text') : null;
   // 효과 체인 패널(미리보기 왼쪽) — 선택이 바뀌거나 목록이 다시 그려질 때마다 여기서
   // 같이 새로고침한다. 패널 자체의 렌더 함수는 UI 쪽에서 정의.
-  if (typeof renderEffectPanel === 'function') renderEffectPanel(c);
+  if (typeof renderEffectPanel === 'function') renderEffectPanel(c, bulkTrack);
 }
 
 // ── 내보내기 ────────────────────────────────────────
