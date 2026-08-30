@@ -7,6 +7,7 @@ import { t as tr } from './i18n.js';
 import { esc } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
 import { getClipThumb } from './video-thumbs.js';
+import { getFilePeaks, drawWaveform } from './video-waveform.js';
 import { BoxTracker } from './video-tracker.js';
 
 const api = window.yssApi;
@@ -27,6 +28,14 @@ let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h}
 let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
+
+// ── 가사 타이밍 맞추기 — 재생하면서 Enter 를 누르면 그 순간 재생선 위치가 "지금 armed 된
+// 줄"의 시작 시각으로 찍히고 다음 줄로 넘어간다(카라오케 타이밍 툴과 같은 방식). 다 찍으면
+// 텍스트 트랙에 자막 클립으로 한 번에 만들어진다.
+let _lyricTiming = false;
+let _lyricLines = [];
+let _lyricStarts = [];
+let _lyricIdx = 0;
 
 function nextTrackId() { return ++_trackSeq; }
 function nextClipId() { return ++_clipSeq; }
@@ -1778,7 +1787,7 @@ function renderClips() {
       } else {
         // 오디오 전용(mp3/wav 등, 영상 트랙 없음) 클립은 캡처할 프레임 자체가 없다 —
         // 필름스트립 대신 음표 표시만 둔다.
-        el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span>` : `<div class="ve-thumbs"></div>`)
+        el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span><canvas class="ve-wave"></canvas>` : `<div class="ve-thumbs"></div>`)
           + `<span class="ve-clip-lbl">${esc(c.name)}</span>
           ${c.fileMissing ? `<span class="ve-clip-missing" title="${esc(tr('video.fileMissing'))}">✕</span>` : ''}
           <div class="ve-fade l"></div><div class="ve-fade r"></div>
@@ -1820,10 +1829,27 @@ function renderClips() {
       } else if (!c.isAudioOnly && !c.isText) {
         const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
         if (cached) paintThumbs(c);
+      } else if (c.isAudioOnly) {
+        paintWave(c);
       }
     }
   });
   updateClipToolbarUI();
+}
+// 오디오 클립 파형 — video-thumbs.js 의 paintThumbs 와 같은 패턴(캐시 있으면 바로 그리고,
+// 없으면 디코드가 끝난 뒤 다시 불려서 그린다). 캔버스 크기는 클립 엘리먼트의 실제 렌더
+// 크기(줌·트랙 높이)를 그대로 따라간다 — 고정 크기로 미리 만들어두면 확대/축소 때마다 흐리거나
+// 잘려 보인다.
+function paintWave(c) {
+  const clipEl = document.querySelector(`.ve-clip[data-clip-id="${c.id}"]`);
+  const canvas = clipEl?.querySelector('.ve-wave');
+  if (!canvas) return;
+  const rect = clipEl.getBoundingClientRect();
+  const w = Math.max(4, Math.round(rect.width)), h = Math.max(4, Math.round(rect.height));
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const peaks = getFilePeaks(c, toYtsepUrl, paintWave);
+  if (peaks) drawWaveform(canvas, peaks, c.inOff, c.dur);
 }
 // 영상 임포트 시 자동으로 짝지어진 오디오 클립(Vegas Pro 관례: groupId 공유) — 그룹인
 // 클립은 이동/트림/분할/삭제가 서로 따라간다. "U" 로 그룹을 풀면 그때부턴 따로 논다.
@@ -2208,6 +2234,114 @@ function buildEDL() {
 }
 const VIDEO_FPS_OPTS = ['auto', '24', '30', '60'];
 const VIDEO_RES_OPTS = [['2160', '2160p (4K)'], ['1440', '1440p (2K)'], ['1080', '1080p'], ['720', '720p'], ['480', '480p']];
+// ── 가사(SRT 자막) ────────────────────────────────
+function srtTimestamp(sec) {
+  sec = Math.max(0, sec || 0);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec - Math.floor(sec)) * 1000);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+// 텍스트 트랙의 클립을 표준 .srt 로 저장 — 가사 타이밍 도구로 만든 것이든 "+텍스트"로
+// 하나씩 손으로 만든 것이든 가리지 않는다(둘 다 결국 같은 isText 클립).
+async function exportSrt() {
+  const clips = _veClips.filter(c => c.isText).sort((a, b) => a.start - b.start);
+  if (!clips.length) { flash(tr('video.srtEmpty')); return; }
+  const body = clips.map((c, i) =>
+    `${i + 1}\n${srtTimestamp(c.start)} --> ${srtTimestamp(c.start + c.dur)}\n${(c.text || '').trim()}\n`
+  ).join('\n');
+  const r = await api.dialog.saveAs('subtitle.srt', ['srt']);
+  if (!r || !r.ok) return;
+  const res = await api.fs.writeBuffer(r.filePath, new TextEncoder().encode(body));
+  flash(res.ok ? tr('video.srtDone') : tr('video.srtFail'));
+}
+function openLyricsModal() {
+  const host = $('ve-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.lyrics')}</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" id="ve-lyric-body" style="padding:16px"></div></div>`;
+  host.hidden = false;
+  _lyricTiming = false; _lyricLines = []; _lyricStarts = []; _lyricIdx = 0;
+  renderLyricPanel();
+  host.querySelector('.x').addEventListener('click', () => { finishLyricTiming(true); });
+  host.addEventListener('click', (e) => { if (e.target === host) finishLyricTiming(true); }, { once: true });
+}
+function renderLyricPanel() {
+  const body = $('ve-lyric-body'); if (!body) return;
+  if (!_lyricTiming) {
+    body.innerHTML = `
+      <p class="ve-lyric-hint">${tr('video.lyricPasteHint')}</p>
+      <textarea id="ve-lyric-text" rows="10" placeholder="${esc(tr('video.lyricPlaceholder'))}"></textarea>
+      <div style="display:flex;justify-content:space-between;margin-top:12px;gap:8px">
+        <button class="mini" id="ve-lyric-srt">${tr('video.srtExport')}</button>
+        <button class="mini" id="ve-lyric-start">${tr('video.lyricStart')}</button>
+      </div>`;
+    body.querySelector('#ve-lyric-start').addEventListener('click', startLyricTiming);
+    body.querySelector('#ve-lyric-srt').addEventListener('click', exportSrt);
+  } else {
+    const rows = _lyricLines.map((line, i) => {
+      const done = i < _lyricIdx, cur = i === _lyricIdx;
+      const ts = _lyricStarts[i] != null ? fmtTC(_lyricStarts[i]) : '';
+      return `<div class="ve-lyric-row${cur ? ' cur' : ''}${done ? ' done' : ''}"><span class="ve-lyric-ts">${ts}</span><span class="ve-lyric-txt">${esc(line)}</span></div>`;
+    }).join('');
+    body.innerHTML = `
+      <p class="ve-lyric-hint">${tr('video.lyricTimingHint')}</p>
+      <div class="ve-lyric-list" id="ve-lyric-list">${rows}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button class="mini" id="ve-lyric-cancel">${tr('video.cancel')}</button>
+      </div>`;
+    body.querySelector('#ve-lyric-cancel').addEventListener('click', () => finishLyricTiming(true));
+    body.querySelector('.ve-lyric-row.cur')?.scrollIntoView({ block: 'nearest' });
+  }
+}
+function startLyricTiming() {
+  const raw = document.getElementById('ve-lyric-text')?.value || '';
+  const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!lines.length) { flash(tr('video.lyricEmpty')); return; }
+  _lyricLines = lines; _lyricStarts = []; _lyricIdx = 0; _lyricTiming = true;
+  // 텍스트칸에 포커스가 남아 있으면 전역 keydown 가드(INPUT/TEXTAREA 는 단축키 무시)가
+  // Enter/Esc 를 막아버린다 — 타이밍을 시작하는 순간 포커스를 놓는다.
+  document.activeElement?.blur?.();
+  renderLyricPanel();
+}
+// Enter — "지금 armed 된 줄"이 바로 이 순간(재생선 위치)부터 시작한다고 찍고 다음 줄로.
+// 줄 수만큼 누르면 끝(마지막 줄의 끝은 다음 줄이 없으니 기본 3초로 채운다 — finishLyricTiming).
+function stepLyricTiming() {
+  if (!_lyricTiming) return;
+  _lyricStarts[_lyricIdx] = nowSec();
+  _lyricIdx++;
+  if (_lyricIdx >= _lyricLines.length) { finishLyricTiming(false); return; }
+  renderLyricPanel();
+}
+function finishLyricTiming(cancel) {
+  if (!_lyricTiming && !cancel) return;
+  _lyricTiming = false;
+  if (!cancel && _lyricStarts.length) {
+    let tid = _veTracks.find(t => t.kind === 'text')?.id;
+    const createdTrack = tid == null;
+    if (createdTrack) tid = newTextTrack(false);
+    const trackRef = createdTrack ? _veTracks.find(t => t.id === tid) : null;
+    const created = [];
+    for (let i = 0; i < _lyricStarts.length; i++) {
+      const start = _lyricStarts[i];
+      const nextStart = _lyricStarts[i + 1];
+      const dur = Math.max(0.3, (nextStart != null ? nextStart : start + 3) - start);
+      const clip = {
+        id: nextClipId(), trackId: tid, isText: true, start, dur, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
+        text: _lyricLines[i], xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
+      };
+      _veClips.push(clip); created.push(clip);
+    }
+    pushUndo(
+      () => { _veClips = _veClips.filter(c => !created.includes(c)); if (createdTrack) _veTracks = _veTracks.filter(t => t.id !== tid); },
+      () => { if (createdTrack) _veTracks.unshift(trackRef); _veClips.push(...created); },
+    );
+    ensureLayers(); layout();
+    flash(tr('video.lyricDone', { n: created.length }));
+  }
+  const host = $('ve-modal'); if (host) host.hidden = true;
+}
+
 function openExportModal() {
   if (!_veClips.length) { flash(tr('video.needImport')); return; }
   const host = $('ve-modal');
@@ -2515,6 +2649,7 @@ function wire() {
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
   $('ve-export')?.addEventListener('click', () => openExportModal());
+  $('ve-lyrics')?.addEventListener('click', () => openLyricsModal());
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
   // Shift+드래그(또는 영역 선택 모드)면 재생선 대신 내보내기 구간을 지정한다(스튜디오와 동일).
@@ -2603,6 +2738,13 @@ function wire() {
   document.addEventListener('keydown', (e) => {
     const view = document.querySelector('.video-body');
     if (!view || view.hidden) return;
+    // 가사 타이밍 모드 — 재생/정지(Space)는 평소처럼 쓸 수 있어야 하니 그대로 두고,
+    // Enter/Esc 만 여기서 가로챈다. INPUT/TEXTAREA 포커스 가드보다 먼저 확인한다 —
+    // startLyricTiming() 이 포커스를 놓지만(blur), 혹시 남아있어도 이 두 키는 살아있어야 한다.
+    if (_lyricTiming) {
+      if (e.key === 'Enter') { e.preventDefault(); stepLyricTiming(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); finishLyricTiming(true); return; }
+    }
     if (document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
     if (e.code === 'Space') { e.preventDefault(); setPlaying(!_playing); }
     else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); }
