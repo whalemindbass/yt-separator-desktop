@@ -34,6 +34,13 @@ let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h}
 let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
+// 그리드 스냅 — "스튜디오 트랙처럼 snap to grid 기능, 토글식으로" 요청. 스튜디오는 BPM
+// 기준 박자 격자(16분음표)를 쓰지만 영상 타임라인엔 템포 개념이 없으니 고정 1초 격자를
+// 쓴다. 기본은 꺼짐(기존 클립 경계 스냅은 이 토글과 무관하게 항상 켜져 있다 — 이건 그
+// 위에 얹는 추가 스냅 후보일 뿐) — 껐다 켠 상태는 스튜디오의 자석 토글과 같은 방식으로
+// localStorage 에 저장해 다음에 켰을 때도 그대로 유지한다.
+const SNAP_GRID_SEC = 1;
+let _snapGrid = localStorage.getItem('yss:videoSnapGrid') === '1';
 
 // ── 미리보기 해상도(프록시, 저해상도 대체본) — 4K 등 고해상도 소스는 내장그래픽에서 실시간
 // 디코드가 버겁다("버벅임" 피드백). "원본 보기" 가 아닌 해상도를 고르면, 그보다 세로가 큰
@@ -2208,6 +2215,11 @@ function hideDragBadge() { document.getElementById('ve-drag-badge')?.remove(); }
 function snapSec(sec, excludeId) {
   const cand = [0];
   for (const c of _veClips) { if (c.id === excludeId) continue; cand.push(c.start, c.start + c.dur); }
+  // 그리드 스냅이 켜져 있으면 가장 가까운 1초 격자선도 후보에 더한다 — 클립 경계와 같은
+  // 문턱(6px)으로 경쟁시켜서, 둘 다 가까우면 더 가까운 쪽이 이긴다(굳이 우선순위를 나누지
+  // 않는다 — 스튜디오처럼 클립 경계를 항상 우선하게 하면 로직이 갈라지고, 실사용에서
+  // 어느 쪽이든 붙기만 하면 충분하다).
+  if (_snapGrid) cand.push(Math.round(sec / SNAP_GRID_SEC) * SNAP_GRID_SEC);
   let best = sec, bestPx = 6;
   for (const edge of cand) { const d = Math.abs(sec - edge) * _pxPerSec; if (d < bestPx) { bestPx = d; best = edge; } }
   return best;
@@ -3301,6 +3313,21 @@ function wire() {
     $('ve-ruler-wrap')?.classList.toggle('range-mode', _veRangeMode);
     flash(_veRangeMode ? tr('video.rangeModeOn') : tr('video.rangeModeOff'));
   });
+  // 그리드 스냅 토글 — 스튜디오의 자석 토글(localStorage 저장)과 같은 방식.
+  {
+    const gridBtn = $('ve-snap-grid');
+    if (gridBtn) {
+      gridBtn.classList.toggle('on', _snapGrid);
+      gridBtn.setAttribute('aria-pressed', String(_snapGrid));
+      gridBtn.addEventListener('click', () => {
+        _snapGrid = !_snapGrid;
+        localStorage.setItem('yss:videoSnapGrid', _snapGrid ? '1' : '0');
+        gridBtn.classList.toggle('on', _snapGrid);
+        gridBtn.setAttribute('aria-pressed', String(_snapGrid));
+        flash(_snapGrid ? tr('video.snapGridOn') : tr('video.snapGridOff'));
+      });
+    }
+  }
   // 렌더 해상도 선택 — 프리셋 또는 사용자 지정. 미리보기 틀 크기·PIP 좌표 기준·내보내기
   // 결과물 크기가 전부 이걸 따른다(getResolution()).
   const resSel = $('ve-res'), resCustom = $('ve-res-custom'), resW = $('ve-res-w'), resH = $('ve-res-h');
