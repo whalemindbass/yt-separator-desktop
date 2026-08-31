@@ -2,8 +2,9 @@
 // 특정 영역을 프레임마다 따라가는 단순 템플릿 매칭 트래커 — OpenCV 없이 순수 JS(Canvas 2D).
 // (OpenCV.js 시도했으나 이 배포판의 Tracker 바인딩이 껍데기뿐이라 포기 — video-tracker
 // 관련 메모리 참고). 그레이스케일로 축소한 패치끼리 SSD(제곱오차합)로 비교하고, 이전
-// 위치 주변 좁은 범위만 훑는다(전체 프레임 탐색은 느리고 프레임 간 이동은 보통 작다).
-// 빠른 움직임·회전·가림에는 약하다 — "완만하게 움직이는 대상 가리기" 정도가 목표.
+// 위치 주변을 훑는다(전체 프레임 탐색은 느리다). 회전·가림에는 여전히 약하지만, 빠르게
+// 움직이는 대상을 자주 놓친다는 피드백으로 탐색 반경/촘촘함을 크게 늘렸다("오래 걸려도
+// 상관없다"는 전제) — video-editor.js 의 TRACK_SAMPLE_INTERVAL(샘플 간격)도 같이 줄였다.
 
 const PATCH = 24;   // 비교용 축소 크기(정사각) — 클수록 정확하지만 느림
 
@@ -52,8 +53,12 @@ export class BoxTracker {
     return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
   }
   // ctx 에 다음 프레임이 그려진 상태로 호출한다 — 이전 위치 주변을 훑어 가장 비슷한 자리를
-  // 찾고 박스를 그쪽으로 옮긴다. searchRadius 는 박스 크기 대비 탐색 반경 비율.
-  update(ctx, searchRadius = 0.6) {
+  // 찾고 박스를 그쪽으로 옮긴다. searchRadius 는 박스 크기 대비 탐색 반경 비율 — 예전 0.6
+  // 이었는데, 그 폭(박스의 0.6배)보다 더 빨리 움직이는 대상은 다음 샘플에서 아예 탐색
+  // 범위 밖으로 나가버려 조용히 놓쳤다("조금만 빠르게 움직여도 전혀 못 따라감" 피드백).
+  // 1.5 로 늘려 같은 시간 동안 훨씬 더 멀리 움직인 대상도 범위 안에 들어오게 한다 —
+  // 후보 수가 늘어(느려)지지만 "오래 걸려도 상관없다"는 전제로 정확도를 우선한다.
+  update(ctx, searchRadius = 1.5) {
     const { x, y, w, h } = this.box;
     const rx = Math.max(6, Math.round(w * searchRadius)), ry = Math.max(6, Math.round(h * searchRadius));
     const region = this._clipToCanvas(ctx, x - rx, y - ry, w + rx * 2, h + ry * 2);
@@ -61,7 +66,9 @@ export class BoxTracker {
     try { img = ctx.getImageData(region.x, region.y, region.w, region.h); }
     catch { return { ...this.box, score: Infinity, lost: true }; }
     const gray = toGray(img);
-    const step = Math.max(1, Math.round(Math.min(rx, ry) / 10));
+    // 범위가 넓어진 만큼 촘촘함(step)도 같이 올려서(나눗수 10→20) 넓어진 범위 안에서도
+    // 예전과 비슷하거나 더 촘촘한 격자로 훑는다 — "처리 깊이 늘려야 할듯" 요청 반영.
+    const step = Math.max(1, Math.round(Math.min(rx, ry) / 20));
     let bestScore = Infinity, bestX = x, bestY = y;
     const cur = new Float32Array(PATCH * PATCH);
     const maxOx = region.w - 1, maxOy = region.h - 1;

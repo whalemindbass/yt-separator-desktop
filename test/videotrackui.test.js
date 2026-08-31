@@ -1,8 +1,10 @@
 'use strict';
-// 실제 UI 흐름으로 추적 기능 검증 — 배경 영상(움직이는 사각형) 임포트 → 이미지 오버레이
-// 추가 → 효과 패널 "+" 추가 메뉴에서 "따라다니기" 선택(기본으로 항상 보이는 게 아니라
-// 이렇게 직접 추가해야만 생긴다는 요청 반영) → 미리보기 위 드래그로 영역 지정 → 자동 분석
-// → 내보내기 결과에서 오버레이가 실제로 대상을 따라 움직였는지 실측한다.
+// 실제 UI 흐름으로 추적("오토 트래킹") 기능 검증 — 배경 영상(움직이는 사각형) 임포트 →
+// 이미지 오버레이 추가 → 효과 패널 "+" 추가 메뉴에서 "오토 트래킹" 선택(기본으로 항상
+// 보이는 게 아니라 이렇게 직접 추가해야만 생긴다는 요청 반영) → 미리보기 위 드래그로
+// 영역 지정 → 자동 분석(시작하자마자 "분석 중…" 표시가 뜨는지도 확인 — 예전엔 처음
+// 추가할 때만 이 표시가 안 뜨는 버그가 있었다) → 내보내기 결과에서 오버레이가 실제로
+// 대상을 따라 움직였는지 실측한다.
 
 const path = require('path'); const fs = require('fs'); const os = require('os');
 const { spawnSync } = require('child_process');
@@ -54,16 +56,16 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="image"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 1) break; await wait(300); }
 
-  section('2) 클립 선택 — 기본으로는 따라다니기 섹션이 안 보임(요청대로)');
+  section('2) 클립 선택 — 기본으로는 오토 트래킹 섹션이 안 보임(요청대로)');
   await js(`(() => {
     const el = document.querySelector('.ve-clip.image');
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
     document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
   })(); true`);
   await wait(150);
-  expect('선택만으론 따라다니기 섹션 안 뜸', await js(`!document.querySelector('.ve-track-start-btn')`), true);
+  expect('선택만으론 오토 트래킹 섹션 안 뜸', await js(`!document.querySelector('.ve-track-start-btn')`), true);
 
-  section('2b) "+" 효과 추가 메뉴에서 "따라다니기" 선택 — 골라야만 그리기 모드로 들어감');
+  section('2b) "+" 효과 추가 메뉴에서 "오토 트래킹" 선택 — 골라야만 그리기 모드로 들어감');
   await js(`document.getElementById('ve-fx-add-btn').click(); true`);
   await wait(80);
   // .ve-fx-add-item 클래스는 "+트랙" 메뉴(#ve-add-track-menu)도 같이 쓴다 — 반드시
@@ -72,11 +74,11 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
     const items = [...document.querySelectorAll('#ve-fx-add-menu .ve-fx-add-item')];
     return items[0]?.textContent;
   })()`);
-  expect('메뉴 맨 위가 따라다니기 항목', trackItemLabel, '따라다니기');
+  expect('메뉴 맨 위가 오토 트래킹 항목', trackItemLabel, '오토 트래킹');
   await js(`(() => { [...document.querySelectorAll('#ve-fx-add-menu .ve-fx-add-item')][0].click(); })(); true`);
   await wait(150);
 
-  section('3) 미리보기에서 드래그로 영역 지정 → 자동 분석 대기 → 완료 확인');
+  section('3) 미리보기에서 드래그로 영역 지정 → "분석 중…" 표시가 처음 추가하는 이번에도 바로 뜨는지(버그였던 부분)');
   await js(`(() => {
     const host = document.getElementById('ve-preview');
     const r = host.getBoundingClientRect();
@@ -89,20 +91,24 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: ex, clientY: ey, pointerId: 5 }));
     document.dispatchEvent(new PointerEvent('pointerup', { clientX: ex, clientY: ey, pointerId: 5 }));
   })(); true`);
-  // 프레임 seek(디코드) 자체가 느려서 샘플당 0.3~0.8초 걸린다(실측) — 기본 5초 클립이면
-  // 0.3초 간격으로 17개 샘플, 넉넉히 40초까지 기다린다.
-  for (let i = 0; i < 100; i++) {
-    if (await js(`!!document.querySelector('.ve-track-status')`)) break;
+  await wait(60);   // renderEffectPanel 이 분석 시작과 동시에 부르는 첫 렌더 — 다음 틱까지 기다리지 않아도 된다
+  const analyzingText = await js(`document.querySelector('.ve-track-status')?.textContent || ''`);
+  expect('처음 추가하는 이번에도 분석 시작과 동시에 "분석 중…" 표시가 뜸(예전엔 안 떴다)', /분석 중/.test(analyzingText), true);
+  expect('다시 지정/해제 버튼은 분석 중엔 비활성', await js(`document.querySelector('.ve-track-start-btn')?.disabled`), true);
+
+  section('4) 자동 분석 완료 대기 — "분석 중…" 표시가 "추적 중 (N개 지점)" 으로 바뀔 때까지');
+  // 프레임 seek(디코드) 자체가 느려진 촘촘한 샘플 간격(0.1초) 탓에 시간이 걸린다(실측) —
+  // 기본 5초 클립이면 대략 50개 샘플, 넉넉히 60초까지 기다린다.
+  for (let i = 0; i < 150; i++) {
+    if (/추적 중/.test(await js(`document.querySelector('.ve-track-status')?.textContent || ''`))) break;
     await wait(400);
   }
-  expect('추적 완료 후 상태 표시가 뜸', await js(`!!document.querySelector('.ve-track-status')`), true);
-  const kfCount = await js(`(() => {
-    const m = document.querySelector('.ve-track-status')?.textContent.match(/\\d+/);
-    return m ? Number(m[0]) : 0;
-  })()`);
+  const finalStatus = await js(`document.querySelector('.ve-track-status')?.textContent || ''`);
+  expect('분석 끝나면 "추적 중 (N개 지점)" 으로 바뀜', /추적 중/.test(finalStatus), true);
+  const kfCount = Number((finalStatus.match(/\d+/) || [0])[0]);
   expect('키프레임이 여러 개 쌓임', kfCount >= 2, true);
 
-  section('4) 내보내기 — 오버레이가 실제로 대상(빨간 사각형)을 따라 움직였는지');
+  section('5) 내보내기 — 오버레이가 실제로 대상(빨간 사각형)을 따라 움직였는지');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
   await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {
@@ -111,10 +117,12 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   }
   expect('출력 파일 생김', fs.existsSync(OUT), true);
   if (fs.existsSync(OUT)) {
-    // 트래커가 이상적인 궤적을 정확히 따르진 않는다(격자 탐색이라 약간 어긋남) — 실측한
-    // 실제 추적 결과 기준으로 넉넉히 중앙 근처를 잡는다.
-    const start = samplePixel(OUT, 0.1, 45, 45);
-    const end = samplePixel(OUT, 1.7, 195, 155);
+    // 트래커가 이상적인 궤적을 정확히 따르진 않는다(격자 탐색이라 약간 어긋남) — 실제
+    // 대상(빨간 사각형, x='20+t*110':y='20+t*70', 40x40)의 그 시각 중심 좌표를 잡는다
+    // (탐색 반경/촘촘함이 바뀌면 트래커의 정확한 오차까지 매번 달라지니, 매직넘버로
+    // 실측값을 박아두는 대신 원래 목표의 중심을 기준으로 넉넉히 잡는 쪽이 더 안정적이다).
+    const start = samplePixel(OUT, 0.1, Math.round(20 + 0.1 * 110 + 20), Math.round(20 + 0.1 * 70 + 20));
+    const end = samplePixel(OUT, 1.7, Math.round(20 + 1.7 * 110 + 20), Math.round(20 + 1.7 * 70 + 20));
     expect('시작 시점 근처에 오버레이(노랑) 있음', isYellowish(start), true);
     expect('끝 시점 근처에도 오버레이(노랑) 있음(따라 움직임)', isYellowish(end), true);
   }

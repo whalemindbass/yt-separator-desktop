@@ -769,9 +769,12 @@ function renderEffectPanel(clip, bulkTextTrack) {
   if (addBtn) addBtn.disabled = false;
   if (presetBtn) presetBtn.disabled = false;
   body.innerHTML = '';
-  // "+" 메뉴로 골라서 실제로 추적을 마쳐야만(clip.trackKeyframes 가 생겨야만) 이 섹션이
-  // 보인다 — 이미지/도형이라고 무조건 보이던 것에서 바꿈(요청).
-  if ((clip.isImage || clip.isShape) && clip.trackKeyframes && clip.trackKeyframes.length) {
+  // "+" 메뉴로 골라야만(clip.trackKeyframes 가 생기거나, 지금 한창 분석 중이거나) 이
+  // 섹션이 보인다 — 이미지/도형이라고 무조건 보이던 것에서 바꿈(요청). 분석 중에도
+  // 보여야 진행 상태가 뜬다 — 예전엔 추적이 끝나야만(키프레임이 생겨야만) 이 섹션 자체가
+  // 없어서, 처음 추가할 때는 "분석 중…" 표시가 아예 뜨지 않는 버그가 있었다(재지정할
+  // 땐 이미 섹션이 떠 있어서 그 안의 버튼 텍스트만 바꿔치기하던 방식이라 우연히 보였다).
+  if ((clip.isImage || clip.isShape) && (clip._trackAnalyzing || (clip.trackKeyframes && clip.trackKeyframes.length))) {
     body.appendChild(renderTrackSection(clip));
   }
   const list = clip.effects || [];
@@ -916,9 +919,12 @@ function loadVideoOnce(v, src) {
     v.src = src; v.dataset.src = src;
   });
 }
-const TRACK_SAMPLE_INTERVAL = 0.3;   // 초 — 실측해보니 프레임 seek(디코드) 자체가 느려서(샘플당 대략 0.3~0.8초)
-// 이보다 촘촘하면 짧은 클립도 분석에 십수 초가 걸린다. 성기면 애니메이션이 계단져 보이지만
-// 이 정도면 완만한 움직임엔 충분하다.
+// 초 — 샘플 간격이 넓으면(예전 0.3) 그 사이 대상이 트래커의 탐색 범위보다 더 멀리
+// 움직여버려 놓치기 쉽다("조금이라도 빠르게 움직이면 못 따라감" 피드백) — 촘촘하게
+// 줄였다(샘플당 대략 0.3~0.8초 걸리니 클립 길이에 따라 분석이 오래 걸릴 수 있지만,
+// "오래 걸려도 상관없다"는 전제로 정확도를 우선한다). video-tracker.js 의 탐색 반경도
+// 같이 늘렸다 — 둘 다 같은 문제(빠른 움직임 놓침)를 다른 각도에서 완화한다.
+const TRACK_SAMPLE_INTERVAL = 0.1;
 async function runTracking(clip, source, previewHostRect, cssBox) {
   const { w: cw, h: ch } = getResolution();
   // 미리보기 화면 좌표(cssBox, #ve-preview 기준) → 소스 영상 자연 해상도 픽셀 좌표.
@@ -936,8 +942,13 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
   const canvas = document.createElement('canvas'); canvas.width = source.w; canvas.height = source.h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const n = Math.max(1, Math.round(clip.dur / TRACK_SAMPLE_INTERVAL));
-  const btn = document.querySelector('.ve-track-start-btn');
-  if (btn) btn.disabled = true;
+  // 분석 시작과 동시에 "분석 중…" 표시를 띄운다 — clip.trackKeyframes 가 아직 없어도
+  // renderEffectPanel 이 이 플래그만으로 섹션을 보여주게 바꿔 둬서(위 renderEffectPanel
+  // 참고), 처음 추가하는 경우든 재지정이든 항상 뜬다(예전엔 "이미 떠 있는 재지정 버튼의
+  // 텍스트만 바꿔치기"하는 방식이라 처음 추가할 땐 그 버튼 자체가 없어서 표시가 안 됐다).
+  clip._trackAnalyzing = true;
+  clip._trackProgress = 0;
+  renderEffectPanel(clip);
   const outLb = letterboxRect(source.w, source.h, cw, ch);   // 소스 픽셀 → 최종 출력 캔버스 프랙션
   const toCanvasFrac = (b) => ({
     x: (outLb.offX + b.x * outLb.scale) / cw, y: (outLb.offY + b.y * outLb.scale) / ch,
@@ -957,11 +968,14 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
       if (!tracker) { tracker = new BoxTracker(ctx, srcBox0); box = { ...srcBox0 }; }
       else box = tracker.update(ctx);
       keyframes.push({ t: localT, ...toCanvasFrac(box) });
-      if (btn) btn.textContent = tr('video.trackAnalyzing', { pct: Math.round((i / n) * 100) });
+      clip._trackProgress = Math.round((i / n) * 100);
+      const statusEl = document.querySelector('.ve-track-status');
+      if (statusEl) statusEl.textContent = tr('video.trackAnalyzing', { pct: clip._trackProgress });
       // 프레임마다 렌더러가 완전히 멈추지 않도록 한 틱 양보한다.
       await new Promise((r) => requestAnimationFrame(r));
     }
   } catch { /* 분석 중 실패하면 그때까지 모은 키프레임만 쓴다 */ }
+  clip._trackAnalyzing = false;
   if (keyframes.length >= 2) {
     clip.trackKeyframes = keyframes;
     clip.transform = null;   // 키프레임이 있으면 정적 transform 은 안 쓴다(clipTransformAt 우선순위)
@@ -972,21 +986,26 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
   scheduleSave();
   flash(tr('video.trackDone'));
 }
-// 효과 패널 맨 위에 붙는 "따라다니기" 섹션 — "+" 효과 추가 메뉴에서 골라야만 생긴다(요청:
-// 기본으로 항상 보이게 두지 말 것). renderEffectPanel 이 clip.trackKeyframes 가 실제로
-// 있을 때만 이걸 부른다 — 그래서 여긴 "이미 추적 중" 상태(다시 지정/해제)만 다룬다.
+// 효과 패널 맨 위에 붙는 "오토 트래킹" 섹션 — "+" 효과 추가 메뉴에서 골라야만 생긴다(요청:
+// 기본으로 항상 보이게 두지 말 것). renderEffectPanel 이 지금 분석 중이거나 이미 키프레임이
+// 있을 때만 이걸 부른다 — 분석 중엔 진행률만, 끝나면 "다시 지정/해제" 버튼을 보여준다.
 function renderTrackSection(clip) {
   const wrap = document.createElement('div');
   wrap.className = 've-track-section';
+  const analyzing = !!clip._trackAnalyzing;
+  const statusText = analyzing
+    ? tr('video.trackAnalyzing', { pct: clip._trackProgress || 0 })
+    : tr('video.trackActive', { n: clip.trackKeyframes.length });
   wrap.innerHTML = `
     <div class="ve-track-head">${esc(tr('video.trackFollowTitle'))}</div>
-    <div class="ve-track-status">${esc(tr('video.trackActive', { n: clip.trackKeyframes.length }))}</div>
+    <div class="ve-track-status">${esc(statusText)}</div>
     <div class="ve-track-btns">
-      <button type="button" class="mini ve-track-start-btn">${esc(tr('video.trackRedo'))}</button>
-      <button type="button" class="mini ve-track-clear-btn">${esc(tr('video.trackClear'))}</button>
+      <button type="button" class="mini ve-track-start-btn" ${analyzing ? 'disabled' : ''}>${esc(tr('video.trackRedo'))}</button>
+      <button type="button" class="mini ve-track-clear-btn" ${analyzing ? 'disabled' : ''}>${esc(tr('video.trackClear'))}</button>
     </div>`;
-  wrap.querySelector('.ve-track-start-btn').addEventListener('click', () => startTrackDrawMode(clip));
+  wrap.querySelector('.ve-track-start-btn').addEventListener('click', () => { if (!clip._trackAnalyzing) startTrackDrawMode(clip); });
   wrap.querySelector('.ve-track-clear-btn').addEventListener('click', () => {
+    if (clip._trackAnalyzing) return;
     clip.trackKeyframes = null;
     syncPreview(nowSec()); renderEffectPanel(clip); scheduleSave();
   });

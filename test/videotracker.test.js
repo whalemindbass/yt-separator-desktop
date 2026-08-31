@@ -62,5 +62,34 @@ const { bootRenderer, expect, near, section, finish } = require('./harness');
   const distFromTarget = Math.hypot(far.x - 250, far.y - 180);
   expect('탐색 범위 밖으로 튄 대상은 못 따라감(범위 내에서만 최선을 찾음)', distFromTarget > 50, true);
 
+  section('3) 예전 탐색 반경(박스의 0.6배 ≈ 24px)으로는 놓쳤을 빠른 움직임 — 지금은 잡아야 함');
+  // "조금이라도 빠르게 움직이면 전혀 못 따라감" 피드백으로 searchRadius 를 0.6→1.5 로
+  // 늘렸다 — 박스 40px 기준 옛 반경은 24px, 새 반경은 60px. 프레임당 40px 씩 옮기면(옛
+  // 반경 밖, 새 반경 안) 예전엔 놓쳤을 자리를 지금은 정확히 찾아야 한다.
+  const result3 = await js(`(async () => {
+    const { BoxTracker } = await import('./scripts/video-tracker.js');
+    const W = 320, H = 240, BOX = 40;
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    function draw(x, y) {
+      ctx.fillStyle = 'black'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#e05a5a'; ctx.fillRect(x, y, BOX, BOX);
+    }
+    const path = [];
+    for (let i = 0; i < 5; i++) path.push({ x: 20 + i * 40, y: 40 });   // 프레임당 40px(가로) 이동
+    draw(path[0].x, path[0].y);
+    const tracker = new BoxTracker(ctx, { x: path[0].x, y: path[0].y, w: BOX, h: BOX });
+    const errors = [];
+    for (let i = 1; i < path.length; i++) {
+      draw(path[i].x, path[i].y);
+      const r = tracker.update(ctx);
+      errors.push(Math.hypot(r.x - path[i].x, r.y - path[i].y));
+    }
+    return JSON.stringify({ errors, maxError: Math.max(...errors) });
+  })()`);
+  const { errors: errors3, maxError: maxError3 } = JSON.parse(result3);
+  console.log('  빠른 이동 오차(px):', errors3.map(e => e.toFixed(1)).join(', '));
+  near('예전엔 놓쳤을 빠른 움직임도 지금은 잘 따라감(오차 작음)', maxError3, 0, 10);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
