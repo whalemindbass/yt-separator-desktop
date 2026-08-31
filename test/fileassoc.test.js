@@ -54,7 +54,14 @@ const PROJECT = {
     if (await js(`document.querySelector('main.view:not([hidden])')?.dataset.view`) === 'studio') break;
     await wait(250);
   }
-  await wait(600);   // 로드 뒤 늦게 오는 엔진 이벤트까지 받아 본다
+  // 화면이 studio 로 바뀌는 건 거의 즉시지만, 실제 제목 반영(loadProjectData → applyProject
+  // → markClean)은 엔진 IPC 왕복까지 걸려 훨씬 늦게 온다(실측 2.5초 넘게 걸림) — 고정 대기
+  // 대신 제목이 실제로 바뀔 때까지 기다린다(느린 기계에서도 안정적으로).
+  for (let i = 0; i < 40; i++) {
+    const t = await js(`document.querySelector('#st-proj-name .pn-label')?.textContent || ''`);
+    if (t.includes('연결시험')) break;
+    await wait(250);
+  }
 
   const st = await js(`({
     화면: document.querySelector('main.view:not([hidden])')?.dataset.view,

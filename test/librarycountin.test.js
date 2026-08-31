@@ -7,6 +7,14 @@
 // 따른다. 실제 오디오/영상 파일 없이도(스템 없음, 존재하지 않는 videoPath) UI 배선만
 // 확인하면 되므로 bootRenderer 로 가볍게 띄운다(엔진·ffmpeg 불필요 — home.test.js 와 같은 패턴).
 
+const path = require('path'); const fs = require('fs'); const os = require('os');
+const { app } = require('electron');
+// bootRenderer() 는 main.js 를 안 거쳐서 app.setPath 를 안 해 두면 이 기기의 기본
+// userData(=localStorage)를 그대로 쓴다 — 지난 실행이 저장해 둔 곡별 설정(카운트인/
+// 메트로놈 정렬·패턴 등)이 남아 있으면 "기본값" 검증이 실행할 때마다 달라진다(실측
+// 확인 — 다른 테스트가 이 코드베이스에서 하듯 여기도 매번 새 프로필을 써야 한다).
+app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'yss-librarycountin-profile-')));
+
 const { bootRenderer, expect, section, wait, finish } = require('./harness');
 
 const VIDEO_PATH = 'X:/nonexistent.mp4';
