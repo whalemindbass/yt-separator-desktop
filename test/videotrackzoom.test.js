@@ -25,9 +25,12 @@ const W = 320, H = 240, BOX = 40;
 // 원본(320x240) 안에서 상자 자리 — 중심 근처(140,100)~(180,140).
 const SRC_BOX = { x: 140, y: 100 };
 
+// 30fps(예전엔 10fps) — 내보내기가 추적 구간을 EXPORT_INTERP_HZ(30) 만큼 촘촘히 쪼개는데,
+// 조각 하나가 소스 프레임 주기보다 짧으면 ffmpeg trim 이 0프레임을 내놓아 결과물이
+// 어긋난다(실측 확인된 버그, videotracking.test.js 주석 참고).
 const RED_BOX = path.join(TMP, 'red_box.png');
 spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=red:size=${BOX}x${BOX}`, '-frames:v', '1', RED_BOX], { stdio: 'ignore' });
-spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=black:size=${W}x${H}:duration=5:rate=10`, '-i', RED_BOX,
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=black:size=${W}x${H}:duration=5:rate=30`, '-i', RED_BOX,
   '-filter_complex', `[0][1]overlay=${SRC_BOX.x}:${SRC_BOX.y}`,
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', BG], { stdio: 'ignore' });
 spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'color=yellow:size=30x30', '-frames:v', '1', OVERLAY_IMG], { stdio: 'ignore' });

@@ -19,7 +19,12 @@ const OVERLAY_IMG = path.join(TMP, 'overlay.png');
 const OUT = path.join(TMP, 'out.mp4');
 const W = 320, H = 240;
 
-spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=black:size=${W}x${H}:duration=2:rate=10`,
+// 배경을 30fps 로(예전엔 10fps) — 내보내기가 이제 추적 구간을 훨씬 촘촘히(EXPORT_INTERP_HZ)
+// 쪼개는데, 그 조각 하나(≈0.017초)가 소스 자체의 프레임 주기(10fps=0.1초)보다 짧으면
+// ffmpeg 의 trim 이 그 조각에 프레임을 하나도 못 넣어(0프레임) 결과물이 통째로 어긋난다
+// (실측으로 확인한 버그) — 30fps 는 실제 촬영/화면녹화 영상의 흔한 하한이라 이 문제를
+// 재현하지 않는다.
+spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', `color=black:size=${W}x${H}:duration=2:rate=30`,
   '-c:v', 'libx264', '-pix_fmt', 'yuv420p', BG], { stdio: 'ignore' });
 spawnSync(FFMPEG, ['-y', '-f', 'lavfi', '-i', 'color=yellow:size=40x40', '-frames:v', '1', OVERLAY_IMG], { stdio: 'ignore' });
 if (!fs.existsSync(BG) || !fs.existsSync(OVERLAY_IMG)) throw new Error('ffmpeg 로 테스트 파일 생성 실패');

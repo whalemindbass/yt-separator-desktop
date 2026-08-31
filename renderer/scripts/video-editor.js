@@ -2731,6 +2731,15 @@ function clipTransformAt(c, track, absT) {
   if (c.transform) return c.transform;
   return track.transform;
 }
+// 내보내기에서 추적 키프레임 구간을 매끄럽게 보이게 하는 데 쓰는 보간 밀도 — 실제 영상
+// 프레임레이트(소스마다 제각각이고 렌더러는 그 값을 모른다)를 정확히 몰라도 "왠만한
+// 프레임레이트보다는 촘촘하게" 찍으면 충분하다. 다만 무작정 높이면 안 된다 — 세그먼트
+// 하나의 길이(1/EXPORT_INTERP_HZ)가 소스 자체의 프레임 주기보다 짧아지면 ffmpeg 의
+// trim=duration=… 이 그 조각에 프레임을 하나도 못 채워(0프레임) 뒤이은 concat 전체가
+// 밀려서 어긋난다(실측으로 확인한 버그 — 소스가 10fps 인데 60Hz 로 쪼갰더니 결과물에
+// 추적 오버레이가 아예 안 보였다). 30 은 실촬영/화면녹화 영상의 흔한 하한(대개 24~60fps)
+// 보다는 낮아서 그 경계를 웬만해선 안 넘는다. buildEDL() 의 trackKeyframes 경계 생성에서만 쓴다.
+const EXPORT_INTERP_HZ = 30;
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
@@ -2762,7 +2771,18 @@ function buildEDL() {
     // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 그래야 그 사이마다 세그먼트가
     // 잘게 갈라져서 각자 다른(보간된) 위치로 내보내진다("애니메이션"은 여기, 잘게 쪼갠 정적
     // PIP 세그먼트를 이어붙이는 걸로 구현한다 — ffmpeg 쪽엔 새 코드가 필요 없다).
-    if (c.trackKeyframes) for (const kf of c.trackKeyframes) bounds.add(c.start + kf.t);
+    // 키프레임 자체(TRACK_SAMPLE_INTERVAL=0.1초 간격, 분석 정확도 목적)만 경계로 쓰면
+    // 초당 10번만 위치가 바뀌어, 영상 프레임레이트(보통 24~60fps)보다 훨씬 성겨서 미리보기
+    // (매 프레임 새로 보간)와 달리 뚝뚝 끊겨 보인다("따라가기가 뚝뚝 끊기면서 이동 —
+    // 미리보기보다 조잡해" 피드백). 키프레임 사이사이에도 EXPORT_INTERP_HZ 간격으로 촘촘히
+    // 중간 경계를 더 넣는다 — 실제 위치는 여전히 같은 interpolateKeyframes 로 구하니 정확도는
+    // 그대로고, 세그먼트(=위치 갱신 횟수)만 프레임마다 갱신될 만큼 늘어난다.
+    if (c.trackKeyframes && c.trackKeyframes.length) {
+      const kfs = c.trackKeyframes;
+      for (const kf of kfs) bounds.add(c.start + kf.t);
+      const step = 1 / EXPORT_INTERP_HZ;
+      for (let t = kfs[0].t; t < kfs[kfs.length - 1].t; t += step) bounds.add(c.start + t);
+    }
   }
   if (range) { bounds.add(range.start); bounds.add(range.end); }
   const pts = [...bounds].sort((a, b) => a - b);
