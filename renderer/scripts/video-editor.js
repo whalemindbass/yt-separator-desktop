@@ -31,6 +31,15 @@ let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지�
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
 
+// ── 프록시(저해상도 미리보기 대체본) — 4K 등 고해상도 소스는 내장그래픽에서 실시간 디코드가
+// 버겁다("버벅임" 피드백). 켜져 있으면 PROXY_HEIGHT_THRESHOLD 를 넘는 소스는 재생·필름스트립
+// 생성 때 userData/proxies 에 만들어 둔 저해상도 사본으로 대체된다 — 내보내기(buildEDL)는
+// clip.file(원본)만 보내니 이 상태와 완전히 무관하다(화질 손실 없음). 기기별 하드웨어
+// 사정이라 프로젝트가 아니라 앱 전역 설정(api.settings)에 저장한다.
+const PROXY_HEIGHT_THRESHOLD = 1080;
+let _proxyMode = false;
+const _proxyStatus = new Map();   // file(원본 경로) → {status:'pending'|'ready'|'failed', proxyPath?}
+
 // ── 가사 타이밍 맞추기 — 재생하면서 Enter 를 누르면 그 순간 재생선 위치가 "지금 armed 된
 // 줄"의 시작 시각으로 찍히고 다음 줄로 넘어간다(카라오케 타이밍 툴과 같은 방식). 다 찍으면
 // 텍스트 트랙에 자막 클립으로 한 번에 만들어진다.
@@ -151,6 +160,7 @@ async function openProjectFile() {
   renderLanes();   // 트랙 개수 자체가 바뀌었을 수 있다 — layout() 만으론 레인 DOM 이 안 갱신된다
   flash(tr('video.projectOpened'));
   checkMissingFiles();
+  ensureProxiesFor(_veClips);
 }
 
 // ── 재생 시계 (엔진 없음 — rAF 로 직접 잰다) ──────────────
@@ -995,6 +1005,50 @@ function clipsAt(trackId, t) {
 // el 은 슬롯 래퍼(.ve-layer-slot, <video>+<img> 둘 다 담음) — 클립이 이미지면 <img> 를,
 // 아니면 <video> 를 보여준다. 나머지 하나는 숨기고(이미지면 비디오는 멈춰 둔다) 반대로.
 function layerVideo(el) { return el.querySelector('video'); }
+// 프록시 대상 — 이미지/오디오전용/텍스트는 애초에 실시간 디코드 부담이 없다(이미지는
+// 정지 프레임 하나, 나머지 둘은 화면에 그릴 <video> 자체가 없다). 원본 세로 해상도가
+// 임계값을 넘는 진짜 영상 클립만 대상.
+function needsProxy(clip) {
+  return !clip.isImage && !clip.isAudioOnly && !clip.isText && clip.h > PROXY_HEIGHT_THRESHOLD;
+}
+// 지금 미리보기/필름스트립에 실제로 쓸 URL. 프록시 모드가 켜져 있고 그 파일의 저해상도
+// 사본이 이미 준비돼 있으면 그걸(ytsep://), 아니면 원본을 그대로 돌려준다. 내보내기
+// (buildEDL→main.js video:export)는 이 함수를 아예 거치지 않고 clip.file 원본을 그대로
+// 보낸다 — 프록시 여부가 실제 결과물 화질에 영향을 줄 수 없다.
+function previewUrlFor(file) {
+  if (_proxyMode) {
+    const st = _proxyStatus.get(file);
+    if (st && st.status === 'ready' && st.proxyPath) return toYtsepUrl(st.proxyPath);
+  }
+  return toYtsepUrl(file);
+}
+// 프록시 모드에서 필요한(아직 상태를 모르거나 예전에 실패한) 파일들만 골라 한꺼번에
+// main 프로세스에 요청한다 — 이미 준비/대기 중인 파일은 여기서 다시 안 보낸다(중복
+// 트랜스코드 방지, main 쪽 매니페스트도 어차피 같은 파일이면 건너뛰지만 IPC 자체를 줄인다).
+async function ensureProxiesFor(clips) {
+  if (!_proxyMode || !clips?.length) return;
+  const files = [...new Set(clips.filter(needsProxy).map(c => c.file))]
+    .filter(f => !_proxyStatus.has(f) || _proxyStatus.get(f).status === 'failed');
+  if (!files.length) return;
+  for (const f of files) _proxyStatus.set(f, { status: 'pending' });
+  updateProxyToggleUI();
+  let result;
+  try { result = await api.video.proxyEnsure(files); } catch { return; }
+  for (const [f, info] of Object.entries(result || {})) {
+    if (info.status === 'ready') _proxyStatus.set(f, { status: 'ready', proxyPath: info.proxyPath });
+    else if (info.status === 'skipped') _proxyStatus.delete(f);
+    // 'pending' 은 그대로 둔다 — video:proxyProgress 이벤트가 끝나면 갱신한다.
+  }
+  updateProxyToggleUI();
+  syncPreview(nowSec());
+}
+function updateProxyToggleUI() {
+  const btn = $('ve-proxy-toggle'); if (!btn) return;
+  const pending = [..._proxyStatus.values()].filter(s => s.status === 'pending').length;
+  btn.textContent = pending ? `${tr('video.proxyToggle')} (${pending})` : tr('video.proxyToggle');
+  btn.classList.toggle('on', _proxyMode);
+  btn.setAttribute('aria-pressed', String(_proxyMode));
+}
 function driveLayer(el, clip, t, visual) {
   const v = el.querySelector('video'), img = el.querySelector('img');
   if (visual) el.hidden = false;
@@ -1022,7 +1076,11 @@ function driveLayer(el, clip, t, visual) {
   // 낸다 — 이 레이어는 화면만 그리고 무음이어야 한다(둘 다 소리 내면 겹쳐 들린다).
   // 짝이 없는(예전 프로젝트 등) 클립은 자기 소리를 그대로 낸다.
   v.muted = visual && !!clip.groupId;
-  if (v.dataset.loadedSrc !== clip.file) { v.src = toYtsepUrl(clip.file); v.dataset.loadedSrc = clip.file; }
+  // dataset.loadedSrc 는 clip.file(원본 경로)이 아니라 실제로 물린 URL 을 기준으로 비교한다 —
+  // 그래야 프록시 모드를 켜거나(또는 방금 프록시가 준비돼서) 물어야 할 URL 이 원본↔프록시
+  // 로 바뀌는 순간에도 "그대로다" 로 착각하지 않고 실제로 다시 로드해 갈아탄다.
+  const src = previewUrlFor(clip.file);
+  if (v.dataset.loadedSrc !== src) { v.src = src; v.dataset.loadedSrc = src; }
   const target = Math.min(clip.inOff + (t - clip.start), (v.duration || clip.srcDur) - 0.02);
   if (Math.abs(v.currentTime - target) > 0.1) { try { v.currentTime = Math.max(0, target); } catch {} }
   if (_playing && v.paused) v.play().catch(() => {});
@@ -1951,7 +2009,9 @@ function renderClips() {
         const box = el.querySelector('.ve-thumbs');
         if (box) box.innerHTML = `<img src="${esc(shapeImgUrl(c))}">`;
       } else if (!c.isAudioOnly && !c.isText) {
-        const cached = getClipThumb(c, _pxPerSec, toYtsepUrl, paintThumbs);
+        // 필름스트립도 프록시가 준비돼 있으면 그걸로 seek — 4K 원본을 프레임마다 seek 하는
+        // 것보다 훨씬 가볍다(정확도엔 영향 없다, 어차피 축소된 썸네일이라 화질 차이도 안 보임).
+        const cached = getClipThumb(c, _pxPerSec, (f) => previewUrlFor(f), paintThumbs);
         if (cached) paintThumbs(c);
       } else if (c.isAudioOnly) {
         paintWave(c);
@@ -2655,6 +2715,7 @@ async function importVideoFiles(paths, trackId) {
   layout();
   if (importedFileCount) flash(tr('video.importing', { n: importedFileCount }));
   else flash(tr('video.needImport'));
+  ensureProxiesFor(added);   // 프록시 모드가 켜져 있으면 지금 임포트한 고해상도 클립도 바로 대상에 넣는다
 }
 async function pickImportVideo() {
   const r = await api.dialog.pickVideoFiles('video');
@@ -2788,6 +2849,27 @@ function wire() {
     });
   });
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
+  $('ve-proxy-toggle')?.addEventListener('click', async () => {
+    _proxyMode = !_proxyMode;
+    updateProxyToggleUI();
+    try { await api.settings.set({ videoProxyMode: _proxyMode }); } catch {}
+    syncPreview(nowSec());
+    if (_proxyMode) ensureProxiesFor(_veClips);
+  });
+  api.video.onProxyProgress(({ path, status, proxyPath, error }) => {
+    if (status === 'ready') {
+      _proxyStatus.set(path, { status: 'ready', proxyPath });
+      flash(tr('video.proxyDone', { name: path.split(/[\\/]/).pop() }));
+    } else if (status === 'failed') {
+      _proxyStatus.set(path, { status: 'failed' });
+      flash(tr('video.proxyFail', { name: path.split(/[\\/]/).pop() }));
+      console.warn('[video-proxy]', error);
+    } else if (status === 'started') {
+      _proxyStatus.set(path, { status: 'pending' });
+    }
+    updateProxyToggleUI();
+    syncPreview(nowSec());   // 지금 화면에 그 파일이 걸려 있으면 바로 갈아탄다
+  });
   $('ve-save-project')?.addEventListener('click', () => saveProjectAs());
   $('ve-open-project')?.addEventListener('click', () => openProjectFile());
   $('ve-undo')?.addEventListener('click', () => doUndo());
@@ -2925,8 +3007,11 @@ function wire() {
 
 export async function initVideoEditor() {
   wire();
+  try { const s = await api.settings.get(); _proxyMode = !!s?.videoProxyMode; } catch {}
+  updateProxyToggleUI();
   await loadProject();
   if (!_veTracks.length) ensureLayers();
   renderLanes();
   layout();
+  if (_proxyMode) ensureProxiesFor(_veClips);
 }

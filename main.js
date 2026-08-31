@@ -1326,6 +1326,86 @@ ipcMain.handle('video:export', async (event, payload) => {
     });
   });
 });
+// ── 영상 편집 프록시(저해상도 미리보기 대체본) ──────────────────────
+// 4K 등 고해상도 소스를 그대로 재생하면 내장그래픽에서 실시간 디코드가 버겁다("버벅임"
+// 피드백) — 편집 중 미리보기만 userData/proxies 에 만들어 둔 저해상도(540p) 사본으로
+// 대체하고, 실제 내보내기(video:export)는 항상 원본 파일을 그대로 쓴다(화질 손실 없음,
+// 여긴 렌더러의 buildEDL 이 clip.file 을 그대로 넘기니 이 프록시 캐시와 아예 무관하다).
+// 어떤 소스가 프록시 대상인지(해상도 임계값)는 렌더러가 이미 아는 clip.w/h 로 판단해서
+// 넘겨준다 — 여긴 그냥 요청받은 파일을 트랜스코드만 한다.
+const PROXY_DIR = path.join(app.getPath('userData'), 'proxies');
+const PROXY_MANIFEST_FILE = path.join(PROXY_DIR, 'manifest.json');
+const PROXY_TARGET_HEIGHT = 540;
+function loadProxyManifest() {
+  try { return JSON.parse(fs.readFileSync(PROXY_MANIFEST_FILE, 'utf-8')); } catch { return {}; }
+}
+function saveProxyManifest(m) {
+  try { fs.mkdirSync(PROXY_DIR, { recursive: true }); fs.writeFileSync(PROXY_MANIFEST_FILE, JSON.stringify(m, null, 2), 'utf-8'); } catch {}
+}
+// 키에 mtime·크기를 같이 넣어서 — 같은 경로라도 원본이 나중에 바뀌면(다시 내보내기 등)
+// 새 프록시를 다시 만든다(낡은 프록시로 조용히 편집하게 두지 않는다).
+function proxyKeyFor(srcPath, stat) {
+  return crypto.createHash('sha1').update(srcPath + ':' + stat.mtimeMs + ':' + stat.size).digest('hex');
+}
+function transcodeProxy(srcPath, outPath) {
+  return new Promise((resolve) => {
+    fs.mkdirSync(PROXY_DIR, { recursive: true });
+    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', srcPath,
+      '-vf', `scale=-2:${PROXY_TARGET_HEIGHT}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+      '-c:a', 'aac', '-b:a', '96k', outPath];
+    let proc;
+    try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
+    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let stderr = '';
+    proc.stderr.on('data', (d) => stderr += d);
+    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('close', (code) => {
+      if (code === 0 && fs.existsSync(outPath)) resolve({ ok: true });
+      else { try { fs.rmSync(outPath, { force: true }); } catch {} resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) }); }
+    });
+  });
+}
+// 한 번에 하나씩만 돌린다 — 프록시가 필요한 건 대체로 CPU 가 약한 컴퓨터라, 여러 개를
+// 동시에 트랜스코드하면 오히려 전체가 더 느려지고 다른 작업(재생 자체)까지 밀린다.
+const _proxyQueue = [];
+let _proxyBusy = false;
+function pumpProxyQueue() {
+  if (_proxyBusy || !_proxyQueue.length) return;
+  _proxyBusy = true;
+  const job = _proxyQueue.shift();
+  job().finally(() => { _proxyBusy = false; pumpProxyQueue(); });
+}
+function sendProxyProgress(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('video:proxyProgress', payload);
+}
+ipcMain.handle('video:proxy:ensure', async (_ev, paths) => {
+  const manifest = loadProxyManifest();
+  const result = {};
+  for (const p of [...new Set(paths || [])]) {
+    if (typeof p !== 'string' || !fs.existsSync(p)) { result[p] = { status: 'skipped' }; continue; }
+    let stat;
+    try { stat = fs.statSync(p); } catch { result[p] = { status: 'skipped' }; continue; }
+    const key = proxyKeyFor(p, stat);
+    const entry = manifest[key];
+    if (entry && fs.existsSync(entry.outPath)) { result[p] = { status: 'ready', proxyPath: entry.outPath }; continue; }
+    result[p] = { status: 'pending' };
+    const outPath = path.join(PROXY_DIR, key + '.mp4');
+    _proxyQueue.push(async () => {
+      sendProxyProgress({ path: p, status: 'started' });
+      const r = await transcodeProxy(p, outPath);
+      if (r.ok) {
+        manifest[key] = { outPath, srcPath: p, createdAt: Date.now() };
+        saveProxyManifest(manifest);
+        sendProxyProgress({ path: p, status: 'ready', proxyPath: outPath });
+      } else {
+        sendProxyProgress({ path: p, status: 'failed', error: r.error });
+      }
+    });
+  }
+  pumpProxyQueue();
+  return result;
+});
+
 ipcMain.handle('engine:quit', () => { audioEngine?.quit(); return { ok: true }; });
 // 종료 시 엔진 자식 프로세스가 orphan 으로 남지 않도록 exit 까지 기다림 (Windows 는 자동 종료 안 됨)
 let _quitting = false;

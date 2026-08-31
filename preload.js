@@ -98,6 +98,12 @@ contextBridge.exposeInMainWorld('yssApi', {
       ipcRenderer.on('video:exportProgress', h);
       return () => ipcRenderer.off('video:exportProgress', h);
     },
+    proxyEnsure: (paths) => ipcRenderer.invoke('video:proxy:ensure', paths),
+    onProxyProgress: (fn) => {
+      const h = (_ev, data) => fn(data);
+      ipcRenderer.on('video:proxyProgress', h);
+      return () => ipcRenderer.off('video:proxyProgress', h);
+    },
   },
 
   // 지난 실행이 비정상 종료했는지 — 읽으면 지워진다

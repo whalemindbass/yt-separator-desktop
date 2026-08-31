@@ -3873,6 +3873,7 @@ body { background: var(--bg) !important; }
 .ve-tbtn:hover { background: var(--elev-2); color: var(--tx-1); }
 .ve-tbtn:disabled { opacity: .4; cursor: default; pointer-events: none; }
 .ve-tbtn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+#ve-proxy-toggle.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .ve-time { font: 500 12.5px/1 var(--mono); color: var(--tx-2); min-width: 84px; text-align: center; }
 
 /* 미리보기 + 왼쪽 효과 패널을 한 행으로 묶는다 — 높이/아래 테두리는 여기서만 관리하고
