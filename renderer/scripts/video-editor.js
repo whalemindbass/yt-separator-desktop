@@ -429,7 +429,13 @@ function openPipPopover(track, anchorEl) {
   _pipPopoverEl = pop;
   const getTf = () => track.transform || naturalTransform(track);
   const setTf = (nextTf) => {
-    const isDefault = nextTf.x === 0 && nextTf.y === 0 && nextTf.w === 1 && nextTf.h === 1;
+    // lock 을 뺴먹으면 안 된다 — 이미지가 마침 풀프레임(x=0,y=0,w=1,h=1, 예: 첫 임포트라
+    // 이미지 자체 비율로 해상도가 잡힌 경우)일 때 "비율 고정"만 체크해도 w/h/x/y 는
+    // 그대로 기본값이라 옛 검사로는 "기본값이니 그냥 null 로" 취급해 버렸다 — 방금 체크한
+    // lock:true 가 통째로 버려지고, 그 다음 첫 리사이즈 드래그는 track.transform 이 다시
+    // null 이니 lock 없는 상태(defaultTransform)에서 시작해 비율이 안 지켜졌다("처음
+    // 변경하기 전에는 비율 고정이 안 먹힘" 피드백).
+    const isDefault = nextTf.x === 0 && nextTf.y === 0 && nextTf.w === 1 && nextTf.h === 1 && !nextTf.lock;
     track.transform = isDefault ? null : nextTf;
     const pair = _layerEls.get(track.id);
     if (pair) applyTrackTransform(pair, track);
