@@ -1115,7 +1115,11 @@ ipcMain.handle('video:export', async (event, payload) => {
       // 미리 그려 오버레이하는 별도 작업이 필요하다).
       const padV = Math.round(size * 0.15), padH = Math.round(size * 0.4);
       const box = t.bg ? `:box=1:boxcolor=#000000@0.45:boxborderw=${padV}|${padH}|${padV}|${padH}` : '';
-      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}${box}`;
+      // text_align 기본값은 왼쪽 정렬 — 미리보기(.ve-text-item, text-align: center)는
+      // 여러 줄 자막의 짧은 줄도 가운데로 맞추는데, drawtext 는 x= 로 전체 블록만
+      // 가운데에 두고 그 안 각 줄은 왼쪽 정렬로 남겨서 여러 줄일 때만 어긋나 보였다
+      // ("자막 정렬이 미리보기에선 가운데인데 영상에선 좌측" 신고).
+      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:text_align=center:x=${x}:y=${y}${box}`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
     return dstLabel;

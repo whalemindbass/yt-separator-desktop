@@ -100,6 +100,49 @@ function probeFrameCounts(file) {
     expect('글자가 2.5배 커지면 상자(어두운 픽셀) 면적도 뚜렷이 늘어남(패딩이 고정값이 아님)', cBgBig.boxDark > cBg.boxDark * 1.8, true);
   }
 
+  section('1d) 여러 줄 자막 — 미리보기(.ve-text-item, text-align: center)처럼 짧은 줄도 가운데 정렬돼야 함');
+  // 예전엔 drawtext 가 기본(왼쪽 정렬)이라, x= 로 전체 블록만 가운데 두고 그 안 각 줄은
+  // 왼쪽에 붙어 있었다("자막 정렬이 미리보기에선 가운데인데 영상에선 좌측" 신고) — 폭이
+  // 크게 다른 두 줄(긴 줄/짧은 줄)을 넣어서, 짧은 줄이 긴 줄과 "왼쪽 끝"이 아니라
+  // "가운데"가 맞는지로 확인한다.
+  const OUT_MULTILINE = path.join(TMP, 'out_multiline.mp4');
+  const multilineText = [{ content: 'WWWWWWWWWW\nI', x: 0.5, y: 0.5, size: 28, color: '#ffff00' }];
+  res = await js(`(async () => {
+    try { return await yssApi.video.export(${JSON.stringify({ segments: [{ ...baseSeg, texts: multilineText }], outPath: OUT_MULTILINE, format: 'mp4' })}); }
+    catch (e) { return { ok: false, error: String(e && (e.stack || e.message || e)) }; }
+  })()`);
+  expect('여러 줄 자막 내보내기 성공', res?.ok, true);
+  if (fs.existsSync(OUT_MULTILINE)) {
+    const raw = path.join(TMP, 'multiline.rgb');
+    spawnSync(FFMPEG, ['-y', '-i', OUT_MULTILINE, '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', raw], { stdio: 'ignore' });
+    const d = fs.readFileSync(raw);
+    // 배경(blue, 0,0,255)과 뚜렷이 다른 픽셀만 "글자"로 본다 — 색상으로 안 고른다. 홑글자
+    // 'I' 처럼 아주 가는 획은(폰트 힌팅/안티에일리어싱 탓으로 보임 — text_align 켜기
+    // 전에도 똑같이 재현돼 이 정렬 수정과는 무관하다) fontcolor(#ffff00)와 다르게 흰색
+    // 계열로 렌더될 수 있어, 엄격한 "노란색인가"로 고르면 그 줄만 통째로 놓친다.
+    const isText = (o) => { const r = d[o], g = d[o + 1], b = d[o + 2]; return !(r < 40 && g < 40 && b > 200); };
+    // 행마다 글자 픽셀의 좌우 끝을 잰다 — 줄 사이를 y 좌표로 나누지 않는다('W' 열 개 줄과
+    // 'I' 한 글자 줄이 행 단위로는 거의 안 붙어 있어(줄간격이 좁아 y 로는 못 가른다),
+    // 실측 확인) — 대신 "가장 넓은 행"(W 줄)과 "가장 좁은 행"(I 줄)을 그대로 그 줄의
+    // 대표값으로 쓴다. 폭 차이가 워낙 크니(10글자 대 1글자) 이 방식이 훨씬 튼튼하다.
+    const rows = [];
+    for (let y = 0; y < H; y++) {
+      let minX = -1, maxX = -1;
+      for (let x = 0; x < W; x++) { if (isText((y * W + x) * 3)) { if (minX < 0) minX = x; maxX = x; } }
+      if (minX >= 0) rows.push({ y, minX, maxX, w: maxX - minX });
+    }
+    expect('글자 픽셀이 있는 행이 있음', rows.length > 0, true);
+    if (rows.length) {
+      const wide = rows.reduce((a, b) => (b.w > a.w ? b : a));
+      const narrow = rows.reduce((a, b) => (b.w < a.w ? b : a));
+      const centerWide = (wide.minX + wide.maxX) / 2, centerNarrow = (narrow.minX + narrow.maxX) / 2;
+      console.log(`  가장 넓은 행(W 줄) x범위 [${wide.minX},${wide.maxX}] 가운데=${centerWide} · 가장 좁은 행(I 줄) x범위 [${narrow.minX},${narrow.maxX}] 가운데=${centerNarrow}`);
+      expect('폭 차이가 뚜렷함(두 줄이 실제로 다른 폭으로 그려짐)', wide.w - narrow.w > 20, true);
+      expect('좁은 줄의 가운데가 넓은 줄의 가운데와 거의 일치(가운데 정렬)', Math.abs(centerWide - centerNarrow) <= 3, true);
+      expect('좁은 줄의 왼쪽 끝이 넓은 줄의 왼쪽 끝과는 다름(왼쪽 정렬이었으면 여기가 같았을 것)', Math.abs(wide.minX - narrow.minX) > 5, true);
+    }
+  }
+
   section('2) 빈 내용 캡션은 조용히 건너뜀(drawtext textfile 빈 파일 크래시 방지)');
   const OUT_EMPTY = path.join(TMP, 'out_empty.mp4');
   res = await js(`(async () => {
