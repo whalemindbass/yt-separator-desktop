@@ -91,5 +91,36 @@ const { bootRenderer, expect, near, section, finish } = require('./harness');
   console.log('  빠른 이동 오차(px):', errors3.map(e => e.toFixed(1)).join(', '));
   near('예전엔 놓쳤을 빠른 움직임도 지금은 잘 따라감(오차 작음)', maxError3, 0, 10);
 
+  section('4) 화면 밖으로 나갔다가(사라짐) 다시 들어오면(재진입) — 놓친 동안엔 lost, 다시 잡으면 그 자리로');
+  // "화면 밖으로 나가면 비슷한 걸로 옮겨가는데, 사라지는 게 맞고 다시 들어오면 다시
+  // 따라가야 한다" 요청 — 대상이 아예 안 보이는 프레임에 억지로 아무 자리나 골라 붙잡지
+  // 않고(lost=true, 위치는 마지막 위치에 얼어붙는다) 있다가, 다시 나타나면(재진입, 화면
+  // 전체를 다시 훑는 재탐색) 그 새 위치를 다시 정확히 찾아야 한다.
+  const result4 = await js(`(async () => {
+    const { BoxTracker } = await import('./scripts/video-tracker.js');
+    const W = 320, H = 240, BOX = 40;
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    function drawBoxAt(x, y) {
+      ctx.fillStyle = 'black'; ctx.fillRect(0, 0, W, H);
+      if (x != null) { ctx.fillStyle = '#e05a5a'; ctx.fillRect(x, y, BOX, BOX); }
+    }
+    drawBoxAt(140, 100);
+    const tracker = new BoxTracker(ctx, { x: 140, y: 100, w: BOX, h: BOX });
+    drawBoxAt(null, null);              // 화면 밖으로 나감(완전히 사라짐)
+    const r1 = tracker.update(ctx);
+    drawBoxAt(null, null);              // 계속 안 보임
+    const r2 = tracker.update(ctx);
+    drawBoxAt(220, 30);                 // 다른 자리로 다시 나타남(재진입)
+    const r3 = tracker.update(ctx);
+    return JSON.stringify({ lost1: r1.lost, lost2: r2.lost, lost3: r3.lost, x3: r3.x, y3: r3.y });
+  })()`);
+  const r4 = JSON.parse(result4);
+  expect('사라진 첫 프레임에 lost=true(엉뚱한 자리로 안 옮겨붙음)', r4.lost1, true);
+  expect('계속 안 보이는 동안엔 계속 lost=true', r4.lost2, true);
+  expect('다시 나타나면 lost=false 로 돌아옴(재탐색 성공)', r4.lost3, false);
+  near('재진입한 새 위치를 다시 찾음(x)', r4.x3, 220, 15);
+  near('재진입한 새 위치를 다시 찾음(y)', r4.y3, 30, 15);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

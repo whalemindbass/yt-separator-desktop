@@ -980,7 +980,10 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
       let box;
       if (!tracker) { tracker = new BoxTracker(ctx, srcBox0); box = { ...srcBox0 }; }
       else box = tracker.update(ctx);
-      keyframes.push({ t: localT, ...toCanvasFrac(box) });
+      // box.lost — 화면 밖으로 나갔거나 원래 대상이 그 자리에 없다고 트래커가 판단한
+      // 샘플. hidden 으로 표시해 두면 그 구간엔 오버레이 자체를 안 그린다(clipHiddenAt
+      // 참고) — "화면 밖으로 나가면 사라지고, 다시 들어오면 다시 따라가야" 한다는 요청.
+      keyframes.push({ t: localT, hidden: !!box.lost, ...toCanvasFrac(box) });
       clip._trackProgress = Math.round((i / n) * 100);
       const statusEl = document.querySelector('.ve-track-status');
       if (statusEl) statusEl.textContent = tr('video.trackAnalyzing', { pct: clip._trackProgress });
@@ -1264,7 +1267,10 @@ function syncPreview(t) {
     const { a, b } = pair;
     const visual = track.kind !== 'audio';   // 영상 트랙만 화면에 그린다 — 오디오 트랙은 소리만.
     if (track.hidden) { hideLayer(a, visual); hideLayer(b, visual); continue; }
-    const here = clipsAt(track.id, t);
+    // 추적 중 놓친(clipHiddenAt) 클립은 지금 이 시각엔 없는 셈 친다 — 화면 밖으로 나가면
+    // 그 자리에 억지로(엉뚱한 위치에) 그리지 않고 그냥 안 보인다("사라지는 게 맞는 것
+    // 같다" 요청). 다시 찾으면(hidden:false) 다음 tick 부터 자연히 다시 나타난다.
+    const here = clipsAt(track.id, t).filter(c => !clipHiddenAt(c, t));
     if (here.length >= 2) {
       const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
@@ -1915,7 +1921,11 @@ async function addShape() {
   const tid = newVideoTrack();
   const clip = addShapeClipAt(tid, nowSec());
   await regenerateShapeFile(clip);
-  ensureLayers(); syncPreview(nowSec()); renderClips();
+  ensureLayers();
+  // renderClips() 만으론 트랙 헤드 라벨이 안 바뀐다(importImageFiles 쪽 주석 참고, 같은
+  // 이유의 같은 버그) — renderLanes() 가 layout()/renderClips() 까지 다 불러 준다.
+  renderLanes();
+  syncPreview(nowSec());
   const el = document.querySelector(`.ve-clip[data-clip-id="${clip.id}"]`);
   if (el) openShapePopover(clip, el);
 }
@@ -2377,6 +2387,21 @@ function interpolateKeyframes(kfs, t) {
   }
   return kfs[kfs.length - 1];
 }
+// 그 절대 시각에 추적 대상을 놓쳤다고(hidden) 기록된 구간인지 — kf.hidden 은 "그 샘플
+// 시각에 대상을 못 찾았다"는 뜻이고, 다음 샘플에서 다시 찾을 때까지(hidden:false 로
+// 바뀔 때까지) 그 사이 전체가 계속 숨김이다(그 사이를 보간해서 그리면 어차피 화면 밖
+// 어딘가를 어색하게 지나가는 모양이 된다 — 아예 안 그리는 쪽이 요청과도 맞다).
+function clipHiddenAt(clip, absT) {
+  const kfs = clip.trackKeyframes;
+  if (!kfs || !kfs.length) return false;
+  const t = absT - clip.start;
+  if (t <= kfs[0].t) return !!kfs[0].hidden;
+  if (t >= kfs[kfs.length - 1].t) return !!kfs[kfs.length - 1].hidden;
+  for (let i = 0; i < kfs.length - 1; i++) {
+    if (t >= kfs[i].t && t <= kfs[i + 1].t) return !!kfs[i].hidden;
+  }
+  return !!kfs[kfs.length - 1].hidden;
+}
 // 이 클립이 그 절대 시각(absT)에 화면 어디에 놓이는지 — 추적 키프레임이 있으면 보간값,
 // 없으면 클립 자체 위치(도형/이미지 개별 배치), 그것도 없으면 트랙 전체 PIP 위치.
 function clipTransformAt(c, track, absT) {
@@ -2431,7 +2456,9 @@ function buildEDL() {
     const activeVideo = [];
     for (const track of videoTracks) {   // 배열 순서 = 목록 위→아래 = 화면 앞→뒤
       if (track.hidden) continue;
-      const here = clipsAt(track.id, mid);
+      // 추적 중 놓친(clipHiddenAt) 클립은 이 구간엔 없는 셈 친다 — 미리보기(syncPreview)
+      // 와 같은 규칙: 화면 밖으로 나간 동안은 내보내기 결과에도 안 그려진다.
+      const here = clipsAt(track.id, mid).filter(c => !clipHiddenAt(c, mid));
       if (here.length) activeVideo.push({ track, clips: here });
     }
     const top = activeVideo[0];
@@ -2847,7 +2874,14 @@ async function importImageFiles(paths, trackId) {
     );
   }
   ensureLayers();
-  layout();
+  // layout() 만 부르면(예전) 클립/눈금자는 새로 그려져도 트랙 헤드 라벨(.lbl 텍스트)은
+  // 안 바뀐다 — 그 텍스트는 renderLanes() 가 트랙 DOM 을 통째로 새로 만들 때만 계산된다.
+  // 새 트랙을 만드는 newVideoTrack() 은 클립이 생기기 *전에* 이미 renderLanes() 를 한 번
+  // 불러서 그 시점엔 아직 아무 클립도 없으니 "영상 N"으로 그려지고, 그 뒤로 아무도
+  // renderLanes() 를 다시 안 부르면 실제로 이미지가 들어갔어도 라벨은 "영상 N"에 얼어
+  // 붙어 있었다(이름 변경처럼 renderLanes() 를 부르는 다른 동작을 해야만 그제서야
+  // "이미지 N"으로 바뀌어 보였다 — "수정하려고 누르면 이미지로 바뀐다" 피드백 그대로).
+  renderLanes();
   if (added.length) flash(tr('video.importing', { n: added.length }));
   else flash(tr('video.needImport'));
 }
