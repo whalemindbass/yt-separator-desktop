@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     // .dsvproj — 사용자가 직접 저장 위치를 고르는 쪽(자동 저장인 위 load/save 와 별개).
     saveAs: (json, name, path) => ipcRenderer.invoke('video:project:save', json, name, path),
     open:   ()                 => ipcRenderer.invoke('video:project:open'),
+    // .dsvproj 를 더블클릭해 들어온 경우 — project.onOpenFile(.yssproj) 과 같은 패턴.
+    onOpenFile: (fn) => { ipcRenderer.on('project:open-file-video', (_e, p) => fn(p)); ipcRenderer.send('project:open-ready-video'); },
   },
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),

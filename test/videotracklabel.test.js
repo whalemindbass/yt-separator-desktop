@@ -63,7 +63,7 @@ function laneLabels(js) {
 
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [VID] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) {
     const n = await js(`document.querySelectorAll('.ve-clip:not(.image):not(.audio):not(.text)').length`);
     if (n >= 1) break;

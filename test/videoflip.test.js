@@ -53,7 +53,7 @@ const isGreen = (p) => p.g > p.r + 60 && p.g > p.b + 60;
   await wait(300);
   expect('상하좌우 반전 툴바 버튼 자체가 없음', await js(`!document.getElementById('ve-flip-h') && !document.getElementById('ve-flip-v')`), true);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`(() => {
     document.querySelector('.ve-clip').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));

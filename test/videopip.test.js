@@ -99,7 +99,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   let n2 = 0;
   for (let i = 0; i < 40; i++) {
     n2 = await js(`document.querySelectorAll('.ve-clip').length`);

@@ -44,7 +44,7 @@ makeClip(BLUE, 'testsrc2', 2);
   s = await js(`({ 트랙수: document.querySelectorAll('.ve-lane').length })`);
   expect('트랙 1개 생김', s.트랙수, 1);
 
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   // probeVideo 가 실제 <video> loadedmetadata 를 기다리므로 넉넉히 대기
   let clips = [];
   for (let i = 0; i < 40; i++) {

@@ -51,7 +51,7 @@ function clipLeftPx(js, label) {
   // 나중에 클립 자체를 2초 지점으로 옮겨 둔다(초기 임포트는 항상 0초에서 시작하므로).
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [B] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await dragBy(js, 'b_green.mp4', 80);   // 0초 → 2초(80px)로 옮김
   await wait(80);
@@ -60,7 +60,7 @@ function clipLeftPx(js, label) {
   // 트랙1(A, red) — 별도 트랙에 0초부터 배치.
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [A] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) {
     if (await js(`[...document.querySelectorAll('.ve-clip')].some(x => x.querySelector('.ve-clip-lbl').textContent === 'a_red.mp4')`)) break;
     await wait(300);

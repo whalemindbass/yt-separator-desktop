@@ -50,7 +50,7 @@ async function dragBy(js, selector, dx, dy) {
 
   section('1) 배경 영상(320x240, 4:3) 임포트 — 이게 해상도를 결정한다');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [BG] });
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
 
   section('2) 정사각형(240x240) 이미지를 "+트랙"→이미지로 임포트 — 배경과 다른 비율, 새 트랙에 들어감');

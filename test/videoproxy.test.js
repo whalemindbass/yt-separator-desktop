@@ -63,7 +63,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   section('1) 기본은 "원본 보기" — 4K 클립 하나 임포트, 미리보기가 원본 그대로 물린다');
   expect('기본값은 원본 보기(0)', await js(`document.getElementById('ve-preview-res')?.value`), '0');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [UHD] });
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await wait(300);
   const srcOff = await js(`document.querySelector('.ve-video-layers video:not([hidden])')?.getAttribute('src') || ''`);
@@ -135,7 +135,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   section('6) 고른 해상도(540p)보다 이미 작은 클립은 애초에 프록시 대상이 아니다');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [SD] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   await wait(500);
   const sdProxied = Object.values(readManifest(app)).some(e => e.srcPath === SD);

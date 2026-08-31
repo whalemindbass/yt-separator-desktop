@@ -24,10 +24,10 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
 
-  section('1) "+오디오"로 wav 임포트 — 오디오 클립에 파형 캔버스가 생긴다');
+  section('1) Import → 오디오로 wav 임포트 — 오디오 클립에 파형 캔버스가 생긴다');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [WAV] });
-  await js(`document.getElementById('ve-add-track-btn').click();
-    document.querySelector('#ve-add-track-menu [data-kind="audio"]').click(); true`);
+  await js(`document.getElementById('ve-import').click();
+    document.querySelector('#ve-import-menu [data-kind="audio"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await wait(200);
   const hasCanvas = await js(`!!document.querySelector('.ve-clip .ve-wave')`);

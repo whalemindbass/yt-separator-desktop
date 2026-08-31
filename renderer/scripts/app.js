@@ -10,7 +10,7 @@ import { initCommunity } from './community.js';
 import { initStudio, loadProjectData } from './studio.js';
 import { initHome } from './home.js';
 import { initTraining } from './training.js';
-import { initVideoEditor } from './video-editor.js';
+import { initVideoEditor, loadVideoProjectFromFile } from './video-editor.js';
 import { t, setLocale, getLocale, applyI18n, onLocaleChange } from './i18n.js';
 import { initReport, noteError } from './report.js';
 import { usageEnter } from './usage.js';
@@ -105,6 +105,14 @@ api.project?.onOpenFile?.(async ({ path, data }) => {
   switchView('studio');
   await initStudio();
   await loadProjectData(path, data);
+});
+
+// .dsvproj(영상 편집 프로젝트) 를 더블클릭해 들어온 경우 — 위 .yssproj 와 같은 이유로
+// 영상 편집 탭으로 옮기고 그대로 연다.
+api.videoProject?.onOpenFile?.(async ({ path, data }) => {
+  switchView('video');
+  await initVideoEditor();
+  loadVideoProjectFromFile(path, data);
 });
 
 // ── 초기 뷰: 라이브러리에 항목이 있으면 라이브러리로, 없으면 새 분리 ──

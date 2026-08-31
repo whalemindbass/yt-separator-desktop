@@ -50,7 +50,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
 
   section('2) 두 파일 임포트(keep/doomed) — 저장 전 상태');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [KEEP, DOOMED] });
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip:not(.audio)').length`) >= 2) break; await wait(300); }
   expect('영상 클립 2개 임포트됨', await js(`document.querySelectorAll('.ve-clip:not(.audio)').length`), 2);
   expect('저장 전엔 빨간 X 없음', await js(`document.querySelectorAll('.ve-clip-missing').length`), 0);

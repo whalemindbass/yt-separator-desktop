@@ -40,7 +40,7 @@ function clipEl(js, label) {
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 60; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   expect('클립 2개 임포트됨', await js(`document.querySelectorAll('.ve-clip').length`), 2);
 

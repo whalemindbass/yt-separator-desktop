@@ -55,7 +55,7 @@ function selectVideoClipByIndex(idx, pid) {
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   expect('클립 A 임포트됨(영상+오디오)', await js(`document.querySelectorAll('.ve-clip').length`), 2);
   expect('클립 A(영상) 선택됨', await js(selectClip('.ve-clip:not(.audio)', 1)), true);
@@ -95,7 +95,7 @@ function selectVideoClipByIndex(idx, pid) {
 
   section('3) 클립 B(새 트랙, 빈 체인) 에 프리셋 적용');
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 4) break; await wait(300); }
   expect('클립 B 도 임포트됨(총 4개 .ve-clip)', await js(`document.querySelectorAll('.ve-clip').length`), 4);
   // newVideoTrack() 은 새 트랙을 위로 unshift 하므로, 방금 만든 클립 B(영상) 가

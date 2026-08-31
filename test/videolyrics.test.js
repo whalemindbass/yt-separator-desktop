@@ -47,7 +47,7 @@ function panelHidden(js) { return js(`document.getElementById('ve-lyric-panel').
 
   section('1) 배경 영상 임포트(재생선을 옮길 타임라인이 필요)');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [VIDEO] });
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   const pxPerSec = await js(`(() => {
     const el = document.querySelector('.ve-clip:not(.audio):not(.text)');

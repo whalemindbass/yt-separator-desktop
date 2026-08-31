@@ -46,9 +46,11 @@ function probeSize(file) {
   section('1) 임포트 — 툴바엔 더 이상 포맷 선택(#ve-format)이 없다');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
+  await js(`document.querySelector('#ve-modal .x')?.click(); true`);   // 최초 1회 시험 기능 안내 모달 닫기
+  await wait(100);
   expect('#ve-format 없음', await js(`!document.getElementById('ve-format')`), true);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
 
   section('2) 내보내기 버튼 — 바로 내보내지 않고 모달이 뜬다');

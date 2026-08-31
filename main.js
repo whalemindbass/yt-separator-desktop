@@ -61,12 +61,42 @@ function deliverProject(file) {
   } catch { /* 못 읽으면 조용히 넘어간다 — 앱은 평소대로 뜬다 */ }
 }
 
+// ── .dsvproj(영상 편집 프로젝트) 더블클릭으로 열기 ──────────────────
+// 위 .yssproj 와 완전히 같은 이유로 똑같이 만든다 — 파일 연결(package.json
+// fileAssociations)만 등록하고 여는 처리가 없으면 아이콘은 붙는데 눌러도 아무 일이
+// 없다. 스튜디오/영상 편집은 서로 다른 탭·다른 프로젝트 포맷이라 채널도 따로 둔다.
+let pendingVideoProject = null;
+let rendererVideoOpenReady = false;
+function videoProjectFromArgv(argv) {
+  return (argv || []).find(a => typeof a === 'string' && a.toLowerCase().endsWith('.dsvproj')) || null;
+}
+function flushPendingVideoProject() {
+  if (!pendingVideoProject || !rendererVideoOpenReady) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const payload = pendingVideoProject;
+  pendingVideoProject = null;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  mainWindow.webContents.send('project:open-file-video', payload);
+}
+function deliverVideoProject(file) {
+  if (!file) return;
+  try {
+    if (!fs.existsSync(file)) return;
+    pendingVideoProject = { path: file, data: fs.readFileSync(file, 'utf8') };
+    flushPendingVideoProject();
+  } catch { /* 못 읽으면 조용히 넘어간다 — 앱은 평소대로 뜬다 */ }
+}
+
 // 두 번째로 띄우면 새 창을 만들지 않고 원래 창에서 연다.
 // 없으면 프로젝트를 열 때마다 앱이 하나씩 더 뜬다.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', (_e, argv) => deliverProject(projectFromArgv(argv)));
+  app.on('second-instance', (_e, argv) => {
+    deliverProject(projectFromArgv(argv));
+    deliverVideoProject(videoProjectFromArgv(argv));
+  });
 }
 
 // ── 네이티브 대화상자 문구 ──────────────────────────────────
@@ -262,11 +292,16 @@ function createMainWindow() {
   // 파일을 더블클릭해 실행한 경우 — 렌더러가 "받을 준비가 됐다"고 말할 때 건넨다.
   // did-finish-load 는 화면이 그려졌다는 뜻일 뿐 수신 등록이 끝났다는 뜻이 아니다.
   rendererOpenReady = false;   // 창을 새로 만들면 다시 기다린다
+  rendererVideoOpenReady = false;
   mainWindow.webContents.once('did-finish-load', () => {
-    if (pendingProject) return;                      // 이미 들고 있으면 그대로 둔다
-    const f = projectFromArgv(process.argv);
-    if (!f) return;
-    try { pendingProject = { path: f, data: fs.readFileSync(f, 'utf8') }; } catch { /* 못 읽으면 평소대로 뜬다 */ }
+    if (!pendingProject) {
+      const f = projectFromArgv(process.argv);
+      if (f) { try { pendingProject = { path: f, data: fs.readFileSync(f, 'utf8') }; } catch { /* 못 읽으면 평소대로 뜬다 */ } }
+    }
+    if (!pendingVideoProject) {
+      const vf = videoProjectFromArgv(process.argv);
+      if (vf) { try { pendingVideoProject = { path: vf, data: fs.readFileSync(vf, 'utf8') }; } catch { /* 못 읽으면 평소대로 뜬다 */ } }
+    }
   });
   // F12 로 DevTools 토글 (패키지 빌드에서도 디버깅 가능)
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -1256,11 +1291,26 @@ ipcMain.handle('video:export', async (event, payload) => {
         const tf = layer.transform;
         const lw = tf ? Math.max(2, Math.round(w * (tf.w != null ? tf.w : tf.scale))) : w;
         const lh = tf ? Math.max(2, Math.round(h * (tf.h != null ? tf.h : tf.scale))) : h;
-        const lx = tf ? Math.round(w * tf.x) : 0;
-        const ly = tf ? Math.round(h * tf.y) : 0;
         parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
-        parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
+        // 추적 키프레임 클립(layer.tStart/tEnd) — 세그먼트 양끝 위치를 overlay 필터의
+        // x=/y= 표현식으로 넘겨서 ffmpeg 자체 't'(초 단위 프레임 타임스탬프, 이 레이어도
+        // setpts=PTS-STARTPTS 로 0부터 시작)로 매 프레임 선형보간하게 한다 — JS 쪽에서
+        // 세그먼트를 잘게 쪼개 정적 위치를 잇는 대신, 렌더링되는 모든 프레임마다 다른
+        // 값이 나와 미리보기(매 프레임 재보간)와 똑같이 매끄럽다.
+        const dur = layer.end - layer.start;
+        let ov;
+        if (layer.tStart && layer.tEnd && dur > 0.0005) {
+          const x0 = w * layer.tStart.x, y0 = h * layer.tStart.y;
+          const x1 = w * layer.tEnd.x, y1 = h * layer.tEnd.y;
+          const d = fsec(dur);
+          ov = `x=${x0.toFixed(3)}+(${(x1 - x0).toFixed(3)})*t/${d}:y=${y0.toFixed(3)}+(${(y1 - y0).toFixed(3)})*t/${d}`;
+        } else {
+          const lx = tf ? Math.round(w * tf.x) : 0;
+          const ly = tf ? Math.round(h * tf.y) : 0;
+          ov = `x=${lx}:y=${ly}`;
+        }
+        parts.push(`[${base}][${raw}]overlay=${ov}[${next}]`);
         base = next;
       });
       parts.push(`[${base}]null[v${i}]`);
@@ -1463,6 +1513,12 @@ ipcMain.on('project:open-ready', (ev) => {
   if (mainWindow && !mainWindow.isDestroyed() && ev.sender === mainWindow.webContents) {
     rendererOpenReady = true;
     flushPendingProject();
+  }
+});
+ipcMain.on('project:open-ready-video', (ev) => {
+  if (mainWindow && !mainWindow.isDestroyed() && ev.sender === mainWindow.webContents) {
+    rendererVideoOpenReady = true;
+    flushPendingVideoProject();
   }
 });
 

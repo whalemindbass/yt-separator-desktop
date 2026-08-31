@@ -1,8 +1,9 @@
 'use strict';
-// "+오디오" 버튼 버그 수정 검증 — 예전엔 오디오 임포트가 항상 "이미 있는 오디오 트랙"
-// 하나만 재사용해서, 영상 임포트 후엔 배경음악을 별도 트랙으로 넣을 방법이 사실상 없었다
-// (같은 트랙에 순차로만 쌓임 → 동시에 겹치게 두려면 드래그로 자리를 옮겨야 했고, 그러면
-// 크로스페이드 취급됨). 이제 "+오디오"를 누를 때마다 항상 새 트랙이 생겨야 한다.
+// 오디오 임포트(Import → 오디오) 버그 수정 검증 — 예전엔 오디오 임포트가 항상 "이미 있는
+// 오디오 트랙" 하나만 재사용해서, 영상 임포트 후엔 배경음악을 별도 트랙으로 넣을 방법이
+// 사실상 없었다(같은 트랙에 순차로만 쌓임 → 동시에 겹치게 두려면 드래그로 자리를 옮겨야
+// 했고, 그러면 크로스페이드 취급됨). 이제 오디오를 임포트할 때마다 항상 새 트랙이 생겨야
+// 한다("+트랙"의 오디오는 이제 영상처럼 빈 트랙만 만든다 — 파일 임포트는 Import 버튼 쪽 일).
 // 버튼 클릭 → 실제 UI 흐름(bootMain, 진짜 ffmpeg export)으로 끝까지 검증한다: 트랙 3개
 // (영상 자체 오디오 1 + 배경음악 2)가 buildEDL()→amix 를 거쳐 실제로 동시에 섞이는지.
 
@@ -39,21 +40,21 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [RED] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(150);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   expect('영상+링크오디오 2클립', await js(`document.querySelectorAll('.ve-clip').length`), 2);
   expect('오디오 트랙 1개(자동)', await js(`document.querySelectorAll('.ve-lane.audio').length`), 1);
 
   section('2) "+오디오" 첫 번째 클릭 — 영상 임포트 후에도 막히지 않고 새 트랙에 들어감');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [BG1] });
-  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="audio"]').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="audio"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 3) break; await wait(300); }
   expect('클립 3개로 늘어남(배경음악1 추가)', await js(`document.querySelectorAll('.ve-clip').length`), 3);
   expect('오디오 트랙 2개(재사용 아니라 새로 생김)', await js(`document.querySelectorAll('.ve-lane.audio').length`), 2);
 
   section('3) "+오디오" 두 번째 클릭 — 또 새 트랙(다중 오디오)');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [BG2] });
-  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="audio"]').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="audio"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 4) break; await wait(300); }
   expect('클립 4개로 늘어남(배경음악2 추가)', await js(`document.querySelectorAll('.ve-clip').length`), 4);
   expect('오디오 트랙 3개', await js(`document.querySelectorAll('.ve-lane.audio').length`), 3);

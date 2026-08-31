@@ -158,13 +158,13 @@ async function saveProjectAs() {
   _dsvprojPath = res.path;
   flash(tr('video.projectSaved'));
 }
-async function openProjectFile() {
-  const res = await api.videoProject.open();
-  if (!res?.ok) return;
+// 파일 경로 + 그 내용(JSON 문자열)을 그대로 반영한다 — "열기" 대화상자로 고른 경우와
+// .dsvproj 더블클릭으로 들어온 경우(app.js 의 api.videoProject.onOpenFile) 둘 다 이걸 쓴다.
+export function loadVideoProjectFromFile(path, dataStr) {
   let data;
-  try { data = JSON.parse(res.data); } catch { return; }
-  if (!applyVideoProjectData(data)) return;
-  _dsvprojPath = res.path;
+  try { data = JSON.parse(dataStr); } catch { return false; }
+  if (!applyVideoProjectData(data)) return false;
+  _dsvprojPath = path;
   _undoStack = []; _redoStack = [];   // 다른 프로젝트로 바꿨으니 이전 히스토리는 의미 없다
   _selClipId = null;
   syncResUI();
@@ -172,6 +172,12 @@ async function openProjectFile() {
   flash(tr('video.projectOpened'));
   checkMissingFiles();
   ensureProxiesFor(_veClips);
+  return true;
+}
+async function openProjectFile() {
+  const res = await api.videoProject.open();
+  if (!res?.ok) return;
+  loadVideoProjectFromFile(res.path, res.data);
 }
 
 // ── 재생 시계 (엔진 없음 — rAF 로 직접 잰다) ──────────────
@@ -1467,6 +1473,30 @@ function toggleAddTrackMenu() {
   menu.hidden = false;
   setTimeout(() => document.addEventListener('pointerdown', _onAddTrackMenuOutside, true), 0);
 }
+// "Import" 버튼(툴바·빈 상태 둘 다) — 영상/오디오 중 뭘 가져올지 고르는 작은 메뉴("+트랙"
+// 메뉴와 같은 패턴). 버튼이 두 곳이라 지금 열려 있는 메뉴가 어느 쪽인지(_importMenu)를
+// 기억해 둔다.
+let _importMenu = null;   // { menuId, btnEl } | null
+function closeImportMenu() {
+  if (!_importMenu) return;
+  const menu = $(_importMenu.menuId);
+  if (menu) menu.hidden = true;
+  document.removeEventListener('pointerdown', _onImportMenuOutside, true);
+  _importMenu = null;
+}
+function _onImportMenuOutside(e) {
+  if (!_importMenu) return;
+  const menu = $(_importMenu.menuId);
+  if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== _importMenu.btnEl) closeImportMenu();
+}
+function toggleImportMenu(menuId, btnEl) {
+  const menu = $(menuId); if (!menu) return;
+  if (_importMenu && _importMenu.menuId === menuId) { closeImportMenu(); return; }
+  closeImportMenu();
+  menu.hidden = false;
+  _importMenu = { menuId, btnEl };
+  setTimeout(() => document.addEventListener('pointerdown', _onImportMenuOutside, true), 0);
+}
 function newVideoTrack(pushHistory = true, append = false) {
   const id = nextTrackId();
   const color = TRACK_COLORS[(_veTracks.length) % TRACK_COLORS.length];
@@ -2731,15 +2761,6 @@ function clipTransformAt(c, track, absT) {
   if (c.transform) return c.transform;
   return track.transform;
 }
-// 내보내기에서 추적 키프레임 구간을 매끄럽게 보이게 하는 데 쓰는 보간 밀도 — 실제 영상
-// 프레임레이트(소스마다 제각각이고 렌더러는 그 값을 모른다)를 정확히 몰라도 "왠만한
-// 프레임레이트보다는 촘촘하게" 찍으면 충분하다. 다만 무작정 높이면 안 된다 — 세그먼트
-// 하나의 길이(1/EXPORT_INTERP_HZ)가 소스 자체의 프레임 주기보다 짧아지면 ffmpeg 의
-// trim=duration=… 이 그 조각에 프레임을 하나도 못 채워(0프레임) 뒤이은 concat 전체가
-// 밀려서 어긋난다(실측으로 확인한 버그 — 소스가 10fps 인데 60Hz 로 쪼갰더니 결과물에
-// 추적 오버레이가 아예 안 보였다). 30 은 실촬영/화면녹화 영상의 흔한 하한(대개 24~60fps)
-// 보다는 낮아서 그 경계를 웬만해선 안 넘는다. buildEDL() 의 trackKeyframes 경계 생성에서만 쓴다.
-const EXPORT_INTERP_HZ = 30;
 function buildEDL() {
   // 오디오 전용(mp3/wav, 짝지어진 오디오 클립 포함) 구간은 영상 트랙이 없어서 내보낼 때
   // 검은 화면을 대신 채워야 한다 — 해상도는 사용자가 고른 값(getResolution) 을 그대로 쓴다.
@@ -2768,20 +2789,19 @@ function buildEDL() {
   const bounds = new Set([0]);
   for (const c of _veClips) {
     bounds.add(c.start); bounds.add(c.start + c.dur);
-    // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 그래야 그 사이마다 세그먼트가
-    // 잘게 갈라져서 각자 다른(보간된) 위치로 내보내진다("애니메이션"은 여기, 잘게 쪼갠 정적
-    // PIP 세그먼트를 이어붙이는 걸로 구현한다 — ffmpeg 쪽엔 새 코드가 필요 없다).
-    // 키프레임 자체(TRACK_SAMPLE_INTERVAL=0.1초 간격, 분석 정확도 목적)만 경계로 쓰면
-    // 초당 10번만 위치가 바뀌어, 영상 프레임레이트(보통 24~60fps)보다 훨씬 성겨서 미리보기
-    // (매 프레임 새로 보간)와 달리 뚝뚝 끊겨 보인다("따라가기가 뚝뚝 끊기면서 이동 —
-    // 미리보기보다 조잡해" 피드백). 키프레임 사이사이에도 EXPORT_INTERP_HZ 간격으로 촘촘히
-    // 중간 경계를 더 넣는다 — 실제 위치는 여전히 같은 interpolateKeyframes 로 구하니 정확도는
-    // 그대로고, 세그먼트(=위치 갱신 횟수)만 프레임마다 갱신될 만큼 늘어난다.
+    // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 세그먼트 자체는 키프레임
+    // 간격(TRACK_SAMPLE_INTERVAL=0.1초)마다만 갈라진다. 예전엔 그 구간 안에서 위치가 한
+    // 자리(중간값)로 고정돼 있다가 다음 세그먼트에서 점프해 "뚝뚝 끊겨" 보였다("따라가기
+    // 너무 뚝뚝 끊기면서 이동 — 미리보기보다 조잡해" 피드백). 세그먼트를 프레임 단위로 더
+    // 잘게 쪼개 그때그때 다른 정적 위치를 잇는 방식(EXPORT_INTERP_HZ)으로 처음 고쳤었지만,
+    // 소스 프레임 주기보다 짧은 조각은 ffmpeg trim 이 0프레임을 내놓는 별도 버그가 있어
+    // 안전한 상한(30Hz)까지만 촘촘히 할 수 있었다 — 그래도 여전히 계단식이었다. 지금은
+    // main.js 쪽에서 이 세그먼트 하나(0.1초)를 안 쪼갠 채로 overlay 필터의 x=/y= 를 ffmpeg
+    // 자체 't' 변수로 선형보간하는 표현식으로 만든다(clipTransformAt(c,track,a)→b 로 양끝
+    // 값만 넘기면 됨, 같은 interpolateKeyframes 수학) — ffmpeg 가 실제 렌더링하는 매 프레임마다
+    // 새로 계산하니 세그먼트를 잘게 쪼갤 필요 자체가 없어졌고, 소스 프레임레이트가 뭐든 상관없다.
     if (c.trackKeyframes && c.trackKeyframes.length) {
-      const kfs = c.trackKeyframes;
-      for (const kf of kfs) bounds.add(c.start + kf.t);
-      const step = 1 / EXPORT_INTERP_HZ;
-      for (let t = kfs[0].t; t < kfs[kfs.length - 1].t; t += step) bounds.add(c.start + t);
+      for (const kf of c.trackKeyframes) bounds.add(c.start + kf.t);
     }
   }
   if (range) { bounds.add(range.start); bounds.add(range.end); }
@@ -2828,7 +2848,16 @@ function buildEDL() {
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
           const flip = chainFlip(c.effects);
-          return { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
+          const layer = { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
+          // 추적 키프레임 클립은 위치(x/y)를 이 세그먼트 양끝 값만 넘긴다 — main.js 가
+          // overlay 필터에서 ffmpeg 자체 't' 변수로 그 사이를 매 프레임 선형보간한다(위
+          // bounds 주석 참고). 크기(w/h)는 그대로 세그먼트 중간값(정적) — scale 필터는
+          // overlay 처럼 프레임마다 't' 로 값을 못 바꾼다.
+          if (c.trackKeyframes && c.trackKeyframes.length) {
+            layer.tStart = clipTransformAt(c, track, a);
+            layer.tEnd = clipTransformAt(c, track, b);
+          }
+          return layer;
         }),
         audioSources, refW, refH, dur: b - a, texts: collectTexts(mid),
       });
@@ -3291,14 +3320,23 @@ function wire() {
     btn.addEventListener('click', () => {
       closeAddTrackMenu();
       const kind = btn.dataset.kind;
+      // 오디오도 영상처럼 빈 트랙만 먼저 만든다("+트랙" 은 트랙을 만드는 버튼이지 임포트
+      // 버튼이 아니다 — 파일은 "Import" 버튼에서 고른다는 요청 반영). 클립은 그 빈 트랙에
+      // 나중에 드래그하거나 Import 로 채운다.
       if (kind === 'video') newVideoTrack();
-      else if (kind === 'audio') pickImportAudioTrack();
+      else if (kind === 'audio') newAudioTrack();
       else if (kind === 'text') addText();
       else if (kind === 'image') pickImportImage();
       else if (kind === 'shape') addShape();
     });
   });
-  $('ve-import')?.addEventListener('click', () => pickImportVideo());
+  $('ve-import')?.addEventListener('click', () => toggleImportMenu('ve-import-menu', $('ve-import')));
+  $('ve-import-menu')?.querySelectorAll('[data-kind]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      closeImportMenu();
+      if (btn.dataset.kind === 'audio') pickImportAudioTrack(); else pickImportVideo();
+    });
+  });
   // 미리보기 해상도 선택 — "원본 보기" 포함 여러 해상도 중 고를 수 있게(요청). 바꾸면
   // 예전 해상도 기준 캐시(_proxyStatus)는 더 이상 안 맞으니 비우고 새로 확인한다.
   $('ve-preview-res')?.addEventListener('change', async (e) => {
@@ -3335,7 +3373,13 @@ function wire() {
     const c = _selClipId != null ? _veClips.find(x => x.id === _selClipId) : null;
     toggleFxPresetMenu(c);
   });
-  $('ve-empty-import')?.addEventListener('click', () => pickImportVideo());
+  $('ve-empty-import')?.addEventListener('click', () => toggleImportMenu('ve-empty-import-menu', $('ve-empty-import')));
+  $('ve-empty-import-menu')?.querySelectorAll('[data-kind]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      closeImportMenu();
+      if (btn.dataset.kind === 'audio') pickImportAudioTrack(); else pickImportVideo();
+    });
+  });
   $('ve-seek0')?.addEventListener('click', () => seekTo(0));
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
@@ -3474,8 +3518,28 @@ function wire() {
   });
 }
 
+// 영상 편집 페이지에 처음 들어왔을 때만("최초 한 번만" 요청) 시험 기능 안내를 띄운다 —
+// localStorage 플래그로 기억한다(설정/프로젝트와 무관한 순수 UI 상태라 여기 저장한다).
+const VE_EXPERIMENTAL_SEEN_KEY = 'yss:veExperimentalSeen';
+function showExperimentalNoticeOnce() {
+  if (localStorage.getItem(VE_EXPERIMENTAL_SEEN_KEY)) return;
+  localStorage.setItem(VE_EXPERIMENTAL_SEEN_KEY, '1');
+  const host = $('ve-modal'); if (!host) return;
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.experimentalTitle')}</span><button class="x">✕</button></div>
+    <div class="daw-modal-list" style="padding:16px">
+      <p style="margin:0 0 14px">${tr('video.experimentalBody')}</p>
+      <div style="display:flex;justify-content:flex-end"><button class="mini" id="ve-exp-notice-ok">${tr('common.confirm')}</button></div>
+    </div></div>`;
+  host.hidden = false;
+  const close = () => { host.hidden = true; };
+  host.querySelector('.x').addEventListener('click', close);
+  host.querySelector('#ve-exp-notice-ok').addEventListener('click', close);
+  host.addEventListener('click', (e) => { if (e.target === host) close(); }, { once: true });
+}
+
 export async function initVideoEditor() {
   wire();
+  showExperimentalNoticeOnce();
   try {
     const s = await api.settings.get();
     // videoPreviewHeight 가 있으면 그대로, 없으면 예전 켜짐/꺼짐 설정(videoProxyMode)을

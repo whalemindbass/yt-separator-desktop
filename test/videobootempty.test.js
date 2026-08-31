@@ -25,6 +25,8 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   section('1) 이전 세션 자동 저장이 있어도 부팅 직후엔 빈 프로젝트');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
+  await js(`document.querySelector('#ve-modal .x')?.click(); true`);   // 최초 1회 시험 기능 안내 모달 닫기
+  await wait(100);
   expect('클립 0개', await js(`document.querySelectorAll('.ve-clip').length`), 0);
   expect('영상 트랙도 0개', await js(`document.querySelectorAll('.ve-lane').length`), 0);
   expect('빈 상태 안내 문구가 보임', await js(`document.getElementById('ve-empty')?.hidden`), false);

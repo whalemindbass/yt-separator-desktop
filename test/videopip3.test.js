@@ -39,7 +39,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
     await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
     await wait(150);
-    await js(`document.getElementById('ve-import').click(); true`);
+    await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
     for (let i = 0; i < 40; i++) {
       const n = await js(`document.querySelectorAll('.ve-clip').length`);
       if (n >= expectTotal) break;

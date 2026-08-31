@@ -116,6 +116,13 @@
         "description": "Dr.studio 프로젝트",
         "icon": "build/yssproj.ico",
         "role": "Editor"
+      },
+      {
+        "ext": "dsvproj",
+        "name": "Dr.studio Video Project",
+        "description": "Dr.studio 영상 편집 프로젝트",
+        "icon": "build/yssproj.ico",
+        "role": "Editor"
       }
     ]
   },

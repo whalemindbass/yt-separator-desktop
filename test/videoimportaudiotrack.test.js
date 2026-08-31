@@ -57,7 +57,7 @@ function trackList(js) {
   const files = [A, B, C];
   for (let i = 0; i < files.length; i++) {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [files[i]] });
-    await js(`document.getElementById('ve-import').click(); true`);
+    await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
     for (let w = 0; w < 40; w++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= (i + 1) * 2) break; await wait(300); }
     await wait(200);
     const labels = JSON.parse(await js(`JSON.stringify([...document.querySelectorAll('.ve-lane .lbl')].map(l => l.textContent))`));

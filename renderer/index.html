@@ -25,8 +25,8 @@
       <button class="tab" data-view="library" data-i18n="title.tab.library">라이브러리</button>
       <button class="tab" data-view="community" data-i18n="title.tab.community" hidden>커뮤니티</button>
       <button class="tab" data-view="studio" data-i18n="title.tab.studio">스튜디오</button>
-      <button class="tab" data-view="training" data-i18n="title.tab.training">트레이닝</button>
       <button class="tab" data-view="video" data-i18n="title.tab.video">영상 편집</button>
+      <button class="tab" data-view="training" data-i18n="title.tab.training">트레이닝</button>
       <button class="tab" data-view="settings" data-i18n="title.tab.settings">설정</button>
     </nav>
     <div class="titlebar-meta">
@@ -1176,7 +1176,13 @@
             <button type="button" class="ve-fx-add-item" data-kind="shape" data-i18n="video.trackKindShape">도형</button>
           </div>
         </div>
-        <button id="ve-import" class="btn btn-sm" type="button" data-i18n="video.import">임포트</button>
+        <div class="ve-fx-add-wrap">
+          <button id="ve-import" class="btn btn-sm" type="button" data-i18n="video.import">Import</button>
+          <div id="ve-import-menu" class="ve-fx-add-menu" hidden>
+            <button type="button" class="ve-fx-add-item" data-kind="video" data-i18n="video.trackKindVideo">영상</button>
+            <button type="button" class="ve-fx-add-item" data-kind="audio" data-i18n="video.trackKindAudio">오디오</button>
+          </div>
+        </div>
         <button id="ve-save-project" class="btn btn-sm" type="button" data-i18n="video.saveProject">저장</button>
         <button id="ve-open-project" class="btn btn-sm" type="button" data-i18n="video.openProject">열기</button>
         <button id="ve-undo" class="ve-tbtn" type="button" data-i18n-title="video.undo" title="되돌리기">↶</button>
@@ -1232,7 +1238,13 @@
         <div id="ve-preview" class="ve-preview"></div>
         <div id="ve-empty" class="ve-empty">
           <p data-i18n="video.emptyTitle">아직 영상이 없습니다</p>
-          <button id="ve-empty-import" class="btn primary" type="button" data-i18n="video.import">임포트</button>
+          <div class="ve-fx-add-wrap">
+            <button id="ve-empty-import" class="btn primary" type="button" data-i18n="video.import">Import</button>
+            <div id="ve-empty-import-menu" class="ve-fx-add-menu" hidden>
+              <button type="button" class="ve-fx-add-item" data-kind="video" data-i18n="video.trackKindVideo">영상</button>
+              <button type="button" class="ve-fx-add-item" data-kind="audio" data-i18n="video.trackKindAudio">오디오</button>
+            </div>
+          </div>
         </div>
       </div>
       <aside class="ve-fx-panel ve-lyric-panel" id="ve-lyric-panel" hidden>

@@ -50,7 +50,7 @@ function selectClip(selector, pid) {
 
   section('2) 임포트 + 영상 클립 선택 — 빈 체인 상태, 추가 버튼 활성');
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
-  await js(`document.getElementById('ve-import').click(); true`);
+  await js(`document.getElementById('ve-import').click(); document.querySelector('#ve-import-menu [data-kind="video"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 2) break; await wait(300); }
   expect('영상+오디오 클립 둘 다 생김', await js(`document.querySelectorAll('.ve-clip').length`), 2);
   expect('영상 클립 선택됨', await js(selectClip('.ve-clip:not(.audio)', 1)), true);
