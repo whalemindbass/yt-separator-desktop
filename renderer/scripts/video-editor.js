@@ -4,7 +4,7 @@
 //   - 트랙/클립 상태는 이 모듈 로컬에만 있다(엔진에 동기화할 대상이 없다).
 //   - 시간은 전부 초 단위로만 다룬다 — 엔진 경계가 없으니 샘플 변환도 없다.
 import { t as tr } from './i18n.js';
-import { esc } from './studio/util.js';
+import { esc, fmtDelta } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
 import { getClipThumb } from './video-thumbs.js';
 import { getFilePeaks, drawWaveform } from './video-waveform.js';
@@ -2194,6 +2194,17 @@ function groupSelected() {
   renderClips();
   scheduleSave();
 }
+// 드래그 이동량 배지(+0:01.50) — 커서를 따라다니며 몇 초 옮겼는지 보여준다("클립 움직일 때
+// 몇 초 이동했는지 커서 위치에 보여주도록 해" 요청). 스튜디오 오디오 타임라인의 같은 배지
+// (studio.js showDragBadge)와 생김새를 맞추려 그 CSS 클래스(.daw-drag-badge)를 그대로 쓴다
+// — id 만 따로 둬서(둘 다 동시에 뜰 일은 없지만) 혹시 몰라 충돌하지 않게.
+function showDragBadge(deltaSec, cx, cy) {
+  let b = document.getElementById('ve-drag-badge');
+  if (!b) { b = document.createElement('div'); b.id = 've-drag-badge'; b.className = 'daw-drag-badge'; document.body.appendChild(b); }
+  b.textContent = fmtDelta(deltaSec);
+  b.style.left = (cx + 14) + 'px'; b.style.top = (cy - 26) + 'px';
+}
+function hideDragBadge() { document.getElementById('ve-drag-badge')?.remove(); }
 function snapSec(sec, excludeId) {
   const cand = [0];
   for (const c of _veClips) { if (c.id === excludeId) continue; cand.push(c.start, c.start + c.dur); }
@@ -2230,10 +2241,12 @@ function wireGroupMove(e, c, el, ids) {
         if (pEl) pEl.style.left = (m.clip.start * _pxPerSec) + 'px';
       }
     });
+    showDragBadge(c.start - startStart, ev.clientX, ev.clientY);
   };
   const up = () => {
     document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
     _dragging = false;
+    hideDragBadge();
     if (members.some(m => m.clip.start !== m.start0)) {
       const ends = members.map(m => ({ clip: m.clip, end: m.clip.start, partner: m.partner, pEnd: m.partner?.start }));
       pushUndo(
@@ -2289,10 +2302,12 @@ function wireMove(e, c, el) {
         if (fresh) el = fresh;
       }
     }
+    showDragBadge(c.start - startStart, ev.clientX, ev.clientY);
   };
   const up = () => {
     document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
     _dragging = false;
+    hideDragBadge();
     if (c.start !== startStart || c.trackId !== startTrackId) {
       const endStart = c.start, endTrackId = c.trackId;
       const endPartnerStart = partner?.start;
