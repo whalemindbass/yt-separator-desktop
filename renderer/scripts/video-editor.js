@@ -35,13 +35,13 @@ let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지�
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
 
-// ── 프록시(저해상도 미리보기 대체본) — 4K 등 고해상도 소스는 내장그래픽에서 실시간 디코드가
-// 버겁다("버벅임" 피드백). 켜져 있으면 PROXY_HEIGHT_THRESHOLD 를 넘는 소스는 재생·필름스트립
-// 생성 때 userData/proxies 에 만들어 둔 저해상도 사본으로 대체된다 — 내보내기(buildEDL)는
-// clip.file(원본)만 보내니 이 상태와 완전히 무관하다(화질 손실 없음). 기기별 하드웨어
-// 사정이라 프로젝트가 아니라 앱 전역 설정(api.settings)에 저장한다.
-const PROXY_HEIGHT_THRESHOLD = 1080;
-let _proxyMode = false;
+// ── 미리보기 해상도(프록시, 저해상도 대체본) — 4K 등 고해상도 소스는 내장그래픽에서 실시간
+// 디코드가 버겁다("버벅임" 피드백). "원본 보기" 가 아닌 해상도를 고르면, 그보다 세로가 큰
+// 소스는 재생·필름스트립 생성 때 userData/proxies 에 만들어 둔 그 해상도 사본으로 대체된다
+// — 내보내기(buildEDL)는 clip.file(원본)만 보내니 이 상태와 완전히 무관하다(화질 손실
+// 없음). "선택해서 조절"(360/540/720p) + "원본 보기" 요청 — 예전엔 켜짐/꺼짐 버튼 하나에
+// 540p 로 고정이었다. 기기별 하드웨어 사정이라 프로젝트가 아니라 앱 전역 설정에 저장한다.
+let _previewHeight = 0;   // 0 = 원본 보기(프록시 안 씀, 기본값). 그 외엔 목표 세로 해상도(px).
 const _proxyStatus = new Map();   // file(원본 경로) → {status:'pending'|'ready'|'failed', proxyPath?}
 
 // ── 가사 타이밍 맞추기 — 재생하면서 Enter 를 누르면 그 순간 재생선 위치가 "지금 armed 된
@@ -1045,48 +1045,49 @@ function clipsAt(trackId, t) {
 // 아니면 <video> 를 보여준다. 나머지 하나는 숨기고(이미지면 비디오는 멈춰 둔다) 반대로.
 function layerVideo(el) { return el.querySelector('video'); }
 // 프록시 대상 — 이미지/오디오전용/텍스트는 애초에 실시간 디코드 부담이 없다(이미지는
-// 정지 프레임 하나, 나머지 둘은 화면에 그릴 <video> 자체가 없다). 원본 세로 해상도가
-// 임계값을 넘는 진짜 영상 클립만 대상.
+// 정지 프레임 하나, 나머지 둘은 화면에 그릴 <video> 자체가 없다). "원본 보기"(0)면 대상이
+// 없고, 그 외엔 고른 미리보기 해상도보다 원본 세로 해상도가 큰 진짜 영상 클립만 대상 —
+// 이미 그보다 작은 소스를 굳이 다시 인코드할 필요는 없다.
 function needsProxy(clip) {
-  return !clip.isImage && !clip.isAudioOnly && !clip.isText && clip.h > PROXY_HEIGHT_THRESHOLD;
+  return _previewHeight > 0 && !clip.isImage && !clip.isAudioOnly && !clip.isText && clip.h > _previewHeight;
 }
-// 지금 미리보기/필름스트립에 실제로 쓸 URL. 프록시 모드가 켜져 있고 그 파일의 저해상도
+// 지금 미리보기/필름스트립에 실제로 쓸 URL. "원본 보기" 가 아니고 그 파일의 저해상도
 // 사본이 이미 준비돼 있으면 그걸(ytsep://), 아니면 원본을 그대로 돌려준다. 내보내기
 // (buildEDL→main.js video:export)는 이 함수를 아예 거치지 않고 clip.file 원본을 그대로
-// 보낸다 — 프록시 여부가 실제 결과물 화질에 영향을 줄 수 없다.
+// 보낸다 — 미리보기 해상도 선택이 실제 결과물 화질에 영향을 줄 수 없다.
 function previewUrlFor(file) {
-  if (_proxyMode) {
+  if (_previewHeight > 0) {
     const st = _proxyStatus.get(file);
     if (st && st.status === 'ready' && st.proxyPath) return toYtsepUrl(st.proxyPath);
   }
   return toYtsepUrl(file);
 }
-// 프록시 모드에서 필요한(아직 상태를 모르거나 예전에 실패한) 파일들만 골라 한꺼번에
-// main 프로세스에 요청한다 — 이미 준비/대기 중인 파일은 여기서 다시 안 보낸다(중복
-// 트랜스코드 방지, main 쪽 매니페스트도 어차피 같은 파일이면 건너뛰지만 IPC 자체를 줄인다).
+// 필요한(아직 상태를 모르거나 예전에 실패한) 파일들만 골라 한꺼번에 main 프로세스에
+// 요청한다 — 이미 준비/대기 중인 파일은 여기서 다시 안 보낸다(중복 트랜스코드 방지, main
+// 쪽 매니페스트도 어차피 같은 파일+해상도면 건너뛰지만 IPC 자체를 줄인다). 해상도를 다른
+// 값으로 바꾸면(_proxyStatus.clear()) 이 캐시가 비워지니 새 해상도 기준으로 다시 돈다.
 async function ensureProxiesFor(clips) {
-  if (!_proxyMode || !clips?.length) return;
+  if (_previewHeight <= 0 || !clips?.length) return;
   const files = [...new Set(clips.filter(needsProxy).map(c => c.file))]
     .filter(f => !_proxyStatus.has(f) || _proxyStatus.get(f).status === 'failed');
   if (!files.length) return;
   for (const f of files) _proxyStatus.set(f, { status: 'pending' });
-  updateProxyToggleUI();
+  updatePreviewResUI();
   let result;
-  try { result = await api.video.proxyEnsure(files); } catch { return; }
+  try { result = await api.video.proxyEnsure(files, _previewHeight); } catch { return; }
   for (const [f, info] of Object.entries(result || {})) {
     if (info.status === 'ready') _proxyStatus.set(f, { status: 'ready', proxyPath: info.proxyPath });
     else if (info.status === 'skipped') _proxyStatus.delete(f);
     // 'pending' 은 그대로 둔다 — video:proxyProgress 이벤트가 끝나면 갱신한다.
   }
-  updateProxyToggleUI();
+  updatePreviewResUI();
   syncPreview(nowSec());
 }
-function updateProxyToggleUI() {
-  const btn = $('ve-proxy-toggle'); if (!btn) return;
+function updatePreviewResUI() {
+  const sel = $('ve-preview-res'); if (!sel) return;
+  if (sel.value !== String(_previewHeight)) sel.value = String(_previewHeight);
   const pending = [..._proxyStatus.values()].filter(s => s.status === 'pending').length;
-  btn.textContent = pending ? `${tr('video.proxyToggle')} (${pending})` : tr('video.proxyToggle');
-  btn.classList.toggle('on', _proxyMode);
-  btn.setAttribute('aria-pressed', String(_proxyMode));
+  sel.classList.toggle('busy', pending > 0);
 }
 function driveLayer(el, clip, t, visual) {
   const v = el.querySelector('video'), img = el.querySelector('img');
@@ -3141,12 +3142,15 @@ function wire() {
     });
   });
   $('ve-import')?.addEventListener('click', () => pickImportVideo());
-  $('ve-proxy-toggle')?.addEventListener('click', async () => {
-    _proxyMode = !_proxyMode;
-    updateProxyToggleUI();
-    try { await api.settings.set({ videoProxyMode: _proxyMode }); } catch {}
+  // 미리보기 해상도 선택 — "원본 보기" 포함 여러 해상도 중 고를 수 있게(요청). 바꾸면
+  // 예전 해상도 기준 캐시(_proxyStatus)는 더 이상 안 맞으니 비우고 새로 확인한다.
+  $('ve-preview-res')?.addEventListener('change', async (e) => {
+    _previewHeight = Number(e.target.value) || 0;
+    _proxyStatus.clear();
+    updatePreviewResUI();
+    try { await api.settings.set({ videoPreviewHeight: _previewHeight }); } catch {}
     syncPreview(nowSec());
-    if (_proxyMode) ensureProxiesFor(_veClips);
+    if (_previewHeight > 0) ensureProxiesFor(_veClips);
   });
   api.video.onProxyProgress(({ path, status, proxyPath, error }) => {
     if (status === 'ready') {
@@ -3159,7 +3163,7 @@ function wire() {
     } else if (status === 'started') {
       _proxyStatus.set(path, { status: 'pending' });
     }
-    updateProxyToggleUI();
+    updatePreviewResUI();
     syncPreview(nowSec());   // 지금 화면에 그 파일이 걸려 있으면 바로 갈아탄다
   });
   $('ve-save-project')?.addEventListener('click', () => saveProjectAs());
@@ -3299,11 +3303,17 @@ function wire() {
 
 export async function initVideoEditor() {
   wire();
-  try { const s = await api.settings.get(); _proxyMode = !!s?.videoProxyMode; } catch {}
-  updateProxyToggleUI();
+  try {
+    const s = await api.settings.get();
+    // videoPreviewHeight 가 있으면 그대로, 없으면 예전 켜짐/꺼짐 설정(videoProxyMode)을
+    // 그 시절 고정값(540p)으로 옮겨 읽는다(구버전 설정 호환) — 둘 다 없으면 기본 540p.
+    if (s?.videoPreviewHeight != null) _previewHeight = Number(s.videoPreviewHeight) || 0;
+    else if (s?.videoProxyMode != null) _previewHeight = s.videoProxyMode ? 540 : 0;
+  } catch {}
+  updatePreviewResUI();
   await loadProject();
   if (!_veTracks.length) ensureLayers();
   renderLanes();
   layout();
-  if (_proxyMode) ensureProxiesFor(_veClips);
+  if (_previewHeight > 0) ensureProxiesFor(_veClips);
 }

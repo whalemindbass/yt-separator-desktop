@@ -98,7 +98,7 @@ contextBridge.exposeInMainWorld('yssApi', {
       ipcRenderer.on('video:exportProgress', h);
       return () => ipcRenderer.off('video:exportProgress', h);
     },
-    proxyEnsure: (paths) => ipcRenderer.invoke('video:proxy:ensure', paths),
+    proxyEnsure: (paths, height) => ipcRenderer.invoke('video:proxy:ensure', paths, height),
     onProxyProgress: (fn) => {
       const h = (_ev, data) => fn(data);
       ipcRenderer.on('video:proxyProgress', h);

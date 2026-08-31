@@ -1335,23 +1335,25 @@ ipcMain.handle('video:export', async (event, payload) => {
 // 넘겨준다 — 여긴 그냥 요청받은 파일을 트랜스코드만 한다.
 const PROXY_DIR = path.join(app.getPath('userData'), 'proxies');
 const PROXY_MANIFEST_FILE = path.join(PROXY_DIR, 'manifest.json');
-const PROXY_TARGET_HEIGHT = 540;
+const PROXY_TARGET_HEIGHT = 540;   // 렌더러가 height 를 안 보내면(구버전 호환) 쓰는 기본값
 function loadProxyManifest() {
   try { return JSON.parse(fs.readFileSync(PROXY_MANIFEST_FILE, 'utf-8')); } catch { return {}; }
 }
 function saveProxyManifest(m) {
   try { fs.mkdirSync(PROXY_DIR, { recursive: true }); fs.writeFileSync(PROXY_MANIFEST_FILE, JSON.stringify(m, null, 2), 'utf-8'); } catch {}
 }
-// 키에 mtime·크기를 같이 넣어서 — 같은 경로라도 원본이 나중에 바뀌면(다시 내보내기 등)
-// 새 프록시를 다시 만든다(낡은 프록시로 조용히 편집하게 두지 않는다).
-function proxyKeyFor(srcPath, stat) {
-  return crypto.createHash('sha1').update(srcPath + ':' + stat.mtimeMs + ':' + stat.size).digest('hex');
+// 키에 mtime·크기·목표 높이를 같이 넣어서 — 같은 경로라도 원본이 나중에 바뀌거나(다시
+// 내보내기 등) 미리보기 해상도를 다른 걸로 골랐으면(360/540/720p 선택 가능, "미리보기
+// 해상도를 선택해서 조절" 요청) 새 프록시를 다시 만든다(낡거나 해상도가 다른 프록시로
+// 조용히 편집하게 두지 않는다).
+function proxyKeyFor(srcPath, stat, targetHeight) {
+  return crypto.createHash('sha1').update(srcPath + ':' + stat.mtimeMs + ':' + stat.size + ':' + targetHeight).digest('hex');
 }
-function transcodeProxy(srcPath, outPath) {
+function transcodeProxy(srcPath, outPath, targetHeight) {
   return new Promise((resolve) => {
     fs.mkdirSync(PROXY_DIR, { recursive: true });
     const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', srcPath,
-      '-vf', `scale=-2:${PROXY_TARGET_HEIGHT}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+      '-vf', `scale=-2:${targetHeight}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
       '-c:a', 'aac', '-b:a', '96k', outPath];
     let proc;
     try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
@@ -1378,21 +1380,22 @@ function pumpProxyQueue() {
 function sendProxyProgress(payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('video:proxyProgress', payload);
 }
-ipcMain.handle('video:proxy:ensure', async (_ev, paths) => {
+ipcMain.handle('video:proxy:ensure', async (_ev, paths, targetHeight) => {
+  const height = Number(targetHeight) > 0 ? Number(targetHeight) : PROXY_TARGET_HEIGHT;
   const manifest = loadProxyManifest();
   const result = {};
   for (const p of [...new Set(paths || [])]) {
     if (typeof p !== 'string' || !fs.existsSync(p)) { result[p] = { status: 'skipped' }; continue; }
     let stat;
     try { stat = fs.statSync(p); } catch { result[p] = { status: 'skipped' }; continue; }
-    const key = proxyKeyFor(p, stat);
+    const key = proxyKeyFor(p, stat, height);
     const entry = manifest[key];
     if (entry && fs.existsSync(entry.outPath)) { result[p] = { status: 'ready', proxyPath: entry.outPath }; continue; }
     result[p] = { status: 'pending' };
     const outPath = path.join(PROXY_DIR, key + '.mp4');
     _proxyQueue.push(async () => {
       sendProxyProgress({ path: p, status: 'started' });
-      const r = await transcodeProxy(p, outPath);
+      const r = await transcodeProxy(p, outPath, height);
       if (r.ok) {
         manifest[key] = { outPath, srcPath: p, createdAt: Date.now() };
         saveProxyManifest(manifest);
