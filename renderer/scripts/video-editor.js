@@ -87,8 +87,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes })),
     resolution: _veResolution,
   };
 }
@@ -2093,7 +2093,9 @@ function renderClips() {
         }
         // 이미 다중 선택에 들어 있는 클립을 그냥(수식키 없이) 누르면 선택을 풀지 않고
         // 그대로 그룹 드래그로 들어간다 — 선택을 유지한 채 바로 옮길 수 있어야 하므로.
-        if (!_selClipIds.has(c.id)) _selClipIds = new Set([c.id]);
+        // 영구 그룹(manualGroupId, "그룹" 메뉴로 묶은 것)에 속한 클립이면 매번 다시
+        // Ctrl/Shift 로 고를 필요 없이 클릭 한 번에 그 그룹 전체가 강조 표시된다.
+        if (!_selClipIds.has(c.id)) _selClipIds = new Set([c.id, ...manualGroupMemberIds(c)]);
         _selClipId = c.id;
         wireMove(e, c, el);
       });
@@ -2158,6 +2160,40 @@ function groupPartner(c) {
   if (c.groupId == null) return null;
   return _veClips.find(x => x !== c && x.groupId === c.groupId) || null;
 }
+// 수동 그룹(manualGroupId) — "여러 개 선택 후 같이 움직이게 그룹화" 요청. 임포트 시
+// 자동으로 묶이는 groupId(영상↔오디오, 항상 정확히 둘·같은 길이/inOff 를 강제로 맞춤)와는
+// 다른 개념이라 필드를 따로 둔다 — 수동 그룹은 몇 개든(2개 이상) 묶을 수 있고, "같이
+// 움직인다"만 보장한다(트림/길이는 각자 그대로 — 서로 다른 종류·길이 클립을 묶어도 트림 시
+// 서로의 길이를 억지로 맞추지 않는다). 저장(buildVideoProjectData)에도 포함된다.
+function manualGroupMemberIds(c) {
+  if (c.manualGroupId == null) return [];
+  return _veClips.filter(x => x !== c && x.manualGroupId === c.manualGroupId).map(x => x.id);
+}
+// 이 클립을 드래그할 때 같이 움직여야 할 대상 전체(자기 자신 포함) — 지금 켜져 있는
+// 임시 다중 선택(_selClipIds, 있다면)과 영구 수동 그룹(manualGroupId, 있다면)을 합친다.
+// 하나만 있어도, 아무것도 없어도(단일 클립) 자연스럽게 동작한다.
+function groupDragIds(c) {
+  const ids = new Set(_selClipIds.has(c.id) ? _selClipIds : []);
+  ids.add(c.id);
+  manualGroupMemberIds(c).forEach(id => ids.add(id));
+  return ids;
+}
+// 선택된 클립들(2개 이상)을 영구 그룹으로 묶는다 — 기존에 속해 있던 그룹은 각자 깨진다
+// (다시 묶는 셈). Ctrl+G 단축키 및 우클릭 메뉴("그룹")에서 부른다.
+function groupSelected() {
+  if (_selClipIds.size < 2) return;
+  const ids = [..._selClipIds];
+  const before = ids.map(id => ({ id, prev: _veClips.find(c => c.id === id)?.manualGroupId ?? null }));
+  const gid = nextClipId();
+  pushUndo(
+    () => { before.forEach(({ id, prev }) => { const c = _veClips.find(x => x.id === id); if (c) c.manualGroupId = prev; }); },
+    () => { ids.forEach(id => { const c = _veClips.find(x => x.id === id); if (c) c.manualGroupId = gid; }); },
+  );
+  ids.forEach(id => { const c = _veClips.find(x => x.id === id); if (c) c.manualGroupId = gid; });
+  flash(tr('video.grouped'));
+  renderClips();
+  scheduleSave();
+}
 function snapSec(sec, excludeId) {
   const cand = [0];
   for (const c of _veClips) { if (c.id === excludeId) continue; cand.push(c.start, c.start + c.dur); }
@@ -2210,7 +2246,8 @@ function wireGroupMove(e, c, el, ids) {
   document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
 }
 function wireMove(e, c, el) {
-  if (_selClipIds.size > 1 && _selClipIds.has(c.id)) return wireGroupMove(e, c, el, _selClipIds);
+  const dragIds = groupDragIds(c);
+  if (dragIds.size > 1) return wireGroupMove(e, c, el, dragIds);
   e.preventDefault();
   const startX = e.clientX;
   const startStart = c.start;
@@ -2392,9 +2429,12 @@ function splitAtPlayhead() {
 }
 function deleteSelected() {
   // 다중 선택돼 있으면 전부 지운다 — 그 중 하나만 지우고 나머지가 강조 표시된 채 남으면
-  // 다중 선택 자체가 무의미해진다.
+  // 다중 선택 자체가 무의미해진다. 영구 그룹(manualGroupId)에 속한 클립이면(선택 상태와
+  // 무관하게) 그룹 전체를 지운다 — 그룹이라는 게 결국 "하나처럼 다룬다"는 뜻이므로.
   if (_selClipIds.size > 1) return deleteMultiSelected();
   if (_selClipId == null) return;
+  const target = _veClips.find(c => c.id === _selClipId);
+  if (target?.manualGroupId != null) return deleteMultiSelected(new Set([target.id, ...manualGroupMemberIds(target)]));
   const removed = _veClips.find(c => c.id === _selClipId); if (!removed) return;
   const partner = groupPartner(removed);
   const idx = _veClips.indexOf(removed);
@@ -2408,9 +2448,12 @@ function deleteSelected() {
   _selClipIds = new Set();
   layout();
 }
-function deleteMultiSelected() {
-  const targets = new Set(_selClipIds);
-  _veClips.filter(c => targets.has(c.id)).forEach((c) => { const p = groupPartner(c); if (p) targets.add(p.id); });
+function deleteMultiSelected(ids) {
+  const targets = new Set(ids || _selClipIds);
+  _veClips.filter(c => targets.has(c.id)).forEach((c) => {
+    const p = groupPartner(c); if (p) targets.add(p.id);
+    manualGroupMemberIds(c).forEach(id => targets.add(id));
+  });
   const removed = _veClips.filter(c => targets.has(c.id)).map((c, i) => ({ clip: c, idx: _veClips.indexOf(c) }));
   pushUndo(
     () => { removed.sort((a, b) => a.idx - b.idx).forEach(r => _veClips.splice(r.idx, 0, r.clip)); },
@@ -2421,9 +2464,24 @@ function deleteMultiSelected() {
   _selClipIds = new Set();
   layout();
 }
+// U 단축키/우클릭 메뉴 "그룹 해제" 공용 — 수동 그룹(manualGroupId, "그룹" 으로 묶은 것)이
+// 있으면 그걸 우선 푼다(몇 개든), 없으면 예전부터의 자동 링크(groupId, 영상↔오디오)를 푼다.
 function ungroupSelected() {
   if (_selClipId == null) return;
-  const c = _veClips.find(x => x.id === _selClipId); if (!c || c.groupId == null) return;
+  const c = _veClips.find(x => x.id === _selClipId); if (!c) return;
+  if (c.manualGroupId != null) {
+    const memberIds = manualGroupMemberIds(c);
+    const before = [c.id, ...memberIds].map(id => ({ id, prev: _veClips.find(x => x.id === id)?.manualGroupId ?? null }));
+    pushUndo(
+      () => { before.forEach(({ id, prev }) => { const x = _veClips.find(y => y.id === id); if (x) x.manualGroupId = prev; }); },
+      () => { before.forEach(({ id }) => { const x = _veClips.find(y => y.id === id); if (x) x.manualGroupId = null; }); },
+    );
+    c.manualGroupId = null; memberIds.forEach(id => { const x = _veClips.find(y => y.id === id); if (x) x.manualGroupId = null; });
+    flash(tr('video.ungrouped'));
+    renderClips(); scheduleSave();
+    return;
+  }
+  if (c.groupId == null) return;
   const partner = groupPartner(c);
   const before = { cg: c.groupId, pg: partner?.groupId };
   c.groupId = null; if (partner) partner.groupId = null;
@@ -2509,7 +2567,10 @@ function openClipContextMenu(e, c) {
       { label: tr('video.flipV'), onClick: () => { toggleClipFlip(c, 'flipV'); renderEffectPanel(c); } },
     );
   }
-  if (partner) items.push({ sep: true }, { label: tr('video.ctxUngroup'), onClick: () => ungroupSelected() });
+  if (_selClipIds.size > 1 && _selClipIds.has(c.id)) {
+    items.push({ sep: true }, { label: tr('video.ctxGroup'), onClick: () => groupSelected() });
+  }
+  if (partner || c.manualGroupId != null) items.push({ sep: true }, { label: tr('video.ctxUngroup'), onClick: () => ungroupSelected() });
   items.push({ sep: true }, { label: tr('video.delete'), onClick: () => deleteSelected() });
   openContextMenu(e.clientX, e.clientY, items);
 }
@@ -3285,6 +3346,7 @@ function wire() {
     if (e.code === 'Space') { e.preventDefault(); setPlaying(!_playing); }
     else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); }
     else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); doRedo(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); groupSelected(); }
     else if (e.key === 's' || e.key === 'S') splitAtPlayhead();
     else if (e.key === 'u' || e.key === 'U') ungroupSelected();   // Vegas Pro 와 같은 단축키
     else if (e.key === 'h' || e.key === 'H') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipH'); renderEffectPanel(c); }
