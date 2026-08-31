@@ -24,6 +24,10 @@ let _trackSeq = 0, _clipSeq = 0;
 let _pxPerSec = 40;
 let _veExtraSec = 0;   // 오른쪽 끝까지 스크롤해서 유기적으로 늘어난 여유분(초) — growTimelineIfNeeded()
 let _selClipId = null;
+// 다중 선택(Ctrl/Cmd+클릭으로 추가, Shift+클릭으로 범위) — "여러 개 선택 후 같이 움직이게"
+// 요청. _selClipId 는 그대로 "최근/대표 선택"(효과 패널·우클릭 메뉴·단축키 대상)이고,
+// 이 Set 은 화면에 강조 표시할 대상 + wireMove() 가 그룹 드래그 여부를 판단하는 기준이다.
+let _selClipIds = new Set();
 let _selTrackId = null;   // 텍스트 트랙 헤드를 클릭해 선택 — 클립 선택과 배타적(효과 패널이
                           // 그 트랙의 모든 자막을 일괄 편집하는 모드로 바뀐다).
 let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
@@ -1615,6 +1619,10 @@ function renderLanes() {
       document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
     });
     lane.querySelector('.ve-reorder').addEventListener('pointerdown', (e) => wireReorder(e, vt));
+    lane.querySelector('.ve-head').addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      openTrackContextMenu(e, vt, lane);
+    });
     // 텍스트 트랙 헤드 클릭 = 그 트랙 선택 — 효과 패널이 "이 트랙의 자막 전부를 한 번에
     // 편집" 모드로 바뀐다(요청: 트랙 선택 시 일괄, 클립 선택 시 개별). 다른 종류 트랙은
     // 일괄 편집할 스타일이 없으니(효과 체인은 클립별이라 이미 클립 선택으로 충분하다)
@@ -2040,7 +2048,7 @@ function renderClips() {
     area.innerHTML = '';
     for (const c of _veClips.filter(x => x.trackId === trackId)) {
       const el = document.createElement('div');
-      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.isImage ? ' image' : '') + (c.id === _selClipId ? ' sel' : '');
+      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.isImage ? ' image' : '') + (_selClipIds.has(c.id) || c.id === _selClipId ? ' sel' : '');
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
@@ -2062,6 +2070,29 @@ function renderClips() {
       }
       el.addEventListener('pointerdown', (e) => {
         if (e.target.classList.contains('ve-trim') || e.target.classList.contains('ve-fadeh')) return;
+        // Ctrl/Cmd+클릭 = 다중 선택 토글(드래그는 시작 안 함, 선택만). Shift+클릭 = 마지막
+        // 선택과 이 클립 사이(시간 기준, 트랙 무관)를 통째로 선택 — "여러 개 선택 후 같이
+        // 움직이게" 요청. wireMove() 가 _selClipIds 크기를 보고 그룹 드래그 여부를 정한다.
+        if (e.ctrlKey || e.metaKey) {
+          e.stopPropagation();
+          if (_selClipIds.has(c.id)) _selClipIds.delete(c.id); else _selClipIds.add(c.id);
+          _selClipId = _selClipIds.has(c.id) ? c.id : null;
+          renderClips();
+          return;
+        }
+        if (e.shiftKey && _selClipId != null) {
+          e.stopPropagation();
+          const anchor = _veClips.find(x => x.id === _selClipId);
+          const aStart = anchor ? anchor.start : c.start;
+          const lo = Math.min(aStart, c.start), hi = Math.max(aStart, c.start);
+          _selClipIds = new Set(_veClips.filter(x => x.start >= lo && x.start <= hi).map(x => x.id));
+          _selClipId = c.id;
+          renderClips();
+          return;
+        }
+        // 이미 다중 선택에 들어 있는 클립을 그냥(수식키 없이) 누르면 선택을 풀지 않고
+        // 그대로 그룹 드래그로 들어간다 — 선택을 유지한 채 바로 옮길 수 있어야 하므로.
+        if (!_selClipIds.has(c.id)) _selClipIds = new Set([c.id]);
         _selClipId = c.id;
         wireMove(e, c, el);
       });
@@ -2073,6 +2104,7 @@ function renderClips() {
         _selClipId = c.id; updateClipToolbarUI();
         if (c.isText) openTextPopover(c, el);
         else if (c.isShape) openShapePopover(c, el);
+        else openClipContextMenu(e, c);
       });
       wireTrim(el.querySelector('.ve-trim.l'), c, el, 'l');
       wireTrim(el.querySelector('.ve-trim.r'), c, el, 'r');
@@ -2132,7 +2164,52 @@ function snapSec(sec, excludeId) {
   for (const edge of cand) { const d = Math.abs(sec - edge) * _pxPerSec; if (d < bestPx) { bestPx = d; best = edge; } }
   return best;
 }
+// 다중 선택 그룹 드래그 — 선택된 클립들 전부를 같은 델타(초)만큼 같이 옮긴다. 트랙 간
+// 이동은 하지 않는다(어느 클립을 기준으로 옮길지 애매해지니 단일 클립 드래그만의 기능으로
+// 남겨둔다) — 시간(가로) 위치만 그룹째로 맞춘다. 스냅은 드래그를 시작한 클립(c) 기준으로만
+// 계산하고, 그 델타를 나머지 전부에 그대로 적용한다(각자 따로 스냅하면 서로 어긋난다).
+function wireGroupMove(e, c, el, ids) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startStart = c.start;
+  const members = [...ids].map(id => {
+    const clip = _veClips.find(x => x.id === id); if (!clip) return null;
+    const partner = groupPartner(clip);
+    return { clip, start0: clip.start, partner, pStart0: partner?.start };
+  }).filter(Boolean);
+  _dragging = true;
+  try { el.setPointerCapture(e.pointerId); } catch {}
+  const mv = (ev) => {
+    const dx = (ev.clientX - startX) / _pxPerSec;
+    const ns = Math.max(0, snapSec(startStart + dx, c.id));
+    const delta = ns - startStart;
+    members.forEach((m) => {
+      m.clip.start = Math.max(0, m.start0 + delta);
+      const mEl = document.querySelector(`.ve-clip[data-clip-id="${m.clip.id}"]`);
+      if (mEl) mEl.style.left = (m.clip.start * _pxPerSec) + 'px';
+      if (m.partner) {
+        m.partner.start = m.clip.start;
+        const pEl = document.querySelector(`.ve-clip[data-clip-id="${m.partner.id}"]`);
+        if (pEl) pEl.style.left = (m.clip.start * _pxPerSec) + 'px';
+      }
+    });
+  };
+  const up = () => {
+    document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+    _dragging = false;
+    if (members.some(m => m.clip.start !== m.start0)) {
+      const ends = members.map(m => ({ clip: m.clip, end: m.clip.start, partner: m.partner, pEnd: m.partner?.start }));
+      pushUndo(
+        () => { members.forEach(m => { m.clip.start = m.start0; if (m.partner) m.partner.start = m.pStart0; }); layout(); },
+        () => { ends.forEach(m => { m.clip.start = m.end; if (m.partner) m.partner.start = m.pEnd; }); layout(); },
+      );
+    }
+    layout();
+  };
+  document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
+}
 function wireMove(e, c, el) {
+  if (_selClipIds.size > 1 && _selClipIds.has(c.id)) return wireGroupMove(e, c, el, _selClipIds);
   e.preventDefault();
   const startX = e.clientX;
   const startStart = c.start;
@@ -2313,6 +2390,9 @@ function splitAtPlayhead() {
   layout();
 }
 function deleteSelected() {
+  // 다중 선택돼 있으면 전부 지운다 — 그 중 하나만 지우고 나머지가 강조 표시된 채 남으면
+  // 다중 선택 자체가 무의미해진다.
+  if (_selClipIds.size > 1) return deleteMultiSelected();
   if (_selClipId == null) return;
   const removed = _veClips.find(c => c.id === _selClipId); if (!removed) return;
   const partner = groupPartner(removed);
@@ -2324,6 +2404,20 @@ function deleteSelected() {
   );
   _veClips = _veClips.filter(c => c !== removed && c !== partner);
   _selClipId = null;
+  _selClipIds = new Set();
+  layout();
+}
+function deleteMultiSelected() {
+  const targets = new Set(_selClipIds);
+  _veClips.filter(c => targets.has(c.id)).forEach((c) => { const p = groupPartner(c); if (p) targets.add(p.id); });
+  const removed = _veClips.filter(c => targets.has(c.id)).map((c, i) => ({ clip: c, idx: _veClips.indexOf(c) }));
+  pushUndo(
+    () => { removed.sort((a, b) => a.idx - b.idx).forEach(r => _veClips.splice(r.idx, 0, r.clip)); },
+    () => { _veClips = _veClips.filter(c => !targets.has(c.id)); },
+  );
+  _veClips = _veClips.filter(c => !targets.has(c.id));
+  _selClipId = null;
+  _selClipIds = new Set();
   layout();
 }
 function ungroupSelected() {
@@ -2337,6 +2431,96 @@ function ungroupSelected() {
     () => { c.groupId = null; if (partner) partner.groupId = null; },
   );
   flash(tr('video.ungrouped'));
+}
+// 재생헤드까지 트림 — wireTrim(드래그) 과 같은 규칙(그룹 짝도 같이 트림, 소스 시작보다
+// 앞으로는 못 당김)을 드래그 없이 메뉴 한 번으로. 재생헤드가 클립 구간 밖이면 아무것도
+// 안 한다(우클릭 메뉴 쪽에서 미리 비활성화해 두지만, 방어적으로 한 번 더 확인).
+function trimClipToPlayhead(clip, dir) {
+  const t = _playheadSec;
+  if (t <= clip.start || t >= clip.start + clip.dur) return;
+  const partner = groupPartner(clip);
+  const before = [clip, partner].filter(Boolean).map(c => ({ c, start: c.start, dur: c.dur, inOff: c.inOff }));
+  const applyOne = (c, start0, dur0, inOff0) => {
+    if (dir === 'l') {
+      const delta = t - start0;
+      if (inOff0 + delta < 0) return false;
+      c.start = t; c.dur = dur0 - delta; c.inOff = inOff0 + delta;
+    } else {
+      c.dur = Math.min(t - start0, c.srcDur - inOff0);
+    }
+    return true;
+  };
+  if (!applyOne(clip, clip.start, clip.dur, clip.inOff)) return;
+  if (partner) applyOne(partner, before[1].start, before[1].dur, before[1].inOff);
+  pushUndo(
+    () => { before.forEach(b => { b.c.start = b.start; b.c.dur = b.dur; b.c.inOff = b.inOff; }); layout(); },
+    () => { before.forEach(b => applyOne(b.c, b.start, b.dur, b.inOff)); layout(); },
+  );
+  layout();
+}
+// ── 우클릭 컨텍스트 메뉴 — 클립/트랙에서 뭘 할 수 있는지 한눈에 안 보여서 단축키(S/U/H/V/
+// Delete)를 몰랐다는 피드백. 커서 위치에 뜨는 단순 버튼 목록(팝오버와 같은 패턴: body 에
+// 붙이고, 바깥 클릭/Esc 로 닫는다) — 각 항목은 이미 있는 함수를 그대로 호출한다.
+let _ctxMenuEl = null;
+function closeContextMenu() {
+  if (_ctxMenuEl) { _ctxMenuEl.remove(); _ctxMenuEl = null; }
+  document.removeEventListener('pointerdown', _onCtxMenuOutside, true);
+  document.removeEventListener('keydown', _onCtxMenuEsc, true);
+}
+function _onCtxMenuOutside(e) { if (_ctxMenuEl && !_ctxMenuEl.contains(e.target)) closeContextMenu(); }
+function _onCtxMenuEsc(e) { if (e.key === 'Escape') closeContextMenu(); }
+function openContextMenu(clientX, clientY, items) {
+  closeContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 've-ctxmenu';
+  items.forEach((it) => {
+    if (it.sep) { menu.appendChild(document.createElement('div')).className = 've-ctxmenu-sep'; return; }
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 've-ctxmenu-item'; b.textContent = it.label;
+    if (it.disabled) b.disabled = true;
+    else b.addEventListener('click', () => { closeContextMenu(); it.onClick(); });
+    menu.appendChild(b);
+  });
+  document.body.appendChild(menu);
+  menu.style.left = clientX + 'px'; menu.style.top = clientY + 'px';
+  // 화면 오른쪽/아래로 넘치면 안으로 접어 넣는다 — 실제 크기는 붙인 뒤라야 알 수 있다.
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth) menu.style.left = Math.max(4, window.innerWidth - r.width - 4) + 'px';
+  if (r.bottom > window.innerHeight) menu.style.top = Math.max(4, window.innerHeight - r.height - 4) + 'px';
+  _ctxMenuEl = menu;
+  setTimeout(() => {
+    document.addEventListener('pointerdown', _onCtxMenuOutside, true);
+    document.addEventListener('keydown', _onCtxMenuEsc, true);
+  }, 0);
+}
+function openClipContextMenu(e, c) {
+  _selClipId = c.id; updateClipToolbarUI();
+  const withinPlayhead = _playheadSec > c.start && _playheadSec < c.start + c.dur;
+  const partner = groupPartner(c);
+  const items = [
+    { label: tr('video.split'), disabled: !withinPlayhead, onClick: () => splitAtPlayhead() },
+    { label: tr('video.ctxTrimStart'), disabled: !withinPlayhead, onClick: () => trimClipToPlayhead(c, 'l') },
+    { label: tr('video.ctxTrimEnd'), disabled: !withinPlayhead, onClick: () => trimClipToPlayhead(c, 'r') },
+  ];
+  if (!c.isAudioOnly && !c.isText) {
+    items.push({ sep: true },
+      { label: tr('video.flipH'), onClick: () => { toggleClipFlip(c, 'flipH'); renderEffectPanel(c); } },
+      { label: tr('video.flipV'), onClick: () => { toggleClipFlip(c, 'flipV'); renderEffectPanel(c); } },
+    );
+  }
+  if (partner) items.push({ sep: true }, { label: tr('video.ctxUngroup'), onClick: () => ungroupSelected() });
+  items.push({ sep: true }, { label: tr('video.delete'), onClick: () => deleteSelected() });
+  openContextMenu(e.clientX, e.clientY, items);
+}
+function openTrackContextMenu(e, vt, lane) {
+  const items = [
+    { label: tr('video.rename'), onClick: () => startTrackRename(lane.querySelector('.lbl'), vt) },
+    { label: tr('video.changeColor'), onClick: () => lane.querySelector('.nm i')?.click() },
+    { label: tr(vt.hidden ? 'video.show' : 'video.hide'), onClick: () => lane.querySelector('.ve-hide')?.click() },
+  ];
+  if (vt.kind === 'video') items.push({ label: tr('video.pip'), onClick: () => lane.querySelector('.ve-pip')?.click() });
+  items.push({ sep: true }, { label: tr('video.deleteTrack'), onClick: () => lane.querySelector('.ve-del')?.click() });
+  openContextMenu(e.clientX, e.clientY, items);
 }
 // 좌우/상하 반전은 이제 툴바 버튼이 아니라 효과 체인의 토글 항목(flipH/flipV,
 // EFFECT_TYPES) 이다 — addClipEffect(clip,'flipH') 로 켠다. 다른 색보정 효과처럼 순서

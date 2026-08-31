@@ -3970,6 +3970,21 @@ body { background: var(--bg) !important; }
 }
 .ve-fx-add-item:hover { background: var(--elev-2); color: var(--tx-1); }
 
+/* 클립/트랙 우클릭 메뉴 — 커서 위치에 뜨는 고정(fixed) 위치 목록. .ve-fx-add-menu 와 같은
+   생김새지만 버튼에 매달린 게 아니라 body 에 바로 붙어 커서 좌표를 그대로 쓴다. */
+.ve-ctxmenu {
+  position: fixed; z-index: 200; min-width: 150px;
+  background: var(--elev); border: 1px solid var(--border-mid); border-radius: 8px;
+  padding: 4px; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 1px;
+}
+.ve-ctxmenu-item {
+  text-align: left; padding: 7px 9px; border-radius: 5px; border: 0; background: transparent;
+  color: var(--tx-2); font: 500 12px/1 var(--sans); cursor: pointer;
+}
+.ve-ctxmenu-item:hover:not(:disabled) { background: var(--elev-2); color: var(--tx-1); }
+.ve-ctxmenu-item:disabled { color: var(--tx-3); cursor: default; opacity: .5; }
+.ve-ctxmenu-sep { height: 1px; margin: 3px 2px; background: var(--border-mid); }
+
 .ve-fx-preset-menu { min-width: 190px; right: -36px; }
 .ve-fx-preset-save-row { display: flex; gap: 4px; padding: 3px; }
 .ve-fx-preset-save-row input {
