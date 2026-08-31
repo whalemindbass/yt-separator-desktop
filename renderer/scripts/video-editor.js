@@ -2224,6 +2224,28 @@ function snapSec(sec, excludeId) {
   for (const edge of cand) { const d = Math.abs(sec - edge) * _pxPerSec; if (d < bestPx) { bestPx = d; best = edge; } }
   return best;
 }
+// 클립을 통째로 옮길 때(트림과 달리 시작·끝이 같이 움직인다)의 스냅 — snapSec 은 "제안한
+// 시작점" 하나만 후보와 비교해서, 끌고 있는 클립의 끝을 다른 트랙 클립의 끝(또는 시작)에
+// 맞추려는 흔한 경우를 놓쳤다("다른 트랙 클립 끝부분과 지금 잡고 있는 클립의 끝 부분이
+// 붙어야 해" 피드백). 여기서는 제안한 시작점 기준과 끝점 기준을 각각 모든 후보와 비교해서
+// (스튜디오의 snapClipStart 와 같은 방식) 더 가까운 쪽으로 스냅한다.
+function snapClipMove(startCandidate, dur, excludeIds) {
+  const endCandidate = startCandidate + dur;
+  const cand = [0];
+  for (const c of _veClips) { if (excludeIds.has(c.id)) continue; cand.push(c.start, c.start + c.dur); }
+  if (_snapGrid) {
+    cand.push(Math.round(startCandidate / SNAP_GRID_SEC) * SNAP_GRID_SEC);
+    cand.push(Math.round(endCandidate / SNAP_GRID_SEC) * SNAP_GRID_SEC);
+  }
+  let bestStart = startCandidate, bestPx = 6;
+  for (const edge of cand) {
+    const dStart = Math.abs(startCandidate - edge) * _pxPerSec;
+    if (dStart < bestPx) { bestPx = dStart; bestStart = edge; }
+    const dEnd = Math.abs(endCandidate - edge) * _pxPerSec;
+    if (dEnd < bestPx) { bestPx = dEnd; bestStart = edge - dur; }
+  }
+  return Math.max(0, bestStart);
+}
 // 다중 선택 그룹 드래그 — 선택된 클립들 전부를 같은 델타(초)만큼 같이 옮긴다. 트랙 간
 // 이동은 하지 않는다(어느 클립을 기준으로 옮길지 애매해지니 단일 클립 드래그만의 기능으로
 // 남겨둔다) — 시간(가로) 위치만 그룹째로 맞춘다. 스냅은 드래그를 시작한 클립(c) 기준으로만
@@ -2237,11 +2259,12 @@ function wireGroupMove(e, c, el, ids) {
     const partner = groupPartner(clip);
     return { clip, start0: clip.start, partner, pStart0: partner?.start };
   }).filter(Boolean);
+  const excludeIds = new Set(members.map(m => m.clip.id));
   _dragging = true;
   try { el.setPointerCapture(e.pointerId); } catch {}
   const mv = (ev) => {
     const dx = (ev.clientX - startX) / _pxPerSec;
-    const ns = Math.max(0, snapSec(startStart + dx, c.id));
+    const ns = snapClipMove(startStart + dx, c.dur, excludeIds);
     const delta = ns - startStart;
     members.forEach((m) => {
       m.clip.start = Math.max(0, m.start0 + delta);
@@ -2279,12 +2302,13 @@ function wireMove(e, c, el) {
   const startTrackId = c.trackId;
   const partner = groupPartner(c);
   const partnerStart0 = partner?.start;
+  const excludeIds = new Set(partner ? [c.id, partner.id] : [c.id]);
   const laneEls = [...document.querySelectorAll('.ve-lane')];
   _dragging = true;
   try { el.setPointerCapture(e.pointerId); } catch {}
   const mv = (ev) => {
     const dx = (ev.clientX - startX) / _pxPerSec;
-    let ns = Math.max(0, snapSec(startStart + dx, c.id));
+    let ns = snapClipMove(startStart + dx, c.dur, excludeIds);
     c.start = ns;
     el.style.left = (c.start * _pxPerSec) + 'px';
     // 짝(그룹) 클립이 있으면 같은 시작점으로 실시간으로 따라온다(Vegas 관례) — 트랙은
