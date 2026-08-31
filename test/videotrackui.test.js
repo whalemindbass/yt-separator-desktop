@@ -78,25 +78,39 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   await js(`(() => { [...document.querySelectorAll('#ve-fx-add-menu .ve-fx-add-item')][0].click(); })(); true`);
   await wait(150);
 
-  section('3) 미리보기에서 드래그로 영역 지정 → "분석 중…" 표시가 처음 추가하는 이번에도 바로 뜨는지(버그였던 부분)');
+  section('3) 미리보기에서 드래그로 영역 지정 — 지정하는 동안엔 그 오버레이 이미지 자신이 안 보여야 함(가려서 거슬린다는 피드백)');
+  // pointerdown+move 까지만 먼저 보내고(놓지 않은 채) 중간 상태를 확인한다 — 한 js() 호출
+  // 안에서 down/move/up 을 다 보내버리면 테스트 쪽에서 "드래그 도중" 시점을 볼 수 없다.
   await js(`(() => {
     const host = document.getElementById('ve-preview');
     const r = host.getBoundingClientRect();
     // 시작 시각(t=0) 빨간 사각형은 (20,20,40x40) 근처 — 미리보기 좌표로 환산해 그 자리에 드래그.
     const sx = r.left + r.width * (20 / ${W});
     const sy = r.top + r.height * (20 / ${H});
-    const ex = r.left + r.width * (65 / ${W});
-    const ey = r.top + r.height * (65 / ${H});
+    window.__dragEnd = { x: r.left + r.width * (65 / ${W}), y: r.top + r.height * (65 / ${H}) };
     host.dispatchEvent(new PointerEvent('pointerdown', { clientX: sx, clientY: sy, bubbles: true, pointerId: 5 }));
-    document.dispatchEvent(new PointerEvent('pointermove', { clientX: ex, clientY: ey, pointerId: 5 }));
-    document.dispatchEvent(new PointerEvent('pointerup', { clientX: ex, clientY: ey, pointerId: 5 }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: window.__dragEnd.x, clientY: window.__dragEnd.y, pointerId: 5 }));
   })(); true`);
-  await wait(60);   // renderEffectPanel 이 분석 시작과 동시에 부르는 첫 렌더 — 다음 틱까지 기다리지 않아도 된다
+  await wait(60);
+  const overlayHiddenMidDrag = await js(`(() => {
+    const img = document.querySelector('.ve-video-layers .ve-layer-slot img:not([hidden])');
+    return img?.closest('.ve-layer-slot')?.style.visibility === 'hidden';
+  })()`);
+  expect('드래그 도중엔 오버레이 이미지 레이어가 숨겨짐', overlayHiddenMidDrag, true);
+  await js(`document.dispatchEvent(new PointerEvent('pointerup', { clientX: window.__dragEnd.x, clientY: window.__dragEnd.y, pointerId: 5 })); true`);
+  await wait(60);
+  const overlayVisibleAfterDrag = await js(`(() => {
+    const img = document.querySelector('.ve-video-layers .ve-layer-slot img:not([hidden])');
+    return img?.closest('.ve-layer-slot')?.style.visibility !== 'hidden';
+  })()`);
+  expect('드래그(영역 지정) 끝나면 다시 보임', overlayVisibleAfterDrag, true);
+
+  section('4) "분석 중…" 표시가 처음 추가하는 이번에도 바로 뜨는지(버그였던 부분)');
   const analyzingText = await js(`document.querySelector('.ve-track-status')?.textContent || ''`);
   expect('처음 추가하는 이번에도 분석 시작과 동시에 "분석 중…" 표시가 뜸(예전엔 안 떴다)', /분석 중/.test(analyzingText), true);
   expect('다시 지정/해제 버튼은 분석 중엔 비활성', await js(`document.querySelector('.ve-track-start-btn')?.disabled`), true);
 
-  section('4) 자동 분석 완료 대기 — "분석 중…" 표시가 "추적 중 (N개 지점)" 으로 바뀔 때까지');
+  section('5) 자동 분석 완료 대기 — "분석 중…" 표시가 "추적 중 (N개 지점)" 으로 바뀔 때까지');
   // 프레임 seek(디코드) 자체가 느려진 촘촘한 샘플 간격(0.1초) 탓에 시간이 걸린다(실측) —
   // 기본 5초 클립이면 대략 50개 샘플, 넉넉히 60초까지 기다린다.
   for (let i = 0; i < 150; i++) {
@@ -108,7 +122,7 @@ const isYellowish = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   const kfCount = Number((finalStatus.match(/\d+/) || [0])[0]);
   expect('키프레임이 여러 개 쌓임', kfCount >= 2, true);
 
-  section('5) 내보내기 — 오버레이가 실제로 대상(빨간 사각형)을 따라 움직였는지');
+  section('6) 내보내기 — 오버레이가 실제로 대상(빨간 사각형)을 따라 움직였는지');
   dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT });
   await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {

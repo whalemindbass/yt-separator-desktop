@@ -843,8 +843,19 @@ function findTrackingSource(overlayClip) {
   return null;
 }
 let _trackDrawClip = null;
+// 드래그로 영역을 지정하는 동안 그 클립 자신(오버레이 이미지/도형)이 화면에 그대로
+// 보이면 가려서 지정하려는 밑그림(추적 대상)을 오히려 못 본다("영역 지정 시 지정할
+// 이미지는 안 보이게 하자" 요청) — 지정하는 동안만 그 클립이 속한 트랙의 레이어를
+// 잠깐 숨긴다(트랙 레이어는 a/b 이중버퍼라 둘 다 숨긴다 — 어차피 한쪽만 실제로 보인다).
+function setTrackLayerVisible(trackId, visible) {
+  const pair = _layerEls.get(trackId);
+  if (!pair || pair.text) return;
+  const v = visible ? '' : 'hidden';
+  pair.a.style.visibility = v; pair.b.style.visibility = v;
+}
 function cancelTrackDrawMode() {
   if (!_trackDrawClip) return;
+  setTrackLayerVisible(_trackDrawClip.trackId, true);
   _trackDrawClip = null;
   const host = $('ve-preview');
   host?.classList.remove('ve-track-draw-mode');
@@ -858,6 +869,7 @@ function startTrackDrawMode(clip) {
   cancelTrackDrawMode();
   seekTo(clip.start);
   _trackDrawClip = clip;
+  setTrackLayerVisible(clip.trackId, false);
   const host = $('ve-preview');
   host.classList.add('ve-track-draw-mode');
   flash(tr('video.trackDrawHint'));
@@ -882,6 +894,7 @@ function startTrackDrawMode(clip) {
       host.removeEventListener('pointerdown', onDown);
       host.classList.remove('ve-track-draw-mode');
       box.remove();
+      setTrackLayerVisible(clip.trackId, true);
       _trackDrawClip = null;
       if (cssBox.w < 6 || cssBox.h < 6) return;   // 너무 작게 그리면 취소로 본다
       runTracking(clip, source, host.getBoundingClientRect(), cssBox);
@@ -1476,13 +1489,56 @@ function newTextTrack(pushHistory = true) {
 }
 // 이름 없는 트랙의 기본 이름 — 영상/오디오/텍스트 각자 자기 종류 안에서 순번을 센다
 // (Vegas 처럼 영상 트랙 구역과 오디오 트랙 구역이 따로다).
+// kind='video' 트랙이라도 담긴 클립이 전부 이미지/도형이면 "영상 N"이 아니라 각각
+// "이미지 N"/"도형 N"으로 부른다 — "+트랙" 메뉴에서 이미지/도형으로 따로 골라 넣었는데
+// 라벨은 항상 "영상"이라 헷갈린다는 요청 반영. 클립이 아직 없는(빈) 트랙은 판단할 수
+// 없으니 그냥 "영상 N"(기존 동작)으로 둔다.
+function trackContentKind(vt) {
+  if (vt.kind !== 'video') return vt.kind;
+  const clips = _veClips.filter(c => c.trackId === vt.id);
+  if (!clips.length) return 'video';
+  if (clips.every(c => c.isShape)) return 'shape';
+  if (clips.every(c => c.isImage)) return 'image';
+  return 'video';
+}
 function trackLabel(vt) {
   if (vt.name) return vt.name;
-  const sameKind = _veTracks.filter(t => t.kind === vt.kind);
+  const contentKind = trackContentKind(vt);
+  // 같은 종류끼리만 순번을 센다 — "영상 1, 이미지 1, 영상 2" 처럼 각자 독립적으로.
+  const sameKind = _veTracks.filter(t => t.kind === vt.kind && trackContentKind(t) === contentKind);
   const n = sameKind.indexOf(vt) + 1;
-  if (vt.kind === 'audio') return tr('video.audioTrackN', { n });
-  if (vt.kind === 'text') return tr('video.textTrackN', { n });
+  if (contentKind === 'audio') return tr('video.audioTrackN', { n });
+  if (contentKind === 'text') return tr('video.textTrackN', { n });
+  if (contentKind === 'shape') return tr('video.shapeTrackN', { n });
+  if (contentKind === 'image') return tr('video.imageTrackN', { n });
   return tr('video.trackN', { n });
+}
+// 트랙 이름 인라인 변경 — library.js 의 startInlineRename 과 같은 패턴(라벨 자리를
+// <input> 으로 바꿔치기, Enter=적용/Escape=취소/포커스 잃으면 적용). 예전엔 dblclick 이
+// window.prompt() 네이티브 대화상자를 띄웠는데, 눈에 안 띄고 앱 다른 곳과도 이질적이라
+// "이름 변경 기능 추가" 요청으로 이 패턴으로 바꿨다. 빈 값으로 두면(트림 후 빈 문자열)
+// vt.name 이 빈 문자열이 돼 trackLabel() 이 다시 자동 이름(영상 N 등)을 계산해 보여준다.
+function startTrackRename(lbl, vt) {
+  const input = document.createElement('input');
+  input.className = 've-track-rename';
+  input.value = trackLabel(vt);
+  input.spellcheck = false;
+  lbl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return; done = true;
+    if (save) { vt.name = input.value.trim(); scheduleSave(); }
+    renderLanes();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('pointerdown', (e) => e.stopPropagation());
 }
 
 function renderLanes() {
@@ -1531,8 +1587,7 @@ function renderLanes() {
     const lbl = lane.querySelector('.lbl');
     lbl.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      const val = prompt(tr('video.rename'), trackLabel(vt));
-      if (val != null) { vt.name = val.trim(); lbl.textContent = trackLabel(vt); }
+      startTrackRename(lbl, vt);
     });
     const dot = lane.querySelector('.nm i');
     dot.addEventListener('click', (e) => {

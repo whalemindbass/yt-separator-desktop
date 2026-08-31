@@ -3862,9 +3862,15 @@ body { background: var(--bg) !important; }
   padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface);
   flex: 0 0 auto;
 }
-.ve-toolbar-l, .ve-toolbar-c, .ve-toolbar-r { display: flex; align-items: center; gap: 8px; }
-.ve-toolbar-c { position: absolute; left: 50%; transform: translateX(-50%); }
-.ve-toolbar { position: relative; }
+.ve-toolbar-l, .ve-toolbar-r { display: flex; align-items: center; gap: 8px; }
+/* 재생 관련 버튼(처음으로/재생·정지/시간)을 위쪽 툴바에서 화면 맨 아래 전용 바로
+   옮겼다("위쪽에 재생 관련 버튼들 최하단에 하단바 만들어서 배치" 요청) — 타임라인
+   스크롤 영역(.ve-tscroll) 바로 아래, .video-body 의 마지막 자식이라 항상 맨 아래에 있다. */
+.ve-bottombar {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 16px; border-top: 1px solid var(--border); background: var(--surface);
+  flex: 0 0 auto;
+}
 .ve-tbtn {
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 7px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-2);
@@ -4104,6 +4110,10 @@ body { background: var(--bg) !important; }
 .ve-head .nm .ve-reorder { cursor: grab; color: var(--tx-4); font-size: 12px; }
 .ve-head .nm i { width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--accent)); cursor: pointer; flex: 0 0 auto; }
 .ve-head .nm .lbl { font: 600 12px/1.2 var(--sans); color: var(--tx-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.ve-track-rename {
+  flex: 1; min-width: 0; background: var(--input); border: 1px solid var(--accent); border-radius: 4px;
+  padding: 1px 4px; color: var(--tx-1); font: 600 12px/1.2 var(--sans); outline: none;
+}
 .ve-head .ve-ctrls { display: flex; align-items: center; gap: 4px; }
 .ve-hs {
   width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;

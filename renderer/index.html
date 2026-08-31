@@ -1200,11 +1200,6 @@
           data-i18n="video.proxyToggle" data-i18n-title="video.proxyToggleTitle"
           title="고해상도(1080p 초과) 소스를 편집 중엔 저해상도 사본으로 대체 재생 — 내보내기는 항상 원본 화질">프록시</button>
       </div>
-      <div class="ve-toolbar-c">
-        <button id="ve-seek0" class="ve-tbtn" type="button" data-i18n-title="video.toStart" title="처음으로">|◀</button>
-        <button id="ve-play" class="ve-tbtn ve-play" type="button" data-i18n-title="video.playStop" title="재생/정지">▶</button>
-        <span id="ve-time" class="ve-time">0:00.000</span>
-      </div>
       <div class="ve-toolbar-r">
         <button id="ve-lyrics" class="btn btn-sm" type="button" data-i18n="video.lyrics">가사</button>
         <button id="ve-export" class="btn primary btn-sm" type="button" data-i18n="video.export">내보내기</button>
@@ -1258,6 +1253,11 @@
       <div class="ve-lanes" id="ve-lanes">
         <div class="ve-playhead" id="ve-playhead"></div>
       </div>
+    </div>
+    <div class="ve-bottombar">
+      <button id="ve-seek0" class="ve-tbtn" type="button" data-i18n-title="video.toStart" title="처음으로">|◀</button>
+      <button id="ve-play" class="ve-tbtn ve-play" type="button" data-i18n-title="video.playStop" title="재생/정지">▶</button>
+      <span id="ve-time" class="ve-time">0:00.000</span>
     </div>
     <div id="ve-modal" class="daw-modal" hidden></div>
   </main>
