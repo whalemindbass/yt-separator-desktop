@@ -1264,6 +1264,51 @@ ipcMain.handle('video:export', async (event, payload) => {
     parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
   }
 
+  // ── "레이어"(트랙 PIP·추적 오버레이) 소스 전처리 캐시 ──────────────────
+  // 예전엔 세그먼트마다(추적 키프레임이 있으면 수십 개) 그 레이어의 소스를 처음부터
+  // 다시 trim+HDR톤매핑+반전+효과체인+scale 을 태웠다 — 4K HDR 원본 + 촘촘한 추적
+  // 오버레이 조합(실제 사용자 프로젝트)에서 ffmpeg 필터그래프가 "Cannot allocate
+  // memory" 로 죽거나(트림 조각들이 concat 순서를 기다리며 계속 프레임을 버퍼링)
+  // 몇 분째 진행이 안 멈추는 걸 실측으로 확인했다 — 같은 4K HDR 프레임을 55개 조각이
+  // 각자 톤매핑하고 있었다("텍스트가 있으면 내보내기가 안 됨/처음 장면에서 멈춤" 신고
+  // 원인 — 정확히는 텍스트 자체가 아니라 자막 클립들이 경계를 늘려 세그먼트가 더 잘게
+  // 갈라진 게 방아쇠였다).
+  //
+  // HDR 톤매핑/반전/효과체인은 픽셀당 처리라 "어느 구간을 잘라 쓰든" 결과가 똑같다 —
+  // 그 파일(+같은 hdr/flip/effects 조합) 하나당 딱 한 번만 태운 뒤 split 로 세그먼트
+  // 수만큼 나눠서, 세그먼트마다는 trim+페이드+scale 만(가벼운 부분만) 새로 한다. scale
+  // 은 여기서 안 뺀다 — 추적 키프레임 클립은 세그먼트마다 크기(w/h)가 달라질 수 있다.
+  const layerPreKey = (layer) => `${layer.file}|${layer.hdr || ''}|${layer.flipH ? 1 : 0}${layer.flipV ? 1 : 0}|${JSON.stringify(layer.effects || [])}`;
+  const layerPreCount = new Map();
+  for (const s of segments) {
+    if (!s.layers) continue;
+    for (const layer of s.layers) {
+      const k = layerPreKey(layer);
+      layerPreCount.set(k, (layerPreCount.get(k) || 0) + 1);
+    }
+  }
+  const layerPreQueues = new Map();
+  let preSeq = 0;
+  for (const s of segments) {
+    if (!s.layers) continue;
+    for (const layer of s.layers) {
+      const key = layerPreKey(layer);
+      if (layerPreQueues.has(key)) continue;   // 이미 이 소스(+hdr/flip/effects 조합)용 전처리를 만들었다
+      const n = layerPreCount.get(key);
+      const label = `pre${preSeq++}`;
+      // null 을 첫 필터로 둬서(hdr/flip/effects 가 전부 빈 문자열이어도) 콤마 체인이
+      // 항상 유효한 필터로 시작하게 한다.
+      parts.push(`[${inputIndexFor(layer.file)}:v]null${hdrFrag(layer.hdr)}${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)}[${label}]`);
+      if (n === 1) {
+        layerPreQueues.set(key, [label]);
+      } else {
+        const outs = Array.from({ length: n }, (_, k) => `${label}_${k}`);
+        parts.push(`[${label}]split=${n}${outs.map(o => `[${o}]`).join('')}`);
+        layerPreQueues.set(key, outs);
+      }
+    }
+  }
+
   const vLabels = segments.map((_, i) => `v${i}`);   // textFrag() 가 텍스트 있는 세그먼트만 바꿔치기한다
   segments.forEach((s, i) => {
     if (s.xfade) {
@@ -1298,7 +1343,10 @@ ipcMain.handle('video:export', async (event, payload) => {
         const tf = layer.transform;
         const lw = tf ? Math.max(2, Math.round(w * (tf.w != null ? tf.w : tf.scale))) : w;
         const lh = tf ? Math.max(2, Math.round(h * (tf.h != null ? tf.h : tf.scale))) : h;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);
+        // hdr/flip/effects 는 위 layerPreQueues 전처리에서 이미 한 번만 태워졌다 — 여기선
+        // 그 결과에서 이 세그먼트 몫(trim)만 떼어 페이드·scale 만 새로 적용한다.
+        const preLabel = layerPreQueues.get(layerPreKey(layer)).shift();
+        parts.push(`[${preLabel}]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS,scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         // 추적 키프레임 클립(layer.tStart/tEnd) — 세그먼트 양끝 위치를 overlay 필터의
         // x=/y= 표현식으로 넘겨서 ffmpeg 자체 't'(초 단위 프레임 타임스탬프, 이 레이어도

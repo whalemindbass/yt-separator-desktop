@@ -2786,25 +2786,68 @@ function buildEDL() {
   // 눈금자에서 지정한 내보내기 구간 — 경계값 자체를 breakpoint 로 넣어 두면 그 지점에서
   // 정확히 구간이 갈라져서, 걸치는 클립을 따로 잘라 넣을 필요 없이 범위 밖 구간만 건너뛰면 된다.
   const range = _veExportRange;
-  const bounds = new Set([0]);
+  // "단단한" 경계(클립 시작/끝, 내보내기 범위) — 정확히 그 시각에 갈라져야 어떤 클립이
+  // 활성인지가 맞다, 그래서 무조건 넣는다. 추적 키프레임은 "말랑한" 경계 — 세그먼트를
+  // 더 잘게(그 시각들마다) 갈라서 애니메이션(위치 보간)을 더 정확하게 만들지만, 정확히
+  // 그 시각에 갈라져야 할 이유는 없다(main.js 쪽 overlay x=/y= 가 세그먼트 안에서도
+  // ffmpeg 자체 't' 변수로 계속 보간하니, 세그먼트 경계 자체는 근사치여도 된다).
+  const hardBounds = new Set([0]);
+  const kfBounds = [];
   for (const c of _veClips) {
-    bounds.add(c.start); bounds.add(c.start + c.dur);
-    // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 세그먼트 자체는 키프레임
-    // 간격(TRACK_SAMPLE_INTERVAL=0.1초)마다만 갈라진다. 예전엔 그 구간 안에서 위치가 한
-    // 자리(중간값)로 고정돼 있다가 다음 세그먼트에서 점프해 "뚝뚝 끊겨" 보였다("따라가기
-    // 너무 뚝뚝 끊기면서 이동 — 미리보기보다 조잡해" 피드백). 세그먼트를 프레임 단위로 더
-    // 잘게 쪼개 그때그때 다른 정적 위치를 잇는 방식(EXPORT_INTERP_HZ)으로 처음 고쳤었지만,
-    // 소스 프레임 주기보다 짧은 조각은 ffmpeg trim 이 0프레임을 내놓는 별도 버그가 있어
-    // 안전한 상한(30Hz)까지만 촘촘히 할 수 있었다 — 그래도 여전히 계단식이었다. 지금은
-    // main.js 쪽에서 이 세그먼트 하나(0.1초)를 안 쪼갠 채로 overlay 필터의 x=/y= 를 ffmpeg
-    // 자체 't' 변수로 선형보간하는 표현식으로 만든다(clipTransformAt(c,track,a)→b 로 양끝
-    // 값만 넘기면 됨, 같은 interpolateKeyframes 수학) — ffmpeg 가 실제 렌더링하는 매 프레임마다
-    // 새로 계산하니 세그먼트를 잘게 쪼갤 필요 자체가 없어졌고, 소스 프레임레이트가 뭐든 상관없다.
+    hardBounds.add(c.start); hardBounds.add(c.start + c.dur);
     if (c.trackKeyframes && c.trackKeyframes.length) {
-      for (const kf of c.trackKeyframes) bounds.add(c.start + kf.t);
+      for (const kf of c.trackKeyframes) kfBounds.push(c.start + kf.t);
     }
   }
-  if (range) { bounds.add(range.start); bounds.add(range.end); }
+  if (range) { hardBounds.add(range.start); hardBounds.add(range.end); }
+  // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 세그먼트 자체는 키프레임
+  // 간격(TRACK_SAMPLE_INTERVAL=0.1초)마다만 갈라진다. 예전엔 그 구간 안에서 위치가 한
+  // 자리(중간값)로 고정돼 있다가 다음 세그먼트에서 점프해 "뚝뚝 끊겨" 보였다("따라가기
+  // 너무 뚝뚝 끊기면서 이동 — 미리보기보다 조잡해" 피드백). 세그먼트를 프레임 단위로 더
+  // 잘게 쪼개 그때그때 다른 정적 위치를 잇는 방식(EXPORT_INTERP_HZ)으로 처음 고쳤었지만,
+  // 소스 프레임 주기보다 짧은 조각은 ffmpeg trim 이 0프레임을 내놓는 별도 버그가 있어
+  // 안전한 상한(30Hz)까지만 촘촘히 할 수 있었다 — 그래도 여전히 계단식이었다. 지금은
+  // main.js 쪽에서 이 세그먼트 하나(0.1초)를 안 쪼갠 채로 overlay 필터의 x=/y= 를 ffmpeg
+  // 자체 't' 변수로 선형보간하는 표현식으로 만든다(clipTransformAt(c,track,a)→b 로 양끝
+  // 값만 넘기면 됨, 같은 interpolateKeyframes 수학) — ffmpeg 가 실제 렌더링하는 매 프레임마다
+  // 새로 계산하니 세그먼트를 잘게 쪼갤 필요 자체가 없다.
+  //
+  // 다만 실제 트래킹 키프레임은(합성 테스트 픽스처와 달리) TRACK_SAMPLE_INTERVAL 간격이
+  // 정확히 균일하지 않다 — 프레임 seek/디코드 타이밍에 따라 인접 키프레임이 몇 ms 차이로
+  // 붙어 있을 수 있고, 무엇보다 다른 클립(자막처럼 촘촘한 텍스트 클립 등)의 "단단한" 경계
+  // 바로 옆에 우연히 떨어질 수도 있다 — 처음엔 키프레임끼리만 최소 간격을 뒀는데(클립
+  // 하나 안에서만 비교) 그걸로는 안 막혔다. 그 틈을 그대로 경계로 넣으면 몇 ms짜리(때론
+  // 소스 프레임 주기보다 짧은) 세그먼트가 생겨 ffmpeg 필터그래프 자체가 죽는다("Cannot
+  // allocate memory" — 실제 프로젝트 파일로 실측 확인한 크래시, 합성 테스트는 키프레임
+  // 간격이 항상 정확히 균일하고 다른 클립과 안 겹쳐서 이 문제를 못 잡아냈다). 그래서
+  // 모든 경계를 합쳐 시간순으로 훑으면서, 단단한 경계는 무조건 받고, 키프레임 경계는
+  // 직전에 "받은" 경계(단단하든 말랑하든)와 최소 MIN_KF_GAP 이상 떨어졌을 때만 받는다 —
+  // 건너뛴 키프레임의 실제 값은 버려지지 않는다, clipTransformAt() 이 항상 원본
+  // keyframes 배열 전체로 그 시각의 정확한 보간값을 다시 계산하니 그 세그먼트의
+  // 시작/끝 좌표에는 여전히 반영된다.
+  const MIN_KF_GAP = 0.05;   // 20fps 소스도 안전한 최소 세그먼트 길이
+  const merged = [...hardBounds].map(t => ({ t, hard: true }))
+    .concat(kfBounds.map(t => ({ t, hard: false })))
+    .sort((a, b) => a.t - b.t);
+  const bounds = new Set();
+  let lastAccepted = -Infinity;
+  for (let idx = 0; idx < merged.length; idx++) {
+    const p = merged[idx];
+    if (p.hard) { bounds.add(p.t); lastAccepted = p.t; continue; }
+    // 키프레임(말랑한) 후보 — 직전에 받은 경계뿐 아니라, 바로 다음에 오는 "단단한" 경계
+    // (클립 시작/끝)와도 너무 가까우면 버린다. 처음엔 직전 경계와만 비교했는데, 그 뒤에
+    // 하드 경계가 무조건(간격 상관없이) 따라붙으면서 둘 사이에 ms 단위 초단편 세그먼트가
+    // 생겼다 — 실측 확인: 8ms 세그먼트가 이미지의 -loop 1 무한 입력과 만나 ffmpeg 가
+    // out_time 은 그 자리에 멈춘 채 frame 수만 계속 찍어내며 진행을 못 하는 걸 확인했다
+    // (자막 클립이 촘촘한 프로젝트에서 재현됨). 하드 경계는 그 자체론 절대 못 버린다
+    // (정확한 시각에 갈라져야 자막 등장 시점이 안 어긋난다) — 대신 그 앞의 말랑한
+    // 경계 쪽을 미리 걸러낸다.
+    if (p.t - lastAccepted < MIN_KF_GAP) continue;
+    let nextHard = Infinity;
+    for (let j = idx + 1; j < merged.length; j++) { if (merged[j].hard) { nextHard = merged[j].t; break; } }
+    if (nextHard - p.t < MIN_KF_GAP) continue;
+    bounds.add(p.t); lastAccepted = p.t;
+  }
   const pts = [...bounds].sort((a, b) => a - b);
   const segs = [];
   let skipUntil = -Infinity;
