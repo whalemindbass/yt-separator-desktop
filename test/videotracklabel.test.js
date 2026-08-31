@@ -36,14 +36,27 @@ function laneLabels(js) {
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
 
-  section('1) 이미지 두 번, 도형 한 번, 영상 한 번 — 각자 독립적으로 순번 매겨 라벨이 붙는다');
+  section('0) 이미지 하나만 임포트 — 그 즉시(다른 트랙 추가 없이) 라벨이 "이미지 1"이어야 함');
+  // importImageFiles() 가 ensureLayers()+layout() 만 부르고 renderLanes() 를 안 부르면, 새
+  // 트랙 만들 때(newVideoTrack, 클립 생기기 전) 계산된 "영상 1"에 라벨이 얼어붙는다 — 뒤이어
+  // 다른 트랙을 추가하는 동작(섹션 1)이 renderLanes() 를 다시 불러 우연히 가려지므로, 여기서
+  // 그 사이드이펙트 없이 단독으로 확인한다("추가 시엔 영상, 수정 누르면 이미지로 바뀐다" 재현).
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [IMG1] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="image"]').click(); true`);
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 1) break; await wait(300); }
+  await wait(200);
+  const soloLabel = JSON.parse(await laneLabels(js));
+  expect('트랙 1개', soloLabel.length, 1);
+  expect('임포트 직후 바로 "이미지 1"(라벨 안 갈아엎어도 즉시 반영)', soloLabel[0], '이미지 1');
+
+  section('1) 이미지 두 번, 도형 한 번, 영상 한 번 — 각자 독립적으로 순번 매겨 라벨이 붙는다');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [IMG1] });
+  await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="image"]').click(); true`);
+  for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 2) break; await wait(300); }
 
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [IMG2] });
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="image"]').click(); true`);
-  for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 2) break; await wait(300); }
+  for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip.image').length`) >= 3) break; await wait(300); }
 
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="shape"]').click(); true`);
   await wait(200);
@@ -59,15 +72,18 @@ function laneLabels(js) {
   await wait(300);
 
   const labels = JSON.parse(await laneLabels(js));
-  expect('트랙 4개(이미지2 + 도형1 + 영상1)', labels.length, 4);
+  // 섹션 0 에서 이미 이미지 트랙 1개(A)를 만들어 둔 채로 시작 — 이번 섹션에서 이미지2(IMG1,
+  // IMG2) + 도형1 + 영상1 을 더 추가하니 총 5개, 이미지는 A 까지 합쳐 3개.
+  expect('트랙 5개(이미지3(A+IMG1+IMG2) + 도형1 + 영상1)', labels.length, 5);
   // "+트랙" 은 매번 맨 위로 새 트랙을 얹는다(예전부터의 관례, importVideoFiles 만 예외로
   // 맨 아래에 붙는다 — 그건 이 파일이 아니라 videoimportaudiotrack.test.js 대상) — 라벨은
   // 그때그때 배열 위치로 매기니, 나중에 넣은 같은 종류 트랙이 맨 위(=1번)를 차지하고
   // 먼저 넣은 쪽이 뒤로 밀려 번호가 올라간다.
   expect('맨 위(가장 최근 추가) = 영상 1', labels[0], '영상 1');
   expect('그 다음 = 도형 1', labels[1], '도형 1');
-  expect('그 다음 = 이미지 1(나중에 넣은 이미지가 맨 위라 1번)', labels[2], '이미지 1');
-  expect('맨 아래(가장 먼저 넣은 이미지, 밀려서 2번) = 이미지 2', labels[3], '이미지 2');
+  expect('그 다음 = 이미지 1(나중에 넣은 IMG2가 맨 위라 1번)', labels[2], '이미지 1');
+  expect('그 다음 = 이미지 2(IMG1, 밀려서 2번)', labels[3], '이미지 2');
+  expect('맨 아래(섹션 0 의 A, 가장 먼저 넣어 3번) = 이미지 3', labels[4], '이미지 3');
 
   section('2) 트랙 헤드 라벨 더블클릭 — 인라인 입력칸(예전 네이티브 prompt 대신)으로 바로 바뀜');
   await js(`(() => {

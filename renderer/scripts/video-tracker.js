@@ -116,19 +116,36 @@ export class BoxTracker {
   // 놓친 뒤엔 좁은 범위만 봐선 다시 나타나도 못 찾는다 — 화면 전체를 성기게(칸 간격은
   // 박스 크기의 1/3 정도) 훑어서 다시 나타났는지 확인한다. 정상 추적 중엔 여전히 좁은
   // 범위만 보니, 이 무거운 전체 탐색은 실제로 놓친 동안에만 돈다.
+  //
+  // 순수 최소점수 후보만 고르면, 화면 안에 비슷하게 생긴 다른 물체(가짜 후보)가 있을 때
+  // 실제 대상이 나타난 자리보다 그 가짜 쪽 점수가 우연히 더 낮게 나와 엉뚱한 걸 잡는
+  // 경우가 있다("비슷한 게 두 개 있으면 다른 거에도 표시되는 경우가 있어" 피드백). 화면
+  // 밖으로 나가기 직전 마지막으로 확실했던 위치에서 가까운 후보에 약간의 가산점(거리
+  // 페널티)을 줘서, 점수가 엇비슷한 후보들 사이에서는 "그 근처에서 다시 나타났을 가능성"
+  // 을 우선한다 — 다만 이 가산점은 순위를 매길 때만 쓰고, 최종 채택 여부는 반드시 원본
+  // (페널티 없는) 점수가 LOST_SCORE_THRESHOLD 를 통과해야만 하므로, 진짜 안 닮은 자리를
+  // "가깝다"는 이유만으로 억지로 구제하지는 않는다.
   _reacquire(ctx, cw, ch) {
     const { w, h } = this.box;
     let img;
     try { img = ctx.getImageData(0, 0, cw, ch); } catch { return { ...this.box, score: Infinity, lost: true }; }
     const gray = toGray(img);
     const stepX = Math.max(2, Math.round(w / 3)), stepY = Math.max(2, Math.round(h / 3));
-    let bestScore = Infinity, bestX = this.box.x, bestY = this.box.y;
+    const lastX = this.box.x, lastY = this.box.y;
+    // 캔버스 대각선 길이 대비로 정한 거리 가중치 — 화면 반대편 끝(최대 거리)까지 벌어져도
+    // 가산점이 임계값의 절반 정도만 붙도록(그 정도로는 "진짜 안 닮은" 후보를 못 구제하되,
+    // 점수가 막상막하인 후보들 사이에서는 확실히 갈림길을 만든다).
+    const diag = Math.hypot(cw, ch) || 1;
+    const distWeight = (LOST_SCORE_THRESHOLD * (PATCH * PATCH)) / (2 * diag);
+    let bestEff = Infinity, bestScore = Infinity, bestX = this.box.x, bestY = this.box.y;
     const cur = new Float32Array(PATCH * PATCH);
     for (let ny = 0; ny <= ch - h; ny += stepY) {
       for (let nx = 0; nx <= cw - w; nx += stepX) {
         resamplePatch(gray, cw, ch, nx, ny, w, h, cur);
         const score = ssd(cur, this.template);
-        if (score < bestScore) { bestScore = score; bestX = nx; bestY = ny; }
+        const dist = Math.hypot(nx - lastX, ny - lastY);
+        const eff = score + dist * distWeight;
+        if (eff < bestEff) { bestEff = eff; bestScore = score; bestX = nx; bestY = ny; }
       }
     }
     if (bestScore / (PATCH * PATCH) <= LOST_SCORE_THRESHOLD) {

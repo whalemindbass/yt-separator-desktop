@@ -122,5 +122,42 @@ const { bootRenderer, expect, near, section, finish } = require('./harness');
   near('재진입한 새 위치를 다시 찾음(x)', r4.x3, 220, 15);
   near('재진입한 새 위치를 다시 찾음(y)', r4.y3, 30, 15);
 
+  section('5) 놓친 뒤 재진입 — 화면 안에 비슷하게 생긴 다른 물체(가짜)가 동시에 있으면 그쪽 말고 원래 대상이 다시 나타난 자리(더 가까운 쪽)를 잡아야 함');
+  // "화면 밖으로 나간 요소가 비슷한 게 두 개 있으면 다른 거에도 표시되는 경우도 있어"
+  // 피드백 — 대상이 놓친(lost) 상태에서 재탐색할 때, 놓치기 직전 마지막 위치에서 먼 가짜
+  // 후보와 가까운 진짜 재진입 후보의 점수가 (똑같이 생겨서) 동점이면, 옛날엔 그냥 스캔
+  // 순서상 먼저 걸리는 쪽을 골라 가짜를 잡을 수 있었다. 지금은 거리 가중치가 동점을 깨서
+  // 마지막 위치에 더 가까운 쪽(=진짜 재진입 지점일 가능성이 높은 쪽)을 우선한다.
+  const result5 = await js(`(async () => {
+    const { BoxTracker } = await import('./scripts/video-tracker.js');
+    const W = 320, H = 240, BOX = 40;
+    const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    function drawScene({ target, decoy }) {
+      ctx.fillStyle = 'black'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#e05a5a';
+      if (decoy) ctx.fillRect(decoy.x, decoy.y, BOX, BOX);
+      if (target) ctx.fillRect(target.x, target.y, BOX, BOX);
+    }
+    // 마지막으로 확실했던 자리는 (140,100). 재진입 지점은 그 근처(155,105) — 가까움.
+    // 가짜(decoy)는 화면 반대편 먼 구석(280,190) — 똑같이 생겼지만 훨씬 멀다.
+    drawScene({ target: { x: 140, y: 100 } });
+    const tracker = new BoxTracker(ctx, { x: 140, y: 100, w: BOX, h: BOX });
+    drawScene({});                                                    // 완전히 사라짐 → lost
+    const r1 = tracker.update(ctx);
+    // 가짜와 진짜 재진입 지점이 같은 프레임에 동시에 나타남 — 점수는 사실상 동점.
+    drawScene({ target: { x: 155, y: 105 }, decoy: { x: 280, y: 190 } });
+    const r2 = tracker.update(ctx);
+    return JSON.stringify({ lost1: r1.lost, lost2: r2.lost, x2: r2.x, y2: r2.y });
+  })()`);
+  const r5 = JSON.parse(result5);
+  expect('사라진 프레임엔 lost=true', r5.lost1, true);
+  expect('가짜/진짜 동시 등장 프레임엔 재탐색 성공(lost=false)', r5.lost2, false);
+  const distToReal = Math.hypot(r5.x2 - 155, r5.y2 - 105);
+  const distToDecoy = Math.hypot(r5.x2 - 280, r5.y2 - 190);
+  expect('먼 가짜가 아니라 가까운 진짜 재진입 지점을 잡음', distToReal < distToDecoy, true);
+  near('그 진짜 재진입 지점 좌표도 정확함(x)', r5.x2, 155, 15);
+  near('그 진짜 재진입 지점 좌표도 정확함(y)', r5.y2, 105, 15);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
