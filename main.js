@@ -1185,6 +1185,14 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (!stages.length) return '';
     return ',format=rgb24,' + stages.join(',');
   }
+  // 세그먼트 경계 시각(클립 start/end 를 더하고 빼며 만들어진 값)은 부동소수점 오차로
+  // 수학적으론 0이어야 할 자리에 1.1102230246251565e-16 같은 극소값이 남을 수 있다 —
+  // 그 값을 그대로 문자열에 꽂으면 JS 가 지수 표기(1.11e-16)로 바꿔 버리고, ffmpeg 의
+  // trim/atrim 옵션 파서는 지수 표기를 못 읽어 "Unable to parse ... as duration" 으로
+  // 필터그래프 전체가 죽는다(클립이 아주 많은 프로젝트일수록 오차가 쌓여 잘 걸린다 —
+  // "내보내기 실패, spawn ENAMETOOLONG" 신고를 고치며 만든 대량-클립 테스트에서 처음
+  // 드러났다). 고정 소수점(toFixed) 은 지수 표기를 절대 안 쓰니 이걸로 전부 통일한다.
+  const fsec = (n) => (Math.abs(n) < 1e-6 ? 0 : n).toFixed(6);
   function fadeFrag(kind, obj) {
     const name = kind === 'v' ? 'fade' : 'afade';
     const fs = [];
@@ -1203,12 +1211,12 @@ ipcMain.handle('video:export', async (event, payload) => {
     }
     if (sources.length === 1) {
       const s = sources[0];
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${label}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${label}]`);
       return;
     }
     const subs = sources.map((s, j) => {
       const lb = `${label}_s${j}`;
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${s.start}:end=${s.end}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${lb}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${lb}]`);
       return `[${lb}]`;
     });
     parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
@@ -1222,15 +1230,15 @@ ipcMain.handle('video:export', async (event, payload) => {
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${s.aIn}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${s.bIn}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${fsec(s.aIn)}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${fsec(s.bIn)}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
-        : `[${ix.a}:a]atrim=start=${s.aIn}:duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`);
+        : `[${ix.a}:a]atrim=start=${fsec(s.aIn)}:duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`);
       parts.push(s.hasAudioB === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
-        : `[${ix.b}:a]atrim=start=${s.bIn}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
+        : `[${ix.b}:a]atrim=start=${fsec(s.bIn)}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
       vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i);
     } else if (s.layers) {
@@ -1250,7 +1258,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         const lh = tf ? Math.max(2, Math.round(h * (tf.h != null ? tf.h : tf.scale))) : h;
         const lx = tf ? Math.round(w * tf.x) : 0;
         const ly = tf ? Math.round(h * tf.y) : 0;
-        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${layer.start}:end=${layer.end}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);
+        parts.push(`[${inputIndexFor(layer.file)}:v]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${hdrFrag(layer.hdr)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS${flipFrag(layer.flipH, layer.flipV)}${chainFrag(layer.effects)},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         parts.push(`[${base}][${raw}]overlay=${lx}:${ly}[${next}]`);
         base = next;
@@ -1269,7 +1277,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${s.start}:end=${s.end}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${fsec(s.start)}:end=${fsec(s.end)}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
       vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
     }
@@ -1291,7 +1299,20 @@ ipcMain.handle('video:export', async (event, payload) => {
       outvLabel = 'outvres';
     }
   }
-  args.push('-filter_complex', parts.join(';'), '-map', `[${outvLabel}]`, '-map', '[outa]');
+  // filter_complex 를 명령줄 인자로 그대로 넘기면(-filter_complex "<문자열>") 트랙·클립·
+  // 효과·추적 키프레임이 많은 프로젝트에서 전체 명령줄 길이가 Windows 의 CreateProcess
+  // 제한(약 32KB)을 넘어 "spawn ENAMETOOLONG" 으로 내보내기 자체가 시작도 못 하고
+  // 죽는다(실사용 신고로 확인). ffmpeg 의 -filter_complex_script 로 같은 내용을 파일에서
+  // 읽게 하면 명령줄엔 짧은 파일 경로 하나만 남아 이 제한과 무관해진다 — 내용은 완전히
+  // 동일하고(그냥 어디서 읽어오느냐 차이), 위 drawtextDir 우회(콜론 이스케이프 문제)와도
+  // 안 겹친다 — 그건 필터 문자열 "안"의 텍스트 값 얘기고, 이 스크립트 파일 "경로"는
+  // 평범한 옵션 인자라 절대경로에 콜론이 있어도 문제없다.
+  // drawtextDir 이 있으면 그대로 쓰고(텍스트 있는 export), 없으면 이 스크립트 파일만을
+  // 위한 전용 임시 폴더를 새로 만든다 — 아래 cleanup 이 텍스트 유무와 상관없이 둘 다 지운다.
+  const filterScriptDir = drawtextDir || fs.mkdtempSync(path.join(app.getPath('temp'), 'yss-filter-'));
+  const filterScriptPath = path.join(filterScriptDir, 'filter.txt');
+  fs.writeFileSync(filterScriptPath, parts.join(';'), 'utf-8');
+  args.push('-filter_complex_script', filterScriptPath, '-map', `[${outvLabel}]`, '-map', '[outa]');
 
   if (fmt === 'webm') {
     args.push('-c:v', 'libvpx-vp9', '-crf', String(crf.vp9), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
@@ -1300,10 +1321,15 @@ ipcMain.handle('video:export', async (event, payload) => {
   }
   args.push('-progress', 'pipe:1', outPath);
 
-  // drawtextDir(폰트 사본 + 캡션 txt) 은 이 export 안에서만 필요하다 — 끝나면(성공/실패
-  // 상관없이) 지운다. cwd 를 여기로 두는 게 드라이브 콜론 이스케이프 문제를 피하는
-  // 유일하게 검증된 방법이라(위 주석 참고), 텍스트가 있는 export 만 cwd 가 바뀐다.
-  function cleanupDrawtextDir() { if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} } }
+  // drawtextDir(폰트 사본 + 캡션 txt) 과 filterScriptDir(위 filter_complex_script 파일) 은
+  // 이 export 안에서만 필요하다 — 끝나면(성공/실패 상관없이) 둘 다 지운다. 텍스트가 있으면
+  // 같은 폴더라 한 번만 지워진다(Set 이 아니라 그냥 둘 다 시도해도 두 번째는 이미 없어서
+  // 조용히 넘어간다). cwd 를 drawtextDir 로 두는 건 드라이브 콜론 이스케이프 문제를
+  // 피하는 유일하게 검증된 방법이라(위 주석 참고), 텍스트가 있는 export 만 cwd 가 바뀐다.
+  function cleanupDrawtextDir() {
+    if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} }
+    if (filterScriptDir !== drawtextDir) { try { fs.rmSync(filterScriptDir, { recursive: true, force: true }); } catch {} }
+  }
   return await new Promise((resolve) => {
     let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true, cwd: drawtextDir || undefined }); }
     catch (e) { cleanupDrawtextDir(); return resolve({ ok: false, error: String(e.message || e) }); }
