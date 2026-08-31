@@ -50,15 +50,28 @@ function dragBy(js, dxPx) {
   expect('그리드 스냅 버튼 기본 꺼짐', await js(`document.getElementById('ve-snap-grid')?.classList.contains('on')`), false);
   expect('aria-pressed 도 false', await js(`document.getElementById('ve-snap-grid')?.getAttribute('aria-pressed')`), 'false');
 
+  section('1b) 꺼진 상태 — 0초 근처로 끌어도 안 붙음("꺼도 동작하는데?" 피드백 — 0초가 그리드와')
+  // 별개로 예전부터 무조건 스냅 후보였던 게 원인이었다. 먼저 0초에서 멀리 옮겨 둔 뒤,
+  // 0초 쪽으로 몇 px 만 살짝 끌어서(3px, 문턱 6px 안) 그리드가 꺼져 있으면 0초로 확 붙지
+  // 않고 그 자리(3px) 그대로여야 한다.
+  await dragBy(js, 100);
+  await wait(80);
+  await dragBy(js, -97);   // 100px → 3px 로: 0초에 아주 가깝지만(문턱 안) 그리드는 꺼짐
+  await wait(80);
+  near('0초 쪽으로 살짝 끌어도(3px) 그리드 꺼짐이면 안 붙고 그 자리 그대로', await clipLeftPx(js), 3, 1);
+
   section('2) 꺼진 상태 — 격자선(5초=200px) 근처(202px)로 드래그해도 안 붙음');
-  await dragBy(js, 202);   // 5.05초 목표 — 다른 클립이 없으니 격자 후보가 없으면 그대로 5.05초
+  await dragBy(js, 199);   // 3px → 202px 로(5.05초 목표) — 다른 클립이 없으니 격자 후보가 없으면 그대로 5.05초
   await wait(80);
   const leftOff = await clipLeftPx(js);
   near('그리드 꺼짐 — 정확히 200px(5.0초)로는 안 붙고 대략 202px 그대로', leftOff, 202, 1);
 
   section('3) 되돌리고 그리드 스냅 켜기');
-  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })); true`);
-  await wait(80);
+  // 여기까지 드래그를 세 번 했으니(100px, -97px, 199px) 그만큼 되돌린다.
+  for (let i = 0; i < 3; i++) {
+    await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })); true`);
+    await wait(80);
+  }
   expect('되돌리기로 0px(0초)로 복귀', await clipLeftPx(js), 0);
   await js(`document.getElementById('ve-snap-grid').click(); true`);
   await wait(60);

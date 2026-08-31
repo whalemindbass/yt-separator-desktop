@@ -841,6 +841,18 @@ function letterboxRect(sw, sh, cw, ch) {
   const dispW = sw * scale, dispH = sh * scale;
   return { scale, offX: (cw - dispW) / 2, offY: (ch - dispH) / 2 };
 }
+// source(추적 대상 밑그림) 클립이 어떤 컨테이너(폭 cw·높이 ch — 미리보기 호스트 픽셀이든,
+// 최종 출력 캔버스든) 안에서 실제로 차지하는 자리를 구하고, 거기 맞춰 소스 원본 픽셀
+// 좌표계로/로부터 변환할 스케일·오프셋을 계산한다. 클립 자체 transform 이나 트랙 PIP 가
+// 걸려 있으면(stretched) applyClipTransform/applyTrackTransform 과 같은 규칙으로 그 자리에
+// 비율 무시하고 꽉 채워 그리므로 가로세로 배율이 다를 수 있다(letterboxRect 의 단일
+// scale 로는 부족해서 축마다 따로 낸다) — 없으면 원본 비율 유지 레터박스 그대로.
+function sourceFitRect(srcTf, stretched, sw, sh, cw, ch) {
+  const box = { x: srcTf.x * cw, y: srcTf.y * ch, w: srcTf.w * cw, h: srcTf.h * ch };
+  if (stretched) return { scaleX: box.w / sw, scaleY: box.h / sh, offX: box.x, offY: box.y };
+  const lb = letterboxRect(sw, sh, box.w, box.h);
+  return { scaleX: lb.scale, scaleY: lb.scale, offX: box.x + lb.offX, offY: box.y + lb.offY };
+}
 // 이 오버레이 클립 시작 시각에, 그 아래(트랙 순서상 뒤) 깔린 영상 클립 — 추적 대상.
 // 자기 트랙보다 뒤(배열 인덱스가 큰) 트랙들 중 맨 앞(가장 작은 인덱스)의 활성 클립.
 function findTrackingSource(overlayClip) {
@@ -953,13 +965,19 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
   const { w: cw, h: ch } = getResolution();
   // 미리보기 화면 좌표(cssBox, #ve-preview 기준) → 소스 영상 자연 해상도 픽셀 좌표.
   // #ve-preview 자체가 이미 출력 해상도 비율 그대로(sizePreviewFrame) 니, CSS px → 캔버스
-  // 프랙션은 그냥 hostRect 로 나누면 되고, 거기서 소스 픽셀로는 letterbox 역산.
-  const previewLb = letterboxRect(source.w, source.h, previewHostRect.width, previewHostRect.height);
+  // 프랙션은 hostRect 로 나누면 되지만, 소스 클립 자신이 PIP 로 확대/축소·이동돼 있으면
+  // (트랙 PIP 든 클립 자체 위치든) 그 자리를 기준으로 역산해야 한다 — 그냥 프리뷰 전체를
+  // 레터박스 기준으로 삼으면 확대된 상태를 무시하고 원본 크기 기준으로 좌표를 잡아버려서
+  // "100%보다 크게 확대했을 때 제대로 못 따라간다" 는 결과가 났다.
+  const srcTrack = _veTracks.find(t => t.id === source.trackId);
+  const srcTf = source.transform || srcTrack?.transform || defaultTransform();
+  const srcStretched = !!(source.transform || srcTrack?.transform);
+  const fitIn = sourceFitRect(srcTf, srcStretched, source.w, source.h, previewHostRect.width, previewHostRect.height);
   const srcBox0 = {
-    x: (cssBox.x - previewLb.offX) / previewLb.scale,
-    y: (cssBox.y - previewLb.offY) / previewLb.scale,
-    w: cssBox.w / previewLb.scale,
-    h: cssBox.h / previewLb.scale,
+    x: (cssBox.x - fitIn.offX) / fitIn.scaleX,
+    y: (cssBox.y - fitIn.offY) / fitIn.scaleY,
+    w: cssBox.w / fitIn.scaleX,
+    h: cssBox.h / fitIn.scaleY,
   };
   const v = ensureTrackVideo();
   await loadVideoOnce(v, toYtsepUrl(source.file));
@@ -973,10 +991,13 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
   clip._trackAnalyzing = true;
   clip._trackProgress = 0;
   renderEffectPanel(clip);
-  const outLb = letterboxRect(source.w, source.h, cw, ch);   // 소스 픽셀 → 최종 출력 캔버스 프랙션
+  // 소스 픽셀 → 최종 출력 캔버스 프랙션 — 위 fitIn 과 같은 이유로, 소스가 화면에서 차지하는
+  // (PIP 반영한) 실제 자리를 기준으로 계산해야 트래킹 결과(오버레이 위치)가 확대/이동된
+  // 소스 위에 정확히 겹친다.
+  const fitOut = sourceFitRect(srcTf, srcStretched, source.w, source.h, cw, ch);
   const toCanvasFrac = (b) => ({
-    x: (outLb.offX + b.x * outLb.scale) / cw, y: (outLb.offY + b.y * outLb.scale) / ch,
-    w: (b.w * outLb.scale) / cw, h: (b.h * outLb.scale) / ch,
+    x: (fitOut.offX + b.x * fitOut.scaleX) / cw, y: (fitOut.offY + b.y * fitOut.scaleY) / ch,
+    w: (b.w * fitOut.scaleX) / cw, h: (b.h * fitOut.scaleY) / ch,
   });
   const keyframes = [];
   let tracker = null;
@@ -2213,12 +2234,14 @@ function showDragBadge(deltaSec, cx, cy) {
 }
 function hideDragBadge() { document.getElementById('ve-drag-badge')?.remove(); }
 function snapSec(sec, excludeId) {
-  const cand = [0];
+  const cand = [];
   for (const c of _veClips) { if (c.id === excludeId) continue; cand.push(c.start, c.start + c.dur); }
   // 그리드 스냅이 켜져 있으면 가장 가까운 1초 격자선도 후보에 더한다 — 클립 경계와 같은
   // 문턱(6px)으로 경쟁시켜서, 둘 다 가까우면 더 가까운 쪽이 이긴다(굳이 우선순위를 나누지
   // 않는다 — 스튜디오처럼 클립 경계를 항상 우선하게 하면 로직이 갈라지고, 실사용에서
-  // 어느 쪽이든 붙기만 하면 충분하다).
+  // 어느 쪽이든 붙기만 하면 충분하다). 0초(타임라인 맨 앞)도 결국 그리드선 중 하나라
+  // 따로 무조건 넣지 않는다 — "꺼도 0초 근처에서 계속 붙는다" 버그였다(그리드 스냅
+  // 토글과 무관하게 0만 예외로 항상 스냅 후보였던 옛 코드).
   if (_snapGrid) cand.push(Math.round(sec / SNAP_GRID_SEC) * SNAP_GRID_SEC);
   let best = sec, bestPx = 6;
   for (const edge of cand) { const d = Math.abs(sec - edge) * _pxPerSec; if (d < bestPx) { bestPx = d; best = edge; } }
@@ -2231,8 +2254,10 @@ function snapSec(sec, excludeId) {
 // (스튜디오의 snapClipStart 와 같은 방식) 더 가까운 쪽으로 스냅한다.
 function snapClipMove(startCandidate, dur, excludeIds) {
   const endCandidate = startCandidate + dur;
-  const cand = [0];
+  const cand = [];
   for (const c of _veClips) { if (excludeIds.has(c.id)) continue; cand.push(c.start, c.start + c.dur); }
+  // 0초도 결국 그리드선 중 하나라(snapSec 쪽 주석 참고) 그리드 스냅이 꺼져 있으면
+  // 후보에서 뺀다 — "꺼도 0초 근처에서 계속 붙는다" 버그였다.
   if (_snapGrid) {
     cand.push(Math.round(startCandidate / SNAP_GRID_SEC) * SNAP_GRID_SEC);
     cand.push(Math.round(endCandidate / SNAP_GRID_SEC) * SNAP_GRID_SEC);
