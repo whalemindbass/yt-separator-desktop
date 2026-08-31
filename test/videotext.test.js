@@ -84,6 +84,22 @@ function probeFrameCounts(file) {
     expect('bg:true 로 켜면 어두운 상자 픽셀이 뚜렷이 늘어남(기본보다 훨씬 넓은 면적)', cBg.boxDark > cText.boxDark + 200, true);
   }
 
+  section('1c) 배경 상자 패딩 — 미리보기(.ve-text-item.bg, padding: .15em .4em)처럼 글자 크기에 비례해야 함');
+  // 예전엔 boxborderw 가 고정 8px 이라 큰 글자에선 미리보기보다 훨씬 좁아 보였다("padding
+  // 살짝 부족" 신고) — 글자 크기를 키우면 상자 여백(=어두운 픽셀 면적)도 같이 늘어나는지로
+  // 확인한다(고정값이면 거의 안 늘어난다).
+  const OUT_BG_BIG = path.join(TMP, 'out_bg_big.mp4');
+  res = await js(`(async () => {
+    try { return await yssApi.video.export(${JSON.stringify({ segments: [{ ...baseSeg, texts: [{ ...texts[0], size: 100, bg: true }] }], outPath: OUT_BG_BIG, format: 'mp4' })}); }
+    catch (e) { return { ok: false, error: String(e && (e.stack || e.message || e)) }; }
+  })()`);
+  expect('큰 글자 + bg:true 내보내기 성공', res?.ok, true);
+  if (fs.existsSync(OUT_BG_BIG) && fs.existsSync(OUT_BG)) {
+    const cBg = probeFrameCounts(OUT_BG);         // size 40
+    const cBgBig = probeFrameCounts(OUT_BG_BIG);   // size 100
+    expect('글자가 2.5배 커지면 상자(어두운 픽셀) 면적도 뚜렷이 늘어남(패딩이 고정값이 아님)', cBgBig.boxDark > cBg.boxDark * 1.8, true);
+  }
+
   section('2) 빈 내용 캡션은 조용히 건너뜀(drawtext textfile 빈 파일 크래시 방지)');
   const OUT_EMPTY = path.join(TMP, 'out_empty.mp4');
   res = await js(`(async () => {

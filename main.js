@@ -1107,7 +1107,14 @@ ipcMain.handle('video:export', async (event, payload) => {
       const x = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
       const y = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
       // 반투명 검정 배경(box)은 기본이 아니다 — 렌더러 팝오버에서 켠 클립만 넣는다.
-      const box = t.bg ? ':box=1:boxcolor=#000000@0.45:boxborderw=8' : '';
+      // 패딩은 미리보기(.ve-text-item.bg, padding: .15em .4em — 1em = 폰트 크기)와 맞춘다.
+      // 고정 8px 이던 예전 값은 큰 글자에서 미리보기보다 훨씬 좁아 보였다("padding 살짝
+      // 부족" 신고). boxborderw 는 top|right|bottom|left 네 값을 받는다(실측 확인 — pad
+      // 필터와 같은 순서). 모서리를 둥글게(border-radius) 하는 옵션은 drawtext 에 없어서
+      // 여긴 반영 못 한다(미리보기만 3px 둥근 채로 남음 — 맞추려면 텍스트를 이미지로
+      // 미리 그려 오버레이하는 별도 작업이 필요하다).
+      const padV = Math.round(size * 0.15), padH = Math.round(size * 0.4);
+      const box = t.bg ? `:box=1:boxcolor=#000000@0.45:boxborderw=${padV}|${padH}|${padV}|${padH}` : '';
       return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:x=${x}:y=${y}${box}`;
     });
     parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
