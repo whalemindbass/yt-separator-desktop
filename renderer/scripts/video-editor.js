@@ -2965,6 +2965,105 @@ async function removeSilenceInClip(clip) {
   _selClipId = null; _selClipIds = new Set();
   flash(tr('video.silenceDone', { n: ranges.length }));
 }
+
+// ── 자동 자막(STT, Whisper-small ONNX) ────────────────────────────────
+// 워커(stt-worker.js)가 mel 추출부터 인코더/디코더/토크나이저까지 다 한다 —
+// 여기는 모델 준비(다운로드)·오디오 추출(main.js)·워커 호출·결과(구간 시각+텍스트)를
+// 타임라인 시각으로 되돌려 텍스트 클립으로 만드는 것까지만 맡는다.
+let _sttWorker = null, _sttInited = false, _sttModelLoaded = false;
+function ensureSttWorker() {
+  if (_sttWorker) return _sttWorker;
+  _sttWorker = new Worker(new URL('../workers/stt-worker.js', import.meta.url), { type: 'module' });
+  return _sttWorker;
+}
+function sttWorkerCall(type, payload, waitType) {
+  return new Promise((resolve, reject) => {
+    const worker = ensureSttWorker();
+    const onMsg = (e) => {
+      if (e.data.type === waitType) { worker.removeEventListener('message', onMsg); resolve(e.data); }
+      else if (e.data.type === 'ERROR') { worker.removeEventListener('message', onMsg); reject(new Error(e.data.error)); }
+    };
+    worker.addEventListener('message', onMsg);
+    worker.postMessage({ type, ...payload });
+  });
+}
+// 모델(약 250MB, 인코더+디코더+토크나이저)이 없으면 내려받는다 — 진행률 모달은 export
+// 모달과 같은 #ve-modal 컨테이너를 재사용한다(export 중엔 어차피 이 액션을 못 쓰니 안 겹침).
+async function ensureSttModelReady() {
+  const status = await api.stt.status();
+  if (status.installed) return true;
+  const host = $('ve-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.sttDownloadTitle')}</span></div>
+    <div class="daw-modal-list" style="padding:16px">
+      <p style="margin:0 0 12px">${tr('video.sttDownloadBody')}</p>
+      <div class="progress-bar"><div class="progress-fill" id="stt-dl-fill"></div></div>
+      <div id="stt-dl-pct" style="margin-top:8px;font-size:12px;opacity:.7">0%</div>
+    </div></div>`;
+  host.hidden = false;
+  const off = api.stt.onDownloadProgress((p) => {
+    if (p.phase === 'progress' && p.total) {
+      const pct = Math.round((p.received / p.total) * 100);
+      const fill = document.getElementById('stt-dl-fill'); if (fill) fill.style.width = pct + '%';
+      const lbl = document.getElementById('stt-dl-pct'); if (lbl) lbl.textContent = pct + '%';
+    }
+  });
+  const res = await api.stt.ensureModel();
+  off?.();
+  host.hidden = true;
+  if (!res.ok) { flash(tr('video.sttDownloadFail', { err: res.error || '' })); return false; }
+  return true;
+}
+async function generateCaptionsForClip(clip) {
+  if (clip.isText || clip.isImage || clip.isShape) return;
+  const ok = await ensureSttModelReady();
+  if (!ok) return;
+  flash(tr('video.sttRunning'));
+  const speed = clip.speed || 1;
+  const srcStart = clip.inOff, srcEnd = clip.inOff + clip.dur * speed;
+  try {
+    const audio = await api.stt.extractAudio16k(clip.file, srcStart, srcEnd);
+    if (!audio.ok) { flash(tr('video.sttFail', { err: audio.error || '' })); return; }
+    if (!_sttInited) {
+      await sttWorkerCall('INIT', { runtimeUrl: new URL('../', import.meta.url).href }, 'INIT_OK');
+      _sttInited = true;
+    }
+    if (!_sttModelLoaded) {
+      const mb = await api.stt.modelBytes();
+      if (!mb.ok) { flash(tr('video.sttFail', { err: mb.error || '' })); return; }
+      await sttWorkerCall('LOAD_MODEL', { encoder: mb.encoder, decoder: mb.decoder, vocab: mb.vocab, generationConfig: mb.generationConfig }, 'MODEL_OK');
+      _sttModelLoaded = true;
+    }
+    const result = await sttWorkerCall('TRANSCRIBE', { pcm: audio.pcm, jobId: Date.now() }, 'RESULT');
+    const segments = result.segments || [];
+    if (!segments.length) { flash(tr('video.sttNone')); return; }
+    let tid = _veTracks.find((t) => t.kind === 'text')?.id;
+    if (tid == null) tid = newTextTrack();
+    const created = [];
+    for (const seg of segments) {
+      // 세그먼트 시각은 추출한 오디오(그 클립의 [srcStart,srcEnd) 소스 구간) 기준 0부터
+      // 시작한다 — srcStart 를 더해 "그 소스 파일 안 절대 시각"으로 되돌린 다음,
+      // srcTimeAt 의 역함수로 타임라인 시각으로 옮긴다.
+      const absSrcStart = srcStart + seg.start;
+      const absSrcEnd = srcStart + (seg.end != null ? seg.end : seg.start + 2);
+      const tStart = clip.start + (absSrcStart - clip.inOff) / speed;
+      const tEnd = clip.start + (absSrcEnd - clip.inOff) / speed;
+      const tc = {
+        id: nextClipId(), trackId: tid, isText: true, start: tStart, dur: Math.max(0.3, tEnd - tStart), inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
+        text: seg.text, xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: true,
+      };
+      _veClips.push(tc); created.push(tc);
+    }
+    pushUndo(
+      () => { _veClips = _veClips.filter((c) => !created.includes(c)); },
+      () => { _veClips.push(...created); },
+    );
+    layout();
+    flash(tr('video.sttDone', { n: segments.length }));
+  } catch (err) {
+    flash(tr('video.sttFail', { err: err.message || String(err) }));
+  }
+}
+
 function openClipContextMenu(e, c) {
   _selClipId = c.id; updateClipToolbarUI();
   const withinPlayhead = _playheadSec > c.start && _playheadSec < c.start + c.dur;
@@ -2984,6 +3083,7 @@ function openClipContextMenu(e, c) {
     items.push({ sep: true },
       { label: tr('video.speedMenu'), onClick: () => openSpeedPopover(c, e.clientX, e.clientY) },
       { label: tr('video.silenceMenu'), onClick: () => removeSilenceInClip(c) },
+      { label: tr('video.sttMenu'), onClick: () => generateCaptionsForClip(c) },
     );
   }
   if (_selClipIds.size > 1 && _selClipIds.has(c.id)) {
