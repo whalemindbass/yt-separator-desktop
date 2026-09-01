@@ -28,6 +28,10 @@ function transcribeInPage(js, wavPath) {
     if (!audio.ok) return { error: 'extractAudio: ' + audio.error };
 
     const worker = new Worker(new URL('./workers/stt-worker.js', document.baseURI), { type: 'module' });
+    const progressLog = [];
+    worker.addEventListener('message', (e) => {
+      if (e.data.type === 'CHUNK_START' || e.data.type === 'DECODE_PROGRESS') progressLog.push(e.data);
+    });
     const wait = (matchType) => new Promise((resolve, reject) => {
       const to = setTimeout(() => reject(new Error('timeout waiting ' + matchType)), 60000);
       worker.addEventListener('message', function h(e) {
@@ -43,7 +47,7 @@ function transcribeInPage(js, wavPath) {
     worker.postMessage({ type: 'TRANSCRIBE', pcm: audio.pcm, jobId: 1 });
     const result = await wait('RESULT');
     worker.terminate();
-    return { segments: result.segments };
+    return { segments: result.segments, progressLog };
   })()`);
 }
 
@@ -82,6 +86,10 @@ function transcribeInPage(js, wavPath) {
     expect('끝 시각이 있음(타임스탬프 토큰이 실제로 파싱됨)', s.end != null, true);
     near('끝 시각이 문장 길이(2~4초권)에 맞음', s.end, 3, 1.5);
   }
+  expect('CHUNK_START 진행 메시지가 옴(진행 UI 가 걸 수 있는 신호)', en.progressLog.some((p) => p.type === 'CHUNK_START'), true);
+  const decodeSteps = en.progressLog.filter((p) => p.type === 'DECODE_PROGRESS');
+  expect('DECODE_PROGRESS 가 토큰마다 여러 번 옴(1개 이상)', decodeSteps.length > 0, true);
+  expect('토큰 카운트가 1부터 단조 증가함', decodeSteps.every((p, i) => p.tokenCount === i + 1), true);
 
   section('3) 한국어 TTS 문장("오늘 날씨가 정말 좋네요.") — 정확히 인식');
   const ko = await transcribeInPage(js, path.join(TTS_DIR, 'ko.wav'));
