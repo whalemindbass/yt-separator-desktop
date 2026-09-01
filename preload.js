@@ -110,20 +110,6 @@ contextBridge.exposeInMainWorld('yssApi', {
     },
   },
 
-  // 자동 자막(STT, Whisper-small) — 모델은 stem 모델처럼 on-demand 다운로드.
-  stt: {
-    status:         () => ipcRenderer.invoke('stt:status'),
-    ensureModel:    () => ipcRenderer.invoke('stt:ensureModel'),
-    cancelDownload: () => ipcRenderer.invoke('stt:cancelDownload'),
-    modelBytes:     () => ipcRenderer.invoke('stt:modelBytes'),
-    extractAudio16k: (file, start, end) => ipcRenderer.invoke('stt:extractAudio16k', file, start, end),
-    onDownloadProgress: (fn) => {
-      const h = (_ev, data) => fn(data);
-      ipcRenderer.on('stt:modelDownloadProgress', h);
-      return () => ipcRenderer.off('stt:modelDownloadProgress', h);
-    },
-  },
-
   // 지난 실행이 비정상 종료했는지 — 읽으면 지워진다
   takeLastCrash: () => ipcRenderer.invoke('crash:take'),
 
