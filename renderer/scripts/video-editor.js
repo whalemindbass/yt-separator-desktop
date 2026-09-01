@@ -2718,6 +2718,65 @@ function deleteMultiSelected(ids) {
   _selClipIds = new Set();
   layout();
 }
+// 겹치는(또는 맞닿은) 구간을 하나로 합친다 — 같은 트랙에서 여러 클립을 한 번에 립플
+// 삭제할 때, 그 구간들이 서로 겹치면(크로스페이드로 겹쳐 있던 클립들) 뒤 클립을 당길
+// 양을 각 구간 길이의 단순 합이 아니라 실제 "지워진 총 구간" 으로 계산해야 정확하다.
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end + 0.001) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
+// 선택 클립(들)을 지우면서 그 뒤(같은 트랙)에 남는 클립들을 당겨 빈 자리를 없앤다 — 보통
+// 삭제(deleteSelected)는 자리를 그대로 비워 두는데, 이건 "잘라내고 뒤를 붙이는" 립플 편집.
+// 트랙마다 따로(다른 트랙 클립은 그대로) 계산한다 — 여러 트랙을 동시에 립플하면(멀티캠 등)
+// 오디오/PIP 트랙끼리 어긋날 위험이 커서, 지금은 지운 클립이 있는 그 트랙만 당긴다.
+function rippleDeleteSelected() {
+  const ids = _selClipIds.size > 1 ? new Set(_selClipIds) : (_selClipId != null ? new Set([_selClipId]) : null);
+  if (!ids || !ids.size) return;
+  const targets = new Set(ids);
+  _veClips.filter((c) => targets.has(c.id)).forEach((c) => {
+    const p = groupPartner(c); if (p) targets.add(p.id);
+    manualGroupMemberIds(c).forEach((id) => targets.add(id));
+  });
+  const removedClips = _veClips.filter((c) => targets.has(c.id));
+  if (!removedClips.length) return;
+  const rangesByTrack = new Map();
+  for (const c of removedClips) {
+    if (!rangesByTrack.has(c.trackId)) rangesByTrack.set(c.trackId, []);
+    rangesByTrack.get(c.trackId).push({ start: c.start, end: c.start + c.dur });
+  }
+  for (const [trackId, ranges] of rangesByTrack) rangesByTrack.set(trackId, mergeRanges(ranges));
+  const origStarts = new Map(_veClips.map((c) => [c.id, c.start]));
+  const idxSnapshot = removedClips.map((c) => ({ clip: c, idx: _veClips.indexOf(c) }));
+  function applyRipple() {
+    _veClips = _veClips.filter((c) => !targets.has(c.id));
+    for (const [trackId, ranges] of rangesByTrack) {
+      for (const c of _veClips) {
+        if (c.trackId !== trackId) continue;
+        const orig = origStarts.get(c.id);
+        let shift = 0;
+        for (const r of ranges) if (orig >= r.end - 0.001) shift += (r.end - r.start);
+        if (shift > 0) c.start = orig - shift;
+      }
+    }
+  }
+  pushUndo(
+    () => {
+      for (const c of _veClips) { const s = origStarts.get(c.id); if (s != null) c.start = s; }
+      idxSnapshot.sort((a, b) => a.idx - b.idx).forEach((r) => _veClips.splice(r.idx, 0, r.clip));
+    },
+    applyRipple,
+  );
+  applyRipple();
+  _selClipId = null;
+  _selClipIds = new Set();
+  layout();
+}
 // U 단축키/우클릭 메뉴 "그룹 해제" 공용 — 수동 그룹(manualGroupId, "그룹" 으로 묶은 것)이
 // 있으면 그걸 우선 푼다(몇 개든), 없으면 예전부터의 자동 링크(groupId, 영상↔오디오)를 푼다.
 function ungroupSelected() {
@@ -2825,7 +2884,10 @@ function openClipContextMenu(e, c) {
     items.push({ sep: true }, { label: tr('video.ctxGroup'), onClick: () => groupSelected() });
   }
   if (partner || c.manualGroupId != null) items.push({ sep: true }, { label: tr('video.ctxUngroup'), onClick: () => ungroupSelected() });
-  items.push({ sep: true }, { label: tr('video.delete'), onClick: () => deleteSelected() });
+  items.push({ sep: true },
+    { label: tr('video.delete'), onClick: () => deleteSelected() },
+    { label: tr('video.rippleDelete'), onClick: () => rippleDeleteSelected() },
+  );
   openContextMenu(e.clientX, e.clientY, items);
 }
 function openTrackContextMenu(e, vt, lane) {
@@ -3722,6 +3784,7 @@ function wire() {
     else if (e.key === 'u' || e.key === 'U') ungroupSelected();   // Vegas Pro 와 같은 단축키
     else if (e.key === 'h' || e.key === 'H') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipH'); renderEffectPanel(c); }
     else if (e.key === 'v' || e.key === 'V') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipV'); renderEffectPanel(c); }
+    else if (e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); rippleDeleteSelected(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
     else if (e.key === 'm' || e.key === 'M') addMarkerAtPlayhead();
     else if (e.key === '[') jumpToMarker(-1);
