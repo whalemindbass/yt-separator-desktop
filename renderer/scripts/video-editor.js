@@ -358,6 +358,73 @@ function applyClipTransform(el, clip, track, t) {
 // 고정" 은 이제 선택 사항(tf.lock) — 켜져 있으면 손잡이를 어느 방향으로 끌어도 시작
 // 시점의 w/h 비율을 그대로 유지하고(예전 scale 방식과 같은 감각), 꺼져 있으면 가로/세로를
 // 완전히 따로 늘릴 수 있다(도형처럼 원본 비율에 안 묶여도 되는 경우를 위한 요청 반영).
+// 드래그로 옮길 때 프레임 정중앙이나 다른 PIP박스·도형·자막의 중심에 가까워지면 딱
+// 붙여주고 그 자리에 안내선을 보여준다 — PIP 박스든 텍스트든 같은 프레임(#ve-preview)
+// 기준이라 함수 하나로 공용. Alt 를 누르고 있으면 스냅을 통째로 끈다(미세 위치 조정용).
+const SNAP_PX = 6;
+let _snapVEl = null, _snapHEl = null;
+function ensureSnapGuides() {
+  const host = $('ve-preview'); if (!host) return;
+  if (!_snapVEl) { _snapVEl = document.createElement('div'); _snapVEl.className = 've-snap-guide v'; _snapVEl.hidden = true; host.appendChild(_snapVEl); }
+  if (!_snapHEl) { _snapHEl = document.createElement('div'); _snapHEl.className = 've-snap-guide h'; _snapHEl.hidden = true; host.appendChild(_snapHEl); }
+}
+// guideX/guideY 는 안내선을 그릴 위치(0~1 비율, 프레임 중앙일 수도 다른 요소의 중심일
+// 수도 있다) — null 이면 그 축 안내선을 숨긴다.
+function setSnapGuides(guideX, guideY) {
+  if (_snapVEl) { _snapVEl.hidden = guideX == null; if (guideX != null) _snapVEl.style.left = (guideX * 100) + '%'; }
+  if (_snapHEl) { _snapHEl.hidden = guideY == null; if (guideY != null) _snapHEl.style.top = (guideY * 100) + '%'; }
+}
+function clearSnapGuides() { setSnapGuides(null, null); }
+// (cx, cy) = 지금 드래그 중인 요소의 중심(0~1 비율). 프레임 정중앙(0.5) 과 siblings 로
+// 넘어온 다른 요소들의 중심 중 SNAP_PX 이내로 가장 가까운 걸 축마다 하나씩 골라 붙인다.
+function snapCenter(cx, cy, hostRect, siblings) {
+  const thX = SNAP_PX / hostRect.width, thY = SNAP_PX / hostRect.height;
+  const xs = [0.5, ...(siblings || []).map((s) => s.cx)];
+  const ys = [0.5, ...(siblings || []).map((s) => s.cy)];
+  let bestX = null, bestXd = Infinity;
+  for (const x of xs) { const d = Math.abs(cx - x); if (d < thX && d < bestXd) { bestXd = d; bestX = x; } }
+  let bestY = null, bestYd = Infinity;
+  for (const y of ys) { const d = Math.abs(cy - y); if (d < thY && d < bestYd) { bestYd = d; bestY = y; } }
+  return { cx: bestX != null ? bestX : cx, cy: bestY != null ? bestY : cy, guideX: bestX, guideY: bestY };
+}
+// 리사이즈로 폭/높이를 바꿀 때 5% 단위 라운드 값 근처면 붙여준다(50%·25%처럼 딱 떨어지는
+// 크기를 손으로 맞추기 쉽게) — lock(가로세로 비율 고정)일 땐 건드리지 않는다: w/h 를
+// 따로 스냅하면 시작 시점에 고정해 둔 비율이 깨져 버리기 때문.
+function snapSize(v, pxDim) {
+  const th = SNAP_PX / pxDim;
+  const nearest = Math.round(v * 20) / 20;
+  return Math.abs(v - nearest) < th ? nearest : v;
+}
+// 정렬 스냅 후보 — 지금 미리보기에 같이 떠 있는 다른 PIP박스/도형·이미지 클립들의 중심.
+// excludeTrackId/excludeClipId 로 지금 드래그 중인 자기 자신은 뺀다.
+function collectBoxCenters(excludeTrackId, excludeClipId) {
+  const t = nowSec();
+  const out = [];
+  for (const tr2 of _veTracks) {
+    if (tr2.kind !== 'video' || tr2.id === excludeTrackId) continue;
+    const tf = tr2.transform || naturalTransform(tr2);
+    out.push({ cx: tf.x + tf.w / 2, cy: tf.y + tf.h / 2 });
+  }
+  for (const c of _veClips) {
+    if (c.id === excludeClipId || !(c.isImage || c.isShape)) continue;
+    if (!(t >= c.start && t < c.start + c.dur)) continue;
+    const tf = c.transform || (c.isShape ? shapeTransform(c) : defaultTransform());
+    out.push({ cx: tf.x + tf.w / 2, cy: tf.y + tf.h / 2 });
+  }
+  return out;
+}
+// 정렬 스냅 후보 — 지금 화면에 같이 떠 있는 다른 자막 클립들의 중심(xPct/yPct 가 이미
+// 중심 좌표라 그대로 쓴다).
+function collectTextCenters(excludeClipId) {
+  const t = nowSec();
+  const out = [];
+  for (const c of _veClips) {
+    if (c.id === excludeClipId || !c.isText) continue;
+    if (!(t >= c.start && t < c.start + c.dur)) continue;
+    out.push({ cx: c.xPct, cy: c.yPct });
+  }
+  return out;
+}
 let _boxEl = null;
 function closeResizeBox() { if (_boxEl) { _boxEl.remove(); _boxEl = null; } }
 function syncResizeBox(getTf) {
@@ -366,7 +433,9 @@ function syncResizeBox(getTf) {
   _boxEl.style.left = (tf.x * 100) + '%'; _boxEl.style.top = (tf.y * 100) + '%';
   _boxEl.style.width = (tf.w * 100) + '%'; _boxEl.style.height = (tf.h * 100) + '%';
 }
-function createResizeBox(getTf, setTf, onChange) {
+// getSiblings — 정렬 스냅 후보(다른 PIP박스/도형 중심)를 돌려주는 함수, 생략하면 프레임
+// 정중앙 스냅만 동작한다.
+function createResizeBox(getTf, setTf, onChange, getSiblings) {
   const host = $('ve-preview'); if (!host) return;
   const box = document.createElement('div');
   box.className = 've-pip-box';
@@ -380,18 +449,26 @@ function createResizeBox(getTf, setTf, onChange) {
     const hostRect = host.getBoundingClientRect();
     const tf0 = getTf();
     const startX = e.clientX, startY = e.clientY;
+    const siblings = getSiblings ? getSiblings() : [];
     try { box.setPointerCapture(e.pointerId); } catch {}
+    ensureSnapGuides();
     const mv = (ev) => {
       // 프레임 테두리에 안 묶는다(요청대로) — 밖으로 나간 만큼은 export 의 overlay 와
       // 똑같이 그냥 잘려 보인다(.ve-video-layers 의 overflow:hidden). 박스/손잡이 자체는
       // #ve-preview 바로 밑이라 안 잘리니 언제든 다시 끌고 돌아올 수 있다.
-      const nx = tf0.x + (ev.clientX - startX) / hostRect.width;
-      const ny = tf0.y + (ev.clientY - startY) / hostRect.height;
+      let nx = tf0.x + (ev.clientX - startX) / hostRect.width;
+      let ny = tf0.y + (ev.clientY - startY) / hostRect.height;
+      if (!ev.altKey) {
+        const snap = snapCenter(nx + tf0.w / 2, ny + tf0.h / 2, hostRect, siblings);
+        if (snap.guideX != null) nx = snap.cx - tf0.w / 2;
+        if (snap.guideY != null) ny = snap.cy - tf0.h / 2;
+        setSnapGuides(snap.guideX, snap.guideY);
+      } else clearSnapGuides();
       setTf({ ...tf0, x: nx, y: ny });
       syncResizeBox(getTf);
       onChange(false);
     };
-    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); onChange(true); };
+    const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); clearSnapGuides(); onChange(true); };
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
   });
   box.querySelector('.ve-pip-box-handle').addEventListener('pointerdown', (e) => {
@@ -411,6 +488,9 @@ function createResizeBox(getTf, setTf, onChange) {
         w = Math.max(0.02, tf0.w * factor); h = Math.max(0.02, tf0.h * factor);
       } else {
         w = Math.max(0.02, tf0.w + dxF); h = Math.max(0.02, tf0.h + dyF);
+        // lock 이 꺼져 있을 때만 5% 단위로 스냅한다 — lock 켜짐은 비율 유지가 우선이라
+        // 위 factor 계산이 그대로 지켜져야 한다(따로 스냅하면 비율이 깨짐).
+        if (!ev.altKey) { w = snapSize(w, hostRect.width); h = snapSize(h, hostRect.height); }
       }
       setTf({ ...tf0, w, h });
       syncResizeBox(getTf);
@@ -497,7 +577,8 @@ function openPipPopover(track, anchorEl) {
     applyFromInputs(null);
   });
   // 박스를 드래그/리사이즈했을 때 숫자 입력칸도 같이 맞춘다(반대 방향 동기화).
-  createResizeBox(getTf, (nextTf) => { setTf(nextTf); syncPipPopoverFields(nextTf); }, (committed) => { if (committed) scheduleSave(); });
+  createResizeBox(getTf, (nextTf) => { setTf(nextTf); syncPipPopoverFields(nextTf); }, (committed) => { if (committed) scheduleSave(); },
+    () => collectBoxCenters(track.id, null).concat(collectTextCenters(null)));
   setTimeout(() => document.addEventListener('pointerdown', onOutsidePip, true), 0);
 }
 // ── 클립 효과 체인 — 밝기/대비/채도/흑백/세피아/블러를 순서 있는 목록으로 추가·제거·
@@ -1254,14 +1335,25 @@ function wireTextItemDrag(el, c) {
     const x0 = c.xPct, y0 = c.yPct;
     const startX = e.clientX, startY = e.clientY;
     try { el.setPointerCapture(e.pointerId); } catch {}
+    ensureSnapGuides();
+    // 다른 자막뿐 아니라 PIP박스·도형 중심에도 맞춰볼 수 있게(예: 영상 중앙에 자막 맞추기).
+    const siblings = collectTextCenters(c.id).concat(collectBoxCenters(null, null));
     const mv = (ev) => {
-      c.xPct = x0 + (ev.clientX - startX) / hostRect.width;
-      c.yPct = y0 + (ev.clientY - startY) / hostRect.height;
+      const nx = x0 + (ev.clientX - startX) / hostRect.width;
+      const ny = y0 + (ev.clientY - startY) / hostRect.height;
+      // xPct/yPct 는 이미 텍스트 박스의 중심(positionTextItem 이 -natural.width/2 로
+      // 상쇄) 이라 PIP 박스처럼 w/2 를 더할 필요 없이 그대로 스냅 대상에 맞춰본다.
+      if (!ev.altKey) {
+        const snap = snapCenter(nx, ny, hostRect, siblings);
+        c.xPct = snap.cx; c.yPct = snap.cy;
+        setSnapGuides(snap.guideX, snap.guideY);
+      } else { c.xPct = nx; c.yPct = ny; clearSnapGuides(); }
       positionTextItem(el, c.xPct, c.yPct);
       syncTextPopoverFields(c);
     };
     const up = () => {
       document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
+      clearSnapGuides();
       if (c.xPct !== x0 || c.yPct !== y0) scheduleSave();
     };
     document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up);
@@ -2096,7 +2188,8 @@ function openShapePopover(clip, anchorEl) {
     _selClipId = clip.id;
     deleteSelected();
   });
-  createResizeBox(getTf, (nextTf) => { clip.transform = nextTf; syncShapePopoverFields(nextTf); syncPreview(nowSec()); }, (committed) => { if (committed) scheduleSave(); });
+  createResizeBox(getTf, (nextTf) => { clip.transform = nextTf; syncShapePopoverFields(nextTf); syncPreview(nowSec()); }, (committed) => { if (committed) scheduleSave(); },
+    () => collectBoxCenters(clip.trackId, clip.id).concat(collectTextCenters(null)));
   setTimeout(() => document.addEventListener('pointerdown', onOutsideShapePopover, true), 0);
 }
 

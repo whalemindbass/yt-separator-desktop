@@ -4214,6 +4214,12 @@ body { background: var(--bg) !important; }
   background: var(--accent); border: 2px solid var(--elev); cursor: nwse-resize;
 }
 
+/* 드래그로 PIP/텍스트를 옮길 때 프레임 중앙(또는 다른 요소 중심)에 가까워지면 뜨는
+   스냅 안내선 — left/top 은 JS(setSnapGuides)가 스냅된 위치로 매번 다시 잡아준다. */
+.ve-snap-guide { position: absolute; z-index: 65; background: var(--accent); pointer-events: none; }
+.ve-snap-guide.v { top: 0; bottom: 0; width: 1px; margin-left: -0.5px; }
+.ve-snap-guide.h { left: 0; right: 0; height: 1px; margin-top: -0.5px; }
+
 /* ── 텍스트/타이틀 트랙 ─────────────────────────────── */
 .ve-lane.text .ve-area { background: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
 .ve-clip.text {
