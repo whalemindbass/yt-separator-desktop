@@ -33,6 +33,8 @@ let _selTrackId = null;   // 텍스트 트랙 헤드를 클릭해 선택 — 클
 let _veResolution = null;   // null = 자동(첫 클립 기준). 아니면 {w,h} — 사용자가 고른 렌더 해상도.
 let _veExportRange = null;   // {start, end} 초 — 눈금자 드래그로 지정한 내보내기 구간(없으면 전체).
 let _veRangeMode = false;    // true 면 눈금자 드래그가 재생선 이동 대신 구간 지정(Shift 없이도).
+let _veMarkers = [];   // [{id, t}] — 타임라인 마커(북마크). 클립/트랙과 무관, 프로젝트 전체 기준.
+let _markerSeq = 0;
 let _dragging = false;   // 드래그 중엔 rebuild 로 DOM 을 통째로 갈지 않는다(포인터 이벤트가 끊긴다)
 // 그리드 스냅 — "스튜디오 트랙처럼 snap to grid 기능, 토글식으로" 요청. 스튜디오는 BPM
 // 기준 박자 격자(16분음표)를 쓰지만 영상 타임라인엔 템포 개념이 없으니 고정 1초 격자를
@@ -97,6 +99,7 @@ function buildVideoProjectData() {
     clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes }) =>
       ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes })),
     resolution: _veResolution,
+    markers: _veMarkers.map(({ id, t }) => ({ id, t })),
   };
 }
 function scheduleSave() {
@@ -112,6 +115,8 @@ function applyVideoProjectData(p) {
   _trackSeq = Math.max(0, ..._veTracks.map(t => t.id));
   _clipSeq = Math.max(0, ..._veClips.map(c => c.id));
   _veResolution = p.resolution || null;
+  _veMarkers = p.markers || [];
+  _markerSeq = Math.max(0, ..._veMarkers.map((m) => m.id));
   _veExtraSec = 0;
   for (const t of _veTracks) migrateTrackTransform(t);
   for (const c of _veClips) { migrateClipEffects(c); migrateClipFlip(c); migrateClipShapeTransform(c); }
@@ -1502,6 +1507,55 @@ function renderExportRange() {
   if (band) { band.hidden = false; band.style.left = (HEAD_W + x) + 'px'; band.style.width = w + 'px'; band.style.height = veTracksHeight() + 'px'; }
 }
 
+// ── 마커 ────────────────────────────────────────────
+// 클립/트랙과 무관한 순수 타임코드 북마크. 눈금자(ve-ruler)에 작은 깃발로 그린다(layout()
+// 이 눈금을 다시 그릴 때 같이 그린다 — 이미 매번 innerHTML 을 비우고 다시 채우는 곳이라
+// 마커도 거기 얹는 게 자연스럽다). 클릭하면 그 위치로 이동, 우클릭하면 삭제.
+function addMarkerAtPlayhead() {
+  const t = nowSec();
+  if (_veMarkers.some(m => Math.abs(m.t - t) < 0.05)) return;   // 같은 자리 중복 방지
+  const id = ++_markerSeq;
+  _veMarkers.push({ id, t });
+  _veMarkers.sort((a, b) => a.t - b.t);
+  pushUndo(
+    () => { _veMarkers = _veMarkers.filter((m) => m.id !== id); layout(); },
+    () => { _veMarkers.push({ id, t }); _veMarkers.sort((a, b) => a.t - b.t); layout(); },
+  );
+  layout();
+  flash(tr('video.markerAdded', { t: fmtTC(t) }));
+}
+function deleteMarker(id) {
+  const m = _veMarkers.find((x) => x.id === id); if (!m) return;
+  _veMarkers = _veMarkers.filter((x) => x.id !== id);
+  pushUndo(
+    () => { _veMarkers.push(m); _veMarkers.sort((a, b) => a.t - b.t); layout(); },
+    () => { _veMarkers = _veMarkers.filter((x) => x.id !== id); layout(); },
+  );
+  layout();
+}
+// dir: -1 이전, +1 다음 — 재생선과 정확히 같은 자리는 건너뛴다(그 자리 마커로는 안 감).
+function jumpToMarker(dir) {
+  if (!_veMarkers.length) return;
+  const t = nowSec(), eps = 0.02;
+  const target = dir > 0
+    ? _veMarkers.find((m) => m.t > t + eps)
+    : [..._veMarkers].reverse().find((m) => m.t < t - eps);
+  if (target) seekTo(target.t);
+}
+function renderMarkers() {
+  const ruler = $('ve-ruler'); if (!ruler) return;
+  for (const m of _veMarkers) {
+    const el = document.createElement('div');
+    el.className = 've-marker-flag';
+    el.style.left = (m.t * _pxPerSec) + 'px';
+    el.title = fmtTC(m.t);
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    el.addEventListener('click', (e) => { e.stopPropagation(); seekTo(m.t); });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); deleteMarker(m.id); });
+    ruler.appendChild(el);
+  }
+}
+
 // ── 타임라인 크기 ──────────────────────────────────────
 function fullSec() {
   const sc = $('ve-tscroll');
@@ -1537,6 +1591,7 @@ function layout() {
       tk.appendChild(lbl);
       ruler.appendChild(tk);
     }
+    renderMarkers();
   }
   ensureExportEls(); renderExportRange();
   renderClips();
@@ -3557,6 +3612,7 @@ function wire() {
     };
     ruler?.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.ve-eh')) return;   // 범위 가장자리 핸들은 dragExportEdge 가 처리
+      if (e.target.closest('.ve-marker-flag')) return;   // 마커 자체 클릭은 그 리스너가 처리
       e.preventDefault();
       if (_veRangeMode || e.shiftKey) {
         const a = secAt(e.clientX); let b = a;
@@ -3577,6 +3633,7 @@ function wire() {
       window.addEventListener('pointerup', onUp, { once: true });
     });
   }
+  $('ve-marker-add')?.addEventListener('click', () => addMarkerAtPlayhead());
   $('ve-range-mode')?.addEventListener('click', () => {
     _veRangeMode = !_veRangeMode;
     const btn = $('ve-range-mode');
@@ -3666,6 +3723,9 @@ function wire() {
     else if (e.key === 'h' || e.key === 'H') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipH'); renderEffectPanel(c); }
     else if (e.key === 'v' || e.key === 'V') { const c = _veClips.find(x => x.id === _selClipId); toggleClipFlip(c, 'flipV'); renderEffectPanel(c); }
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
+    else if (e.key === 'm' || e.key === 'M') addMarkerAtPlayhead();
+    else if (e.key === '[') jumpToMarker(-1);
+    else if (e.key === ']') jumpToMarker(1);
   });
   // 파일 드래그&드롭 — 빈 영역/기존 트랙 위 모두 받는다
   const wrap = $('ve-tscroll');

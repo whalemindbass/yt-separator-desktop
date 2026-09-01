@@ -207,6 +207,8 @@ const LOCALES = {
     'video.fpsAuto': '자동(소스와 동일)',
     'video.exportGpu': 'GPU 가속(NVENC)',
     'video.exportGpuHint': 'MP4만 해당 — 안 되면 자동으로 CPU 인코딩으로 전환',
+    'video.markerAddTitle': '마커 추가(M) — 재생선 위치에, 우클릭으로 삭제',
+    'video.markerAdded': '마커 추가됨 · {t}',
     'studio.title': '스튜디오',
     'studio.sub': '스템 위에 저지연으로 연주·녹음 (ASIO)',
     'studio.engine.off': '오디오 꺼짐',

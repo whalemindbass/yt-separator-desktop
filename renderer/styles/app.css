@@ -4123,6 +4123,14 @@ body { background: var(--bg) !important; }
 }
 .ve-ruler .tk { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-mid); }
 .ve-ruler .tk span { position: absolute; top: 3px; left: 4px; font: 400 10px/1 var(--mono); color: var(--tx-3); }
+/* 마커 — 클립/트랙과 무관한 타임코드 북마크. 노란 깃발, 눈금자 위에 얹는다(재생선의
+   accent 색과 겹치지 않게 일부러 다른 색). 클릭=이동, 우클릭=삭제. */
+.ve-marker-flag {
+  position: absolute; top: 0; width: 9px; height: 12px; margin-left: -1px;
+  background: #e0a83c; clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
+  cursor: pointer; z-index: 2;
+}
+.ve-marker-flag:hover { filter: brightness(1.15); }
 
 .ve-lanes { position: relative; min-width: 100%; width: max-content; }
 /* 레인 구분선을 레인 자체(헤드+영역 공용)에 두면 안 된다 — var(--border) 가 반투명이라
