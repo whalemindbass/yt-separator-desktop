@@ -461,11 +461,7 @@ let _lastEncoderHidden = null;
 
 // 하나의 30초 창(멜 스펙트로그램)을 인코더+디코더로 돌려 토큰 시퀀스를 만들고,
 // 타임스탬프 토큰(<=50364 이상, 0.02초 단위)으로 (start,end,text) 세그먼트를 뽑는다.
-// progressInfo — {jobId, chunkIndex, totalChunks}: 디코드 진행(생성한 토큰 수)을
-// 실시간으로 알려준다 — 문장이 짧으면 금방(수십 토큰 안에) 끝나니 최대 길이(448) 대비
-// 퍼센트로 보여주면 오히려 "몇 % 안 갔는데 끝남" 처럼 왜곡돼서, 그냥 진행 중인 토큰
-// 개수를 그대로 보여준다(퍼센트 아님, "지금 몇 개째 만드는 중"만 알려줌).
-async function transcribeChunk(melData, progressInfo) {
+async function transcribeChunk(melData) {
   const encFeeds = { input_features: new ORT.Tensor('float32', melData, [1, N_MELS, NB_MAX_FRAMES]) };
   const encOut = await encoderSession.run(encFeeds);
   _lastEncoderHidden = encOut.last_hidden_state;
@@ -503,7 +499,6 @@ async function transcribeChunk(melData, progressInfo) {
     const nextId = argmaxMasked(lastLogits, mask);
     if (nextId === eos) break;
     tokens.push(nextId);
-    self.postMessage({ type: 'DECODE_PROGRESS', jobId: progressInfo.jobId, chunkIndex: progressInfo.chunkIndex, totalChunks: progressInfo.totalChunks, tokenCount: tokens.length });
 
     // KV 캐시 갱신 — present.* 를 다음 스텝의 past.* 로.
     const newPast = {};
@@ -544,16 +539,12 @@ async function transcribeChunk(melData, progressInfo) {
 async function transcribe(pcmBuffer, jobId) {
   const pcm = new Float32Array(pcmBuffer);
   const windowSamples = N_SAMPLES;
-  const totalChunks = Math.max(1, Math.ceil(pcm.length / windowSamples));
   const all = [];
-  let chunkIndex = 0;
   for (let off = 0; off < pcm.length; off += windowSamples) {
     const chunk = pcm.subarray(off, Math.min(off + windowSamples, pcm.length));
     if (chunk.length < SAMPLE_RATE * 0.2) break;   // 0.2초 미만 꼬리는 버린다(의미 있는 소리 아님)
-    chunkIndex++;
-    self.postMessage({ type: 'CHUNK_START', jobId, chunkIndex, totalChunks });
     const mel = computeLogMelSpectrogram(chunk);
-    const segs = await transcribeChunk(mel, { jobId, chunkIndex, totalChunks });
+    const segs = await transcribeChunk(mel);
     const offsetSec = off / SAMPLE_RATE;
     for (const s of segs) all.push({ start: s.start + offsetSec, end: s.end == null ? null : s.end + offsetSec, text: s.text });
     self.postMessage({ type: 'PROGRESS', jobId, done: Math.min(off + windowSamples, pcm.length), total: pcm.length });

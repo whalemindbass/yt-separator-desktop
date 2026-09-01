@@ -2971,16 +2971,9 @@ async function removeSilenceInClip(clip) {
 // 여기는 모델 준비(다운로드)·오디오 추출(main.js)·워커 호출·결과(구간 시각+텍스트)를
 // 타임라인 시각으로 되돌려 텍스트 클립으로 만드는 것까지만 맡는다.
 let _sttWorker = null, _sttInited = false, _sttModelLoaded = false;
-let _sttProgressCb = null;   // TRANSCRIBE 진행 중에만 채워진다 — openSttRunModal 이 설정
 function ensureSttWorker() {
   if (_sttWorker) return _sttWorker;
   _sttWorker = new Worker(new URL('../workers/stt-worker.js', import.meta.url), { type: 'module' });
-  // CHUNK_START/DECODE_PROGRESS 는 sttWorkerCall 의 "딱 하나 결과 기다리기"와 별개로
-  // 항상 흘러들어온다 — 진행 중인 UI(있으면)로 그대로 넘긴다.
-  _sttWorker.addEventListener('message', (e) => {
-    const t = e.data.type;
-    if ((t === 'CHUNK_START' || t === 'DECODE_PROGRESS') && _sttProgressCb) _sttProgressCb(e.data);
-  });
   return _sttWorker;
 }
 function sttWorkerCall(type, payload, waitType) {
@@ -3020,49 +3013,27 @@ async function ensureSttModelReady() {
   if (!res.ok) { flash(tr('video.sttDownloadFail', { err: res.error || '' })); return false; }
   return true;
 }
-// 진행 모달 — 퍼센트가 아니라 "지금 몇 번째 구간(긴 오디오면 여러 30초 창)/몇 토큰째
-// 만드는 중"을 그대로 보여준다. 문장 길이가 제각각이라(수 토큰~수백 토큰) 최대
-// 길이(448) 대비 퍼센트로 보이면 "5%인데 벌써 끝남" 처럼 왜곡된 느낌을 준다.
-function openSttRunModal() {
-  const host = $('ve-modal');
-  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('video.sttRunTitle')}</span></div>
-    <div class="daw-modal-list" style="padding:16px">
-      <p id="stt-run-status" style="margin:0;font:500 13px/1.6 var(--sans)">${tr('video.sttRunStarting')}</p>
-    </div></div>`;
-  host.hidden = false;
-}
-function updateSttRunModal(data) {
-  const el = document.getElementById('stt-run-status'); if (!el) return;
-  const chunkPart = data.totalChunks > 1 ? tr('video.sttRunChunk', { i: data.chunkIndex, n: data.totalChunks }) + ' · ' : '';
-  el.textContent = data.type === 'CHUNK_START'
-    ? chunkPart + tr('video.sttRunAnalyzing')
-    : chunkPart + tr('video.sttRunTokens', { n: data.tokenCount });
-}
-function closeSttRunModal() { const host = $('ve-modal'); if (host) host.hidden = true; }
 async function generateCaptionsForClip(clip) {
   if (clip.isText || clip.isImage || clip.isShape) return;
   const ok = await ensureSttModelReady();
   if (!ok) return;
+  flash(tr('video.sttRunning'));
   const speed = clip.speed || 1;
   const srcStart = clip.inOff, srcEnd = clip.inOff + clip.dur * speed;
   try {
     const audio = await api.stt.extractAudio16k(clip.file, srcStart, srcEnd);
     if (!audio.ok) { flash(tr('video.sttFail', { err: audio.error || '' })); return; }
-    openSttRunModal();
     if (!_sttInited) {
       await sttWorkerCall('INIT', { runtimeUrl: new URL('../', import.meta.url).href }, 'INIT_OK');
       _sttInited = true;
     }
     if (!_sttModelLoaded) {
       const mb = await api.stt.modelBytes();
-      if (!mb.ok) { closeSttRunModal(); flash(tr('video.sttFail', { err: mb.error || '' })); return; }
+      if (!mb.ok) { flash(tr('video.sttFail', { err: mb.error || '' })); return; }
       await sttWorkerCall('LOAD_MODEL', { encoder: mb.encoder, decoder: mb.decoder, vocab: mb.vocab, generationConfig: mb.generationConfig }, 'MODEL_OK');
       _sttModelLoaded = true;
     }
-    _sttProgressCb = updateSttRunModal;
-    let result;
-    try { result = await sttWorkerCall('TRANSCRIBE', { pcm: audio.pcm, jobId: Date.now() }, 'RESULT'); }
-    finally { _sttProgressCb = null; closeSttRunModal(); }
+    const result = await sttWorkerCall('TRANSCRIBE', { pcm: audio.pcm, jobId: Date.now() }, 'RESULT');
     const segments = result.segments || [];
     if (!segments.length) { flash(tr('video.sttNone')); return; }
     let tid = _veTracks.find((t) => t.kind === 'text')?.id;
@@ -3089,7 +3060,6 @@ async function generateCaptionsForClip(clip) {
     layout();
     flash(tr('video.sttDone', { n: segments.length }));
   } catch (err) {
-    closeSttRunModal();
     flash(tr('video.sttFail', { err: err.message || String(err) }));
   }
 }
