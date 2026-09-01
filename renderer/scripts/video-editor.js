@@ -2311,11 +2311,14 @@ function openShapePopover(clip, anchorEl) {
 function paintMulticamCuts(clip, el) {
   const box = document.createElement('div'); box.className = 've-mc-cuts';
   for (const cut of (clip.mcCuts || [])) {
-    if (cut.t <= clip.start + 0.02) continue;
+    if (cut.t <= 0.02) continue;
     const tick = document.createElement('div');
     tick.className = 've-mc-cut';
-    tick.style.left = ((cut.t - clip.start) * _pxPerSec) + 'px';
+    tick.style.left = (cut.t * _pxPerSec) + 'px';
     tick.dataset.angle = String(cut.angle + 1);
+    tick.title = tr('video.mcCutRemoveHint');
+    tick.addEventListener('pointerdown', (e) => e.stopPropagation());
+    tick.addEventListener('click', (e) => { e.stopPropagation(); removeMulticamCut(clip, cut.t); });
     box.appendChild(tick);
   }
   el.appendChild(box);
@@ -2516,7 +2519,7 @@ function groupSelectedAsMulticam() {
     start: groupStart, dur: groupEnd - groupStart,
     inOff: angles[0].inOff, srcDur: angles[0].srcDur, w: angles[0].w, h: angles[0].h,
     hasAudio: angles.some(a => a.hasAudio !== false),
-    mcAngles: angles, mcCuts: [{ t: groupStart, angle: 0 }],
+    mcAngles: angles, mcCuts: [{ t: 0, angle: 0 }],
   };
   const removed = new Set(clips);
   for (const c of clips) { const p = groupPartner(c); if (p) removed.add(p); }
@@ -2543,9 +2546,10 @@ function setMulticamAngleAtPlayhead(clip, angleIdx) {
   if (!clip?.isMulticam || !clip.mcAngles?.[angleIdx]) return;
   const t = _playheadSec;
   if (t <= clip.start || t >= clip.start + clip.dur) { flash(tr('video.mcNeedPlayhead')); return; }
+  const rel = t - clip.start;
   const prevCuts = clip.mcCuts.map(c => ({ ...c }));
-  const newCuts = clip.mcCuts.filter(c => Math.abs(c.t - t) > 0.02);
-  newCuts.push({ t, angle: angleIdx });
+  const newCuts = clip.mcCuts.filter(c => Math.abs(c.t - rel) > 0.02);
+  newCuts.push({ t: rel, angle: angleIdx });
   newCuts.sort((a, b) => a.t - b.t);
   pushUndo(
     () => { clip.mcCuts = prevCuts; },
@@ -2553,6 +2557,22 @@ function setMulticamAngleAtPlayhead(clip, angleIdx) {
   );
   clip.mcCuts = newCuts;
   syncPreview(t); renderClips(); renderEffectPanel(clip); scheduleSave();
+}
+// 컷 하나만 취소 — 타임라인 위 컷 눈금을 눌러서(Ctrl+Z 로 전체를 되감지 않고) 그
+// 전환만 없앤다. 없어진 구간은 자동으로 그 앞 컷의 각도로 이어붙는다(컷을 순서대로 죽
+// 나열해 둔 배열에서 하나만 빼면, mcAngleIdxAt 이 앞 컷을 찾아 자연히 그렇게 동작한다).
+// 맨 처음 컷(t=0, 클립의 기본 각도)은 못 지운다 — 항상 최소 하나는 있어야 한다.
+function removeMulticamCut(clip, cutT) {
+  if (!clip?.isMulticam || Math.abs(cutT) < 0.02) return;
+  const prevCuts = clip.mcCuts.map(c => ({ ...c }));
+  const newCuts = clip.mcCuts.filter(c => Math.abs(c.t - cutT) > 0.02);
+  if (newCuts.length === prevCuts.length) return;
+  pushUndo(
+    () => { clip.mcCuts = prevCuts; },
+    () => { clip.mcCuts = newCuts; },
+  );
+  clip.mcCuts = newCuts;
+  syncPreview(_playheadSec); renderClips(); renderEffectPanel(clip); scheduleSave();
 }
 // 드래그 이동량 배지(+0:01.50) — 커서를 따라다니며 몇 초 옮겼는지 보여준다("클립 움직일 때
 // 몇 초 이동했는지 커서 위치에 보여주도록 해" 요청). 스튜디오 오디오 타임라인의 같은 배지
@@ -2719,6 +2739,7 @@ function wireTrim(handle, c, el, dir) {
     _selClipId = c.id;
     const startX = e.clientX;
     const start0 = c.start, dur0 = c.dur, inOff0 = c.inOff;
+    const mcInOff0 = c.isMulticam ? c.mcAngles.map(a => a.inOff) : null;
     const partner = groupPartner(c);
     // 소스 자체가 같은 파일·같은 트림 지점에서 갈라져 나온 짝이라 항상 start/dur/inOff 가
     // 동일하다 — 이번에 c 에 적용한 값을 그대로 partner 에도 복사하면 된다.
@@ -2731,6 +2752,11 @@ function wireTrim(handle, c, el, dir) {
         const delta = ns - start0;
         if (inOff0 + delta < 0) return;   // 소스 시작보다 앞으로는 못 당김
         c.start = ns; c.dur = dur0 - delta; c.inOff = inOff0 + delta;
+        // 멀티캠은 각도별 inOff(mcAngles) 를 따로 들고 있다 — 컷(mcCuts.t)은 클립 시작
+        // 기준 상대 시각이라 왼쪽 트림으로 start 가 밀려도 그대로 유효하지만, 그 상대
+        // 시각이 가리키는 실제 소스 지점은 delta 만큼 밀린다 — 모든 각도의 inOff 를
+        // 똑같이 밀어야 트림 후에도 각 각도가 같은 실제 순간을 계속 가리킨다.
+        if (mcInOff0) c.mcAngles.forEach((a, i) => { a.inOff = mcInOff0[i] + delta; });
       } else {
         let ne = Math.max(start0 + 0.1, snapSec(start0 + dur0 + dx, c.id));
         c.dur = Math.min(ne - start0, c.srcDur - c.inOff);
@@ -2746,14 +2772,17 @@ function wireTrim(handle, c, el, dir) {
       document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up);
       if (c.start !== start0 || c.dur !== dur0) {
         const endStart = c.start, endDur = c.dur, endInOff = c.inOff;
+        const endMcInOff = mcInOff0 ? c.mcAngles.map(a => a.inOff) : null;
         pushUndo(
           () => {
             c.start = start0; c.dur = dur0; c.inOff = inOff0;
+            if (mcInOff0) c.mcAngles.forEach((a, i) => { a.inOff = mcInOff0[i]; });
             if (partner) { partner.start = start0; partner.dur = dur0; partner.inOff = inOff0; }
             layout();
           },
           () => {
             c.start = endStart; c.dur = endDur; c.inOff = endInOff;
+            if (endMcInOff) c.mcAngles.forEach((a, i) => { a.inOff = endMcInOff[i]; });
             if (partner) { partner.start = endStart; partner.dur = endDur; partner.inOff = endInOff; }
             layout();
           },
@@ -2809,9 +2838,25 @@ function splitAtPlayhead() {
     const rightDur = clip.start + clip.dur - t;
     const leftDur = t - clip.start;
     const right = { ...clip, id: nextClipId(), start: t, dur: rightDur, inOff: srcTimeAt(clip, t) };
+    // 멀티캠은 각도별 소스 정보(mcAngles)·컷 목록(mcCuts, 클립 시작 기준 상대 시각)을
+    // 따로 들고 있다 — 그냥 얕은 복사(...clip)만 하면 왼쪽·오른쪽 조각이 같은 배열을
+    // 공유해서 한쪽 컷을 바꾸면 다른 쪽까지 같이 바뀐다. 오른쪽 조각은 새 시작점(t)
+    // 기준으로 컷을 다시 상대화하고, 모든 각도의 inOff 를 leftDur 만큼 밀어(자른
+    // 지점부터 시작하니 소스도 그만큼 뒤에서 시작) 원래 실제 순간을 계속 가리키게 한다.
+    const origMcAngles = clip.mcAngles, origMcCuts = clip.mcCuts;
+    if (clip.isMulticam) {
+      right.mcAngles = clip.mcAngles.map(a => ({ ...a, inOff: a.inOff + leftDur }));
+      right.mcCuts = (clip.mcCuts || [{ t: 0, angle: 0 }])
+        .filter(cut => cut.t > leftDur - 1e-6)
+        .map(cut => ({ t: cut.t - leftDur, angle: cut.angle }));
+      if (!right.mcCuts.length || right.mcCuts[0].t > 1e-6) right.mcCuts.unshift({ t: 0, angle: mcAngleIdxAt(clip, t) });
+      clip.mcAngles = clip.mcAngles.map(a => ({ ...a }));
+      clip.mcCuts = (clip.mcCuts || [{ t: 0, angle: 0 }]).filter(cut => cut.t < leftDur - 1e-6).map(cut => ({ ...cut }));
+      if (!clip.mcCuts.length) clip.mcCuts = [{ t: 0, angle: 0 }];
+    }
     clip.dur = leftDur;
     _veClips.push(right);
-    return { clip, right, origDur, leftDur };
+    return { clip, right, origDur, leftDur, origMcAngles, origMcCuts, splitMcAngles: clip.mcAngles, splitMcCuts: clip.mcCuts };
   };
 
   const r1 = splitOne(c);
@@ -2826,11 +2871,19 @@ function splitAtPlayhead() {
   pushUndo(
     () => {
       r1.clip.dur = r1.origDur; _veClips = _veClips.filter(x => x !== r1.right);
-      if (r2) { r2.clip.dur = r2.origDur; _veClips = _veClips.filter(x => x !== r2.right); }
+      if (r1.clip.isMulticam) { r1.clip.mcAngles = r1.origMcAngles; r1.clip.mcCuts = r1.origMcCuts; }
+      if (r2) {
+        r2.clip.dur = r2.origDur; _veClips = _veClips.filter(x => x !== r2.right);
+        if (r2.clip.isMulticam) { r2.clip.mcAngles = r2.origMcAngles; r2.clip.mcCuts = r2.origMcCuts; }
+      }
     },
     () => {
       r1.clip.dur = r1.leftDur; _veClips.push(r1.right);
-      if (r2) { r2.clip.dur = r2.leftDur; _veClips.push(r2.right); }
+      if (r1.clip.isMulticam) { r1.clip.mcAngles = r1.splitMcAngles; r1.clip.mcCuts = r1.splitMcCuts; }
+      if (r2) {
+        r2.clip.dur = r2.leftDur; _veClips.push(r2.right);
+        if (r2.clip.isMulticam) { r2.clip.mcAngles = r2.splitMcAngles; r2.clip.mcCuts = r2.splitMcCuts; }
+      }
     },
   );
   layout();
@@ -3236,13 +3289,18 @@ function srcTimeAt(clip, absT) {
 }
 // ── 멀티캠 ────────────────────────────────────────
 // 멀티캠 클립 하나 = 같은 순간을 찍은 여러 각도(mcAngles, 소스 파일마다 file/inOff/w/h/
-// hasAudio/srcDur) + 어느 시각에 어느 각도가 나가는지 적은 컷 목록(mcCuts, [{t(절대
-// 타임라인 시각), angle(mcAngles 인덱스)}], 시간순 정렬). "각도 전환" 자체가 컷이라
-// 크로스페이드는 없다(하드컷만) — 전문 멀티캠 툴의 핵심 동작과 같다.
+// hasAudio/srcDur) + 어느 시각에 어느 각도가 나가는지 적은 컷 목록(mcCuts, [{t(클립
+// 시작 기준 상대 시각 — trackKeyframes 와 같은 관례), angle(mcAngles 인덱스)}], 시간순
+// 정렬). 절대 시각이 아니라 상대 시각으로 저장해야 클립을 옮겨도(wireMove) 컷이 같이
+// 따라온다 — 절대 시각으로 저장했다면 clip.start 가 바뀌는 순간 컷들이 죄다 클립 밖으로
+// 밀려나 멀티캠이 깨졌을 것("클립 위치 이동해도 멀티캠 유지되도록" 요청으로 상대 시각
+// 방식으로 바꿈). "각도 전환" 자체가 컷이라 크로스페이드는 없다(하드컷만) — 전문
+// 멀티캠 툴의 핵심 동작과 같다.
 function mcAngleIdxAt(clip, absT) {
-  const cuts = clip.mcCuts && clip.mcCuts.length ? clip.mcCuts : [{ t: clip.start, angle: 0 }];
+  const rel = absT - clip.start;
+  const cuts = clip.mcCuts && clip.mcCuts.length ? clip.mcCuts : [{ t: 0, angle: 0 }];
   let idx = cuts[0].angle;
-  for (const cut of cuts) { if (cut.t <= absT + 1e-6) idx = cut.angle; else break; }
+  for (const cut of cuts) { if (cut.t <= rel + 1e-6) idx = cut.angle; else break; }
   return idx;
 }
 // 그 순간 활성 각도의 file/inOff/w/h/hasAudio/srcDur 로 갈아 끼운 클립 사본을 돌려준다 —
@@ -3338,8 +3396,9 @@ function buildEDL() {
     if (c.trackKeyframes && c.trackKeyframes.length) {
       for (const kf of c.trackKeyframes) kfBounds.push(c.start + kf.t);
     }
-    // 컷 시각도 "단단한" 경계 — 정확히 그 지점에서 각도가 바뀌어야 한다.
-    if (c.isMulticam && c.mcCuts) for (const cut of c.mcCuts) hardBounds.add(cut.t);
+    // 컷 시각도 "단단한" 경계 — 정확히 그 지점에서 각도가 바뀌어야 한다. mcCuts.t 는
+    // 클립 시작 기준 상대 시각이라 절대 시각으로 바꿔서 넣는다.
+    if (c.isMulticam && c.mcCuts) for (const cut of c.mcCuts) hardBounds.add(c.start + cut.t);
   }
   if (range) { hardBounds.add(range.start); hardBounds.add(range.end); }
   // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 세그먼트 자체는 키프레임

@@ -116,5 +116,53 @@ function clickClip(label, opts) {
     expect('컷 후(1.5초) — 각도2(파랑)', isPureBlue(after), true);
   }
 
+  section('5) 클립을 1초 뒤로 옮겨도(드래그) 컷이 그대로 따라오는지 — 절대시각 아니라 상대시각으로 저장돼야 함');
+  await js(`(() => {
+    const el = document.querySelector('.ve-clip.multicam');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 5, clientY: r.top + 5, pointerId: 7, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 5 + 40, clientY: r.top + 5, pointerId: 7, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 5 + 40, clientY: r.top + 5, pointerId: 7, bubbles: true }));
+  })(); true`);
+  await wait(150);
+  const mcLeft = await js(`parseFloat(document.querySelector('.ve-clip.multicam').style.left)`);
+  near('멀티캠 클립이 1초(40px) 뒤로 옮겨짐', mcLeft, 40, 2);
+  const cutTicksAfterMove = await js(`document.querySelectorAll('.ve-mc-cut').length`);
+  expect('이동 후에도 컷 눈금이 그대로 있음(클립 안 기준 상대 위치)', cutTicksAfterMove, 1);
+
+  const OUT2 = path.join(TMP, 'out2.mp4');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT2 });
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
+  for (let i = 0; i < 60; i++) { if (fs.existsSync(OUT2) && !/%$/.test(await js(`document.getElementById('ve-export').textContent`))) break; await wait(500); }
+  expect('이동 후 export 성공', fs.existsSync(OUT2), true);
+  if (fs.existsSync(OUT2)) {
+    // 클립 앞의 빈 구간(0~1초, 아무 트랙도 없음)은 내보낼 때 그대로 건너뛴다(검은 화면을
+    // 채우지 않는다 — buildEDL 의 기존 규칙, "아무것도 없는 구간은 건너뛴다"). 그래서
+    // 내보낸 파일 자체의 시간은 옮긴 클립의 실제 시작(1초)부터 다시 0초로 시작한다 —
+    // 컷이 클립 콘텐츠 기준 여전히 정확히 중간(1초 지난 지점)에 있으면 파일 0.5초는
+    // 빨강, 1.5초는 파랑이어야 한다(옮기기 전과 똑같은 상대 위치).
+    const before = pxAt(OUT2, 0.5), after = pxAt(OUT2, 1.5);
+    console.log('  이동 후 컷 전(파일 0.5초):', JSON.stringify(before), '컷 후(파일 1.5초):', JSON.stringify(after));
+    expect('이동 후에도 컷 전은 각도1(빨강)', isPureRed(before), true);
+    expect('이동 후에도 컷 후는 각도2(파랑)', isPureBlue(after), true);
+  }
+
+  section('6) 컷 눈금 클릭 — 그 각도 전환만 취소(하나씩 취소)');
+  await js(`document.querySelector('.ve-mc-cut').click(); true`);
+  await wait(100);
+  const cutTicksAfterRemove = await js(`document.querySelectorAll('.ve-mc-cut').length`);
+  expect('컷 눈금을 눌러 지우면 0개가 됨', cutTicksAfterRemove, 0);
+
+  const OUT3 = path.join(TMP, 'out3.mp4');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: OUT3 });
+  await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
+  for (let i = 0; i < 60; i++) { if (fs.existsSync(OUT3) && !/%$/.test(await js(`document.getElementById('ve-export').textContent`))) break; await wait(500); }
+  expect('컷 취소 후 export 성공', fs.existsSync(OUT3), true);
+  if (fs.existsSync(OUT3)) {
+    const stillLate = pxAt(OUT3, 1.5);
+    console.log('  컷 취소 후 파일 1.5초(예전엔 파랑이었던 지점):', JSON.stringify(stillLate));
+    expect('컷 취소 후엔 끝까지 각도1(빨강) — 전환이 없어짐', isPureRed(stillLate), true);
+  }
+
   finish(eApp);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

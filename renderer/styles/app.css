@@ -4219,13 +4219,21 @@ body { background: var(--bg) !important; }
   font: 700 9.5px/14px var(--mono); pointer-events: none;
 }
 .ve-mc-cuts { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+/* width 를 2px 보다 넉넉히 잡아 눌러서 지우기 쉽게 한다(pointer-events 는 이 눈금만 auto,
+   나머지 클립 바닥은 계속 none 이라 드래그 이동을 안 가로챈다). */
 .ve-mc-cut {
-  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tx-0, #fff);
-  opacity: .85; box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+  position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px;
+  cursor: pointer; pointer-events: auto;
 }
+.ve-mc-cut::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px;
+  background: var(--tx-0, #fff); opacity: .85; box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+}
+.ve-mc-cut:hover::after { background: var(--danger); }
 .ve-mc-cut::before {
-  content: attr(data-angle); position: absolute; bottom: 2px; left: 3px;
+  content: attr(data-angle); position: absolute; bottom: 2px; left: 7px;
   font: 700 9px/1 var(--sans); color: var(--tx-0, #fff); text-shadow: 0 1px 2px rgba(0,0,0,.7);
+  pointer-events: none;
 }
 .ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
