@@ -2921,6 +2921,50 @@ function openSpeedPopover(clip, clientX, clientY) {
   });
   setTimeout(() => document.addEventListener('pointerdown', _onSpeedPopoverOutside, true), 0);
 }
+// ── 무음 구간 자동 제거 ──────────────────────────────
+// silencedetect(main.js) 로 이 클립의 소스 구간 안 무음 시각들을 찾은 뒤, 뒤에서부터
+// (앞쪽 구간의 좌표가 안 밀리게) 각 구간의 끝/시작에서 두 번 잘라(splitAtPlayhead 재사용
+// — 그룹 짝 동기화까지 이미 검증된 로직) 가운데 무음 조각만 립플 삭제(rippleDeleteSelected
+// 재사용 — 뒤 클립을 당겨 빈 자리 없앰)한다. 새 분할/삭제 로직을 따로 만들지 않고 이미
+// 테스트된 두 기능을 조합한다.
+async function removeSilenceInClip(clip) {
+  if (clip.isText || clip.isImage || clip.isShape) return;
+  const speed = clip.speed || 1;
+  const srcStart = clip.inOff, srcEnd = clip.inOff + clip.dur * speed;
+  flash(tr('video.silenceScanning'));
+  let res;
+  try { res = await api.video.detectSilence(clip.file, srcStart, srcEnd); }
+  catch { res = { ok: false }; }
+  if (!res?.ok) { flash(tr('video.silenceFail')); return; }
+  // 소스 시간 → 타임라인 시간(srcTimeAt 의 역변환). 컷이 너무 딱 붙어 부자연스럽지
+  // 않게, 무음 구간 양끝에 살짝(PAD) 말소리를 남겨 둔다 — 단, 그 무음이 클립의 진짜
+  // 시작/끝에 닿아 있으면(패딩할 "다음 소리"가 없다) 패딩 대신 클립 경계에 딱 붙인다,
+  // 안 그러면 클립 끝에 PAD 크기만큼의 안 지워진 자투리 조각이 하나 더 남는다.
+  const clipEnd = clip.start + clip.dur;
+  const PAD = 0.06, MIN_RANGE = 0.12, EDGE_TOL = PAD + 0.02;
+  const ranges = (res.ranges || [])
+    .map((r) => {
+      let start = clip.start + (r.start - clip.inOff) / speed;
+      let end = clip.start + (r.end - clip.inOff) / speed;
+      start = start - clip.start < EDGE_TOL ? clip.start : start + PAD;
+      end = clipEnd - end < EDGE_TOL ? clipEnd : end - PAD;
+      return { start, end };
+    })
+    .filter((r) => r.end - r.start > MIN_RANGE)
+    .sort((a, b) => a.start - b.start);
+  if (!ranges.length) { flash(tr('video.silenceNone')); return; }
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    const { start: rs, end: re } = ranges[i];
+    _selClipId = clip.id; _selClipIds = new Set(); _playheadSec = re;
+    if (re < clip.start + clip.dur - 0.02) splitAtPlayhead();
+    _selClipId = clip.id; _selClipIds = new Set(); _playheadSec = rs;
+    if (rs > clip.start + 0.02) splitAtPlayhead();
+    const mid = _veClips.find((c) => c.trackId === clip.trackId && Math.abs(c.start - rs) < 0.05 && Math.abs(c.start + c.dur - re) < 0.05);
+    if (mid) { _selClipId = mid.id; _selClipIds = new Set(); rippleDeleteSelected(); }
+  }
+  _selClipId = null; _selClipIds = new Set();
+  flash(tr('video.silenceDone', { n: ranges.length }));
+}
 function openClipContextMenu(e, c) {
   _selClipId = c.id; updateClipToolbarUI();
   const withinPlayhead = _playheadSec > c.start && _playheadSec < c.start + c.dur;
@@ -2937,7 +2981,10 @@ function openClipContextMenu(e, c) {
     );
   }
   if (!c.isText && !c.isImage && !c.isShape) {
-    items.push({ sep: true }, { label: tr('video.speedMenu'), onClick: () => openSpeedPopover(c, e.clientX, e.clientY) });
+    items.push({ sep: true },
+      { label: tr('video.speedMenu'), onClick: () => openSpeedPopover(c, e.clientX, e.clientY) },
+      { label: tr('video.silenceMenu'), onClick: () => removeSilenceInClip(c) },
+    );
   }
   if (_selClipIds.size > 1 && _selClipIds.has(c.id)) {
     items.push({ sep: true }, { label: tr('video.ctxGroup'), onClick: () => groupSelected() });

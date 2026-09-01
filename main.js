@@ -1045,6 +1045,35 @@ ipcMain.handle('video:probeAudio', async (_ev, file) => {
     });
   });
 });
+// 무음 구간 자동 감지 — silencedetect 필터로 [start,end) 구간(소스 파일의 절대 시각,
+// clip.inOff 와 같은 좌표계) 안의 무음 시각들을 찾는다. atrim 은 PTS 를 안 건드리니
+// (다른 곳들과 같은 이유) silencedetect 가 찍는 silence_start/end 도 그대로 절대 시각으로
+// 나온다 — 렌더러가 되돌려 계산할 필요 없이 clip.inOff 기준으로 바로 쓸 수 있다.
+ipcMain.handle('video:detectSilence', async (_ev, file, start, end, opts) => {
+  if (typeof file !== 'string' || !fs.existsSync(file)) return { ok: false, error: '파일 없음' };
+  const noiseDb = (opts && opts.noiseDb) || -30;
+  const minDur = (opts && opts.minDur) || 0.3;
+  return await new Promise((resolve) => {
+    const args = ['-nostdin', '-hide_banner', '-i', file,
+      '-af', `atrim=start=${Number(start).toFixed(6)}:end=${Number(end).toFixed(6)},silencedetect=noise=${noiseDb}dB:d=${minDur}`,
+      '-f', 'null', '-'];
+    let proc;
+    try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
+    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let stderr = '';
+    proc.stderr.on('data', (d) => stderr += d);
+    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('close', () => {
+      const starts = [...stderr.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]));
+      const ends = [...stderr.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map((m) => Number(m[1]));
+      const ranges = [];
+      for (let i = 0; i < Math.min(starts.length, ends.length); i++) ranges.push({ start: starts[i], end: ends[i] });
+      // 구간이 끝날 때까지 무음이 이어지면 silence_end 가 안 찍힌다 — 그럴 땐 요청한 end 로 닫는다.
+      if (starts.length > ends.length) ranges.push({ start: starts[starts.length - 1], end: Number(end) });
+      resolve({ ok: true, ranges });
+    });
+  });
+});
 // GPU(NVENC) 인코더 사용 가능 여부 — `ffmpeg -encoders` 목록에 h264_nvenc 가 있는지로
 // 판단한다(실제 하드웨어/드라이버 없이도 목록엔 있을 수 있다 — 그건 export 쪽 실패 시
 // libx264 로 자동 재시도하는 걸로 대응한다, 여기선 그냥 "시도해볼 만한지"만 빠르게 본다).
