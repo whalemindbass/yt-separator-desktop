@@ -96,8 +96,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts })),
     resolution: _veResolution,
     markers: _veMarkers.map(({ id, t }) => ({ id, t })),
   };
@@ -902,6 +902,7 @@ function renderEffectPanel(clip, bulkTextTrack) {
   if (addBtn) addBtn.disabled = false;
   if (presetBtn) presetBtn.disabled = false;
   body.innerHTML = '';
+  if (clip.isMulticam) body.appendChild(renderMulticamSection(clip));
   // "+" 메뉴로 골라야만(clip.trackKeyframes 가 생기거나, 지금 한창 분석 중이거나) 이
   // 섹션이 보인다 — 이미지/도형이라고 무조건 보이던 것에서 바꿈(요청). 분석 중에도
   // 보여야 진행 상태가 뜬다 — 예전엔 추적이 끝나야만(키프레임이 생겨야만) 이 섹션 자체가
@@ -959,6 +960,24 @@ function renderEffectPanel(clip, bulkTextTrack) {
     row.querySelector('.ve-fx-file-change')?.addEventListener('click', () => changeLutEffectFile(clip, eff.id));
     body.appendChild(row);
   });
+}
+// 멀티캠 각도 전환 패널 — 각도 버튼(숫자 1~9 단축키와 동일)을 누르면 지금 재생선 위치부터
+// 그 각도로 컷이 들어간다. 지금 활성 각도를 강조 표시(mcAngleIdxAt) 해서 몇 번인지 항상
+// 보이게 한다 — 컷을 여러 번 넣다 보면 눈으로 순서를 잃기 쉽다.
+function renderMulticamSection(clip) {
+  const wrap = document.createElement('div');
+  wrap.className = 've-mc-section';
+  const activeIdx = mcAngleIdxAt(clip, _playheadSec);
+  wrap.innerHTML = `
+    <div class="ve-mc-title">${esc(tr('video.mcAngles'))}</div>
+    <div class="ve-mc-angles">
+      ${clip.mcAngles.map((a, i) => `<button type="button" class="ve-mc-angle-btn${i === activeIdx ? ' active' : ''}" data-i="${i}" title="${esc(a.name || a.file)}">${i + 1}</button>`).join('')}
+    </div>
+    <p class="ve-mc-hint">${esc(tr('video.mcHint'))}</p>`;
+  wrap.querySelectorAll('.ve-mc-angle-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setMulticamAngleAtPlayhead(clip, Number(btn.dataset.i)));
+  });
+  return wrap;
 }
 
 // ── 따라다니기(추적) ────────────────────────────────────
@@ -1246,7 +1265,8 @@ function updatePreviewResUI() {
   const pending = [..._proxyStatus.values()].filter(s => s.status === 'pending').length;
   sel.classList.toggle('busy', pending > 0);
 }
-function driveLayer(el, clip, t, visual) {
+function driveLayer(el, rawClip, t, visual) {
+  const clip = rawClip.isMulticam ? mcResolve(rawClip, t) : rawClip;
   const v = el.querySelector('video'), img = el.querySelector('img');
   if (visual) el.hidden = false;
   if (clip.isImage) {
@@ -2287,6 +2307,19 @@ function openShapePopover(clip, anchorEl) {
   setTimeout(() => document.addEventListener('pointerdown', onOutsideShapePopover, true), 0);
 }
 
+// 멀티캠 클립 위에 컷(각도 전환) 지점을 눈금으로 얹는다 — 몇 번째 각도로 바뀌는지 숫자로.
+function paintMulticamCuts(clip, el) {
+  const box = document.createElement('div'); box.className = 've-mc-cuts';
+  for (const cut of (clip.mcCuts || [])) {
+    if (cut.t <= clip.start + 0.02) continue;
+    const tick = document.createElement('div');
+    tick.className = 've-mc-cut';
+    tick.style.left = ((cut.t - clip.start) * _pxPerSec) + 'px';
+    tick.dataset.angle = String(cut.angle + 1);
+    box.appendChild(tick);
+  }
+  el.appendChild(box);
+}
 function renderClips() {
   document.querySelectorAll('.ve-lane').forEach(lane => {
     const trackId = Number(lane.dataset.trackId);
@@ -2294,7 +2327,7 @@ function renderClips() {
     area.innerHTML = '';
     for (const c of _veClips.filter(x => x.trackId === trackId)) {
       const el = document.createElement('div');
-      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.isImage ? ' image' : '') + (_selClipIds.has(c.id) || c.id === _selClipId ? ' sel' : '');
+      el.className = 've-clip' + (c.isAudioOnly ? ' audio' : '') + (c.isText ? ' text' : '') + (c.isImage ? ' image' : '') + (c.isMulticam ? ' multicam' : '') + (_selClipIds.has(c.id) || c.id === _selClipId ? ' sel' : '');
       el.style.left = (c.start * _pxPerSec) + 'px';
       el.style.width = Math.max(4, c.dur * _pxPerSec) + 'px';
       el.dataset.clipId = String(c.id);
@@ -2310,6 +2343,7 @@ function renderClips() {
         el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span><canvas class="ve-wave"></canvas>` : `<div class="ve-thumbs"></div>`)
           + `<span class="ve-clip-lbl">${esc(c.name)}</span>
           ${c.speed && c.speed !== 1 ? `<span class="ve-clip-speed">${(c.speed).toFixed(2).replace(/\.?0+$/, '')}×</span>` : ''}
+          ${c.isMulticam ? `<span class="ve-mc-badge" title="${esc(tr('video.mcAngles'))}">CAM ${c.mcAngles.length}</span>` : ''}
           ${c.fileMissing ? `<span class="ve-clip-missing" title="${esc(tr('video.fileMissing'))}">✕</span>` : ''}
           <div class="ve-fade l"></div><div class="ve-fade r"></div>
           <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
@@ -2381,6 +2415,7 @@ function renderClips() {
       } else if (c.isAudioOnly) {
         paintWave(c);
       }
+      if (c.isMulticam) paintMulticamCuts(c, el);
     }
     // 크로스페이드 배지 — 같은 트랙에서 겹치는 인접 클립 쌍마다 겹친 자리 가운데 하나씩.
     // 클릭하면 전환 효과 종류를 고를 수 있다(기본은 fade, 겹치기만 해도 이미 크로스페이드
@@ -2456,6 +2491,68 @@ function groupSelected() {
   flash(tr('video.grouped'));
   renderClips();
   scheduleSave();
+}
+// 멀티캠 — 같은 순간을 찍은 여러 각도(선택한 클립 2개 이상)를 각도 전환(컷)만으로 오가는
+// 클립 하나로 묶는다. 겹치는 구간(모든 각도가 다 있는 구간)만 남긴다 — 한쪽만 있는
+// 꼬리는 잘라낸다(전문 멀티캠 툴의 "sync by overlap" 과 같은 규칙). 소리를 내는(hasAudio)
+// 짝 오디오 클립이 있었으면 각도 전환에 오디오도 같이 따라가도록 그 파일 정보를 각도
+// 메타에 그대로 담고, 원래 자리(오디오 트랙)의 클립은 치운다.
+function groupSelectedAsMulticam() {
+  const rawIds = _selClipIds.size >= 2 ? [..._selClipIds] : (_selClipId != null ? [_selClipId] : []);
+  const clips = rawIds.map(id => _veClips.find(c => c.id === id)).filter(Boolean)
+    .filter(c => !c.isText && !c.isImage && !c.isShape && !c.isAudioOnly && !c.isMulticam);
+  if (clips.length < 2) { flash(tr('video.mcNeedTwo')); return; }
+  const groupStart = Math.max(...clips.map(c => c.start));
+  const groupEnd = Math.min(...clips.map(c => c.start + c.dur));
+  if (groupEnd - groupStart < 0.1) { flash(tr('video.mcNoOverlap')); return; }
+  clips.sort((x, y) => x.id - y.id);
+  const angles = clips.map(c => ({
+    file: c.file, name: c.name, w: c.w, h: c.h, srcDur: c.srcDur, hasAudio: c.hasAudio,
+    inOff: c.inOff + (groupStart - c.start),
+  }));
+  const mc = {
+    id: nextClipId(), trackId: clips[0].trackId, isMulticam: true,
+    file: angles[0].file, name: tr('video.mcClipName'),
+    start: groupStart, dur: groupEnd - groupStart,
+    inOff: angles[0].inOff, srcDur: angles[0].srcDur, w: angles[0].w, h: angles[0].h,
+    hasAudio: angles.some(a => a.hasAudio !== false),
+    mcAngles: angles, mcCuts: [{ t: groupStart, angle: 0 }],
+  };
+  const removed = new Set(clips);
+  for (const c of clips) { const p = groupPartner(c); if (p) removed.add(p); }
+  const removedList = [...removed].map((c) => ({ clip: c, idx: _veClips.indexOf(c) }));
+  pushUndo(
+    () => {
+      _veClips = _veClips.filter(c => c !== mc);
+      removedList.sort((a, b) => a.idx - b.idx).forEach(r => _veClips.splice(r.idx, 0, r.clip));
+    },
+    () => {
+      _veClips = _veClips.filter(c => !removed.has(c));
+      _veClips.push(mc);
+    },
+  );
+  _veClips = _veClips.filter(c => !removed.has(c));
+  _veClips.push(mc);
+  _selClipIds = new Set([mc.id]); _selClipId = mc.id;
+  renderClips(); updateClipToolbarUI();
+  scheduleSave();
+}
+// 각도 전환 — 재생선이 이 멀티캠 클립 위에 있을 때(그 밖이면 조용히 무시) 그 시각부터
+// 지정한 각도로 바뀌는 컷을 넣는다(같은 시각에 이미 컷이 있었으면 각도만 갈아치운다).
+function setMulticamAngleAtPlayhead(clip, angleIdx) {
+  if (!clip?.isMulticam || !clip.mcAngles?.[angleIdx]) return;
+  const t = _playheadSec;
+  if (t <= clip.start || t >= clip.start + clip.dur) { flash(tr('video.mcNeedPlayhead')); return; }
+  const prevCuts = clip.mcCuts.map(c => ({ ...c }));
+  const newCuts = clip.mcCuts.filter(c => Math.abs(c.t - t) > 0.02);
+  newCuts.push({ t, angle: angleIdx });
+  newCuts.sort((a, b) => a.t - b.t);
+  pushUndo(
+    () => { clip.mcCuts = prevCuts; },
+    () => { clip.mcCuts = newCuts; },
+  );
+  clip.mcCuts = newCuts;
+  syncPreview(t); renderClips(); renderEffectPanel(clip); scheduleSave();
 }
 // 드래그 이동량 배지(+0:01.50) — 커서를 따라다니며 몇 초 옮겼는지 보여준다("클립 움직일 때
 // 몇 초 이동했는지 커서 위치에 보여주도록 해" 요청). 스튜디오 오디오 타임라인의 같은 배지
@@ -3081,6 +3178,9 @@ function openClipContextMenu(e, c) {
   }
   if (_selClipIds.size > 1 && _selClipIds.has(c.id)) {
     items.push({ sep: true }, { label: tr('video.ctxGroup'), onClick: () => groupSelected() });
+    if (!c.isText && !c.isImage && !c.isShape && !c.isAudioOnly) {
+      items.push({ label: tr('video.mcGroup'), onClick: () => groupSelectedAsMulticam() });
+    }
   }
   if (partner || c.manualGroupId != null) items.push({ sep: true }, { label: tr('video.ctxUngroup'), onClick: () => ungroupSelected() });
   items.push({ sep: true },
@@ -3133,6 +3233,25 @@ function updateClipToolbarUI() {
 // 길이로 되돌린다. buildEDL 전체와 미리보기 재생(driveLayer)이 공용으로 쓴다.
 function srcTimeAt(clip, absT) {
   return clip.inOff + (absT - clip.start) * (clip.speed || 1);
+}
+// ── 멀티캠 ────────────────────────────────────────
+// 멀티캠 클립 하나 = 같은 순간을 찍은 여러 각도(mcAngles, 소스 파일마다 file/inOff/w/h/
+// hasAudio/srcDur) + 어느 시각에 어느 각도가 나가는지 적은 컷 목록(mcCuts, [{t(절대
+// 타임라인 시각), angle(mcAngles 인덱스)}], 시간순 정렬). "각도 전환" 자체가 컷이라
+// 크로스페이드는 없다(하드컷만) — 전문 멀티캠 툴의 핵심 동작과 같다.
+function mcAngleIdxAt(clip, absT) {
+  const cuts = clip.mcCuts && clip.mcCuts.length ? clip.mcCuts : [{ t: clip.start, angle: 0 }];
+  let idx = cuts[0].angle;
+  for (const cut of cuts) { if (cut.t <= absT + 1e-6) idx = cut.angle; else break; }
+  return idx;
+}
+// 그 순간 활성 각도의 file/inOff/w/h/hasAudio/srcDur 로 갈아 끼운 클립 사본을 돌려준다 —
+// start/dur/speed/effects/fadeIn/fadeOut 등 나머지는 멀티캠 클립 자신의 값 그대로(모든
+// 각도가 공유). buildEDL/driveLayer 가 원래 단일 클립을 다루던 코드 그대로 이 결과를 쓴다.
+function mcResolve(clip, absT) {
+  if (!clip.isMulticam || !clip.mcAngles || !clip.mcAngles.length) return clip;
+  const angle = clip.mcAngles[mcAngleIdxAt(clip, absT)] || clip.mcAngles[0];
+  return { ...clip, file: angle.file, inOff: angle.inOff, srcDur: angle.srcDur, w: angle.w, h: angle.h, hasAudio: angle.hasAudio };
 }
 // fadeIn/fadeOut(초 단위)은 사용자가 "타임라인에서 몇 초에 걸쳐" 로 입력한 값이지만,
 // 이 필터는 아직 setpts 로 되감기 전(소스 시간 그대로)에 걸린다 — 배속이 걸려 있으면
@@ -3219,6 +3338,8 @@ function buildEDL() {
     if (c.trackKeyframes && c.trackKeyframes.length) {
       for (const kf of c.trackKeyframes) kfBounds.push(c.start + kf.t);
     }
+    // 컷 시각도 "단단한" 경계 — 정확히 그 지점에서 각도가 바뀌어야 한다.
+    if (c.isMulticam && c.mcCuts) for (const cut of c.mcCuts) hardBounds.add(cut.t);
   }
   if (range) { hardBounds.add(range.start); hardBounds.add(range.end); }
   // 추적 결과(키프레임)가 있으면 그 시각들도 경계로 넣는다 — 세그먼트 자체는 키프레임
@@ -3296,7 +3417,7 @@ function buildEDL() {
     // 오디오 트랙 전부(숨김 제외). 몇 개든 상관없이 다 담는다 — main.js 가 섞는다.
     const audioSources = [];
     for (const { clips } of relevantVideo) {
-      const c = clips[0];
+      const c = mcResolve(clips[0], mid);
       if (c.hasAudio !== false) audioSources.push({ file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, ...fadeFieldsFor(c) });
     }
     for (const track of audioTracks) {
@@ -3310,7 +3431,7 @@ function buildEDL() {
       // 이거 하나뿐이어도) 검은 배경 위에 위치·크기를 반영해서 그려야 한다(미리보기와 맞추기).
       segs.push({
         layers: relevantVideo.map(({ track, clips }) => {
-          const c = clips[0];
+          const c = mcResolve(clips[0], mid);
           const flip = chainFlip(c.effects);
           const layer = { file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
           // 추적 키프레임 클립은 위치(x/y)를 이 세그먼트 양끝 값만 넘긴다 — main.js 가
@@ -3344,7 +3465,7 @@ function buildEDL() {
         skipUntil = overlapEnd;
         continue;
       }
-      const c = clips[0];
+      const c = mcResolve(clips[0], mid);
       const flip = chainFlip(c.effects);
       segs.push({ file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, audioSources, refW, refH, dur: b - a, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
       continue;
@@ -4000,6 +4121,10 @@ function wire() {
     else if (e.key === 'm' || e.key === 'M') addMarkerAtPlayhead();
     else if (e.key === '[') jumpToMarker(-1);
     else if (e.key === ']') jumpToMarker(1);
+    else if (e.key >= '1' && e.key <= '9') {
+      const c = _veClips.find(x => x.id === _selClipId);
+      if (c?.isMulticam) setMulticamAngleAtPlayhead(c, Number(e.key) - 1);
+    }
   });
   // 파일 드래그&드롭 — 빈 영역/기존 트랙 위 모두 받는다
   const wrap = $('ve-tscroll');

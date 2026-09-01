@@ -4093,6 +4093,18 @@ body { background: var(--bg) !important; }
 }
 .ve-fx-file-hint { margin: 4px 0 0; font: 500 10.5px/1.4 var(--sans); color: var(--tx-3); }
 
+/* 효과 패널 위쪽에 뜨는 멀티캠 각도 전환 섹션 — 효과 목록과 구분되게 border 로 한번 끊는다. */
+.ve-mc-section { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.ve-mc-title { font: 600 11px/1.2 var(--sans); color: var(--tx-2); margin-bottom: 6px; }
+.ve-mc-angles { display: flex; flex-wrap: wrap; gap: 5px; }
+.ve-mc-angle-btn {
+  width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border-mid);
+  background: var(--elev); color: var(--tx-2); font: 700 12px/1 var(--sans); cursor: pointer;
+}
+.ve-mc-angle-btn:hover { background: var(--elev-2); }
+.ve-mc-angle-btn.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.ve-mc-hint { margin: 6px 0 0; font: 500 10.5px/1.4 var(--sans); color: var(--tx-3); }
+
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
 .ve-ruler-ctrl {
@@ -4198,6 +4210,22 @@ body { background: var(--bg) !important; }
   position: absolute; bottom: 2px; right: 5px; z-index: 3; color: var(--tx-0, #fff);
   background: rgba(var(--accent-rgb), .85); border-radius: 3px; padding: 0 4px;
   font: 700 10px/15px var(--sans); pointer-events: none;
+}
+/* 멀티캠 클립 — 몇 각도인지 배지, 컷(각도 전환) 지점 눈금. */
+.ve-clip.multicam { border-style: dashed; }
+.ve-mc-badge {
+  position: absolute; top: 2px; right: 5px; z-index: 3; color: var(--tx-0, #fff);
+  background: rgba(0,0,0,.6); border-radius: 3px; padding: 0 4px;
+  font: 700 9.5px/14px var(--mono); pointer-events: none;
+}
+.ve-mc-cuts { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.ve-mc-cut {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tx-0, #fff);
+  opacity: .85; box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+}
+.ve-mc-cut::before {
+  content: attr(data-angle); position: absolute; bottom: 2px; left: 3px;
+  font: 700 9px/1 var(--sans); color: var(--tx-0, #fff); text-shadow: 0 1px 2px rgba(0,0,0,.7);
 }
 .ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
