@@ -1270,9 +1270,22 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (obj.fadeOutD) fs.push(`${name}=t=out:st=${obj.fadeOutSt.toFixed(3)}:d=${obj.fadeOutD.toFixed(3)}`);
     return fs.length ? ',' + fs.join(',') : '';
   }
+  // atempo 는 필터 하나당 0.5~2.0 배만 받는다 — 그 밖(우리 UI 는 0.25~4x 허용)이면 2.0 또는
+  // 0.5 를 여러 번 곱해서 접근하고 남는 배수 하나를 마지막에 건다(렌더러의 speed 클램프
+  // 범위상 실제로는 최대 두 단계면 충분하지만, 나중에 범위를 넓혀도 그대로 맞는다).
+  function atempoChain(speed) {
+    if (!speed || Math.abs(speed - 1) < 0.001) return '';
+    let remaining = speed;
+    const stages = [];
+    while (remaining > 2) { stages.push(2); remaining /= 2; }
+    while (remaining < 0.5) { stages.push(0.5); remaining /= 0.5; }
+    stages.push(remaining);
+    return ',' + stages.map((v) => `atempo=${v.toFixed(4)}`).join(',');
+  }
 
   const parts = [];
   // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
+  // 소스마다 배속(speed)이 다를 수 있다(트랙마다 다른 클립) — atempo 는 믹스 전에 각자 건다.
   function buildAudio(sources, dur, label) {
     const d = dur.toFixed(3);
     if (!sources || !sources.length) {
@@ -1281,12 +1294,12 @@ ipcMain.handle('video:export', async (event, payload) => {
     }
     if (sources.length === 1) {
       const s = sources[0];
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${label}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${label}]`);
       return;
     }
     const subs = sources.map((s, j) => {
       const lb = `${label}_s${j}`;
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)},asetpts=PTS-STARTPTS[${lb}]`);
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${lb}]`);
       return `[${lb}]`;
     });
     parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
@@ -1344,16 +1357,19 @@ ipcMain.handle('video:export', async (event, payload) => {
       // xfade(영상)/acrossfade(오디오)로 섞는다. 둘 다 정확히 dur 길이로 잘랐으니 offset=0.
       const ix = idxs[i];
       const dur = s.dur.toFixed(3);
+      const speedA = s.speedA || 1, speedB = s.speedB || 1;
+      // xfade/acrossfade 는 양쪽 입력이 정확히 같은(dur) 길이여야 한다 — 배속이 걸려 있으면
+      // 소스에서는 그만큼(×speed) 더 길게/짧게 잘라낸 뒤 setpts/atempo 로 다시 dur 로 맞춘다.
       const xw = s.refW || 1280, xh = s.refH || 720;
-      parts.push(`[${ix.a}:v]trim=start=${fsec(s.aIn)}:duration=${dur}${hdrFrag(s.hdrA)},setpts=PTS-STARTPTS${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
-      parts.push(`[${ix.b}:v]trim=start=${fsec(s.bIn)}:duration=${dur}${hdrFrag(s.hdrB)},setpts=PTS-STARTPTS${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
+      parts.push(`[${ix.a}:v]trim=start=${fsec(s.aIn)}:duration=${(s.dur * speedA).toFixed(3)}${hdrFrag(s.hdrA)},setpts=(PTS-STARTPTS)/${speedA}${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
+      parts.push(`[${ix.b}:v]trim=start=${fsec(s.bIn)}:duration=${(s.dur * speedB).toFixed(3)}${hdrFrag(s.hdrB)},setpts=(PTS-STARTPTS)/${speedB}${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
       parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
-        : `[${ix.a}:a]atrim=start=${fsec(s.aIn)}:duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`);
+        : `[${ix.a}:a]atrim=start=${fsec(s.aIn)}:duration=${(s.dur * speedA).toFixed(3)}${atempoChain(speedA)},asetpts=PTS-STARTPTS[xaa${i}]`);
       parts.push(s.hasAudioB === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
-        : `[${ix.b}:a]atrim=start=${fsec(s.bIn)}:duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`);
+        : `[${ix.b}:a]atrim=start=${fsec(s.bIn)}:duration=${(s.dur * speedB).toFixed(3)}${atempoChain(speedB)},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
       vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i);
     } else if (s.layers) {
@@ -1374,14 +1390,17 @@ ipcMain.handle('video:export', async (event, payload) => {
         // hdr/flip/effects 는 위 layerPreQueues 전처리에서 이미 한 번만 태워졌다 — 여기선
         // 그 결과에서 이 세그먼트 몫(trim)만 떼어 페이드·scale 만 새로 적용한다.
         const preLabel = layerPreQueues.get(layerPreKey(layer)).shift();
-        parts.push(`[${preLabel}]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${fadeFrag('v', layer)},setpts=PTS-STARTPTS,scale=${lw}:${lh}[${raw}]`);
+        const speed = layer.speed || 1;
+        parts.push(`[${preLabel}]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${fadeFrag('v', layer)},setpts=(PTS-STARTPTS)/${speed},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         // 추적 키프레임 클립(layer.tStart/tEnd) — 세그먼트 양끝 위치를 overlay 필터의
         // x=/y= 표현식으로 넘겨서 ffmpeg 자체 't'(초 단위 프레임 타임스탬프, 이 레이어도
         // setpts=PTS-STARTPTS 로 0부터 시작)로 매 프레임 선형보간하게 한다 — JS 쪽에서
         // 세그먼트를 잘게 쪼개 정적 위치를 잇는 대신, 렌더링되는 모든 프레임마다 다른
-        // 값이 나와 미리보기(매 프레임 재보간)와 똑같이 매끄럽다.
-        const dur = layer.end - layer.start;
+        // 값이 나와 미리보기(매 프레임 재보간)와 똑같이 매끄럽다. layer.start/end 는 이미
+        // 배속만큼 늘어난 "소스" 구간이라(buildEDL 의 srcTimeAt), 위 setpts 로 다시 압축한
+        // 뒤의 실제(타임라인) 길이는 배속으로 나눈 값이다 — t 의 범위와 맞아야 한다.
+        const dur = (layer.end - layer.start) / speed;
         let ov;
         if (layer.tStart && layer.tEnd && dur > 0.0005) {
           const x0 = w * layer.tStart.x, y0 = h * layer.tStart.y;
@@ -1410,7 +1429,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
-      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${fsec(s.start)}:end=${fsec(s.end)}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=PTS-STARTPTS${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
+      parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${fsec(s.start)}:end=${fsec(s.end)}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=(PTS-STARTPTS)/${s.speed || 1}${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
       vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
     }
@@ -1445,6 +1464,13 @@ ipcMain.handle('video:export', async (event, payload) => {
   const filterScriptDir = drawtextDir || fs.mkdtempSync(path.join(app.getPath('temp'), 'yss-filter-'));
   const filterScriptPath = path.join(filterScriptDir, 'filter.txt');
   fs.writeFileSync(filterScriptPath, parts.join(';'), 'utf-8');
+  // fps_mode=passthrough — setpts 로 배속을 건 구간이 있으면 프레임 간격이 원본의 "정수
+  // fps" 가 아니게 된다(예: 2배속=간격 절반). 기본 CFR 보정(vsync auto)은 그 프레임들을
+  // 자기가 짐작한 명목 fps 에 맞추다가 프레임을 실측으로 확인될 만큼(20% 가까이) 버렸다
+  // (trim+setpts/2 로 정확히 20프레임 나와야 할 자리에 12프레임만 나옴). PTS 를 그대로
+  // 믿고 프레임을 하나도 버리거나 겹치지 않게 통과시킨다 — 배속 없는(기존) export 도
+  // 프레임 수가 원래도 정확했던 경우라 이 옵션을 켜도 결과가 달라지지 않는다.
+  args.push('-fps_mode', 'passthrough');
   args.push('-filter_complex_script', filterScriptPath, '-map', `[${outvLabel}]`, '-map', '[outa]');
 
   // drawtextDir(폰트 사본 + 캡션 txt) 과 filterScriptDir(위 filter_complex_script 파일) 은

@@ -96,8 +96,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed })),
     resolution: _veResolution,
     markers: _veMarkers.map(({ id, t }) => ({ id, t })),
   };
@@ -1098,7 +1098,7 @@ async function runTracking(clip, source, previewHostRect, cssBox) {
       const localT = Math.min(clip.dur, i * TRACK_SAMPLE_INTERVAL);
       // 오버레이 클립의 로컬 시각 → 절대 시각 → 소스 클립 자신의(inOff 반영) 재생 시각.
       const absT = clip.start + localT;
-      const srcT = Math.max(0, Math.min((v.duration || source.srcDur || clip.dur) - 0.02, source.inOff + (absT - source.start)));
+      const srcT = Math.max(0, Math.min((v.duration || source.srcDur || clip.dur) - 0.02, srcTimeAt(source, absT)));
       await seekVideoOnce(v, srcT);
       ctx.drawImage(v, 0, 0, source.w, source.h);
       let box;
@@ -1241,8 +1241,10 @@ function driveLayer(el, clip, t, visual) {
   // 로 바뀌는 순간에도 "그대로다" 로 착각하지 않고 실제로 다시 로드해 갈아탄다.
   const src = previewUrlFor(clip.file);
   if (v.dataset.loadedSrc !== src) { v.src = src; v.dataset.loadedSrc = src; }
-  const target = Math.min(clip.inOff + (t - clip.start), (v.duration || clip.srcDur) - 0.02);
+  const target = Math.min(srcTimeAt(clip, t), (v.duration || clip.srcDur) - 0.02);
   if (Math.abs(v.currentTime - target) > 0.1) { try { v.currentTime = Math.max(0, target); } catch {} }
+  const rate = clip.speed || 1;
+  if (v.playbackRate !== rate) v.playbackRate = rate;
   if (_playing && v.paused) v.play().catch(() => {});
   if (!_playing && !v.paused) v.pause();
 }
@@ -2270,6 +2272,7 @@ function renderClips() {
         // 필름스트립 대신 음표 표시만 둔다.
         el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span><canvas class="ve-wave"></canvas>` : `<div class="ve-thumbs"></div>`)
           + `<span class="ve-clip-lbl">${esc(c.name)}</span>
+          ${c.speed && c.speed !== 1 ? `<span class="ve-clip-speed">${(c.speed).toFixed(2).replace(/\.?0+$/, '')}×</span>` : ''}
           ${c.fileMissing ? `<span class="ve-clip-missing" title="${esc(tr('video.fileMissing'))}">✕</span>` : ''}
           <div class="ve-fade l"></div><div class="ve-fade r"></div>
           <div class="ve-fadeh l" title="${tr('video.fadeIn')}"></div><div class="ve-fadeh r" title="${tr('video.fadeOut')}"></div>
@@ -2654,7 +2657,7 @@ function splitAtPlayhead() {
     const origDur = clip.dur;
     const rightDur = clip.start + clip.dur - t;
     const leftDur = t - clip.start;
-    const right = { ...clip, id: nextClipId(), start: t, dur: rightDur, inOff: clip.inOff + (t - clip.start) };
+    const right = { ...clip, id: nextClipId(), start: t, dur: rightDur, inOff: srcTimeAt(clip, t) };
     clip.dur = leftDur;
     _veClips.push(right);
     return { clip, right, origDur, leftDur };
@@ -2865,6 +2868,59 @@ function openContextMenu(clientX, clientY, items) {
     document.addEventListener('keydown', _onCtxMenuEsc, true);
   }, 0);
 }
+// ── 배속(고정 스피드) ────────────────────────────────
+// 소스 트림 지점(inOff, "어디서부터 어디까지"의 그 구간)은 배속을 바꿔도 그대로 둔다 —
+// 바뀌는 건 그 구간이 타임라인에서 얼마나 오래 걸리느냐뿐이다(빠르면 짧게, 느리면 길게).
+// 그래서 "지금 이 소스 구간 길이(초)" = dur × 지금 speed 를 불변으로 잡고, 새 speed 로
+// 나눠 새 dur 를 구한다 — 여러 번 배속을 바꿔도(1.5x 로 갔다가 다시 2x 로) 트림한
+// 소스 구간 자체는 절대 안 밀린다. 영상+짝지어진 오디오(groupId)는 항상 같은 start/dur
+// 이어야 하는 불변조건이 있어(splitAtPlayhead 등과 동일) 배속도 짝까지 같이 맞춘다 —
+// 안 그러면 영상만 빨라지고 소리는 원래 길이 그대로 남는다(실측으로 확인한 버그).
+const SPEED_MIN = 0.25, SPEED_MAX = 4;
+function setClipSpeed(clip, newSpeed) {
+  const next = Math.max(SPEED_MIN, Math.min(SPEED_MAX, newSpeed || 1));
+  const prevSpeed = clip.speed || 1;
+  if (Math.abs(next - prevSpeed) < 0.001) return;
+  const srcConsumed = clip.dur * prevSpeed;
+  const nextDur = Math.max(1 / 60, srcConsumed / next);   // 아무리 빨라도 최소 한 프레임(1/60초)은 남긴다
+  const partner = groupPartner(clip);
+  const targets = partner ? [clip, partner] : [clip];
+  const prevState = targets.map((c) => ({ c, speed: c.speed, dur: c.dur }));
+  const apply = () => { for (const c of targets) { c.speed = next === 1 ? undefined : next; c.dur = nextDur; } };
+  pushUndo(
+    () => { for (const p of prevState) { p.c.speed = p.speed; p.c.dur = p.dur; } },
+    apply,
+  );
+  apply();
+  layout();
+}
+let _speedPopoverEl = null;
+function closeSpeedPopover() {
+  if (!_speedPopoverEl) return;
+  _speedPopoverEl.remove(); _speedPopoverEl = null;
+  document.removeEventListener('pointerdown', _onSpeedPopoverOutside, true);
+}
+function _onSpeedPopoverOutside(e) { if (_speedPopoverEl && !_speedPopoverEl.contains(e.target)) closeSpeedPopover(); }
+function openSpeedPopover(clip, clientX, clientY) {
+  closeSpeedPopover(); closeShapePopover(); closeTextPopover(); closePipPopover();
+  const pop = document.createElement('div');
+  pop.className = 've-text-pop';   // 다른 작은 팝오버들과 같은 상자 스타일 재사용
+  pop.style.left = Math.max(4, clientX) + 'px'; pop.style.top = (clientY + 6) + 'px';
+  const cur = Math.round((clip.speed || 1) * 100);
+  pop.innerHTML = `
+    <label class="ve-text-pop-full">${tr('video.speed')}<input type="number" id="sp-val" min="${SPEED_MIN * 100}" max="${SPEED_MAX * 100}" step="5" value="${cur}">%</label>
+    <div class="ve-text-pop-row" id="sp-presets">
+      ${[50, 100, 150, 200].map((p) => `<button class="mini" data-p="${p}">${p}%</button>`).join('')}
+    </div>`;
+  document.body.appendChild(pop);
+  _speedPopoverEl = pop;
+  const input = pop.querySelector('#sp-val');
+  input.addEventListener('input', () => setClipSpeed(clip, Number(input.value) / 100));
+  pop.querySelectorAll('#sp-presets button').forEach((btn) => {
+    btn.addEventListener('click', () => { input.value = btn.dataset.p; setClipSpeed(clip, Number(btn.dataset.p) / 100); });
+  });
+  setTimeout(() => document.addEventListener('pointerdown', _onSpeedPopoverOutside, true), 0);
+}
 function openClipContextMenu(e, c) {
   _selClipId = c.id; updateClipToolbarUI();
   const withinPlayhead = _playheadSec > c.start && _playheadSec < c.start + c.dur;
@@ -2879,6 +2935,9 @@ function openClipContextMenu(e, c) {
       { label: tr('video.flipH'), onClick: () => { toggleClipFlip(c, 'flipH'); renderEffectPanel(c); } },
       { label: tr('video.flipV'), onClick: () => { toggleClipFlip(c, 'flipV'); renderEffectPanel(c); } },
     );
+  }
+  if (!c.isText && !c.isImage && !c.isShape) {
+    items.push({ sep: true }, { label: tr('video.speedMenu'), onClick: () => openSpeedPopover(c, e.clientX, e.clientY) });
   }
   if (_selClipIds.size > 1 && _selClipIds.has(c.id)) {
     items.push({ sep: true }, { label: tr('video.ctxGroup'), onClick: () => groupSelected() });
@@ -2928,10 +2987,22 @@ function updateClipToolbarUI() {
 // 구간(segment)이 아니라 "원본 파일의 절대 시각" 기준 st(시작점)/d(길이) 를 받는다 —
 // trim 은 PTS 를 안 건드리니, setpts=PTS-STARTPTS 로 리셋하기 전에 fade 를 걸면 세그먼트가
 // (다른 트랙・PIP・범위 지정 등으로) 잘게 쪼개져도 경계에서 끊기지 않고 이어진다.
+// 클립의 타임라인 절대 시각(absT) → 그 클립 소스 파일 안에서의 재생 시각. 배속(speed)이
+// 걸린 클립은 타임라인 1초에 소스를 speed 초만큼 먹는다 — main.js 가 그 소스 구간을
+// 통째로 잘라 setpts=.../speed 로 다시 눌러(빠르게) 또는 늘려(느리게) 원래 타임라인
+// 길이로 되돌린다. buildEDL 전체와 미리보기 재생(driveLayer)이 공용으로 쓴다.
+function srcTimeAt(clip, absT) {
+  return clip.inOff + (absT - clip.start) * (clip.speed || 1);
+}
+// fadeIn/fadeOut(초 단위)은 사용자가 "타임라인에서 몇 초에 걸쳐" 로 입력한 값이지만,
+// 이 필터는 아직 setpts 로 되감기 전(소스 시간 그대로)에 걸린다 — 배속이 걸려 있으면
+// 소스 쪽에서는 그만큼(×speed) 더 길게/짧게 줘야 되감은 뒤 타임라인 길이가 요청한
+// 페이드 길이와 맞는다.
 function fadeFieldsFor(c) {
   const f = {};
-  if (c.fadeIn) { f.fadeInSt = c.inOff; f.fadeInD = c.fadeIn; }
-  if (c.fadeOut) { f.fadeOutSt = c.inOff + c.dur - c.fadeOut; f.fadeOutD = c.fadeOut; }
+  const speed = c.speed || 1;
+  if (c.fadeIn) { f.fadeInSt = c.inOff; f.fadeInD = c.fadeIn * speed; }
+  if (c.fadeOut) { f.fadeOutSt = c.inOff + c.dur * speed - c.fadeOut * speed; f.fadeOutD = c.fadeOut * speed; }
   return f;
 }
 // 키프레임(clip.trackKeyframes, 클립 로컬 시각 t 기준 {t,x,y,w,h} 배열)에서 임의 시각의
@@ -3086,12 +3157,12 @@ function buildEDL() {
     const audioSources = [];
     for (const { clips } of relevantVideo) {
       const c = clips[0];
-      if (c.hasAudio !== false) audioSources.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), ...fadeFieldsFor(c) });
+      if (c.hasAudio !== false) audioSources.push({ file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, ...fadeFieldsFor(c) });
     }
     for (const track of audioTracks) {
       if (track.hidden) continue;
       const clip = clipAt(track.id, mid);
-      if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: clip.inOff + (a - clip.start), end: clip.inOff + (b - clip.start), ...fadeFieldsFor(clip) });
+      if (clip && clip.hasAudio !== false) audioSources.push({ file: clip.file, start: srcTimeAt(clip, a), end: srcTimeAt(clip, b), speed: clip.speed || 1, ...fadeFieldsFor(clip) });
     }
 
     if (!topFillsFrame) {
@@ -3101,7 +3172,7 @@ function buildEDL() {
         layers: relevantVideo.map(({ track, clips }) => {
           const c = clips[0];
           const flip = chainFlip(c.effects);
-          const layer = { file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
+          const layer = { file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, transform: clipTransformAt(c, track, mid), flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, ...fadeFieldsFor(c) };
           // 추적 키프레임 클립은 위치(x/y)를 이 세그먼트 양끝 값만 넘긴다 — main.js 가
           // overlay 필터에서 ffmpeg 자체 't' 변수로 그 사이를 매 프레임 선형보간한다(위
           // bounds 주석 참고). 크기(w/h)는 그대로 세그먼트 중간값(정적) — scale 필터는
@@ -3126,8 +3197,8 @@ function buildEDL() {
         const flipA = chainFlip(outC.effects), flipB = chainFlip(inC.effects);
         segs.push({
           xfade: true, dur: overlapEnd - overlapStart,
-          fileA: outC.file, aIn: outC.inOff + (overlapStart - outC.start), hasAudioA: outC.hasAudio !== false, flipHA: flipA.h, flipVA: flipA.v, effectsA: outC.effects, hdrA: outC.hdr,
-          fileB: inC.file, bIn: inC.inOff + (overlapStart - inC.start), hasAudioB: inC.hasAudio !== false, flipHB: flipB.h, flipVB: flipB.v, effectsB: inC.effects, hdrB: inC.hdr,
+          fileA: outC.file, aIn: srcTimeAt(outC, overlapStart), speedA: outC.speed || 1, hasAudioA: outC.hasAudio !== false, flipHA: flipA.h, flipVA: flipA.v, effectsA: outC.effects, hdrA: outC.hdr,
+          fileB: inC.file, bIn: srcTimeAt(inC, overlapStart), speedB: inC.speed || 1, hasAudioB: inC.hasAudio !== false, flipHB: flipB.h, flipVB: flipB.v, effectsB: inC.effects, hdrB: inC.hdr,
           refW, refH, texts: collectTexts((overlapStart + overlapEnd) / 2),
         });
         skipUntil = overlapEnd;
@@ -3135,7 +3206,7 @@ function buildEDL() {
       }
       const c = clips[0];
       const flip = chainFlip(c.effects);
-      segs.push({ file: c.file, start: c.inOff + (a - c.start), end: c.inOff + (b - c.start), audioSources, refW, refH, dur: b - a, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
+      segs.push({ file: c.file, start: srcTimeAt(c, a), end: srcTimeAt(c, b), speed: c.speed || 1, audioSources, refW, refH, dur: b - a, flipH: flip.h, flipV: flip.v, effects: c.effects, hdr: c.hdr, texts: collectTexts(mid), ...fadeFieldsFor(c) });
       continue;
     }
 
