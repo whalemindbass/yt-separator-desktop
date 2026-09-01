@@ -120,6 +120,7 @@ const DIALOG_TEXT = {
     importImageFiles: '이미지 파일 임포트 (여러 개 가능)',
     fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fImage: '이미지', fAll: '모든 파일', fProject: 'YSS 프로젝트',
     fVideoProject: 'Dr.studio 영상 프로젝트',
+    importLut: 'LUT 파일 선택(.cube)', fLut: 'LUT(.cube)',
   },
   en: {
     saveClose: 'Save and close', discardClose: 'Close without saving', cancel: 'Cancel',
@@ -135,6 +136,7 @@ const DIALOG_TEXT = {
     importImageFiles: 'Import image files (multiple allowed)',
     fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fImage: 'Image', fAll: 'All files', fProject: 'YSS project',
     fVideoProject: 'Dr.studio video project',
+    importLut: 'Choose a LUT file (.cube)', fLut: 'LUT (.cube)',
   },
 };
 const td = (k) => (DIALOG_TEXT[uiLocale] || DIALOG_TEXT.ko)[k] || k;
@@ -837,6 +839,21 @@ ipcMain.handle('dialog:pickVideoFile', async () => {
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
   return { ok: true, filePath: res.filePaths[0] };
 });
+// 영상 편집: 색보정 LUT(.cube) 파일 선택 — 효과 체인의 'lut' 항목이 여기서 고른 절대
+// 경로를 그대로 들고 있다가, export 때(main.js 위쪽 ensureLutCopied) 콜론 우회용
+// 작업 폴더로 복사된다.
+ipcMain.handle('dialog:pickLutFile', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: td('importLut'),
+    properties: ['openFile'],
+    filters: [
+      { name: td('fLut'), extensions: ['cube'] },
+      { name: td('fAll'), extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
+  return { ok: true, filePath: res.filePaths[0] };
+});
 // 영상 편집: 비디오/오디오 파일 임포트 (트랙 클립) — 트랙 종류에 안 맞는 파일을 넣으면
 // 아무것도 재생되지 않는데(영상 트랙에 오디오 파일 넣으면 화면도 소리도 안 남,
 // 반대도 마찬가지) 그걸 굳이 필터로 허용해 둘 이유가 없다 — kind 로 트랙에 맞는
@@ -1130,6 +1147,20 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 드라이브 콜론에서 깨진다 — 실측으로 확인한 우회법은 ffmpeg 의 cwd 를 그 폴더로 두고
   // 파일명만(콜론 없이) 넘기는 것뿐이었다.
   const hasTexts = segments.some(s => s.texts && s.texts.length);
+  // LUT(.cube) 효과도 같은 콜론 우회(위 주석)가 필요하다 — lut3d=file=... 값이 절대경로면
+  // 똑같이 드라이브 콜론에서 필터 파서가 깨진다. 텍스트와 같은 작업 폴더를 재사용한다
+  // (텍스트가 없어도 LUT 만 있으면 이 폴더가 그 이유만으로 새로 생긴다).
+  function collectEffectLists() {
+    const lists = [];
+    for (const s of segments) {
+      if (s.effects) lists.push(s.effects);
+      if (s.effectsA) lists.push(s.effectsA);
+      if (s.effectsB) lists.push(s.effectsB);
+      if (s.layers) for (const l of s.layers) if (l.effects) lists.push(l.effects);
+    }
+    return lists;
+  }
+  const hasLuts = collectEffectLists().some((list) => (list || []).some((e) => e.type === 'lut' && e.value && e.enabled !== false));
   let drawtextDir = null;
   const _copiedFonts = new Set();   // 실제로 쓰인 폰트만, 중복 복사 안 함
   function ensureFontCopied(key) {
@@ -1139,8 +1170,16 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (!_copiedFonts.has(name)) { fs.copyFileSync(src, path.join(drawtextDir, name)); _copiedFonts.add(name); }
     return name;
   }
-  if (hasTexts) {
-    if (!resolveTextFont('malgun')) return { ok: false, error: '텍스트 오버레이용 폰트를 찾을 수 없습니다(맑은 고딕 없음)' };
+  const _copiedLuts = new Map();   // 원본 절대경로 → 복사된 파일명(같은 LUT 여러 클립에 쓰여도 한 번만 복사)
+  function ensureLutCopied(absPath) {
+    if (_copiedLuts.has(absPath)) return _copiedLuts.get(absPath);
+    const name = `lut${_copiedLuts.size}${path.extname(absPath) || '.cube'}`;
+    try { fs.copyFileSync(absPath, path.join(drawtextDir, name)); } catch { return null; }
+    _copiedLuts.set(absPath, name);
+    return name;
+  }
+  if (hasTexts && !resolveTextFont('malgun')) return { ok: false, error: '텍스트 오버레이용 폰트를 찾을 수 없습니다(맑은 고딕 없음)' };
+  if (hasTexts || hasLuts) {
     drawtextDir = path.join(app.getPath('temp'), 'yss-drawtext-' + crypto.randomBytes(4).toString('hex'));
     fs.mkdirSync(drawtextDir, { recursive: true });
   }
@@ -1285,6 +1324,11 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (type === 'bw') return 'colorchannelmixer=rr=0.213:rg=0.715:rb=0.072:gr=0.213:gg=0.715:gb=0.072:br=0.213:bg=0.715:bb=0.072';
     if (type === 'sepia') return 'colorchannelmixer=rr=0.393:rg=0.769:rb=0.189:gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131';
     if (type === 'blur') return v ? `gblur=sigma=${(v / 2).toFixed(2)}` : '';
+    if (type === 'lut') {
+      if (!v || !fs.existsSync(v)) return '';
+      const name = ensureLutCopied(v);
+      return name ? `lut3d=file=${name}` : '';
+    }
     return '';
   }
   function chainFrag(effects) {

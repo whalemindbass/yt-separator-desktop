@@ -605,6 +605,11 @@ const EFFECT_TYPES = {
   // chainFlip() 이 체인을 스캔해서 따로 뽑는다.
   flipH: { i18n: 'video.flipH', kind: 'toggle' },
   flipV: { i18n: 'video.flipV', kind: 'toggle' },
+  // 3D LUT(.cube) — 전문 색보정 툴에서 만든 룩을 그대로 입힌다. CSS filter 로는 임의의
+  // 3D LUT 를 흉내 낼 방법이 없어서(브라우저 표준 필터 함수 조합만 가능) 미리보기엔
+  // 반영이 안 되고 내보내기(ffmpeg lut3d)에만 적용된다 — 패널에 그 사실을 그대로 적어
+  // 둔다(안 보이는데 보이는 척하지 않는다).
+  lut: { i18n: 'video.fxLut', kind: 'file' },
 };
 let _effectSeq = 0;
 function nextEffectId() { return ++_effectSeq; }
@@ -641,6 +646,25 @@ function addClipEffect(clip, type) {
   clip.effects = clip.effects || [];
   clip.effects.push({ id: nextEffectId(), type, value: EFFECT_TYPES[type].def, enabled: true });
   syncPreview(nowSec()); scheduleSave();
+}
+// LUT 파일을 골라서 새 효과로 추가한다 — 취소하면 아무것도 안 만든다(빈 LUT 항목이
+// 남는 걸 피한다).
+async function addLutEffect(clip) {
+  const r = await api.dialog.pickLutFile();
+  if (!r?.ok) return;
+  clip.effects = clip.effects || [];
+  clip.effects.push({ id: nextEffectId(), type: 'lut', value: r.filePath, enabled: true });
+  syncPreview(nowSec()); scheduleSave();
+  renderEffectPanel(clip);
+}
+// 이미 추가된 LUT 항목의 파일을 바꾼다(패널의 "변경" 버튼).
+async function changeLutEffectFile(clip, effectId) {
+  const r = await api.dialog.pickLutFile();
+  if (!r?.ok) return;
+  const e = clip.effects?.find((x) => x.id === effectId); if (!e) return;
+  e.value = r.filePath;
+  syncPreview(nowSec()); scheduleSave();
+  renderEffectPanel(clip);
 }
 function removeClipEffect(clip, effectId) {
   if (!clip.effects) return;
@@ -779,7 +803,13 @@ function toggleFxAddMenu(clip) {
   Object.keys(EFFECT_TYPES).forEach((type) => {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 've-fx-add-item'; b.textContent = tr(EFFECT_TYPES[type].i18n);
-    b.addEventListener('click', () => { addClipEffect(clip, type); closeFxAddMenu(); renderEffectPanel(clip); });
+    // 'file' 종류(LUT)는 바로 추가하지 않고 먼저 파일을 고르게 한다 — 파일 없이 추가하면
+    // 빈 항목만 남아서 뭘 해야 할지 안 보인다.
+    b.addEventListener('click', () => {
+      closeFxAddMenu();
+      if (EFFECT_TYPES[type].kind === 'file') addLutEffect(clip);
+      else { addClipEffect(clip, type); renderEffectPanel(clip); }
+    });
     menu.appendChild(b);
   });
   menu.hidden = false;
@@ -888,6 +918,7 @@ function renderEffectPanel(clip, bulkTextTrack) {
   list.forEach((eff, i) => {
     const def = EFFECT_TYPES[eff.type]; if (!def) return;
     const isRange = def.kind === 'range';
+    const isFile = def.kind === 'file';
     const val = eff.value ?? def.def ?? 0;
     const enabled = eff.enabled !== false;
     const row = document.createElement('div');
@@ -905,6 +936,11 @@ function renderEffectPanel(clip, bulkTextTrack) {
         <button type="button" class="ve-fx-del" title="${esc(tr('video.fxRemove'))}">×</button>
       </div>
       ${isRange ? `<input type="range" class="ve-fx-slider" min="${def.min}" max="${def.max}" step="1" value="${val}">` : ''}
+      ${isFile ? `<div class="ve-fx-file-row">
+        <span class="ve-fx-file-name" title="${esc(eff.value || '')}">${esc(eff.value ? eff.value.split(/[\\/]/).pop() : tr('video.fxLutNone'))}</span>
+        <button type="button" class="mini ve-fx-file-change">${esc(tr('video.fxLutChange'))}</button>
+      </div>
+      <p class="ve-fx-file-hint">${esc(tr('video.fxLutPreviewHint'))}</p>` : ''}
     `;
     row.querySelector('.ve-fx-onoff').addEventListener('click', () => { toggleClipEffect(clip, eff.id); renderEffectPanel(clip); });
     row.querySelectorAll('.ve-fx-mv').forEach((b) => {
@@ -920,6 +956,7 @@ function renderEffectPanel(clip, bulkTextTrack) {
         if (valEl) valEl.textContent = (v > 0 ? '+' : '') + v;
       });
     }
+    row.querySelector('.ve-fx-file-change')?.addEventListener('click', () => changeLutEffectFile(clip, eff.id));
     body.appendChild(row);
   });
 }

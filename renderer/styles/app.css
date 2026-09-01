@@ -4086,6 +4086,12 @@ body { background: var(--bg) !important; }
 .ve-fx-del { font-size: 12px; }
 .ve-fx-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 .ve-fx-slider { width: 100%; }
+.ve-fx-file-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.ve-fx-file-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 500 11.5px/1 var(--sans); color: var(--tx-2);
+}
+.ve-fx-file-hint { margin: 4px 0 0; font: 500 10.5px/1.4 var(--sans); color: var(--tx-3); }
 
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
