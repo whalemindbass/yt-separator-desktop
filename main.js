@@ -19,7 +19,7 @@ const fs = require('fs');
 process.on('uncaughtException',  (e) => { try { console.error('[uncaught]', e && e.stack || e); } catch {} noteCrash('main', e); });
 process.on('unhandledRejection', (e) => { try { console.error('[unhandledRejection]', e); } catch {} noteCrash('promise', e); });
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 // 작업표시줄 고정·창 그룹화·알림이 쓰는 앱 식별자.
 // 설치 시 NSIS 바로가기에는 electron-builder 가 package.json 의 build.appId 를 심는데,
@@ -1045,17 +1045,41 @@ ipcMain.handle('video:probeAudio', async (_ev, file) => {
     });
   });
 });
+// GPU(NVENC) 인코더 사용 가능 여부 — `ffmpeg -encoders` 목록에 h264_nvenc 가 있는지로
+// 판단한다(실제 하드웨어/드라이버 없이도 목록엔 있을 수 있다 — 그건 export 쪽 실패 시
+// libx264 로 자동 재시도하는 걸로 대응한다, 여기선 그냥 "시도해볼 만한지"만 빠르게 본다).
+// 한 번 확인하면 캐시 — 매 export 마다 ffmpeg 를 또 띄워 목록을 물어볼 필요는 없다.
+let _gpuEncoderCache = null;
+function detectGpuEncoder() {
+  if (_gpuEncoderCache != null) return _gpuEncoderCache;
+  try {
+    const r = spawnSync(FFMPEG_BIN, ['-hide_banner', '-encoders'], { windowsHide: true, encoding: 'utf-8' });
+    _gpuEncoderCache = /\bh264_nvenc\b/.test(r.stdout || '');
+  } catch { _gpuEncoderCache = false; }
+  return _gpuEncoderCache;
+}
+ipcMain.handle('video:gpuInfo', () => ({ available: detectGpuEncoder() }));
+// mp4(h264) 인코더 인자만 GPU/CPU 로 갈라 만든다 — webm(vp9)은 번들 ffmpeg 에 vp9 하드웨어
+// 인코더가 없어 항상 CPU(libvpx-vp9). NVENC 의 -cq 는 libx264 -crf 와 스케일이 거의 같아
+// (둘 다 대략 0~51, 낮을수록 고화질) 값은 그대로 재사용하고 -b:v 0 으로 cq 가 화질을
+// 온전히 결정하게 둔다(비트레이트 상한을 안 걸어야 crf 처럼 동작한다).
+function h264EncodeArgs(useGpu, crfH264) {
+  return useGpu
+    ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', String(crfH264), '-b:v', '0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k']
+    : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crfH264), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k'];
+}
 // 영상 편집 탭 내보내기(v2) — 컷 편집 + 트랙 겹침(PIP overlay) + 여러 오디오 트랙 믹스.
 // 렌더러 buildEDL() 이 구간별로 layers(겹친 영상 트랙들)/audioSources(N개 오디오 트랙)를
 // 미리 계산해서 넘긴다 — 여기선 그 구간 정보를 filter_complex 로 옮기기만 한다.
 ipcMain.handle('video:export', async (event, payload) => {
-  const { segments, outPath, format, res, fps } = payload || {};
+  const { segments, outPath, format, res, fps, gpu } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
   const fmt = ['mp4', 'webm'].includes(format) ? format : 'mp4';
   // CRF 는 고정값 — 이전 기본값(mp4=20/webm=32) 그대로. "화질" 은 이제 이 CRF 를 고르는 대신
   // 아래 res(해상도)로 명확하게(720p/1080p 처럼) 표현한다.
   const crf = { h264: 20, vp9: 32 };
+  const wantGpu = fmt === 'mp4' && !!gpu && detectGpuEncoder();
   // 해상도 낮춰 내보내기 — 원본(프로젝트 캔버스) 해상도보다 큰 값은 업스케일하지 않고 무시한다.
   const RES_HEIGHTS = { '2160': 2160, '1440': 1440, '1080': 1080, '720': 720, '480': 480 };
   const targetH = RES_HEIGHTS[res];
@@ -1423,13 +1447,6 @@ ipcMain.handle('video:export', async (event, payload) => {
   fs.writeFileSync(filterScriptPath, parts.join(';'), 'utf-8');
   args.push('-filter_complex_script', filterScriptPath, '-map', `[${outvLabel}]`, '-map', '[outa]');
 
-  if (fmt === 'webm') {
-    args.push('-c:v', 'libvpx-vp9', '-crf', String(crf.vp9), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
-  } else {   // mp4 — h264+aac
-    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf.h264), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k');
-  }
-  args.push('-progress', 'pipe:1', outPath);
-
   // drawtextDir(폰트 사본 + 캡션 txt) 과 filterScriptDir(위 filter_complex_script 파일) 은
   // 이 export 안에서만 필요하다 — 끝나면(성공/실패 상관없이) 둘 다 지운다. 텍스트가 있으면
   // 같은 폴더라 한 번만 지워진다(Set 이 아니라 그냥 둘 다 시도해도 두 번째는 이미 없어서
@@ -1439,27 +1456,43 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} }
     if (filterScriptDir !== drawtextDir) { try { fs.rmSync(filterScriptDir, { recursive: true, force: true }); } catch {} }
   }
-  return await new Promise((resolve) => {
-    let proc; try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true, cwd: drawtextDir || undefined }); }
-    catch (e) { cleanupDrawtextDir(); return resolve({ ok: false, error: String(e.message || e) }); }
-    let stderr = '', outBuf = '';
-    proc.stdout.on('data', (d) => {
-      outBuf += d;
-      const m = /out_time_ms=(\d+)/.exec(outBuf);
-      const nl = outBuf.lastIndexOf('\n');
-      if (nl >= 0) outBuf = outBuf.slice(nl + 1);
-      if (m && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('video:exportProgress', { outTimeMs: Number(m[1]) });
-      }
+  // 인코더 인자만 GPU/CPU 로 갈아끼워서 한 번 더 돌릴 수 있게 필터그래프 뒷부분(-map 까지)
+  // 과 분리했다 — filter_complex_script 파일은 인코더와 무관하니 재시도 때 다시 안 만든다.
+  function runOnce(useGpu) {
+    const encArgs = fmt === 'webm'
+      ? ['-c:v', 'libvpx-vp9', '-crf', String(crf.vp9), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k']
+      : h264EncodeArgs(useGpu, crf.h264);
+    const finalArgs = [...args, ...encArgs, '-progress', 'pipe:1', outPath];
+    return new Promise((resolve) => {
+      let proc; try { proc = spawn(FFMPEG_BIN, finalArgs, { windowsHide: true, cwd: drawtextDir || undefined }); }
+      catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+      let stderr = '', outBuf = '';
+      proc.stdout.on('data', (d) => {
+        outBuf += d;
+        const m = /out_time_ms=(\d+)/.exec(outBuf);
+        const nl = outBuf.lastIndexOf('\n');
+        if (nl >= 0) outBuf = outBuf.slice(nl + 1);
+        if (m && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('video:exportProgress', { outTimeMs: Number(m[1]) });
+        }
+      });
+      proc.stderr.on('data', (d) => stderr += d);
+      proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+      proc.on('close', (code) => {
+        if (code === 0) { grantWrite(outPath); resolve({ ok: true, outPath }); }
+        else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) });
+      });
     });
-    proc.stderr.on('data', (d) => stderr += d);
-    proc.on('error', (e) => { cleanupDrawtextDir(); resolve({ ok: false, error: String(e.message || e) }); });
-    proc.on('close', (code) => {
-      cleanupDrawtextDir();
-      if (code === 0) { grantWrite(outPath); resolve({ ok: true, outPath }); }
-      else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) });
-    });
-  });
+  }
+  let result = await runOnce(wantGpu);
+  if (!result.ok && wantGpu) {
+    // NVENC 가 목록엔 있어도 실제 드라이버/하드웨어가 없거나 문제가 있을 수 있다 — 사용자가
+    // 그 실패를 그대로 보는 대신, 이미 검증된 CPU(libx264) 경로로 조용히 한 번 더 시도한다.
+    try { fs.rmSync(outPath, { force: true }); } catch {}
+    result = await runOnce(false);
+  }
+  cleanupDrawtextDir();
+  return result;
 });
 // ── 영상 편집 프록시(저해상도 미리보기 대체본) ──────────────────────
 // 4K 등 고해상도 소스를 그대로 재생하면 내장그래픽에서 실시간 디코드가 버겁다("버벅임"

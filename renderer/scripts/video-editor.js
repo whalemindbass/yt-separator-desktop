@@ -3167,6 +3167,16 @@ function finishLyricTiming(cancel) {
   const panel = $('ve-lyric-panel'); if (panel) panel.hidden = true;
 }
 
+// GPU 가능 여부는 세션 중 안 바뀌니 한 번만 물어보고 캐시 — 모달 열 때마다 IPC 왕복 안 함.
+let _gpuInfoCache = null;
+async function getGpuInfo() {
+  if (_gpuInfoCache) return _gpuInfoCache;
+  try { _gpuInfoCache = await api.video.gpuInfo(); } catch { _gpuInfoCache = { available: false }; }
+  return _gpuInfoCache;
+}
+// GPU 정보는 IPC 왕복이 필요해 비동기다 — 모달 자체를 그거 끝날 때까지 늦추면 "내보내기"
+// 클릭 즉시 버튼이 뜨는 다른 흐름들(더블클릭으로 바로 여는 습관 등)이 깨진다. 그래서
+// 모달은 항상 동기로 먼저 뜨고, GPU 체크박스 줄만 나중에 도착하는 대로 끼워 넣는다.
 function openExportModal() {
   if (!_veClips.length) { flash(tr('video.needImport')); return; }
   const host = $('ve-modal');
@@ -3183,6 +3193,7 @@ function openExportModal() {
       <div class="dev-field" style="margin-top:10px"><span>${tr('video.exportFps')}</span><select id="ve-exp-fps">
         ${VIDEO_FPS_OPTS.map(v => `<option value="${v}">${v === 'auto' ? tr('video.fpsAuto') : v}</option>`).join('')}
       </select></div>
+      <div id="ve-exp-gpu-slot"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="mini" id="ve-exp-go">${tr('video.export')}</button></div>
     </div></div>`;
   host.hidden = false;
@@ -3190,10 +3201,22 @@ function openExportModal() {
   host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
   $('ve-exp-go').addEventListener('click', () => {
     host.hidden = true;
-    runExport($('ve-exp-fmt').value, $('ve-exp-res').value, $('ve-exp-fps').value);
+    const gpu = !!$('ve-exp-gpu')?.checked;
+    runExport($('ve-exp-fmt').value, $('ve-exp-res').value, $('ve-exp-fps').value, gpu);
+  });
+  getGpuInfo().then((gpuInfo) => {
+    const slot = document.getElementById('ve-exp-gpu-slot');   // 모달이 그 사이 닫혔으면 null
+    if (!slot || !gpuInfo.available) return;
+    slot.outerHTML = `<div class="dev-field" id="ve-exp-gpu-slot" style="margin-top:10px;align-items:flex-start">
+        <span>${tr('video.exportGpu')}</span>
+        <label style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <input type="checkbox" id="ve-exp-gpu" checked>
+          <small style="opacity:.65;font-size:11px">${tr('video.exportGpuHint')}</small>
+        </label>
+      </div>`;
   });
 }
-async function runExport(format, res, fps) {
+async function runExport(format, res, fps, gpu) {
   const segs = buildEDL();
   if (!segs.length) { flash(tr('video.needImport')); return; }
   format = format || 'mp4';
@@ -3208,7 +3231,7 @@ async function runExport(format, res, fps) {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
   let result;
-  try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps }); }
+  try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps, gpu }); }
   finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
   flash(result.ok ? tr('video.exportDone') : tr('video.exportFail', { err: result.error || '' }));
 }
