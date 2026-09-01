@@ -20,6 +20,9 @@ renderer/models/*.onnx
 concept.png
 symbol.png
 daw스크린샷.png
+111607.png
+스크린샷 *.png
+영상 프로젝트.dsvproj
 
 # 테스트용 녹음·채보 자료 (로컬 전용)
 low_B_sample.wav
