@@ -4195,6 +4195,14 @@ body { background: var(--bg) !important; }
 }
 .ve-clip .ve-trim { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 2; }
 .ve-clip .ve-trim.l { left: 0; } .ve-clip .ve-trim.r { right: 0; }
+/* 크로스페이드(겹치는 클립 쌍) 자리 가운데 뜨는 작은 배지 — 눌러서 전환 효과 종류를 고른다. */
+.ve-xfade-badge {
+  position: absolute; top: 50%; width: 18px; height: 18px; margin-left: -9px; margin-top: -9px;
+  border-radius: 50%; background: var(--elev); border: 1px solid var(--border-mid); color: var(--accent);
+  font: 700 11px/16px var(--sans); text-align: center; cursor: pointer; z-index: 4; user-select: none;
+  box-shadow: var(--shadow-pop);
+}
+.ve-xfade-badge:hover { background: var(--elev-2); border-color: var(--accent); }
 .ve-clip .ve-thumbs { position: absolute; inset: 0; display: flex; opacity: .85; pointer-events: none; }
 .ve-clip .ve-thumbs img { height: 100%; flex: 1 1 auto; object-fit: cover; min-width: 0; }
 .ve-fade { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--elev) 80%, transparent); }

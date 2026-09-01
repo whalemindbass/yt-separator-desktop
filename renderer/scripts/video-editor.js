@@ -96,8 +96,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType })),
     resolution: _veResolution,
     markers: _veMarkers.map(({ id, t }) => ({ id, t })),
   };
@@ -2345,6 +2345,23 @@ function renderClips() {
         paintWave(c);
       }
     }
+    // 크로스페이드 배지 — 같은 트랙에서 겹치는 인접 클립 쌍마다 겹친 자리 가운데 하나씩.
+    // 클릭하면 전환 효과 종류를 고를 수 있다(기본은 fade, 겹치기만 해도 이미 크로스페이드
+    // 되니 굳이 안 눌러도 된다 — 이건 "무슨 모양으로" 를 바꾸는 선택 사항).
+    const sorted = _veClips.filter((x) => x.trackId === trackId && !x.isText).sort((a, b) => a.start - b.start);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const outC = sorted[i], inC = sorted[i + 1];
+      const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
+      if (overlapEnd <= overlapStart + 0.001) continue;
+      const badge = document.createElement('div');
+      badge.className = 've-xfade-badge';
+      badge.style.left = (((overlapStart + overlapEnd) / 2) * _pxPerSec) + 'px';
+      badge.title = tr('video.transitionTitle');
+      badge.textContent = '⤩';
+      badge.addEventListener('pointerdown', (e) => e.stopPropagation());
+      badge.addEventListener('click', (e) => { e.stopPropagation(); openTransitionPopover(inC, e.clientX, e.clientY); });
+      area.appendChild(badge);
+    }
   });
   updateClipToolbarUI();
 }
@@ -2921,6 +2938,45 @@ function openSpeedPopover(clip, clientX, clientY) {
   });
   setTimeout(() => document.addEventListener('pointerdown', _onSpeedPopoverOutside, true), 0);
 }
+// ── 트랜지션(크로스페이드 전환 효과) ─────────────────────
+// main.js 의 XFADE_TRANSITIONS 화이트리스트와 이름이 정확히 같아야 한다(ffmpeg -h
+// filter=xfade 로 확인한 정식 이름). 57개 전부가 아니라 실제로 자주 쓰는 것만 추렸다.
+const TRANSITION_TYPES = [
+  'fade', 'fadeblack', 'fadewhite', 'dissolve',
+  'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+  'slideleft', 'slideright', 'slideup', 'slidedown',
+  'circlecrop', 'circleopen', 'circleclose', 'radial', 'pixelize', 'smoothleft',
+];
+let _transPopoverEl = null;
+function closeTransitionPopover() {
+  if (!_transPopoverEl) return;
+  _transPopoverEl.remove(); _transPopoverEl = null;
+  document.removeEventListener('pointerdown', _onTransPopoverOutside, true);
+}
+function _onTransPopoverOutside(e) { if (_transPopoverEl && !_transPopoverEl.contains(e.target)) closeTransitionPopover(); }
+// clip 은 겹치는 두 클립 중 뒤(안으로 들어오는) 클립 — 전환은 그 클립이 "가지고 있는"
+// 설정으로 저장한다(splitAtPlayhead 처럼 클립 하나에 귀속시키는 게 자연스럽다).
+function openTransitionPopover(clip, clientX, clientY) {
+  closeTransitionPopover(); closeSpeedPopover(); closeShapePopover(); closeTextPopover(); closePipPopover();
+  const pop = document.createElement('div');
+  pop.className = 've-text-pop';
+  pop.style.left = Math.max(4, clientX) + 'px'; pop.style.top = (clientY + 6) + 'px';
+  const cur = clip.transitionType || 'fade';
+  pop.innerHTML = `
+    <label class="ve-text-pop-full">${tr('video.transitionType')}
+      <select id="tr-type">${TRANSITION_TYPES.map((t) => `<option value="${t}" ${t === cur ? 'selected' : ''}>${tr('video.transition.' + t)}</option>`).join('')}</select>
+    </label>`;
+  document.body.appendChild(pop);
+  _transPopoverEl = pop;
+  pop.querySelector('#tr-type').addEventListener('change', (e) => {
+    const prev = clip.transitionType;
+    const next = e.target.value === 'fade' ? undefined : e.target.value;
+    pushUndo(() => { clip.transitionType = prev; }, () => { clip.transitionType = next; });
+    clip.transitionType = next;
+    scheduleSave();
+  });
+  setTimeout(() => document.addEventListener('pointerdown', _onTransPopoverOutside, true), 0);
+}
 // ── 무음 구간 자동 제거 ──────────────────────────────
 // silencedetect(main.js) 로 이 클립의 소스 구간 안 무음 시각들을 찾은 뒤, 뒤에서부터
 // (앞쪽 구간의 좌표가 안 밀리게) 각 구간의 끝/시작에서 두 번 잘라(splitAtPlayhead 재사용
@@ -3243,7 +3299,7 @@ function buildEDL() {
         const overlapStart = inC.start, overlapEnd = outC.start + outC.dur;
         const flipA = chainFlip(outC.effects), flipB = chainFlip(inC.effects);
         segs.push({
-          xfade: true, dur: overlapEnd - overlapStart,
+          xfade: true, dur: overlapEnd - overlapStart, transitionType: inC.transitionType || 'fade',
           fileA: outC.file, aIn: srcTimeAt(outC, overlapStart), speedA: outC.speed || 1, hasAudioA: outC.hasAudio !== false, flipHA: flipA.h, flipVA: flipA.v, effectsA: outC.effects, hdrA: outC.hdr,
           fileB: inC.file, bIn: srcTimeAt(inC, overlapStart), speedB: inC.speed || 1, hasAudioB: inC.hasAudio !== false, flipHB: flipB.h, flipVB: flipB.v, effectsB: inC.effects, hdrB: inC.hdr,
           refW, refH, texts: collectTexts((overlapStart + overlapEnd) / 2),

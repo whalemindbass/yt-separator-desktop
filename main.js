@@ -185,6 +185,16 @@ function vendorPath(...parts) {
 const YTDLP_BIN  = vendorPath('yt-dlp', 'yt-dlp.exe');
 const FFMPEG_BIN = vendorPath('ffmpeg', 'ffmpeg.exe');
 const FFMPEG_DIR = vendorPath('ffmpeg');
+// 크로스페이드(같은 트랙 클립 겹침) 전환 효과 — 렌더러의 전환 선택 팝오버가 내놓는
+// transitionType 값이 실제 ffmpeg xfade 필터가 아는 이름인지 여기서 다시 확인한다
+// (렌더러 쪽 목록(TRANSITION_TYPES)과 반드시 같은 이름들이어야 한다 — ffmpeg -h
+// filter=xfade 로 확인한 정식 이름 그대로).
+const XFADE_TRANSITIONS = new Set([
+  'fade', 'fadeblack', 'fadewhite', 'dissolve',
+  'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+  'slideleft', 'slideright', 'slideup', 'slidedown',
+  'circlecrop', 'circleopen', 'circleclose', 'radial', 'pixelize', 'smoothleft',
+]);
 const FFPROBE_BIN = vendorPath('ffmpeg', 'ffprobe.exe');
 
 // ── 텍스트/타이틀 오버레이용 폰트 — 우리 폰트를 새로 번들하는 대신 Windows 에 이미 깔린
@@ -1392,7 +1402,11 @@ ipcMain.handle('video:export', async (event, payload) => {
       const xw = s.refW || 1280, xh = s.refH || 720;
       parts.push(`[${ix.a}:v]trim=start=${fsec(s.aIn)}:duration=${(s.dur * speedA).toFixed(3)}${hdrFrag(s.hdrA)},setpts=(PTS-STARTPTS)/${speedA}${flipFrag(s.flipHA, s.flipVA)}${chainFrag(s.effectsA)},${scalePad(xw, xh)}[xva${i}]`);
       parts.push(`[${ix.b}:v]trim=start=${fsec(s.bIn)}:duration=${(s.dur * speedB).toFixed(3)}${hdrFrag(s.hdrB)},setpts=(PTS-STARTPTS)/${speedB}${flipFrag(s.flipHB, s.flipVB)}${chainFrag(s.effectsB)},${scalePad(xw, xh)}[xvb${i}]`);
-      parts.push(`[xva${i}][xvb${i}]xfade=transition=fade:duration=${dur}:offset=0[v${i}]`);
+      // 렌더러가 준 문자열을 필터그래프에 그대로 꽂기 전에 화이트리스트로 확인한다 —
+      // ffmpeg xfade 가 실제로 아는 이름인지 검증해 잘못된 값이 필터 문자열 전체를
+      // 깨뜨리는 걸 막는다.
+      const transitionType = XFADE_TRANSITIONS.has(s.transitionType) ? s.transitionType : 'fade';
+      parts.push(`[xva${i}][xvb${i}]xfade=transition=${transitionType}:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
         : `[${ix.a}:a]atrim=start=${fsec(s.aIn)}:duration=${(s.dur * speedA).toFixed(3)}${atempoChain(speedA)},asetpts=PTS-STARTPTS[xaa${i}]`);
