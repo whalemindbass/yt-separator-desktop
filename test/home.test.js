@@ -39,7 +39,7 @@ let lib = [];
     버전카드: !!document.querySelector('.home-nav-card'),
   })`);
   expect('홈 페이지    ', s.페이지, 'home');
-  expect('바로 시작 3개', s.바로시작, 3);
+  expect('바로 시작 4개', s.바로시작, 4);
   expect('최근 패널 숨김', s.최근숨김, true);
   expect('공지 미리보기', s.미리보기, 2);
   expect('디스코드 숨김', s.디스코드숨김, true);

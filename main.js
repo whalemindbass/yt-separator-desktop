@@ -233,6 +233,21 @@ function resolveTextFont(key) {
 // 진단 로그 — main 프로세스 콘솔에만. 파일 기록·렌더러 전달 없음
 function dlog(...args) { console.log(...args); }
 
+// 단일 JSON 파일 하나에 상태 전체를 담아 두는 저장소들(설정·라이브러리·연습기록·영상
+// 프로젝트 등) 공용 — 실제 경로에 바로 writeFileSync 하면 쓰는 도중(강제종료·크래시·
+// 다른 프로세스가 같은 파일을 건드림) 파일이 반쯤만 쓰인 채로 남을 수 있다. 다음에 그
+// 파일을 읽으면 JSON.parse 가 깨져서 실패하고, 이 저장소들은 전부 "읽기 실패 = 빈 상태"
+// 로 다루므로(catch 에서 {}/[] 반환) 그 순간 지금까지 쌓인 기록 전체가 사라진 것처럼
+// 보인다 — 그리고 그 "빈 상태"가 다음 저장에서 그대로 다시 쓰이면 진짜로 사라진다.
+// project:autosaveWrite 하나만 이미 "임시 파일에 쓰고 바꿔치기"로 이 문제를 피해 갔다
+// (rename 은 같은 볼륨에서 원자적이라 절반짜리 파일이 생길 틈이 없다) — 나머지도 전부
+// 같은 방식을 쓰게 이 헬퍼로 묶는다.
+function writeJsonAtomic(filePath, text) {
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, text, 'utf-8');
+  fs.renameSync(tmp, filePath);
+}
+
 // ── 사용자 설정 (userData/settings.json) ────────────────
 function settingsFile() { return path.join(app.getPath('userData'), 'settings.json'); }
 function readSettings() {
@@ -240,7 +255,7 @@ function readSettings() {
   catch { return {}; }
 }
 function writeSettings(obj) {
-  try { fs.writeFileSync(settingsFile(), JSON.stringify(obj, null, 2), 'utf-8'); return true; }
+  try { writeJsonAtomic(settingsFile(), JSON.stringify(obj, null, 2)); return true; }
   catch { return false; }
 }
 
@@ -722,7 +737,7 @@ ipcMain.handle('project:autosaveWrite', (_ev, json, meta) => {
     const tmp = autosavePath() + '.tmp';
     fs.writeFileSync(tmp, String(json), 'utf8');
     fs.renameSync(tmp, autosavePath());
-    fs.writeFileSync(autosaveMetaPath(), JSON.stringify({ ...(meta || {}), at: Date.now() }), 'utf8');
+    writeJsonAtomic(autosaveMetaPath(), JSON.stringify({ ...(meta || {}), at: Date.now() }));
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
@@ -968,7 +983,7 @@ function crashPath() { return path.join(app.getPath('userData'), 'lastcrash.json
 
 function noteCrash(kind, err, extra) {
   try {
-    fs.writeFileSync(crashPath(), JSON.stringify({
+    writeJsonAtomic(crashPath(), JSON.stringify({
       at: Date.now(),
       kind,
       version: app.getVersion(),
@@ -976,7 +991,7 @@ function noteCrash(kind, err, extra) {
       // 스택은 위쪽 몇 줄이면 어디서 났는지 알기 충분하다. 경로에 사용자 이름이 섞이므로 길게 담지 않는다.
       stack: String((err && err.stack) || '').split('\n').slice(1, 7).map(s => s.trim()).join('\n').slice(0, 900),
       ...(extra || {}),
-    }), 'utf8');
+    }));
   } catch { /* 크래시를 적다가 또 죽지는 않게 */ }
 }
 
@@ -1713,7 +1728,7 @@ function loadProxyManifest() {
   try { return JSON.parse(fs.readFileSync(PROXY_MANIFEST_FILE, 'utf-8')); } catch { return {}; }
 }
 function saveProxyManifest(m) {
-  try { fs.mkdirSync(PROXY_DIR, { recursive: true }); fs.writeFileSync(PROXY_MANIFEST_FILE, JSON.stringify(m, null, 2), 'utf-8'); } catch {}
+  try { fs.mkdirSync(PROXY_DIR, { recursive: true }); writeJsonAtomic(PROXY_MANIFEST_FILE, JSON.stringify(m, null, 2)); } catch {}
 }
 // 키에 mtime·크기·목표 높이를 같이 넣어서 — 같은 경로라도 원본이 나중에 바뀌거나(다시
 // 내보내기 등) 미리보기 해상도를 다른 걸로 골랐으면(360/540/720p 선택 가능, "미리보기
@@ -2291,7 +2306,7 @@ function readLibrary() {
   } catch { return []; }
 }
 function writeLibrary(items) {
-  fs.writeFileSync(libraryFile(), JSON.stringify({ items }, null, 2), 'utf-8');
+  writeJsonAtomic(libraryFile(), JSON.stringify({ items }, null, 2));
 }
 
 ipcMain.handle('library:list', () => {
@@ -2627,7 +2642,7 @@ ipcMain.handle('usage:load', () => {
 });
 ipcMain.handle('usage:save', (_ev, data) => {
   try {
-    fs.writeFileSync(usageFile(), JSON.stringify({ log: data?.log || {}, goals: data?.goals || {} }));
+    writeJsonAtomic(usageFile(), JSON.stringify({ log: data?.log || {}, goals: data?.goals || {} }));
     return true;
   } catch { return false; }
 });
@@ -2649,7 +2664,7 @@ ipcMain.handle('videoProject:load', () => {
 });
 ipcMain.handle('videoProject:save', (_ev, data) => {
   try {
-    fs.writeFileSync(videoProjectFile(), JSON.stringify({ tracks: data?.tracks || [], clips: data?.clips || [], resolution: data?.resolution || null }));
+    writeJsonAtomic(videoProjectFile(), JSON.stringify({ tracks: data?.tracks || [], clips: data?.clips || [], resolution: data?.resolution || null }));
     return true;
   } catch { return false; }
 });
