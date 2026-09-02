@@ -110,7 +110,11 @@ const DIALOG_TEXT = {
     saveClose: '저장하고 닫기', discardClose: '저장하지 않고 닫기', cancel: '취소',
     unsavedTitle: '저장하지 않은 작업이 있습니다',
     unsavedDetail: '지금 닫으면 마지막 저장 이후의 변경을 잃습니다.',
+    exportBusyTitle: '믹스를 내보내는 중입니다',
+    exportBusyDetail: '지금 닫으면 내보낸 파일이 손상되거나 잘릴 수 있습니다.',
+    closeAnyway: '그래도 닫기',
     pickVideoDir: '영상 다운로드 폴더 선택', pickStemDir: '스템 저장 폴더 선택',
+    pickVstDir: 'VST3 플러그인 폴더 선택',
     pickSaveTo: '저장 위치 선택', pickFolder: '폴더 선택',
     projectSave: '프로젝트 저장', projectOpen: '프로젝트 열기',
     pickMedia: '분리할 영상/오디오 파일 선택',
@@ -126,7 +130,11 @@ const DIALOG_TEXT = {
     saveClose: 'Save and close', discardClose: 'Close without saving', cancel: 'Cancel',
     unsavedTitle: 'You have unsaved work',
     unsavedDetail: 'Closing now loses everything changed since the last save.',
+    exportBusyTitle: 'Exporting your mix',
+    exportBusyDetail: 'Closing now may corrupt or truncate the exported file.',
+    closeAnyway: 'Close anyway',
     pickVideoDir: 'Choose the download folder', pickStemDir: 'Choose the stem folder',
+    pickVstDir: 'Choose a VST3 plugin folder',
     pickSaveTo: 'Choose where to save', pickFolder: 'Choose a folder',
     projectSave: 'Save project', projectOpen: 'Open project',
     pickMedia: 'Choose a video or audio file to separate',
@@ -326,7 +334,29 @@ function createMainWindow() {
   // 창이 닫힌 뒤에 도는 'closed' 로는 늦다 — 그때는 이미 되돌릴 수 없다.
   let closeConfirmed = false;
   mainWindow.on('close', (e) => {
-    if (closeConfirmed || !unsavedWork) return;
+    if (closeConfirmed) return;
+    // 내보내기 중 닫으면 엔진이 message 스레드를 exportMix 에 붙잡고 있어 quit 명령을
+    // 못 받고, 뒤이은 강제 kill(will-quit)에 writer flush 없이 죽는다 — 파일이 잘린다.
+    // unsavedWork 보다 먼저 — 지금 끊기면 되돌릴 수 없는 손상이라 더 급하다.
+    if (engineExporting) {
+      e.preventDefault();
+      (async () => {
+        const win = mainWindow;
+        if (!win) return;
+        const { response } = await dialog.showMessageBox(win, {
+          type: 'warning',
+          buttons: [td('cancel'), td('closeAnyway')],
+          defaultId: 0, cancelId: 0, noLink: true,
+          message: td('exportBusyTitle'),
+          detail: td('exportBusyDetail'),
+        });
+        if (response === 0) return;   // 취소 — 내보내기 계속
+        engineExporting = false;      // 강제 진행하기로 함 — 다시 묻지 않는다
+        win.close();
+      })();
+      return;
+    }
+    if (!unsavedWork) return;
     e.preventDefault();
     (async () => {
       const win = mainWindow;
@@ -586,6 +616,31 @@ ipcMain.handle('settings:pickStemsDir', async () => {
   return { ok: true, dir };
 });
 ipcMain.handle('settings:stemsDir', () => stemsDir());
+// VST3 표준 위치(사용자 폴더 아래 VST3, Program Files\Common Files\VST3)에 안 잡히는
+// 플러그인을 위한 추가 스캔 폴더 목록. 엔진(네이티브 프로세스)은 재시작하면 아무것도
+// 기억 못 하므로 여기 저장해 뒀다가 scanPlugins 를 보낼 때마다 함께 넘긴다.
+function vstDirs() {
+  const d = readSettings().vstDirs;
+  return Array.isArray(d) ? d.filter((x) => typeof x === 'string') : [];
+}
+ipcMain.handle('settings:vstDirs', () => vstDirs());
+ipcMain.handle('settings:vstDirsAdd', async () => {
+  const res = await dialog.showOpenDialog(mainWindow || null, {
+    title: td('pickVstDir'),
+    properties: ['openDirectory'],
+  });
+  if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true, dirs: vstDirs() };
+  const dir = res.filePaths[0];
+  const cur = vstDirs();
+  if (!cur.includes(dir)) cur.push(dir);
+  writeSettings({ ...readSettings(), vstDirs: cur });
+  return { ok: true, dirs: cur };
+});
+ipcMain.handle('settings:vstDirsRemove', (_ev, dir) => {
+  const cur = vstDirs().filter((d) => d !== dir);
+  writeSettings({ ...readSettings(), vstDirs: cur });
+  return { ok: true, dirs: cur };
+});
 ipcMain.handle('settings:calcDiskUsage', () => {
   const dlDir  = downloadsDir();
   const modDir = path.join(app.getPath('userData'), 'models');
@@ -688,6 +743,9 @@ ipcMain.handle('project:autosaveClear', () => {
 // 저장 안 한 변경이 있는지 렌더러가 알려 준다 — 창을 닫을 때 물어보기 위해서다
 let unsavedWork = false;
 ipcMain.on('project:dirty', (_ev, v) => { unsavedWork = !!v; });
+// 스튜디오 믹스 내보내기 진행 중인지 — 창을 닫을 때 물어보기 위해서다(getEngine 의
+// 'export' cmd 가로채기 / exportDone·exportError 이벤트에서 갱신)
+let engineExporting = false;
 
 ipcMain.handle('project:open', async () => {
   const res = await dialog.showOpenDialog(mainWindow || null, {
@@ -976,13 +1034,17 @@ function repairWav(file) {
 function getEngine() {
   if (!audioEngine) {
     audioEngine = new AudioEngine();
-    audioEngine.on('event', (m) => { try { mainWindow?.webContents.send('engine:event', m); } catch {} });
+    audioEngine.on('event', (m) => {
+      if (m && (m.ev === 'exportDone' || m.ev === 'exportError')) engineExporting = false;
+      try { mainWindow?.webContents.send('engine:event', m); } catch {}
+    });
     audioEngine.on('log',   (s) => { try { mainWindow?.webContents.send('engine:event', { ev: 'log', msg: String(s) }); } catch {} });
     // Node 의 EventEmitter 는 'error' 를 예약해 뒀다 — 리스너가 하나도 없으면 emit 이 조용히
     // 무시되는 게 아니라 던져져서 이 프로세스(= 앱 전체)를 죽인다. 실제 오류 전달은 위
     // 'event' 리스너가 이미 하고 있으니, 여기 리스너는 그 크래시를 막는 것 말고 할 일이 없다.
     audioEngine.on('error', (e) => { console.error('[engine] error event:', e); });
     audioEngine.on('exit',  (c, crashed) => {
+      engineExporting = false;   // 엔진이 죽었으면 내보내기도 끝난 것(실패든 뭐든) — 닫기를 막을 이유 없음
       // 죽었는데 녹음 중이었다면 쓰다 만 WAV 가 남아 있다. 헤더를 고쳐 되살릴 수 있게 넘긴다.
       let take = null;
       if (crashed && lastRecordFile) take = repairWav(lastRecordFile);
@@ -1011,6 +1073,10 @@ function summarizeCmd(cmd) {
 ipcMain.handle('engine:cmd',  (_e, cmd) => {
   // 정상적으로 멈췄으면 파일은 엔진이 마무리한다 — 되살릴 대상이 아니다
   if (cmd && cmd.cmd === 'recordStop') lastRecordFile = null;
+  if (cmd && cmd.cmd === 'export') engineExporting = true;   // exportDone/exportError/exit 에서 해제
+  // 엔진은 재시작하면 사용자가 추가한 VST 폴더를 기억 못 한다 — 스캔할 때마다 여기서 채워 넣는다.
+  // 렌더러(scanPlugins() 호출부)는 이 폴더들의 존재를 몰라도 된다.
+  if (cmd && cmd.cmd === 'scanPlugins') cmd = { ...cmd, paths: vstDirs() };
   lastEngineCmd = summarizeCmd(cmd);
   return { ok: getEngine().send(cmd) };
 });

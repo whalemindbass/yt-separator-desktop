@@ -2972,8 +2972,12 @@ function reconnectSavedDevice(d) {
   });
   return true;
 }
-function openDevModal(d) {
+let _devModalGen = 0;   // 'devices' 이벤트마다 다시 부르므로, 늦게 도착한 렌더가 새 걸 덮어쓰지 않게
+async function openDevModal(d) {
+  const gen = ++_devModalGen;
   const host = $('daw-modal');
+  const vstDirs = await api.settings.vstDirs();
+  if (gen !== _devModalGen) return;   // 그 사이 다시 불렸으면(새 'devices' 이벤트 등) 이 렌더는 버린다
   const opts = (arr, cur) => (arr || []).map(v => `<option value="${v}" ${String(v) === String(cur) ? 'selected' : ''}>${v}</option>`).join('');
   const curType = (d.types || []).find(t => t.name === d.currentType) || (d.types || [])[0] || { outputs: [], inputs: [] };
   const rates = (d.rates && d.rates.length ? d.rates : [44100, 48000, 96000]).map(r => Math.round(r));
@@ -3000,10 +3004,34 @@ function openDevModal(d) {
       <div class="dev-field"><span>${tr('studio.x.inputSignal')}</span><div class="dev-inmeters" id="dv-inmeters">${
         chNames.map((n, i) => `<div class="dev-inm"><b>${i + 1}</b><i data-ch="${i}"></i><em>${esc(n)}</em></div>`).join('')
       }</div></div>
+      <div class="dev-sep"></div>
+      <div class="dev-field" style="flex-direction:column;align-items:stretch;gap:6px">
+        <span>${tr('studio.x.vstFolders')}</span>
+        <div style="font-size:11px;opacity:.6">${tr('studio.x.vstFolderHint')}</div>
+        <div id="dv-vst-list" style="display:flex;flex-direction:column;gap:4px">${
+          vstDirs.length ? vstDirs.map(dir => `<div class="dev-vst-row" style="display:flex;align-items:center;gap:6px">
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px" title="${esc(dir)}">${esc(dir)}</span>
+              <button class="mini dv-vst-rm" data-dir="${esc(dir)}">✕</button>
+            </div>`).join('')
+            : `<div style="font-size:12px;opacity:.5">${tr('studio.x.vstFolderEmpty')}</div>`
+        }</div>
+        <button class="mini" id="dv-vst-add" style="align-self:flex-start">${tr('studio.x.vstFolderAdd')}</button>
+      </div>
       <div style="display:flex;justify-content:flex-end"><button class="mini" id="dv-apply">${tr('studio.x.apply')}</button></div>
     </div></div>`;
   host.hidden = false;
   host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  $('dv-vst-add').addEventListener('click', async () => {
+    const res = await api.settings.vstDirsAdd();
+    if (res.canceled) return;
+    api.engine.scanPlugins();       // 새 폴더 포함해 다시 스캔 (main 이 저장된 목록을 자동으로 실어 보냄)
+    openDevModal(d);                // 목록 다시 그림
+  });
+  host.querySelectorAll('.dv-vst-rm').forEach(btn => btn.addEventListener('click', async () => {
+    await api.settings.vstDirsRemove(btn.dataset.dir);
+    api.engine.scanPlugins();
+    openDevModal(d);
+  }));
   // 모노/스테레오 전환 — 스테레오일 때만 오른쪽 채널을 고른다
   $('dv-inmode').addEventListener('change', (e) => {
     const st = e.target.value === '1';
@@ -3109,7 +3137,8 @@ function onEngineEvent(m) {
       break;
     }
     case 'fxError':
-      flashTake(tr('studio.p.fxLoadFail', { n: m.failed }));
+      if (m.reason === 'channels' && m.plugin) flashTake(tr('studio.p.fxLoadFailChannels', { name: m.plugin }));
+      else flashTake(tr('studio.p.fxLoadFail', { n: m.failed }));
       break;
     case 'exportProgress':
       flashTake(tr('studio.p.exporting', { pct: Math.round(m.pct) }));
@@ -3237,6 +3266,12 @@ function onEngineEvent(m) {
       })();
       break;
     case 'exit':
+      // handleEngineCrash 의 복구 스냅샷(buildProjectObject({skipFx:true}), await 없이
+      // 동기 실행됨)은 반드시 아래 _recTracks 등을 비우기 전에 먼저 시작해야 한다 —
+      // 순서가 뒤바뀌어 있던 예전 코드는 스냅샷이 이미 빈 배열을 찍어서, 크래시 직후
+      // 되살아난 엔진에 녹음 트랙이 통째로 사라졌다(실제 제보: 새 녹음트랙 만들고
+      // 싱크룸 VST 로드 → 엔진이 크래시로 재시작되며 방금 만든 트랙이 없어짐).
+      if (m.crashed) handleEngineCrash(m);   // 우리가 끝낸 것이 아니면 되살린다
       _started = false; _playing = false;
       setEngineStatus('off');
       $('st-engine-dot').classList.remove('on');
@@ -3245,7 +3280,6 @@ function onEngineEvent(m) {
       _chain = []; _chainByTrack = {}; _selTrack = null; _recTracks = [];
       _recArmed = false; $('st-rec').classList.remove('armed'); clearRecLive();   // 재시작 후 녹음버튼 잔상 방지
       _activePresetId = null; renderFxSlots(); renderRecLanes(); updateFxPanel();
-      if (m.crashed) handleEngineCrash(m);   // 우리가 끝낸 것이 아니면 되살린다
       setEnabled(false);
       break;
     case 'error': setEngineStatus('error'); break;
@@ -3269,9 +3303,10 @@ function renderFxSlots() {
     const row = document.createElement('div');
     row.className = 'daw-fx-slot' + (s.bypass ? ' bypassed' : '');
     row.draggable = true; row.dataset.id = s.id;
+    const wideTag = s.wideOut > 2 ? `<span class="fx-wide-tag" title="${esc(tr('studio.t.fxWideHint', { n: s.wideOut }))}">${tr('studio.t.fxWideBadge')}</span>` : '';
     row.innerHTML = `<span class="drag" title="${tr('studio.t.dragReorder')}">⠿</span>
       <span class="pw ${s.bypass ? '' : 'on'}" title="${tr('studio.t.clickToggle')}"></span>
-      <div class="info"><div class="n">${s.name}</div></div>
+      <div class="info"><div class="n">${s.name}${wideTag}</div></div>
       <button class="ed" title="${tr('studio.t.edit')}" ${s.hasEditor ? '' : 'disabled'}>✎</button>
       <button class="del" title="${tr('studio.t.delete')}">✕</button>`;
     const pw = row.querySelector('.pw');

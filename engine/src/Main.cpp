@@ -57,6 +57,21 @@ struct FxSlot
     int id = 0;
     int descIndex = -1;          // scanned 내 위치 (재스캔 시 흔들릴 수 있음)
     PluginDescription desc;      // 안정 식별자 — export 는 이걸로 재생성
+    // 멀티버스 플러그인(예: SyncRoom VST bridge — 톤을 만들어 보내면 참가자별 리턴을
+    // 버스로 나눠 준다) 전용. 0 이면 일반 2ch 플러그인, processBlock 을 체인 버퍼에 바로.
+    // 0 초과면 이 슬롯만 wideBuf(실제 채널 수)로 따로 처리하고 메인 버스(첫 2채널)만
+    // 체인에 반영한다 — configurePlugin() 의 주석 참고.
+    int wideIn = 0, wideOut = 0;
+    AudioBuffer<float> wideBuf;  // 오디오 스레드 전용
+};
+
+// export(오프라인 렌더)용 — FxSlot 과 같은 wide 처리를 쓰지만 편집 UI(에디터·bypass 등)가
+// 필요 없어 더 가벼운 구조로 둔다. bypass 된 슬롯은 export 쪽에서 애초에 목록에 안 넣는다.
+struct WideFx
+{
+    std::unique_ptr<AudioPluginInstance> plugin;
+    int wideIn = 0, wideOut = 0;
+    AudioBuffer<float> wideBuf;
 };
 
 struct Stem
@@ -92,21 +107,33 @@ struct Stem
 };
 
 // 플러그인 에디터를 담는 네이티브 창
+// AudioProcessor 는 에디터를 소유하지 않는다 — 만든 쪽(host, 여기)이 책임지고 지워야
+// 하며, 지우기 전에 반드시 processor->editorBeingDeleted() 를 불러야 한다(JUCE 규약,
+// AudioProcessorEditor 소멸자가 그걸 스스로 하지 않고 "이미 불렸어야 한다"고 assert만
+// 한다). 예전엔 setContentNonOwned 를 써서 창이 실제 에디터를 지우지 않았다 — 즉 FX
+// 제거·프리셋 교체·트랙 삭제로 창이 닫힐 때마다 VST3 IPlugView 같은 무거운 네이티브
+// GUI 객체가 그대로 새 나가 세션이 길어질수록 쌓였다. setContentOwned 로 실제 소유하고,
+// 소멸자에서 editorBeingDeleted 를 먼저 불러 processor 쪽 매달린 포인터도 남기지 않는다.
 class PluginWindow : public DocumentWindow
 {
 public:
-    PluginWindow (AudioProcessorEditor* editor, const String& title)
-        : DocumentWindow (title, Colours::black, DocumentWindow::allButtons)
+    PluginWindow (AudioProcessor& proc, AudioProcessorEditor* editor, const String& title)
+        : DocumentWindow (title, Colours::black, DocumentWindow::allButtons),
+          processor (proc), editorComp (editor)
     {
         setUsingNativeTitleBar (true);
-        setContentNonOwned (editor, true);   // 에디터는 플러그인(processor)이 소유
+        setContentOwned (editor, true);
         setResizable (editor->isResizable(), false);
         centreWithSize (getWidth(), getHeight());
         setAlwaysOnTop (true);               // 앱 위에 떠 있도록 (플러그인 에디터 표준)
         setVisible (true);
         toFront (true);
     }
+    ~PluginWindow() override { processor.editorBeingDeleted (editorComp); }   // 실제 delete(베이스 소멸자) 전에
     void closeButtonPressed() override { setVisible (false); }
+private:
+    AudioProcessor& processor;
+    AudioProcessorEditor* editorComp;
 };
 
 // 녹음/임포트 클립 재생 — 디바이스 SR 로 리샘플된 메모리 버퍼(오디오 스레드 디스크 I/O 없음)
@@ -235,6 +262,60 @@ static inline void applyDelayLine (AudioBuffer<float>& buf, int n,
         endPos = w;
     }
     writePos = endPos;
+}
+
+// 플러그인을 우리가 쓸 수 있는 구성으로 맞춘다. 실패하면 false — 호출부는 인스턴스를 버려야 한다.
+// wideIn/wideOut 에 결과를 채운다: 0 이면 일반 2ch 플러그인(체인 버퍼에 바로 processBlock).
+// 0 초과면 멀티버스 플러그인 — 그 실제 채널 수를 담았다는 뜻이고, 호출부는 FxSlot::wideBuf
+// (또는 export 쪽 대응 버퍼)로 이 슬롯만 따로 돌려야 한다(runWide() 참고).
+//
+//   실제 사고: SyncRoom VST bridge(입력 1버스, 출력 10버스 — 톤을 만들어 보내면 참가자별
+//   리턴을 버스로 나눠 준다) 를 2ch 로 강제하면(예전 setPlayConfigDetails(2,2,...)) 로드는
+//   되는데 몇 블록 뒤 크래시했다. checkBusesLayoutSupported+setBusesLayout 로 나머지 9개
+//   버스를 정식으로 비활성화해도(협상 자체는 성공, getTotalNumOutputChannels() 도 2 로
+//   정확히 내려옴) 여전히 크래시 — 이 플러그인은 비활성화한 버스를 실제로는 무시하고
+//   processBlock 안에서 원래 채널 수만큼 계속 쓰는 것으로 보인다(host 협상을 존중 안 하는
+//   서드파티 버그). "협상해서 2ch 로 줄이면 된다"는 전제 자체가 안 통했다.
+//   그래서 버스가 여럿이면 아예 줄이려 하지 않는다 — 원래 레이아웃 그대로 인정하고 실제
+//   채널 수에 맞는 전용 버퍼로 그 슬롯만 넓게 돌린다. 메인 버스(첫 2채널)만 체인에
+//   반영하고 나머지(다른 참가자 버스)는 지금은 버린다 — 엔진이 armed 트랙 하나만 지원해
+//   개별 참가자를 동시에 따로 녹음할 방법 자체가 아직 없다(별도 과제).
+static bool configurePlugin (AudioPluginInstance& inst, double sr, int block, int& wideIn, int& wideOut)
+{
+    wideIn = wideOut = 0;
+    if (inst.getBusCount (true) <= 1 && inst.getBusCount (false) <= 1)
+    {
+        AudioProcessor::BusesLayout layout;
+        if (inst.getBusCount (true)  > 0) layout.inputBuses.add  (AudioChannelSet::stereo());
+        if (inst.getBusCount (false) > 0) layout.outputBuses.add (AudioChannelSet::stereo());
+        if (! inst.checkBusesLayoutSupported (layout) || ! inst.setBusesLayout (layout))
+            return false;
+        inst.prepareToPlay (sr, block);
+        // 협상이 "성공"으로 나와도 최종 채널 수가 2 를 넘으면 우리 고정 2ch 버퍼를 벗어난다 —
+        // 벨트+서스펜더로 여기서 한 번 더 확인한다.
+        return inst.getTotalNumInputChannels() <= 2 && inst.getTotalNumOutputChannels() <= 2;
+    }
+    // 멀티버스 — 줄이지 않고 원래 레이아웃 그대로 prepareToPlay.
+    inst.prepareToPlay (sr, block);
+    wideIn  = inst.getTotalNumInputChannels();
+    wideOut = inst.getTotalNumOutputChannels();
+    return wideIn > 0 || wideOut > 0;   // 채널이 아예 없으면 쓸모없다 — 거부
+}
+
+// wide(멀티버스) 슬롯 처리 — buf(체인의 고정 2ch 버퍼) 의 첫 2채널을 플러그인의 실제 입력
+// 채널 수만큼 넓은 wideBuf 로 복사 → processBlock → 결과의 첫 2채널만 buf 로 되돌린다.
+// wideOut 이 1(모노 리턴)이면 양쪽에 같은 신호를 채운다.
+static void runWide (AudioPluginInstance& plugin, int wideIn, int wideOut, AudioBuffer<float>& wideBuf,
+                      AudioBuffer<float>& buf, int n)
+{
+    wideBuf.setSize (jmax (wideIn, wideOut), n, false, false, true);
+    wideBuf.clear();
+    for (int c = 0; c < jmin (2, wideIn); ++c)
+        wideBuf.copyFrom (c, 0, buf, jmin (c, buf.getNumChannels() - 1), 0, n);
+    MidiBuffer mm;
+    plugin.processBlock (wideBuf, mm);
+    for (int c = 0; c < jmin (2, wideOut); ++c) buf.copyFrom (c, 0, wideBuf, c, 0, n);
+    if (wideOut == 1 && buf.getNumChannels() > 1) buf.copyFrom (1, 0, buf, 0, 0, n);
 }
 
 // 미터 노이즈 게이트 — 인터페이스 입력 노이즈 플로어가 미터를 계속 튀게 하므로
@@ -386,7 +467,10 @@ public:
     }
 
     // ---- VST3 호스팅 ----
-    void scanPlugins()
+    // extraDirs: 표준 위치에 안 잡히는 VST3 를 위해 사용자가 지정한 폴더(설정에 저장,
+    // 매 스캔마다 렌더러가 다시 보냄 — 엔진은 재시작하면 아무것도 기억 못 하므로).
+    // 존재하지 않거나 폴더가 아니면 조용히 건너뛴다(지워진 폴더를 계속 가리켜도 안전).
+    void scanPlugins (const StringArray& extraDirs = {})
     {
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
         scanned.clear();
@@ -395,6 +479,12 @@ public:
         Array<File> files;
         for (int i = 0; i < paths.getNumPaths(); ++i)
             paths[i].findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
+        for (auto& d : extraDirs)
+        {
+            const File f (d);
+            if (f.isDirectory())
+                f.findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
+        }
 
         StringArray seen;   // 중복 제거 (같은 플러그인 여러 번 반환되는 것 방지)
         for (auto& f : files)
@@ -476,6 +566,7 @@ public:
             o->setProperty ("name", s->plugin->getName());
             o->setProperty ("hasEditor", s->plugin->hasEditor());
             o->setProperty ("bypass", s->bypass.load());
+            if (s->wideOut > 0) { o->setProperty ("wideIn", s->wideIn); o->setProperty ("wideOut", s->wideOut); }
             list.add (var (o));
         }
         auto* r = ev ("fxChain");
@@ -492,12 +583,23 @@ public:
         String err;
         auto inst = pluginFmt.createPluginInstance (scanned[index], deviceSampleRate, blockSize, err);
         if (inst == nullptr) { std::cerr << "[engine] load failed: " << err << "\n"; return; }
-        inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
-        inst->prepareToPlay (deviceSampleRate, blockSize);
+        int wIn = 0, wOut = 0;
+        if (! configurePlugin (*inst, deviceSampleRate, blockSize, wIn, wOut))
+        {
+            std::cerr << "[engine] addFx: " << scanned[index].name << " — 지원하지 않는 입출력 구성이라 거부함\n";
+            auto* e = ev ("fxError");
+            e->setProperty ("trackId", trackId);
+            e->setProperty ("failed", 1);
+            e->setProperty ("reason", "channels");
+            e->setProperty ("plugin", scanned[index].name);
+            emit (var (e));
+            return;
+        }
         auto slot = std::make_unique<FxSlot>();
         slot->id = nextSlotId++;
         slot->descIndex = index;
         slot->desc = scanned[index];
+        slot->wideIn = wIn; slot->wideOut = wOut;
         slot->plugin = std::move (inst);
         { const ScopedLock sl (*lk); chain->push_back (std::move (slot)); }
         recomputePdc();
@@ -1122,7 +1224,7 @@ public:
         auto* s = findSlotIn (*chain, id);
         if (s == nullptr || s->plugin == nullptr || ! s->plugin->hasEditor()) return;
         if (s->editor != nullptr) { s->editor->setVisible (true); s->editor->toFront (true); return; }
-        s->editor.reset (new PluginWindow (s->plugin->createEditorIfNeeded(), s->plugin->getName()));
+        s->editor.reset (new PluginWindow (*s->plugin, s->plugin->createEditorIfNeeded(), s->plugin->getName()));
         s->editor->toFront (true);
     }
     void clearChainVec (FxChainVec& chain, CriticalSection& lock)
@@ -1150,8 +1252,13 @@ public:
                 String err;
                 auto inst = pluginFmt.createPluginInstance (scanned[index], deviceSampleRate, blockSize, err);
                 if (inst == nullptr) { ++failed; std::cerr << "[engine] setChain load failed: " << err << "\n"; continue; }
-                inst->setPlayConfigDetails (2, 2, deviceSampleRate, blockSize);
-                inst->prepareToPlay (deviceSampleRate, blockSize);
+                int wIn = 0, wOut = 0;
+                if (! configurePlugin (*inst, deviceSampleRate, blockSize, wIn, wOut))
+                {
+                    ++failed;
+                    std::cerr << "[engine] setChain: " << scanned[index].name << " — 지원하지 않는 구성, 건너뜀\n";
+                    continue;
+                }
                 const String data = v["data"].toString();
                 if (data.isNotEmpty()) { MemoryOutputStream mo; if (Base64::convertFromBase64 (mo, data)) inst->setStateInformation (mo.getData(), (int) mo.getDataSize()); }
                 auto slot = std::make_unique<FxSlot>();
@@ -1159,6 +1266,7 @@ public:
                 slot->descIndex = index;
                 slot->desc = scanned[index];
                 slot->bypass = (bool) v["bypass"];
+                slot->wideIn = wIn; slot->wideOut = wOut;
                 slot->plugin = std::move (inst);
                 next.push_back (std::move (slot));
             }
@@ -1204,7 +1312,7 @@ public:
                     std::unique_ptr<ResamplingAudioSource> rs; int64 nextPos = -1;
                     float gain; bool audible;
                     bool autoOn; std::vector<AutoPoint> autoPts;
-                    std::vector<std::unique_ptr<AudioPluginInstance>> fx; int latency = 0;
+                    std::vector<WideFx> fx; int latency = 0;
                     AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
                     float panL = 1.0f, panR = 1.0f; };
         std::vector<SR> srs;
@@ -1246,11 +1354,11 @@ public:
                             auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
                             if (inst == nullptr) continue;
                             MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                            inst->setPlayConfigDetails (2, 2, sr, block);
-                            inst->prepareToPlay (sr, block);
+                            int wIn = 0, wOut = 0;
+                            if (! configurePlugin (*inst, sr, block, wIn, wOut)) continue;
                             inst->setStateInformation (mb.getData(), (int) mb.getSize());
                             sr2.latency += jmax (0, inst->getLatencySamples());
-                            sr2.fx.push_back (std::move (inst));
+                            sr2.fx.push_back ({ std::move (inst), wIn, wOut, {} });
                         }
                         catch (const std::exception& ex)
                         {
@@ -1263,7 +1371,7 @@ public:
 
         // 트랙: 테이크 버퍼 스냅샷 + 프레시 FX 인스턴스(라이브 체인 상태 복제)
         struct TR { AudioBuffer<float> buf; int64 start; int64 len; int64 inOffset; int64 fadeIn; int64 fadeOut; };
-        struct TRK { float gain; bool audible; std::vector<std::unique_ptr<AudioPluginInstance>> fx; std::vector<TR> takes;
+        struct TRK { float gain; bool audible; std::vector<WideFx> fx; std::vector<TR> takes;
                      bool autoOn; std::vector<AutoPoint> autoPts; int latency = 0;
                      AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
                      float panL = 1.0f, panR = 1.0f; };
@@ -1290,11 +1398,11 @@ public:
                             auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
                             if (inst == nullptr) continue;
                             MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                            inst->setPlayConfigDetails (2, 2, sr, block);
-                            inst->prepareToPlay (sr, block);
+                            int wIn = 0, wOut = 0;
+                            if (! configurePlugin (*inst, sr, block, wIn, wOut)) continue;
                             inst->setStateInformation (mb.getData(), (int) mb.getSize());
                             tk.latency += jmax (0, inst->getLatencySamples());
-                            tk.fx.push_back (std::move (inst));
+                            tk.fx.push_back ({ std::move (inst), wIn, wOut, {} });
                         }
                         catch (const std::exception& ex)
                         {
@@ -1332,7 +1440,7 @@ public:
         os.release();
 
         // 센드 버스 — 실시간과 같은 결과가 나오도록 FX 를 오프라인 인스턴스로 복제
-        struct BUSX { std::vector<std::unique_ptr<AudioPluginInstance>> fx; float gain = 1.0f; bool mute = false; };
+        struct BUSX { std::vector<WideFx> fx; float gain = 1.0f; bool mute = false; };
         BUSX busx[kNumBuses];
         for (int b = 0; b < kNumBuses; ++b)
         {
@@ -1348,10 +1456,10 @@ public:
                     auto inst = pluginFmt.createPluginInstance (slot->desc, sr, block, err);
                     if (inst == nullptr) continue;
                     MemoryBlock mb; slot->plugin->getStateInformation (mb);
-                    inst->setPlayConfigDetails (2, 2, sr, block);
-                    inst->prepareToPlay (sr, block);
+                    int wIn = 0, wOut = 0;
+                    if (! configurePlugin (*inst, sr, block, wIn, wOut)) continue;
                     inst->setStateInformation (mb.getData(), (int) mb.getSize());
-                    busx[b].fx.push_back (std::move (inst));
+                    busx[b].fx.push_back ({ std::move (inst), wIn, wOut, {} });
                 }
                 catch (const std::exception& ex)
                 {
@@ -1417,8 +1525,11 @@ public:
                 if (! r.fx.empty())   // 스템 FX 체인 (실시간과 동일하게 적용)
                 {
                     AudioBuffer<float> pb (sbuf.getArrayOfWritePointers(), 2, n);
-                    MidiBuffer mm;
-                    for (auto& fxp : r.fx) fxp->processBlock (pb, mm);
+                    for (auto& fxp : r.fx)
+                    {
+                        if (fxp.wideOut > 0) runWide (*fxp.plugin, fxp.wideIn, fxp.wideOut, fxp.wideBuf, pb, n);
+                        else { MidiBuffer mm; fxp.plugin->processBlock (pb, mm); }
+                    }
                 }
                 if (r.pdcD > 0) applyDelayLine (sbuf, n, r.pdc, r.pdcW, r.pdcD);
                 if (r.audible)
@@ -1469,7 +1580,14 @@ public:
                     any = true;
                 }
                 if (! any && tk.fx.empty()) continue;
-                { AudioBuffer<float> pb (tbuf.getArrayOfWritePointers(), 2, n); MidiBuffer mm; for (auto& f : tk.fx) f->processBlock (pb, mm); }
+                {
+                    AudioBuffer<float> pb (tbuf.getArrayOfWritePointers(), 2, n);
+                    for (auto& f : tk.fx)
+                    {
+                        if (f.wideOut > 0) runWide (*f.plugin, f.wideIn, f.wideOut, f.wideBuf, pb, n);
+                        else { MidiBuffer mm; f.plugin->processBlock (pb, mm); }
+                    }
+                }
                 if (tk.pdcD > 0) applyDelayLine (tbuf, n, tk.pdc, tk.pdcW, tk.pdcD);
                 {
                     const float g0 = (tk.autoOn ? autoValueAt (tk.autoPts, pos)     : tk.gain) * mg;
@@ -1499,8 +1617,11 @@ public:
                 if (! busx[b].fx.empty())
                 {
                     AudioBuffer<float> pb (bbuf[b].getArrayOfWritePointers(), 2, n);
-                    MidiBuffer mm;
-                    for (auto& f : busx[b].fx) f->processBlock (pb, mm);
+                    for (auto& f : busx[b].fx)
+                    {
+                        if (f.wideOut > 0) runWide (*f.plugin, f.wideIn, f.wideOut, f.wideBuf, pb, n);
+                        else { MidiBuffer mm; f.plugin->processBlock (pb, mm); }
+                    }
                 }
                 const float bg = busx[b].mute ? 0.0f : busx[b].gain;
                 if (bg != 0.0f) for (int c = 0; c < 2; ++c) mix.addFrom (c, 0, bbuf[b], c, 0, n, bg);
@@ -1639,7 +1760,11 @@ public:
                 const ScopedTryLock fl (b.fxLock);
                 if (fl.isLocked())
                     for (auto& s : b.chain)
-                        if (s && s->plugin && ! s->bypass.load()) { MidiBuffer mm; s->plugin->processBlock (b.buf, mm); }
+                        if (s && s->plugin && ! s->bypass.load())
+                        {
+                            if (s->wideOut > 0) runWide (*s->plugin, s->wideIn, s->wideOut, s->wideBuf, b.buf, numSamples);
+                            else { MidiBuffer mm; s->plugin->processBlock (b.buf, mm); }
+                        }
             }
             const float tgt = b.mute.load() ? 0.0f : b.gain.load();
             const float* bL = b.buf.getReadPointer (0);
@@ -1701,7 +1826,11 @@ public:
                     for (int c = 0; c < stemFxBuf.getNumChannels(); ++c)
                         stemFxBuf.copyFrom (c, 0, scratch, jmin (c, scratch.getNumChannels() - 1), 0, numSamples);
                     for (auto& sl : s->chain)
-                        if (sl && sl->plugin && ! sl->bypass.load()) { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
+                        if (sl && sl->plugin && ! sl->bypass.load())
+                        {
+                            if (sl->wideOut > 0) runWide (*sl->plugin, sl->wideIn, sl->wideOut, sl->wideBuf, stemFxBuf, numSamples);
+                            else { MidiBuffer mm; sl->plugin->processBlock (stemFxBuf, mm); }
+                        }
                     srcBuf = &stemFxBuf;
                 }
                 {   // PDC — 다른 트랙의 플러그인 지연에 맞춰 이 트랙을 늦춤
@@ -1816,8 +1945,8 @@ public:
                             for (auto& s : rt->chain)
                                 if (s && s->plugin && ! s->bypass.load())
                                 {
-                                    MidiBuffer mm;
-                                    s->plugin->processBlock (fxBuf, mm);
+                                    if (s->wideOut > 0) runWide (*s->plugin, s->wideIn, s->wideOut, s->wideBuf, fxBuf, numSamples);
+                                    else { MidiBuffer mm; s->plugin->processBlock (fxBuf, mm); }
                                 }
                     }
 
@@ -2153,7 +2282,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
-    else if (cmd == "scanPlugins") engine.scanPlugins();
+    else if (cmd == "scanPlugins") { StringArray extra; if (auto* a = c["paths"].getArray()) for (auto& v : *a) extra.add (v.toString()); engine.scanPlugins (extra); }
     else if (cmd == "fxAdd")       engine.addFx ((int) c["track"], (int) c["index"]);
     else if (cmd == "fxRemove")    engine.removeFx ((int) c["track"], (int) c["slot"]);
     else if (cmd == "fxReorder")   { Array<int> o; if (auto* a = c["order"].getArray()) for (auto& v : *a) o.add ((int) v); engine.reorderFx ((int) c["track"], o); }

@@ -77,6 +77,8 @@ $('theme-toggle').addEventListener('click', () => {
   document.documentElement.dataset.theme = next;
   localStorage.setItem('theme', next);
 });
+const DONATE_URL = 'https://litt.ly/whalemindbass';
+$('donate-btn')?.addEventListener('click', () => api.openExternal(DONATE_URL));
 
 // ── 탭 라우팅 ─────────────────────────────────
 const tabs = document.querySelectorAll('.tab');
