@@ -489,6 +489,10 @@ body { display: flex; flex-direction: column; }
   font-weight: 600;
 }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-fg); }
+/* 내보내는 중 — 같은 버튼이 취소를 겸한다. 진행률(accent)은 그대로 두고 호버해야만
+   "그만두려는 건가?" 가 보이게 danger 색으로 슬쩍 바뀐다(항상 빨갛게 두면 진행 중임을
+   실패로 오해하기 쉽다). */
+#ve-export.exporting:hover:not(:disabled) { background: var(--danger); color: #fff; }
 /* 비활성 프라이머리 — 살짝 어두운 accent tint + 밝은 텍스트로 가독성 확보 */
 .btn.primary:disabled { background: color-mix(in srgb, var(--accent) 20%, var(--elev)); color: color-mix(in srgb, var(--accent-fg) 55%, var(--tx-1)); border-color: color-mix(in srgb, var(--accent) 25%, transparent); opacity: 1; }
 

@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('yssApi', {
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),
     export: (payload) => ipcRenderer.invoke('video:export', payload),
+    exportCancel: () => ipcRenderer.invoke('video:exportCancel'),
     gpuInfo: () => ipcRenderer.invoke('video:gpuInfo'),
     detectSilence: (file, start, end, opts) => ipcRenderer.invoke('video:detectSilence', file, start, end, opts),
     saveShapeImage: (key, data) => ipcRenderer.invoke('video:saveShapeImage', key, data),

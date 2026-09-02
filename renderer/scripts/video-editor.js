@@ -3724,6 +3724,7 @@ function openExportModal() {
       </div>`;
   });
 }
+let _exporting = false;   // 켜져 있는 동안 내보내기 버튼이 취소 버튼을 겸한다
 async function runExport(format, res, fps, gpu) {
   const segs = buildEDL();
   if (!segs.length) { flash(tr('video.needImport')); return; }
@@ -3733,15 +3734,23 @@ async function runExport(format, res, fps, gpu) {
   setPlaying(false);
   const btn = $('ve-export');
   const label = btn?.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = '0%'; }
+  _exporting = true;
+  // disabled 로 잠그지 않는다 — 진행 중엔 같은 버튼을 눌러 취소할 수 있어야 한다
+  // (클릭 핸들러가 _exporting 을 보고 분기, 아래).
+  if (btn) { btn.classList.add('exporting'); btn.textContent = '0%'; btn.title = tr('video.exportCancelHint'); }
   const totalSec = segs.reduce((s, x) => s + (x.dur != null ? x.dur : (x.end - x.start)), 0) || 1;
   const off = api.video.onExportProgress(({ outTimeMs }) => {
     if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
   });
   let result;
   try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps, gpu }); }
-  finally { off?.(); if (btn) { btn.disabled = false; btn.textContent = label; } }
-  flash(result.ok ? tr('video.exportDone') : tr('video.exportFail', { err: result.error || '' }));
+  finally {
+    off?.();
+    _exporting = false;
+    if (btn) { btn.classList.remove('exporting'); btn.textContent = label; btn.title = ''; }
+  }
+  if (result.cancelled) flash(tr('video.exportCancelled'));
+  else flash(result.ok ? tr('video.exportDone') : tr('video.exportFail', { err: result.error || '' }));
 }
 
 // ── 임포트 ──────────────────────────────────────────
@@ -4051,7 +4060,10 @@ function wire() {
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });
-  $('ve-export')?.addEventListener('click', () => openExportModal());
+  $('ve-export')?.addEventListener('click', () => {
+    if (_exporting) { api.video.exportCancel(); return; }
+    openExportModal();
+  });
   $('ve-lyrics')?.addEventListener('click', () => toggleLyricsPanel());
   $('ve-lyric-close')?.addEventListener('click', () => finishLyricTiming(true));
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는

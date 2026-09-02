@@ -1190,6 +1190,17 @@ function h264EncodeArgs(useGpu, crfH264) {
     ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', String(crfH264), '-b:v', '0', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k']
     : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crfH264), '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k'];
 }
+// 영상 export 취소 — 한 번에 하나만 돈다(렌더러가 진행 중엔 새 export 를 막는다)는
+// 전제로 프로세스 하나만 들고 있는다. 실제 kill·"취소됨" 판정은 video:export 핸들러
+// 안에서 한다 — 여긴 그 핸들러가 참조할 상태를 바꿔 주기만 한다.
+let activeExportProc = null;
+let activeExportCancelled = false;
+ipcMain.handle('video:exportCancel', () => {
+  if (!activeExportProc) return { ok: false };
+  activeExportCancelled = true;
+  try { activeExportProc.kill(); } catch {}
+  return { ok: true };
+});
 // 영상 편집 탭 내보내기(v2) — 컷 편집 + 트랙 겹침(PIP overlay) + 여러 오디오 트랙 믹스.
 // 렌더러 buildEDL() 이 구간별로 layers(겹친 영상 트랙들)/audioSources(N개 오디오 트랙)를
 // 미리 계산해서 넘긴다 — 여기선 그 구간 정보를 filter_complex 로 옮기기만 한다.
@@ -1197,6 +1208,7 @@ ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath, format, res, fps, gpu } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
+  activeExportCancelled = false;   // 이 export 는 새로 시작 — 지난 export 의 취소 표시를 물려받지 않는다
   const fmt = ['mp4', 'webm'].includes(format) ? format : 'mp4';
   // CRF 는 고정값 — 이전 기본값(mp4=20/webm=32) 그대로. "화질" 은 이제 이 CRF 를 고르는 대신
   // 아래 res(해상도)로 명확하게(720p/1080p 처럼) 표현한다.
@@ -1228,6 +1240,14 @@ ipcMain.handle('video:export', async (event, payload) => {
   }
   const hasLuts = collectEffectLists().some((list) => (list || []).some((e) => e.type === 'lut' && e.value && e.enabled !== false));
   let drawtextDir = null;
+  let filterScriptDir = null;   // 아래서 실제로 만들 때 대입 — finally 에서 drawtextDir 와 함께 정리
+  // 이 아래(필터그래프 조립·ffmpeg 실행)에서 던지는 예외가 하나라도 있으면, try 밖에서
+  // 그냥 죽게 뒀을 때 drawtextDir/filterScriptDir 임시 폴더(복사된 폰트·LUT·캡션 파일·
+  // filter_complex 스크립트)가 영원히 안 지워지고 남는다 — 이 필터그래프 조립 코드는
+  // 과거에도 예상 못한 세그먼트 모양에 여러 번 실측으로 걸려 죽은 적이 있다(아래
+  // ENAMETOOLONG·"Cannot allocate memory" 주석들 참고). 성공이든 실패든 반드시
+  // 정리되도록 try/finally 로 감싼다.
+  try {
   const _copiedFonts = new Set();   // 실제로 쓰인 폰트만, 중복 복사 안 함
   function ensureFontCopied(key) {
     const src = resolveTextFont(key);
@@ -1614,7 +1634,7 @@ ipcMain.handle('video:export', async (event, payload) => {
   // 평범한 옵션 인자라 절대경로에 콜론이 있어도 문제없다.
   // drawtextDir 이 있으면 그대로 쓰고(텍스트 있는 export), 없으면 이 스크립트 파일만을
   // 위한 전용 임시 폴더를 새로 만든다 — 아래 cleanup 이 텍스트 유무와 상관없이 둘 다 지운다.
-  const filterScriptDir = drawtextDir || fs.mkdtempSync(path.join(app.getPath('temp'), 'yss-filter-'));
+  filterScriptDir = drawtextDir || fs.mkdtempSync(path.join(app.getPath('temp'), 'yss-filter-'));
   const filterScriptPath = path.join(filterScriptDir, 'filter.txt');
   fs.writeFileSync(filterScriptPath, parts.join(';'), 'utf-8');
   // fps_mode=passthrough — setpts 로 배속을 건 구간이 있으면 프레임 간격이 원본의 "정수
@@ -1627,14 +1647,10 @@ ipcMain.handle('video:export', async (event, payload) => {
   args.push('-filter_complex_script', filterScriptPath, '-map', `[${outvLabel}]`, '-map', '[outa]');
 
   // drawtextDir(폰트 사본 + 캡션 txt) 과 filterScriptDir(위 filter_complex_script 파일) 은
-  // 이 export 안에서만 필요하다 — 끝나면(성공/실패 상관없이) 둘 다 지운다. 텍스트가 있으면
-  // 같은 폴더라 한 번만 지워진다(Set 이 아니라 그냥 둘 다 시도해도 두 번째는 이미 없어서
-  // 조용히 넘어간다). cwd 를 drawtextDir 로 두는 건 드라이브 콜론 이스케이프 문제를
-  // 피하는 유일하게 검증된 방법이라(위 주석 참고), 텍스트가 있는 export 만 cwd 가 바뀐다.
-  function cleanupDrawtextDir() {
-    if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} }
-    if (filterScriptDir !== drawtextDir) { try { fs.rmSync(filterScriptDir, { recursive: true, force: true }); } catch {} }
-  }
+  // 이 export 안에서만 필요하다 — 끝나면(성공/실패 상관없이, 아래 finally 에서) 둘 다
+  // 지운다. 텍스트가 있으면 같은 폴더라 한 번만 지워진다. cwd 를 drawtextDir 로 두는 건
+  // 드라이브 콜론 이스케이프 문제를 피하는 유일하게 검증된 방법이라(위 주석 참고),
+  // 텍스트가 있는 export 만 cwd 가 바뀐다.
   // 인코더 인자만 GPU/CPU 로 갈아끼워서 한 번 더 돌릴 수 있게 필터그래프 뒷부분(-map 까지)
   // 과 분리했다 — filter_complex_script 파일은 인코더와 무관하니 재시도 때 다시 안 만든다.
   function runOnce(useGpu) {
@@ -1645,6 +1661,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     return new Promise((resolve) => {
       let proc; try { proc = spawn(FFMPEG_BIN, finalArgs, { windowsHide: true, cwd: drawtextDir || undefined }); }
       catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+      activeExportProc = proc;
       let stderr = '', outBuf = '';
       proc.stdout.on('data', (d) => {
         outBuf += d;
@@ -1656,22 +1673,31 @@ ipcMain.handle('video:export', async (event, payload) => {
         }
       });
       proc.stderr.on('data', (d) => stderr += d);
-      proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+      proc.on('error', (e) => { activeExportProc = null; resolve({ ok: false, error: String(e.message || e) }); });
       proc.on('close', (code) => {
+        activeExportProc = null;
+        // kill() 이 준 종료는(취소) 정상 실패와 다르게 다룬다 — GPU 재시도로 안 넘어가고,
+        // "ffmpeg exit -1" 같은 알아듣기 힘든 에러 대신 취소로 알린다. 죽은 채 반쯤 쓴
+        // 출력 파일은 지운다 — 남아 있으면 아무 데이터 플레이어가 여는 깨진 영상이 된다.
+        if (activeExportCancelled) { try { fs.rmSync(outPath, { force: true }); } catch {} resolve({ ok: false, cancelled: true }); return; }
         if (code === 0) { grantWrite(outPath); resolve({ ok: true, outPath }); }
         else resolve({ ok: false, error: 'ffmpeg exit ' + code + ': ' + stderr.slice(-300) });
       });
     });
   }
   let result = await runOnce(wantGpu);
-  if (!result.ok && wantGpu) {
+  if (!result.ok && wantGpu && !result.cancelled) {
     // NVENC 가 목록엔 있어도 실제 드라이버/하드웨어가 없거나 문제가 있을 수 있다 — 사용자가
     // 그 실패를 그대로 보는 대신, 이미 검증된 CPU(libx264) 경로로 조용히 한 번 더 시도한다.
+    // 취소는 재시도 대상이 아니다 — 사용자가 그만두려는데 다시 인코딩을 시작하면 안 된다.
     try { fs.rmSync(outPath, { force: true }); } catch {}
     result = await runOnce(false);
   }
-  cleanupDrawtextDir();
   return result;
+  } finally {
+    if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} }
+    if (filterScriptDir && filterScriptDir !== drawtextDir) { try { fs.rmSync(filterScriptDir, { recursive: true, force: true }); } catch {} }
+  }
 });
 // ── 영상 편집 프록시(저해상도 미리보기 대체본) ──────────────────────
 // 4K 등 고해상도 소스를 그대로 재생하면 내장그래픽에서 실시간 디코드가 버겁다("버벅임"
