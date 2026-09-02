@@ -475,22 +475,28 @@ public:
         if (pluginFmt.getNumFormats() == 0) addDefaultFormatsToManager (pluginFmt);
         scanned.clear();
         VST3PluginFormat vst3;
-        const auto paths = vst3.getDefaultLocationsToSearch();
-        Array<File> files;
-        for (int i = 0; i < paths.getNumPaths(); ++i)
-            paths[i].findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
+        // VST3 번들은 그 자체가 폴더(Foo.vst3/Contents/<arch>/Foo.vst3 안에 실제 바이너리가
+        // 또 있다) — File::findChildFiles(*.vst3) 로 직접 훑으면 번들 폴더 안까지 재귀해
+        // 들어가 그 안의 바이너리를 "또 다른 vst3 파일"로 다시 찾아내 같은 플러그인이 서로
+        // 다른 경로(번들 폴더 vs 그 안의 실제 파일)로 두 번 잡혔다(실사용 제보: VST3 하나
+        // 설치했는데 목록엔 두 개 — TONE3000·Soundshed Guitar 둘 다 이 구조라 걸림).
+        // 아래 seen 중복제거는 PluginDescription 식별자에 경로가 섞여 있어 이 케이스를
+        // 못 걸렀다. searchPathsForPlugins 는 JUCE 자체 구현이라, 이미 플러그인으로 판정한
+        // 폴더 안쪽으로는 재귀하지 않는다(정확히 이 문제를 피하려고 그렇게 돼 있다) — 직접
+        // 훑는 대신 이걸 쓴다.
+        FileSearchPath search = vst3.getDefaultLocationsToSearch();
         for (auto& d : extraDirs)
         {
             const File f (d);
-            if (f.isDirectory())
-                f.findChildFiles (files, File::findFilesAndDirectories, true, "*.vst3");
+            if (f.isDirectory()) search.add (f);
         }
+        const StringArray files = vst3.searchPathsForPlugins (search, true, false);
 
         StringArray seen;   // 중복 제거 (같은 플러그인 여러 번 반환되는 것 방지)
         for (auto& f : files)
         {
             OwnedArray<PluginDescription> found;
-            vst3.findAllTypesForFile (found, f.getFullPathName());
+            vst3.findAllTypesForFile (found, f);
             for (auto* d : found)
             {
                 const auto key = d->createIdentifierString();
