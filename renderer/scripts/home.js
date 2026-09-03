@@ -18,6 +18,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'
 let booted = false;
 let notices = [];                        // 마지막으로 받은 목록 — 상세 화면이 여기서 찾는다
 let goView = null;                       // 탭 전환 — app.js 가 넘겨 준다
+let openProject = null;                  // 스튜디오/영상 프로젝트 열기 — app.js 가 넘겨 준다(IPC 필요해 home.js 는 직접 못 함)
 
 /** 공지 본문 — 굵게·링크·목록만 허용한다. 이스케이프가 먼저다. */
 function renderBody(md) {
@@ -124,30 +125,55 @@ function closeDetail() {
   $('board-detail').hidden = true;
 }
 
-/** 이어서 하기 — 라이브러리 최근 항목. 없으면 칸 자체를 숨긴다. */
+const projectKindLabel = (type) => t(type === 'video' ? 'home.recent.kind.video' : 'home.recent.kind.studio');
+// 스튜디오/영상 편집/라이브러리 셋 다 헷갈리지 않게 — 배지마다 퀵카드와 같은 아이콘을 붙인다.
+const KIND_ICON = {
+  studio:  '<svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="11" cy="9" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M11 13v5M7.5 18h7M5 9a6 6 0 0 0 12 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  video:   '<svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="6" width="11" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M14 9.5 19 6.5v9L14 12.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  library: '<svg viewBox="0 0 22 22" fill="none" aria-hidden="true"><rect x="3" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3 8h16M8 8v10" stroke="currentColor" stroke-width="1.8"/></svg>',
+};
+
+/** 이어서 하기 — 라이브러리 최근 곡 + 스튜디오/영상 최근 프로젝트를 합쳐 최신순으로.
+ *  둘 다 없으면 칸 자체를 숨긴다. */
 async function paintRecent() {
   const panel = $('home-recent-panel');
   const box = $('home-recent');
   if (!panel || !box) return;
-  let items = [];
-  try { items = await window.yssApi?.library?.list?.() || []; } catch { items = []; }
+  let songs = [], projects = [];
+  try { songs = await window.yssApi?.library?.list?.() || []; } catch { songs = []; }
+  try { projects = await window.yssApi?.project?.recentList?.() || []; } catch { projects = []; }
 
-  const rows = items.slice(0, 4);        // library:list 가 이미 최신 순으로 준다
+  const merged = [
+    ...songs.slice(0, 4).map(it => ({ kind: 'song', id: it.id, name: it.name, at: it.createdAt, modelKey: it.modelKey, thumb: it.meta && it.meta.thumbnail })),
+    ...projects.map(p => ({ kind: p.type === 'video' ? 'video' : 'studio', path: p.path, name: p.name, at: p.at })),
+  ].sort((a, b) => (b.at || 0) - (a.at || 0));
+
+  const rows = merged.slice(0, 6);
   panel.hidden = rows.length === 0;
   if (!rows.length) { box.innerHTML = ''; return; }
 
   box.innerHTML = rows.map(it => {
-    const thumb = it.meta && it.meta.thumbnail;
+    const attrs = it.kind === 'song'
+      ? `data-kind="song" data-id="${esc(it.id)}"`
+      : `data-kind="${esc(it.kind)}" data-path="${esc(it.path)}"`;
+    // 곡(라이브러리)도 스튜디오/영상처럼 "어디서 온 항목인지" 배지를 단다 —
+    // 모델명(4stem 등)만으론 라이브러리 항목인 게 한눈에 안 들어온다는 지적으로 추가.
+    const badge = it.kind === 'song'
+      ? `<span class="recent-model kind-library">${KIND_ICON.library}${esc(t('home.recent.kind.library'))}</span>
+         <span class="recent-model recent-sub">${esc(it.modelKey || '4stem')}</span>`
+      : `<span class="recent-model kind-${esc(it.kind)}">${KIND_ICON[it.kind] || ''}${esc(projectKindLabel(it.kind))}</span>`;
     return `
-    <button class="recent-card" data-song="${esc(it.id)}" title="${esc(it.name || '')}">
+    <button class="recent-card" ${attrs} title="${esc(it.name || '')}">
       <span class="recent-thumb">
         <svg class="recent-ph" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 14v-4M8 17V7M12 20V4M16 17V7M20 14v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        ${thumb ? `<img src="${esc(thumb)}" alt="" draggable="false" loading="lazy" />` : ''}
+        ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" draggable="false" loading="lazy" />` : ''}
       </span>
-      <b>${esc(it.name || t('home.recent.untitled'))}</b>
-      <span class="recent-meta">
-        <span class="recent-model">${esc(it.modelKey || '4stem')}</span>
-        <time>${esc(fmtWhen(it.createdAt))}</time>
+      <span class="recent-body">
+        <b>${esc(it.name || t('home.recent.untitled'))}</b>
+        <span class="recent-meta">
+          ${badge}
+          <time>${esc(fmtWhen(it.at))}</time>
+        </span>
       </span>
     </button>`;
   }).join('');
@@ -244,8 +270,9 @@ function showPage(name) {
   document.querySelector('.home-main')?.scrollTo({ top: 0 });
 }
 
-export function initHome(switchView) {
+export function initHome(switchView, openRecentProject) {
   if (typeof switchView === 'function') goView = switchView;
+  if (typeof openRecentProject === 'function') openProject = openRecentProject;
   // 홈에 다시 들어올 때마다 최근 목록은 새로 읽는다 — 그 사이 분리가 끝났을 수 있다
   if (booted) { loadNotices(); paintRecent(); return; }
   booted = true;
@@ -264,8 +291,13 @@ export function initHome(switchView) {
     const goto = e.target.closest('[data-goto]');
     if (goto) return showPage(goto.dataset.goto);
 
-    const song = e.target.closest('[data-song]');
-    if (song) return void openSong(song.dataset.song);
+    const recent = e.target.closest('[data-kind]');
+    if (recent) {
+      const { kind, id, path } = recent.dataset;
+      if (kind === 'song') return void openSong(id);
+      if ((kind === 'studio' || kind === 'video') && path) return void openProject?.(path, kind);
+      return;
+    }
 
     const view = e.target.closest('[data-view-go]');
     if (view) return void goView?.(view.dataset.viewGo);

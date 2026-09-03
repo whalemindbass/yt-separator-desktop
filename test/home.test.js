@@ -20,10 +20,18 @@ const LIB = [
   { id: 'a5', name: '다섯 번째 — 넘치면 안 보여야 한다', modelKey: '4stem', createdAt: Date.now() - 90 * DAY, videoPath: 'X:/none5.mp4', stemPaths: {}, meta: {} },
 ];
 
+const PROJ = [
+  { path: 'X:/proj/song.yssproj', name: '스튜디오 세션', type: 'studio', at: Date.now() - 2 * 3600e3 },
+  { path: 'X:/proj/edit.dsvproj', name: '영상 편집본',   type: 'video',  at: Date.now() - 5 * 3600e3 },
+];
+
 let lib = [];
+let projects = [];
 
 (async () => {
-  const { app, js, errors } = await bootRenderer({ stubs: { 'library:list': () => lib } });
+  const { app, js, errors } = await bootRenderer({
+    stubs: { 'library:list': () => lib, 'project:recentList': () => projects },
+  });
   const home = () => js('document.getElementById("brand-home").click(); true');
 
   await js(`localStorage.setItem("yss:notices", ${JSON.stringify(JSON.stringify({ at: Date.now(), notices: NOTICES }))}); true`);
@@ -68,8 +76,26 @@ let lib = [];
   expect('제목 두 줄   ', s.두줄, 2);
   expect('썸네일 높이 일정', s.칸높이같음, 1);
 
+  section('3-1) 스튜디오·영상 프로젝트도 섞여서 최신순으로 보인다');
+  projects = PROJ;
+  await home(); await wait(1300);
+  s = await js(`(()=>{const c=[...document.querySelectorAll('.recent-card')];return {
+    카드수: c.length,
+    종류: c.map(x=>x.dataset.kind).join('|'),
+    프로젝트뱃지: [...document.querySelectorAll('.recent-card[data-kind="studio"] .recent-type, .recent-card[data-kind="video"] .recent-type')].map(x=>x.textContent.trim()).join('|'),
+  };})()`);
+  expect('카드 6개(4+2)', s.카드수, 6);
+  expect('최신순 종류  ', s.종류, 'song|studio|video|song|song|song');
+  expect('타입 뱃지    ', s.프로젝트뱃지, '스튜디오|영상');
+
+  section('3-2) 프로젝트 카드를 눌러도 안전하다(파일이 사라졌을 때 조용히 무시)');
+  await js('document.querySelector(\'.recent-card[data-kind="studio"]\').click(); true');
+  await wait(700);
+  expect('홈에 그대로  ', await js('document.getElementById("brand-home").classList.contains("on")'), true);
+  projects = [];   // 이후 섹션에 영향 없게 초기화
+
   section('4) 곡을 누르면 라이브러리에서 열린다');
-  await js('document.querySelector(\'.recent-card[data-song="a2"]\').click(); true');
+  await js('document.querySelector(\'.recent-card[data-kind="song"][data-id="a2"]\').click(); true');
   await wait(1400);
   expect('라이브러리로 ', await js('document.querySelector("main.view:not([hidden])")?.dataset.view'), 'library');
 

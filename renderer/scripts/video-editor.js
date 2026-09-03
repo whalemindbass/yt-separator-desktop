@@ -1838,7 +1838,10 @@ function renderLanes() {
           <button class="ve-hs ve-del" data-i18n-title="video.deleteTrack" title="트랙 삭제">✕</button>
         </div>
       </div>
-      <div class="ve-area"></div>
+      <div class="ve-area-wrap">
+        <div class="ve-area"></div>
+        <div class="ve-lane-name">${esc(trackLabel(vt))}</div>
+      </div>
       <div class="ve-lane-resize"></div>`;
     lane.querySelector('.ve-hide').addEventListener('click', (e) => {
       e.stopPropagation();

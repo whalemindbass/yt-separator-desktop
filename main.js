@@ -259,6 +259,36 @@ function writeSettings(obj) {
   catch { return false; }
 }
 
+// ── 최근 프로젝트(스튜디오 .yssproj · 영상 편집 .dsvproj) ──────────
+// "이어서 하기" 가 라이브러리 곡뿐 아니라 이 목록도 보여준다. 저장/열기는 여전히 사용자가
+// 파일 다이얼로그로 임의 경로를 고르는 구조 그대로다 — 여기는 그 결과를 "최근에 건드린
+// 파일" 로만 따로 기억해 두는 자리.
+function recentProjectsFile() { return path.join(app.getPath('userData'), 'recent-projects.json'); }
+function readRecentProjects() {
+  try {
+    const j = JSON.parse(fs.readFileSync(recentProjectsFile(), 'utf-8'));
+    return Array.isArray(j) ? j : [];
+  } catch { return []; }
+}
+function touchRecentProject(filePath, type) {
+  if (!filePath) return;
+  try {
+    const list = readRecentProjects().filter(x => x && x.path !== filePath);
+    list.unshift({ path: filePath, name: path.basename(filePath, path.extname(filePath)), type, at: Date.now() });
+    writeJsonAtomic(recentProjectsFile(), JSON.stringify(list.slice(0, 8), null, 2));
+  } catch {}
+}
+ipcMain.handle('project:recentList', () => {
+  const all = readRecentProjects();
+  const alive = all.filter(x => { try { return x && fs.existsSync(x.path); } catch { return false; } });
+  if (alive.length !== all.length) { try { writeJsonAtomic(recentProjectsFile(), JSON.stringify(alive, null, 2)); } catch {} }
+  return alive;
+});
+ipcMain.handle('project:openPathDirect', (_ev, filePath) => {
+  try { return { ok: true, path: filePath, data: fs.readFileSync(filePath, 'utf8') }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 /** 영상 다운로드 폴더 — userData/downloads (기본), 설정에서 변경 가능 */
 function downloadsDir() {
   const s = readSettings();
@@ -722,36 +752,60 @@ ipcMain.handle('project:save', async (_ev, json, name, existingPath) => {
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     target = res.filePath;
   }
-  try { fs.writeFileSync(target, String(json), 'utf8'); return { ok: true, path: target }; }
+  try { fs.writeFileSync(target, String(json), 'utf8'); touchRecentProject(target, 'studio'); return { ok: true, path: target }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 // ── 자동 저장 ────────────────────────────────────────────────
 // 저장 안 한 작업을 잃지 않기 위한 최소 장치. 사용자가 고른 .yssproj 는 건드리지 않고
 // 별도 파일에 스냅샷만 남긴다 — 자동 저장이 원본을 덮어쓰면 그게 더 큰 사고다.
-function autosavePath() { return path.join(app.getPath('userData'), 'autosave.yssproj'); }
-function autosaveMetaPath() { return path.join(app.getPath('userData'), 'autosave.json'); }
+// 프로젝트(세션)별 history/ 폴더 안에 남긴다(projectDirFor 등은 밑에서 정의) — 프로젝트를
+// 바꿔가며 작업해도 서로의 자동저장을 안 덮어쓴다. 어느 프로젝트를 열지 모르는 시점
+// (부팅 직후 offerRecovery)엔 전체를 훑어 가장 최근 것 하나를 골라 제안한다.
+function autosavePath(projectKey) { return path.join(historyDirFor(projectKey), 'autosave.yssproj'); }
+function autosaveMetaPath(projectKey) { return path.join(historyDirFor(projectKey), 'autosave.json'); }
+// 예전(1.9.1 이전) 전역 자동저장 — projects/ 구조로 옮기기 전 마지막 흔적일 수 있어
+// autosaveRead 가 못 찾았을 때만 폴백으로 봐준다. 새로 쓰지는 않는다(딱 한 번 읽기용).
+function legacyAutosavePath() { return path.join(app.getPath('userData'), 'autosave.yssproj'); }
+function legacyAutosaveMetaPath() { return path.join(app.getPath('userData'), 'autosave.json'); }
 
 ipcMain.handle('project:autosaveWrite', (_ev, json, meta) => {
   try {
+    const key = meta && meta.projectPath;
     // 임시 파일에 쓰고 바꿔치기한다. 쓰는 도중 죽으면 지난 스냅샷이라도 남아야 한다.
-    const tmp = autosavePath() + '.tmp';
+    const tmp = autosavePath(key) + '.tmp';
     fs.writeFileSync(tmp, String(json), 'utf8');
-    fs.renameSync(tmp, autosavePath());
-    writeJsonAtomic(autosaveMetaPath(), JSON.stringify({ ...(meta || {}), at: Date.now() }));
+    fs.renameSync(tmp, autosavePath(key));
+    writeJsonAtomic(autosaveMetaPath(key), JSON.stringify({ ...(meta || {}), at: Date.now() }));
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
 ipcMain.handle('project:autosaveRead', () => {
   try {
-    if (!fs.existsSync(autosavePath())) return { ok: false };
-    const meta = JSON.parse(fs.readFileSync(autosaveMetaPath(), 'utf8'));
-    return { ok: true, data: fs.readFileSync(autosavePath(), 'utf8'), meta };
+    const root = path.join(downloadsDir(), 'projects');
+    let best = null;   // { key, meta }
+    for (const key of (fs.existsSync(root) ? fs.readdirSync(root) : [])) {
+      const metaP = path.join(root, key, 'history', 'autosave.json');
+      if (!fs.existsSync(metaP)) continue;
+      let meta; try { meta = JSON.parse(fs.readFileSync(metaP, 'utf8')); } catch { continue; }
+      if (!best || (meta.at || 0) > (best.meta.at || 0)) best = { key, meta };
+    }
+    if (best) {
+      const dataP = path.join(root, best.key, 'history', 'autosave.yssproj');
+      if (fs.existsSync(dataP)) return { ok: true, data: fs.readFileSync(dataP, 'utf8'), meta: best.meta, key: best.key };
+    }
+    // 폴백: projects/ 구조로 옮기기 전에 남은 예전 전역 자동저장
+    if (fs.existsSync(legacyAutosavePath())) {
+      const meta = JSON.parse(fs.readFileSync(legacyAutosaveMetaPath(), 'utf8'));
+      return { ok: true, data: fs.readFileSync(legacyAutosavePath(), 'utf8'), meta, key: null, legacy: true };
+    }
+    return { ok: false };
   } catch { return { ok: false }; }
 });
 
-ipcMain.handle('project:autosaveClear', () => {
-  for (const p of [autosavePath(), autosaveMetaPath()]) { try { fs.unlinkSync(p); } catch {} }
+ipcMain.handle('project:autosaveClear', (_ev, projectKey, legacy) => {
+  for (const p of [autosavePath(projectKey), autosaveMetaPath(projectKey)]) { try { fs.unlinkSync(p); } catch {} }
+  if (legacy) for (const p of [legacyAutosavePath(), legacyAutosaveMetaPath()]) { try { fs.unlinkSync(p); } catch {} }
   return { ok: true };
 });
 
@@ -769,7 +823,11 @@ ipcMain.handle('project:open', async () => {
     filters: [{ name: td('fProject'), extensions: ['yssproj'] }],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
-  try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
+  try {
+    const data = fs.readFileSync(res.filePaths[0], 'utf8');
+    touchRecentProject(res.filePaths[0], 'studio');
+    return { ok: true, path: res.filePaths[0], data };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 });
 // 영상 편집 프로젝트(.dsvproj) — 스튜디오의 .yssproj(project:save/open) 와 같은 패턴이지만
@@ -786,7 +844,7 @@ ipcMain.handle('video:project:save', async (_ev, json, name, existingPath) => {
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     target = res.filePath;
   }
-  try { fs.writeFileSync(target, String(json), 'utf8'); return { ok: true, path: target }; }
+  try { fs.writeFileSync(target, String(json), 'utf8'); touchRecentProject(target, 'video'); return { ok: true, path: target }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('video:project:open', async () => {
@@ -796,7 +854,11 @@ ipcMain.handle('video:project:open', async () => {
     filters: [{ name: td('fVideoProject'), extensions: ['dsvproj'] }],
   });
   if (res.canceled || !res.filePaths?.length) return { ok: false, canceled: true };
-  try { return { ok: true, path: res.filePaths[0], data: fs.readFileSync(res.filePaths[0], 'utf8') }; }
+  try {
+    const data = fs.readFileSync(res.filePaths[0], 'utf8');
+    touchRecentProject(res.filePaths[0], 'video');
+    return { ok: true, path: res.filePaths[0], data };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 });
 // 클립이 가리키는 원본 파일이 그새 삭제/이동됐는지 — 여러 개를 한 번에 확인(임포트 때마다
@@ -1095,12 +1157,73 @@ ipcMain.handle('engine:cmd',  (_e, cmd) => {
   lastEngineCmd = summarizeCmd(cmd);
   return { ok: getEngine().send(cmd) };
 });
-ipcMain.handle('engine:recordArm', () => {
-  const dir = path.join(downloadsDir(), 'takes');
+// 저장 안 한(경로 없는) 프로젝트에서 녹음하면 이 세션 한정 폴더를 쓴다 — 앱을 새로
+// 띄울 때마다 새로 받는다. 그 프로젝트를 저장하면 그 뒤부터는 저장 경로 기준 폴더로 옮겨간다.
+const unsavedProjectSessionId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+/** 폴더 이름으로 못 쓰는 문자만 정리 — 나머지(한글 등)는 그대로 둔다 */
+function safeFolderName(s) {
+  return String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0, 120) || 'untitled';
+}
+/** 프로젝트(세션)별 폴더 — 케이크워크 songs 폴더 방식 참고. 저장된 프로젝트면 파일명
+ *  (확장자 제외) 기준, 아직 저장 안 했으면 이번 실행 한정 폴더. 다른 프로젝트 파일명과
+ *  우연히 같아도(폴더가 겹쳐도) 프로젝트 파일 쪽이 자기 media/history 경로를 그대로
+ *  참조하니 문제되지 않는다.
+ *    media/   — 녹음·가져온 take 오디오 파일 (take-1.wav, take-2.wav, ...)
+ *    history/ — 이 프로젝트의 자동저장(복구용) 스냅샷 */
+function projectDirFor(projectKey) {
+  const key = projectKey ? safeFolderName(path.basename(String(projectKey), path.extname(String(projectKey)))) : ('_미저장-' + unsavedProjectSessionId);
+  return path.join(downloadsDir(), 'projects', key);
+}
+function mediaDirFor(projectKey) {
+  const dir = path.join(projectDirFor(projectKey), 'media');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  const file = path.join(dir, `take-${Date.now()}.wav`);
+  return dir;
+}
+function historyDirFor(projectKey) {
+  const dir = path.join(projectDirFor(projectKey), 'history');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
+}
+/** 그 폴더 안의 take-N.wav 중 가장 큰 N 다음 번호 — 지우거나 순서가 섞여도 항상 이어서 매긴다 */
+function nextTakeNumber(dir) {
+  let max = 0;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      const m = /^take-(\d+)\.wav$/i.exec(name);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+  } catch {}
+  return max + 1;
+}
+ipcMain.handle('engine:recordArm', (_ev, projectKey) => {
+  const dir = mediaDirFor(projectKey);
+  const n = nextTakeNumber(dir);
+  const file = path.join(dir, `take-${n}.wav`);
   lastRecordFile = file;   // 엔진이 죽으면 이 파일을 되살려야 한다
   return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
+});
+// 저장 안 한 채 녹음부터 한 take 는 이번 실행 한정 폴더(_미저장-...)에 있다 — 프로젝트를
+// 처음 저장하는 순간(또는 그 뒤 어느 저장이든) 그 프로젝트의 media/ 로 옮겨준다. 이미 제
+// 폴더에 있는 파일은 건드리지 않는다. rename 이라 같은 볼륨 안에서는 즉시·원자적이다.
+ipcMain.handle('project:migrateTakes', (_ev, files, projectKey) => {
+  const dir = mediaDirFor(projectKey);
+  const map = {};
+  const touchedSrcDirs = new Set();
+  for (const f of (Array.isArray(files) ? files : [])) {
+    if (typeof f !== 'string' || !f || map[f]) continue;
+    const srcDir = path.dirname(f);
+    if (path.normalize(srcDir) === path.normalize(dir)) { map[f] = f; continue; }
+    try {
+      const n = nextTakeNumber(dir);
+      const dest = path.join(dir, `take-${n}.wav`);
+      fs.renameSync(f, dest);
+      map[f] = dest;
+      touchedSrcDirs.add(srcDir);
+    } catch { /* 실패하면 그 파일은 매핑에서 빠진다 — 호출한 쪽이 옛 경로를 그대로 쓴다 */ }
+  }
+  // 옮기고 나서 비었으면(그 임시 세션 폴더가 이제 다 옮겨졌으면) 정리
+  for (const d of touchedSrcDirs) { try { if (!fs.readdirSync(d).length) fs.rmdirSync(d); } catch {} }
+  return { ok: true, map };
 });
 // Export MP3: 엔진이 렌더한 임시 WAV → ffmpeg 로 MP3 변환 후 임시 삭제
 ipcMain.handle('audio:transcode', async (_ev, src, dst, opts) => {

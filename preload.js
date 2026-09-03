@@ -71,7 +71,8 @@ contextBridge.exposeInMainWorld('yssApi', {
     // 자동 저장 — 사용자가 고른 파일이 아니라 별도 스냅샷에 쓴다
     autosaveWrite: (json, meta) => ipcRenderer.invoke('project:autosaveWrite', json, meta),
     autosaveRead:  ()           => ipcRenderer.invoke('project:autosaveRead'),
-    autosaveClear: ()           => ipcRenderer.invoke('project:autosaveClear'),
+    autosaveClear: (projectKey, legacy) => ipcRenderer.invoke('project:autosaveClear', projectKey, legacy),
+    migrateTakes: (files, projectKey) => ipcRenderer.invoke('project:migrateTakes', files, projectKey),
     // 저장 안 한 변경 여부를 알려 두면 창을 닫을 때 메인이 묻는다
     setDirty:      (v)  => ipcRenderer.send('project:dirty', !!v),
     // 닫기 전 저장 요청 → 끝나면 결과를 돌려준다
@@ -82,6 +83,9 @@ contextBridge.exposeInMainWorld('yssApi', {
     // 그대로 사라진다. 예전에는 화면 로드 후 400ms 를 기다려 보냈는데, 느린 컴퓨터에서는
     // 그 사이에 등록이 안 끝나 더블클릭이 아무 일도 하지 않는 것처럼 보였다.
     onOpenFile:    (fn) => { ipcRenderer.on('project:open-file', (_e, p) => fn(p)); ipcRenderer.send('project:open-ready'); },
+    // "이어서 하기" — 스튜디오/영상 최근 프로젝트 목록, 다이얼로그 없이 바로 열기
+    recentList:     ()         => ipcRenderer.invoke('project:recentList'),
+    openPathDirect: (path)     => ipcRenderer.invoke('project:openPathDirect', path),
   },
   audio: {
     transcode: (src, dst, opts) => ipcRenderer.invoke('audio:transcode', src, dst, opts),
@@ -217,7 +221,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     fxSaveState: (track, slot)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSaveState', track, slot }),
     fxSetState:  (track, slot, data)=> ipcRenderer.invoke('engine:cmd', { cmd: 'fxSetState', track, slot, data }),
     fxChainReq:  (track)            => ipcRenderer.invoke('engine:cmd', { cmd: 'fxChainReq', track }),
-    recordArm:   ()       => ipcRenderer.invoke('engine:recordArm'),
+    recordArm:   (projectKey) => ipcRenderer.invoke('engine:recordArm', projectKey),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
     takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),

@@ -83,6 +83,23 @@ $('donate-btn')?.addEventListener('click', () => api.openExternal(DONATE_URL));
 // ── 탭 라우팅 ─────────────────────────────────
 const tabs = document.querySelectorAll('.tab');
 const views = document.querySelectorAll('main.view');
+
+// 홈의 "이어서 하기" 에서 스튜디오/영상 최근 프로젝트를 골랐을 때 — 다이얼로그 없이 그
+// 경로를 바로 읽어서 해당 탭으로 옮기고 연다. .yssproj/.dsvproj 더블클릭 열기(아래)와 같은 패턴.
+async function openRecentProject(filePath, type) {
+  const r = await api.project.openPathDirect(filePath);
+  if (!r || !r.ok) return;   // 파일이 그새 사라졌으면 조용히 무시(홈이 알아서 다음 새로고침때 걸러줌) — 실패 토스트까진 필요 없다
+  if (type === 'video') {
+    switchView('video');
+    await initVideoEditor();
+    loadVideoProjectFromFile(r.path, r.data);
+  } else {
+    switchView('studio');
+    await initStudio();
+    await loadProjectData(r.path, r.data);
+  }
+}
+
 function switchView(name) {
   tabs.forEach(t => t.classList.toggle('on', t.dataset.view === name));
   views.forEach(v => v.hidden = v.dataset.view !== name);
@@ -92,7 +109,7 @@ function switchView(name) {
   if (name === 'studio') initStudio().catch(console.error);
   if (name === 'training') initTraining();
   if (name === 'video') initVideoEditor().catch(console.error);
-  if (name === 'home') initHome(switchView);
+  if (name === 'home') initHome(switchView, openRecentProject);
   // 홈은 탭이 아니라 로고로 들어온다 — 홈일 때는 어떤 탭도 켜져 있으면 안 된다
   document.getElementById('brand-home')?.classList.toggle('on', name === 'home');
 }

@@ -330,7 +330,10 @@ function renderTracks() {
           <div class="daw-meter" data-mid="${stemIdOf(t.engineIndex)}"><i class="l"></i><i class="r"></i></div>
         </div>
       </div>
-      <div class="daw-area"><div class="daw-clip"></div></div>`;
+      <div class="daw-area-wrap">
+        <div class="daw-area"><div class="daw-clip"></div></div>
+        <div class="daw-lane-namebar"><div class="daw-lane-name">${esc(t.label)}</div></div>
+      </div>`;
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(stemIdOf(t.engineIndex)));
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
@@ -483,10 +486,21 @@ function renderRecLanes() {
       e.stopPropagation();
       const ci = document.createElement('input');
       ci.type = 'color'; ci.value = rt.color ? rgbToHex(resolveColor(rt.color)) : rgbToHex(resolveColor(defColor));
-      ci.style.cssText = 'position:fixed;left:-9999px';
+      // 화면 밖(-9999px)에 두면 네이티브 색상 선택기도 그 근처(대개 화면 좌상단)에서 뜬다 —
+      // 실제로 누른 점 위치에 숨겨 둬서 선택기가 거기서 뜨게 한다(안 보이긴 마찬가지, opacity:0).
+      const dr = dot.getBoundingClientRect();
+      ci.style.cssText = `position:fixed; left:${dr.left}px; top:${dr.top}px; width:${dr.width}px; height:${dr.height}px; opacity:0; pointer-events:none;`;
       document.body.appendChild(ci);
+      void ci.offsetHeight;   // 강제로 레이아웃 확정 — 안 하면 click() 이 아직 배치 전 위치로 선택기를 띄운다
       const oldColor = rt.color || '';
-      ci.addEventListener('input', () => { rt.color = ci.value; lane.style.setProperty('--c', ci.value); });
+      ci.addEventListener('input', () => {
+        rt.color = ci.value; lane.style.setProperty('--c', ci.value);
+        // 이 트랙 take 들의 파형 색도 같이 — waveColor/캐싱된 svg 그대로면 옛 색으로 남는다
+        // (트랙 이동 때랑 같은 이유·같은 버그, 여긴 "이동"이 아니라 "색 변경"이라 또 새로 남).
+        const nc = resolveColor(ci.value);
+        for (const tk of _takes) if (tk.trackId === rt.id) { tk.waveColor = nc; tk.svg = null; }
+        renderTakes();
+      });
       ci.addEventListener('change', () => { const nw = rt.color; ci.remove(); if (nw !== oldColor) pushUndo(() => setTrackProp(rt.id, 'color', oldColor), () => setTrackProp(rt.id, 'color', nw), tr('studio.u.trackColor')); });
       ci.click();
     });
@@ -1512,7 +1526,7 @@ function stopStudio() {
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
   if (!armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
-  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(); }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath); }
   if (!_playing) playStudio();
   // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
@@ -1565,7 +1579,8 @@ function updateRecLive(t) {
   const wPx = Math.max(2, (t - _recStartSec) * _pxPerSec);
   el.style.left = (_recStartSec * _pxPerSec) + 'px';
   el.style.width = wPx + 'px';
-  el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor('var(--danger)'));
+  const armedRt = _recTracks.find(r => r.id === armedRecId()) || {};
+  el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor(armedRt.color || 'var(--danger)'));
 }
 function clearRecLive() { _recStartSec = null; _recLiveCols = []; document.querySelector('.daw-rec-live')?.remove(); }
 
@@ -1847,7 +1862,8 @@ async function renderTake(file, startSamples, engineId, trackId) {
     const { stems, sampleRate: bufSr } = await loadStemFilesToBuffers({ take: file });
     const ch = stems.take;
     const tid = trackId != null ? trackId : armedRecId();
-    const isAudio = (_recTracks.find(r => r.id === tid) || {}).type === 1;   // 오디오 트랙 클립 = 다른 색
+    const rt = _recTracks.find(r => r.id === tid) || {};
+    const isAudio = rt.type === 1;   // 오디오 트랙 클립 = 다른 색
     const srcDur = ch[0].length / (bufSr || deviceSr());
     _takes.push({
       id: engineId != null ? engineId : Date.now(), file,
@@ -1857,7 +1873,7 @@ async function renderTake(file, startSamples, engineId, trackId) {
       fadeIn: 0, fadeOut: 0,           // 페이드(초)
       // 파형은 svg 로 굳혀 두지 않는다 — waveCh(원본 채널)를 들고 있다가, 화면에 그릴 때
       // 지금 배율(waveAt)로 그렸는지 보고 바뀌었으면 그때 다시 그린다(renderTakes 안).
-      waveCh: ch, waveColor: resolveColor(isAudio ? 'var(--stem-bass)' : 'var(--danger)'), svg: null, waveAt: 0,
+      waveCh: ch, waveColor: resolveColor(rt.color || (isAudio ? 'var(--stem-bass)' : 'var(--danger)')), svg: null, waveAt: 0,
     });
     renderTakes();
   } catch (e) { flashTake(tr('studio.m.takeWaveFail') + (e && e.message || e)); }
@@ -1891,6 +1907,15 @@ function renderTakes() {
     wave.style.width = Math.max(3, tk.srcDur * _pxPerSec) + 'px';
     wave.innerHTML = tk.svg;
     el.appendChild(wave);
+    // 클립에 저장된 실제 파일명(take_130.mp3 등) — 위쪽 이름 띠 안에, sticky 라 클립을
+    // 오른쪽으로 스크롤해서 봐도(그 클립 구간 안에 있는 한) 계속 보인다.
+    const nameBar = document.createElement('div');
+    nameBar.className = 'daw-clip-namebar';
+    const nameLbl = document.createElement('div');
+    nameLbl.className = 'daw-clip-name';
+    nameLbl.textContent = tk.file ? tk.file.replace(/\\/g, '/').split('/').pop() : '';
+    nameBar.appendChild(nameLbl);
+    el.appendChild(nameBar);
     // 페이드 오버레이(대각선) + 상단 코너 페이드 핸들
     const fgL = document.createElement('div'); fgL.className = 'daw-fade l';
     const fgR = document.createElement('div'); fgR.className = 'daw-fade r';
@@ -1973,9 +1998,18 @@ function renderTakes() {
         const sr = deviceSr();
         if (!multi) {
           const newId = target ? Number(target.dataset.recid) : tk.trackId;
-          if (newId && newId !== tk.trackId) { tk.trackId = newId; api.engine.takeMove(tk.id, Math.round(tk.start * sr), newId); }
+          if (newId && newId !== tk.trackId) {
+            tk.trackId = newId;
+            // 파형 색은 만들 때 트랙 색으로 굳혀서 캐싱해 둔다(svg 문자열에 fill 로 박혀 있다) —
+            // 트랙만 바꾸고 이 캐시를 안 지우면 새 트랙 색이 반영 안 된 채 옛 색으로 계속
+            // 그려진다(제보). 새 트랙 색으로 다시 계산하고 캐시를 비워 다시 그리게 한다.
+            const nt = _recTracks.find(r => r.id === newId);
+            if (nt) { tk.waveColor = resolveColor(nt.color || (nt.type === 1 ? 'var(--stem-bass)' : 'var(--danger)')); tk.svg = null; }
+            api.engine.takeMove(tk.id, Math.round(tk.start * sr), newId);
+          }
           else api.engine.takeMove(tk.id, Math.round(tk.start * sr), 0);
         } else group.forEach(t => api.engine.takeMove(t.id, Math.round(t.start * sr), 0));
+        renderTakes();   // 새 트랙(레인)으로 DOM 도 옮기고, 색 캐시 비운 파형도 다시 그린다
         layout();   // 클립이 범위 밖으로 나가면 타임라인 연장 + 재배치
         const afters = group.map(t => ({ id: t.id, st: clipState(t) }));
         pushUndo(() => afters.forEach((a, i) => setClipState(befores[i].id, befores[i].st)),
@@ -2279,7 +2313,14 @@ function waitRecTracks(gen) {
       _recTracksWaiters = _recTracksWaiters.filter(x => x !== w);
       res(ok);
     };
-    w.timer = setTimeout(() => w.resolve(_recTracksGen === gen), 2500);
+    // 2500ms 이던 걸 늘렸다 — "이어서 하기"(홈에서 최근 스튜디오 프로젝트 바로 열기)
+    // 처럼 스튜디오 탭에 막 들어오자마자 프로젝트를 여는 경로에서는, 엔진이 아직 오디오
+    // 장치도 못 연 상태로 이 recTracksReset 이 날아간다(엔진 시작은 initStudio() 안에서
+    // await 없이 fire-and-forget). 그 상태에서 응답이 2.5초를 넘기면 여기서 통째로 포기하고
+    // applyProject() 가 조기 return 해버려 뒤의 3) 클립(takes) 복원을 아예 안 탄다 —
+    // 트랙은 비어 보이고 녹음 클립이 통째로 안 불러와지는 버그(실사용 제보)의 원인이었다.
+    // 실측상 장치 연결에 5초 넘게 걸리는 경우가 있어 10초로 넉넉히 잡는다.
+    w.timer = setTimeout(() => w.resolve(_recTracksGen === gen), 10000);
     _recTracksWaiters.push(w);
   });
 }
@@ -2418,7 +2459,7 @@ function markClean() {
   _dirty = false;
   updateProjectLabel();
   notifyDirty();
-  api.project?.autosaveClear?.();   // 제대로 저장했으면 복구본은 쓸모가 없다
+  api.project?.autosaveClear?.(_projectPath);   // 제대로 저장했으면 복구본은 쓸모가 없다
 }
 /** 창을 닫을 때 물어볼지 판단하도록 메인에 알린다 */
 function notifyDirty() { try { api.project?.setDirty?.(_dirty); } catch {} }
@@ -2437,12 +2478,38 @@ function updateProjectLabel() {
 // 저장은 "저장할 게 없다"며 끄지 않아 사용자가 저장 안내에 갇혔다.
 const hasSaveableContent = () => !!(_stemPaths || _takes.length || _recTracks.length);
 
+// 저장 전엔 take 가 "저장 안 한 프로젝트" 임시 세션 폴더에 있었을 수 있다(녹음부터 하고
+// 나중에 저장하는 흔한 순서) — 저장 경로가 정해지면 그 프로젝트의 media/ 로 옮기고,
+// 옮긴 게 있으면 바뀐 경로가 반영된 최신 JSON 으로 조용히 한 번 더 저장한다(다이얼로그 없음).
+// 엔진에 이미 로드된 참조는 안 건드린다 — 이번 세션 재생엔 옛 경로로도 아무 문제 없고,
+// 다음에 프로젝트를 다시 열 때만 새 경로가 쓰인다.
+async function migrateTakesIfNeeded() {
+  if (!_takes.length) return;
+  const files = [...new Set(_takes.map(t => t.file).filter(Boolean))];
+  if (!files.length) return;
+  let res; try { res = await api.project?.migrateTakes?.(files, _projectPath); } catch {}
+  if (!res || !res.ok || !res.map) return;
+  let moved = false;
+  for (const t of _takes) {
+    const nf = res.map[t.file];
+    if (nf && nf !== t.file) { t.file = nf; moved = true; }
+  }
+  if (!moved) return;
+  renderTakes();   // 파일명 라벨(.daw-clip-name)이 새 경로를 반영하게
+  const obj = await buildProjectObject();
+  await api.project.save(JSON.stringify(obj, null, 2), _songName, _projectPath);
+}
+
 // 저장: 경로 있으면 덮어쓰기, 없으면 새로 저장(다이얼로그)
 async function saveProjectSmart() {
   if (!hasSaveableContent()) { flashTake(tr('studio.m.nothingToSave')); return; }
   const obj = await buildProjectObject();
   const r = await api.project.save(JSON.stringify(obj, null, 2), _songName || tr('studio.lbl.project'), _projectPath || undefined);
-  if (r && r.ok) { _projectPath = r.path; _songName = baseName(r.path); markClean(); flashTake(tr('studio.m.savedTo') + r.path); }
+  if (r && r.ok) {
+    _projectPath = r.path; _songName = baseName(r.path);
+    await migrateTakesIfNeeded();
+    markClean(); flashTake(tr('studio.m.savedTo') + r.path);
+  }
   else if (!r || !r.canceled) flashTake(tr('studio.m.saveFail'));
 }
 const saveProject = saveProjectSmart;   // 드롭다운 tr('studio.d.saveProjectShort') 도 동일 로직
@@ -2567,13 +2634,14 @@ async function offerRecovery() {
       <div class="mt"><div class="n">${esc(tr('studio.rec.discard'))}</div>
       <div class="m">${esc(tr('studio.rec.discardSub'))}</div></div></div>`,
     async (idx) => {
-      if (idx !== '1') { api.project?.autosaveClear?.(); return; }
+      if (idx !== '1') { api.project?.autosaveClear?.(r.key, r.legacy); return; }
       try {
         const obj = JSON.parse(r.data);
         await applyProject(obj);
         _projectPath = r.meta?.projectPath || null;
         _songName = r.meta?.name || _songName;
         if (hasSaveableContent()) markDirty();   // 복구본은 아직 파일에 저장된 상태가 아니다
+        if (r.legacy) api.project?.autosaveClear?.(null, true);   // 예전 전역 자동저장은 옮겨왔으니 정리
         flashTake(tr('studio.rec.restored'));
       } catch {
         flashTake(tr('studio.rec.failed'));
@@ -2661,10 +2729,17 @@ async function applyProject(p) {
   // 제보: 프로젝트 이동 시 "드라이버 충돌"). 빈 배열이라도 넘겨서 엔진을 확실히 비운다.
   let idMap = null;
   {
-    _recTracks = [];
-    const gen = ++_recTracksGenReq;
-    api.engine.recTracksReset((p.tracks || []).map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] })), gen);
-    const ok = await waitRecTracks(gen);
+    // 엔진이 아직 시작 중일 때(홈 "이어서 하기"로 스튜디오 진입과 동시에 여는 경로 등)
+    // 첫 시도가 타임아웃 날 수 있다 — 그땐 엔진이 그새 붙었을 가능성이 높으니 한 번 더
+    // 시도해서(합쳐 최대 20초) 클립(takes) 복원을 계속 포기하지 않게 한다.
+    const reqTracks = (p.tracks || []).map(t => ({ type: t.type || 0, gain: t.gain, pan: t.pan || 0, mute: t.mute, solo: t.solo, sends: Array.isArray(t.sends) ? t.sends : [0, 0] }));
+    let ok = false;
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      _recTracks = [];
+      const gen = ++_recTracksGenReq;
+      api.engine.recTracksReset(reqTracks, gen);
+      ok = await waitRecTracks(gen);
+    }
     if (!ok) { _suppressDirty = false; flashTake(tr('studio.m.trackRestoreTimeout')); return; }
   }
   if (Array.isArray(p.tracks) && p.tracks.length) {
@@ -2802,6 +2877,11 @@ function startRenameTrack(id) {
 function setTrackProp(id, key, val) {   // 이름·색·높이 (렌더러 전용 메타)
   const rt = _recTracks.find(r => r.id === id); if (!rt) return;
   rt[key] = val || (key === 'height' ? 0 : '');
+  if (key === 'color') {   // 되돌리기/다시실행으로 색이 바뀔 때도 파형 색 캐시를 같이 갱신
+    const nc = resolveColor(rt.color || (rt.type === 1 ? 'var(--stem-bass)' : 'var(--danger)'));
+    for (const tk of _takes) if (tk.trackId === id) { tk.waveColor = nc; tk.svg = null; }
+    renderTakes();
+  }
   renderRecLanes(); updateFxPanel(); updateTrackFader();
 }
 function reorderTracks(orderIds) {
@@ -3232,7 +3312,14 @@ function onEngineEvent(m) {
     }
     case 'recTracks': {
       const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
-      _recTracks = (m.list || []).map(r => { const p = prevMeta.get(r.id); return p ? { ...r, ...p } : r; });   // 렌더러 전용 메타(이름·색·높이) id로 보존
+      const RECPAL = ['var(--rec-c1)', 'var(--rec-c2)', 'var(--rec-c3)', 'var(--rec-c4)', 'var(--rec-c5)'];
+      let recColorIdx = _recTracks.filter(r => r.type !== 1 && r.color).length;   // 이미 배정된 녹음 트랙 수만큼 팔레트 순번을 이어간다
+      _recTracks = (m.list || []).map(r => {
+        const p = prevMeta.get(r.id);
+        if (p) return { ...r, ...p };   // 기존 트랙(사용자가 고른 색 포함) 보존
+        if (r.type !== 1) return { ...r, color: RECPAL[recColorIdx++ % RECPAL.length] };   // 처음 보는 녹음 트랙엔 팔레트 색을 순환 배정(Ableton/Logic 관례)
+        return r;   // 오디오(임포트) 트랙은 스템 색 계열 기본값을 그대로 씀
+      });   // 렌더러 전용 메타(이름·색·높이) id로 보존
       if (m.gen != null) {
         _recTracksGen = m.gen;
         _recTracksWaiters.filter(w => w.gen === m.gen).forEach(w => w.resolve(true));
@@ -3521,7 +3608,7 @@ function wire() {
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
-    if (_recArmed) api.engine.recordArm(); else { api.engine.recordStop(); clearRecLive(); }
+    if (_recArmed) api.engine.recordArm(_projectPath); else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });

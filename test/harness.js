@@ -58,6 +58,9 @@ const DEFAULT_STUBS = {
   'project:autosaveRead':  () => ({ ok: false }),
   'project:autosaveWrite': () => ({ ok: true }),
   'project:autosaveClear': () => ({ ok: true }),
+  // 홈의 "이어서 하기" — 최근 스튜디오/영상 프로젝트. 기본은 빈 목록(각 테스트가 필요하면 stubs 로 덮어씀)
+  'project:recentList':      () => ([]),
+  'project:openPathDirect':  () => ({ ok: false }),
   'crash:take': () => null,
   // 연습 기록도 main 이 실제 파일(usageLog.json)로 관리한다 — 화면만 띄우는 모드에서도
   // 트레이닝 탭이 부팅 때부터 부르므로(usage.js 모듈 최상단) 흉내를 낸다.
