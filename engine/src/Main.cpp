@@ -412,8 +412,22 @@ public:
         os.release();
 
         writerChans = recCh;
-        // FIFO 를 넉넉히 — 디스크가 잠깐 밀려도 샘플이 드롭돼 '틱' 이 남지 않도록
-        threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 17));
+        // FIFO 크기 트레이드오프 — 크게 잡을수록 디스크가 잠깐 밀려도 드롭(=녹음에 '틱')이
+        // 안 나지만, 그만큼 크래시 순간 FIFO 안에 남아 디스크로 못 내려간 채 통째로 유실될
+        // 수 있는 오디오도 늘어난다(파일에 이미 쓰인 바이트는 main.js repairWav() 가 헤더를
+        // 고쳐 살리지만, FIFO 안에 있는 건 애초에 파일에 없어서 복구 대상이 아니다).
+        // writerThread(TimeSliceThread)는 write() 때마다 notify() 로 즉시 깨어나 FIFO 가
+        // 빌 때까지 계속 드레인하므로(useTimeSliceClient가 0을 반환하는 한 재호출), 디스크가
+        // 정상 속도일 때 이 FIFO 는 늘 거의 비어 있다 — 용량은 "디스크가 순간적으로 멈췄을
+        // 때 몇 초까지 버티다 드롭할 것인가"의 상한일 뿐이다. 이전 1<<17(131072 샘플)은
+        // 44.1kHz 에서 최대 ~3.0 초(48kHz 에서 ~2.7 초) 치 오디오가 크래시 시 통째로 날아갈
+        // 수 있었다. 1<<16(65536 샘플)로 절반으로 줄이면 최악의 크래시 유실은 ~1.5 초
+        // (44.1kHz)/~1.4 초(48kHz)로 줄고, 그래도 디스크가 1.4~1.5 초간 완전히 멈추는 것도
+        // 버텨내는 여유는 남는다 — 일반적인 OS/디스크 순간 지연(수십~수백 ms)보다 한 자릿수
+        // 이상 크다. 더 줄일수록 유실 창은 더 작아지지만 실제 디스크 스톨(백신 스캔, 인덱싱,
+        // 네트워크 드라이브 등) 내성이 줄어 드롭에 의한 틱이 생길 위험이 커진다 — 이 값은 그
+        // 균형점.
+        threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 16));
         activeWriter.store (threadedWriter.get());
         recordArmed = true;
         recordedStart = -1;
