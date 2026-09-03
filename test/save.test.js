@@ -16,8 +16,12 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
 (async () => {
   const { app, win, js } = await bootMain({ settle: 3000 });
   const userData = app.getPath('userData');
-  const AUTO = path.join(userData, 'autosave.yssproj');
-  const META = path.join(userData, 'autosave.json');
+  // 자동저장은 이제 프로젝트별 downloads/projects/<이름>/history/ 안에 남는다(전역
+  // userData 루트가 아니라 — 프로젝트끼리 자동저장을 안 덮어쓰게 바뀜, main.js autosavePath 참고).
+  // 여기서 넘기는 projectPath('C:/x/테스트곡.yssproj')의 파일명(확장자 제외)이 폴더 키다.
+  const historyDir = path.join(userData, 'downloads', 'projects', '테스트곡', 'history');
+  const AUTO = path.join(historyDir, 'autosave.yssproj');
+  const META = path.join(historyDir, 'autosave.json');
   for (const p of [AUTO, META]) { try { fs.unlinkSync(p); } catch {} }
 
   section('1) 스냅샷을 쓴다');

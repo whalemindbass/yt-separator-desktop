@@ -415,8 +415,10 @@ function createMainWindow() {
       });
       if (response === 2) return;                       // 취소 — 그대로 둔다
       if (response === 0 && !(await requestRendererSave())) return;   // 저장 취소·실패 시에도 닫지 않는다
-      // 여기까지 왔으면 저장했거나 버리기로 한 것이다 — 복구본을 남겨 둘 이유가 없다
-      for (const p of [autosavePath(), autosaveMetaPath()]) { try { fs.unlinkSync(p); } catch {} }
+      // 여기까지 왔으면 저장했거나 버리기로 한 것이다 — 복구본을 남겨 둘 이유가 없다.
+      // 자동저장이 프로젝트별 폴더로 바뀐 뒤에도 여기가 무인자(전역 세션 폴더)만 지우고
+      // 있어서 실제 프로젝트의 복구본은 안 지워지던 버그 — lastAutosaveKey 로 그 프로젝트를 짚는다.
+      for (const p of [autosavePath(lastAutosaveKey), autosaveMetaPath(lastAutosaveKey)]) { try { fs.unlinkSync(p); } catch {} }
       closeConfirmed = true;
       win.close();
     })();
@@ -771,6 +773,7 @@ function legacyAutosaveMetaPath() { return path.join(app.getPath('userData'), 'a
 ipcMain.handle('project:autosaveWrite', (_ev, json, meta) => {
   try {
     const key = meta && meta.projectPath;
+    lastAutosaveKey = key;
     // 임시 파일에 쓰고 바꿔치기한다. 쓰는 도중 죽으면 지난 스냅샷이라도 남아야 한다.
     const tmp = autosavePath(key) + '.tmp';
     fs.writeFileSync(tmp, String(json), 'utf8');
@@ -812,6 +815,9 @@ ipcMain.handle('project:autosaveClear', (_ev, projectKey, legacy) => {
 // 저장 안 한 변경이 있는지 렌더러가 알려 준다 — 창을 닫을 때 물어보기 위해서다
 let unsavedWork = false;
 ipcMain.on('project:dirty', (_ev, v) => { unsavedWork = !!v; });
+// 가장 최근에 autosaveWrite 가 쓴 프로젝트 키 — 창을 "저장 안 함"으로 닫을 때 그
+// 프로젝트의 복구본을 지우기 위해 필요하다(무인자로 지우면 엉뚱한 세션 폴더를 지운다).
+let lastAutosaveKey = null;
 // 스튜디오 믹스 내보내기 진행 중인지 — 창을 닫을 때 물어보기 위해서다(getEngine 의
 // 'export' cmd 가로채기 / exportDone·exportError 이벤트에서 갱신)
 let engineExporting = false;
