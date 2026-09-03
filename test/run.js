@@ -38,6 +38,9 @@ const DEVICE_SENSITIVE = new Set([
   'fileassoc.test.js', 'studio.test.js', 'shortcuts.test.js', 'metronome.test.js',
   'dirtyboot.test.js', 'devtypeswitch.test.js', 'deverror.test.js', 'beatgrid.test.js',
   'crash.test.js',
+  // crashreport.test.js — 장치는 안 만지지만 "크래시 기록 write 완료 → 곧바로 read"
+  // 타이밍이 CPU 경합(6개 동시)에 취약해서 병렬 배치에서만 가끔 실패했다(순차론 항상 통과).
+  'crashreport.test.js',
 ]);
 
 const args = process.argv.slice(2);
