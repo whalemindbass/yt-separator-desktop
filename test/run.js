@@ -119,11 +119,32 @@ async function runPool(fileList, concurrency, onDone) {
   const parallelFiles = forceSerial ? [] : files.filter(f => !DEVICE_SENSITIVE.has(f));
   const serialFiles = forceSerial ? files : files.filter(f => DEVICE_SENSITIVE.has(f));
 
-  if (parallelFiles.length) {
+  // video*.test.js 는 실제 Chromium 비디오 디코드 + canvas 썸네일 + ffmpeg 인코드를 진짜로
+  // 돌린다 — 이런 걸 6개씩 동시에 돌리면 GPU 프로세스가 못 버티고 리셋되고(크롬 로그에
+  // "GPU state invalid after WaitForGetOffsetInRange"), 그 여파로 렌더러 IPC 가 죽거나
+  // (Script failed to execute) 동시에 임시 폴더에 쓰는 비디오 파일을 다른 인스턴스가
+  // 먼저 읽으려다 못 찾는(net::ERR_FILE_NOT_FOUND) flaky 가 났다(실제로 겪음 — 코드
+  // 자체는 멀쩡한데 병렬 부하로만 재현됨). 가벼운 스위트는 그대로 6개씩, GPU 무거운
+  // video* 만 따로 낮은 동시성(2)으로 묶는다.
+  const isGpuHeavy = (f) => /^video/.test(f);
+  const lightFiles = parallelFiles.filter(f => !isGpuHeavy(f));
+  const gpuFiles = parallelFiles.filter(isGpuHeavy);
+
+  if (lightFiles.length) {
     const cpu = os.cpus()?.length || 4;
     const concurrency = Math.max(2, Math.min(6, cpu));
-    console.log(`\n[병렬 ${concurrency}개씩 · ${parallelFiles.length}개 스위트 — 완료 순서대로(파일 순서 아님) 바로 찍는다]`);
-    await runPool(parallelFiles, concurrency, (r, i, total) => {
+    console.log(`\n[병렬 ${concurrency}개씩 · ${lightFiles.length}개 스위트 — 완료 순서대로(파일 순서 아님) 바로 찍는다]`);
+    await runPool(lightFiles, concurrency, (r, i, total) => {
+      console.log(`\n${bar()}\n${r.label}  (${i + 1}/${total})\n${bar()}`);
+      process.stdout.write(r.out);
+      results.push({ label: r.label, code: r.code });
+    });
+  }
+
+  if (gpuFiles.length) {
+    // 2개 동시에도 여전히 flaky 했다(이 기기 GPU가 못 버팀) — 완전 순차로.
+    console.log(`\n[GPU 순차 · ${gpuFiles.length}개 스위트 — 비디오 디코드/인코드라 동시 실행 안 함]`);
+    await runPool(gpuFiles, 1, (r, i, total) => {
       console.log(`\n${bar()}\n${r.label}  (${i + 1}/${total})\n${bar()}`);
       process.stdout.write(r.out);
       results.push({ label: r.label, code: r.code });

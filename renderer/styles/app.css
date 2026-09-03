@@ -3325,10 +3325,10 @@ body { display: flex; flex-direction: column; }
 
 /* 트랙 레인 — 진중한 딥 그레이 + 헤어라인 (플랫) */
 .daw-lanes { background: var(--timeline); }
-/* 레인 구분선: 레인 자체엔 없음(재생선 틈새 방지). 헤드는 불투명 선(재생선 덮음), 영역은 타임라인 선 */
+/* 레인 구분선: 레인 자체·영역 다 없음(재생선 틈새 방지 + 클립 카드 테두리 아래로 삐져나와
+   보이던 선 제거). 헤드만 불투명 선(재생선 덮음). */
 .daw-lane { border-bottom: none; }
 .daw-head { border-bottom: 1px solid color-mix(in srgb, var(--surface) 82%, #000); }
-.daw-lane .daw-area { border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
 .daw-head { background: var(--surface); }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
 .daw-clip { border: 0; }
@@ -3768,24 +3768,26 @@ body { background: var(--bg) !important; }
 .recent-thumb img.on { opacity: 1; }
 .recent-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
 .recent-card b {
-  font-size: 12.5px; font-weight: 600; line-height: 1.3; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  font-size: 12.5px; font-weight: 600; line-height: 1.3; white-space: normal;
+  overflow: hidden;
 }
 .recent-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.recent-model {
+/* 항목 종류 배지(라이브러리/스튜디오/영상) — 아이콘+글자, 박스형 */
+.recent-type {
   display: flex; align-items: center; gap: 3px; flex: none;
   font: 600 9.5px/1 var(--mono); letter-spacing: .03em; padding: 3px 5px; border-radius: 4px;
   background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft-border);
 }
-.recent-model svg { width: 10px; height: 10px; flex: none; }
+.recent-type svg { width: 10px; height: 10px; flex: none; }
 /* 라이브러리/스튜디오/영상 편집을 각자 다른 색으로 — 이름만 보고도 뭘 이어서 하는지 구분되게 */
-.recent-model.kind-library { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
-.recent-model.kind-studio { background: rgba(95,143,206,.16); color: var(--stem-bass); border-color: rgba(95,143,206,.32); }
-.recent-model.kind-video { background: rgba(176,120,194,.16); color: var(--stem-other); border-color: rgba(176,120,194,.32); }
-/* 모델명(4stem 등)은 라이브러리 배지 뒤에 붙는 보조 정보 — 자리 없으면 이쪽이 줄어든다 */
-.recent-model.recent-sub {
-  flex: 0 1 auto; min-width: 0; background: transparent; border-color: transparent; color: var(--tx-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 0;
+.recent-type.kind-library { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
+.recent-type.kind-studio { background: rgba(95,143,206,.16); color: var(--stem-bass); border-color: rgba(95,143,206,.32); }
+.recent-type.kind-video { background: rgba(176,120,194,.16); color: var(--stem-other); border-color: rgba(176,120,194,.32); }
+/* 모델명(4stem 등) — 종류 배지 뒤에 붙는 보조 정보, 박스 없이 텍스트만. 자리 없으면 줄어든다 */
+.recent-model {
+  flex: 0 1 auto; min-width: 0; color: var(--tx-3); font: 600 9.5px/1 var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .recent-meta time { margin-left: auto; flex: none; font: 400 10.5px/1 var(--mono); color: var(--tx-3); }
 

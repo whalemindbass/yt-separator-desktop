@@ -159,9 +159,9 @@ async function paintRecent() {
     // 곡(라이브러리)도 스튜디오/영상처럼 "어디서 온 항목인지" 배지를 단다 —
     // 모델명(4stem 등)만으론 라이브러리 항목인 게 한눈에 안 들어온다는 지적으로 추가.
     const badge = it.kind === 'song'
-      ? `<span class="recent-model kind-library">${KIND_ICON.library}${esc(t('home.recent.kind.library'))}</span>
-         <span class="recent-model recent-sub">${esc(it.modelKey || '4stem')}</span>`
-      : `<span class="recent-model kind-${esc(it.kind)}">${KIND_ICON[it.kind] || ''}${esc(projectKindLabel(it.kind))}</span>`;
+      ? `<span class="recent-type kind-library">${KIND_ICON.library}${esc(t('home.recent.kind.library'))}</span>
+         <span class="recent-model">${esc(it.modelKey || '4stem')}</span>`
+      : `<span class="recent-type kind-${esc(it.kind)}">${KIND_ICON[it.kind] || ''}${esc(projectKindLabel(it.kind))}</span>`;
     return `
     <button class="recent-card" ${attrs} title="${esc(it.name || '')}">
       <span class="recent-thumb">
