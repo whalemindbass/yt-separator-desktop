@@ -3040,7 +3040,7 @@ body { display: flex; flex-direction: column; }
 }
 .daw-area-wrap .daw-area { position: absolute; inset: 0; overflow: hidden; }
 .daw-lane-rec .daw-area { position: relative; overflow: hidden; }
-.daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)); }
+.daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)); opacity: var(--op, 1); }
 .daw-clip.rec { background: color-mix(in srgb, var(--danger) 15%, var(--elev)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 /* 이름 띠 — take 클립의 .daw-clip-namebar 와 같은 패턴. renderWaves() 가 .daw-clip 만
    갈아치우고 이 형제는 안 건드리니 확대·축소해도 안 없어진다. */
