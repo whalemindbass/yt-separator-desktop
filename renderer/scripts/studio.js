@@ -261,8 +261,15 @@ function dragClip(e, onDelta, onEnd) {
 }
 function repositionStems() {
   const w = contentW();   // 스템 클립 폭을 배율에 묶어야 줌이 파형에 반영됨
+  const left = (_stemOffset * _pxPerSec) + 'px';
   document.querySelectorAll('.daw-lane:not(.daw-lane-rec) .daw-clip').forEach(c => {
-    c.style.left = (_stemOffset * _pxPerSec) + 'px'; c.style.width = w + 'px'; c.style.right = 'auto';
+    c.style.left = left; c.style.width = w + 'px'; c.style.right = 'auto';
+  });
+  // 이름 배지(.daw-lane-namebar)는 클립과 별개 요소(형제)라 클립만 옮기면 제자리에
+  // 남는다 — 드래그로 스템을 밀어도 이름은 안 따라간다는 제보. 클립과 같은 left/width 를
+  // 그대로 줘서 같이 움직이게 한다(CSS 기본값 left:0;right:0 을 덮어써야 하니 right도 auto로).
+  document.querySelectorAll('.daw-lane:not(.daw-lane-rec) .daw-lane-namebar').forEach(nb => {
+    nb.style.left = left; nb.style.width = w + 'px'; nb.style.right = 'auto';
   });
 }
 // 트랙 빈 곳 클릭+유지 = 재생선 스크럽 (재생 위치 이동)
