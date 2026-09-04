@@ -1840,7 +1840,6 @@ function renderLanes() {
       </div>
       <div class="ve-area-wrap">
         <div class="ve-area"></div>
-        <div class="ve-lane-name">${esc(trackLabel(vt))}</div>
       </div>
       <div class="ve-lane-resize"></div>`;
     lane.querySelector('.ve-hide').addEventListener('click', (e) => {
@@ -4121,6 +4120,19 @@ function wire() {
       window.addEventListener('pointerup', onUp, { once: true });
     });
   }
+  // 트랙이 스크롤 영역을 다 못 채우면(.ve-lanes 는 내용물 높이만큼만 커진다) 그 아래 빈
+  // 공간은 어떤 트랙 레인에도 안 걸려서 클릭이 씹혔다(제보) — .ve-tscroll 에 한 번만 걸어서
+  // 레인/룰러가 아닌 빈 곳 클릭도 룰러와 같은 방식(클릭·드래그로 스크럽)으로 재생헤드를 옮긴다.
+  $('ve-tscroll')?.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.ve-ruler-wrap, .ve-lane')) return;
+    const ruler = $('ve-ruler'); if (!ruler) return;
+    const secAt = (clientX) => Math.max(0, (clientX - ruler.getBoundingClientRect().left) / _pxPerSec);
+    seekTo(secAt(e.clientX));
+    const onMove = (ev) => seekTo(secAt(ev.clientX));
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  });
   $('ve-marker-add')?.addEventListener('click', () => addMarkerAtPlayhead());
   $('ve-range-mode')?.addEventListener('click', () => {
     _veRangeMode = !_veRangeMode;
