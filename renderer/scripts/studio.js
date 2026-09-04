@@ -51,6 +51,7 @@ let _playStart = 0;   // 재생 시작점
 let _returnOnStop = true;   // 정지 시 재생 시작 위치로 복귀 (옵션)
 let _rangeMode = false;     // 영역 선택 모드(룰러 드래그 = 내보내기 구간)
 let _magnetOn = true;       // 자석 스냅(그리드 + 클립 경계) — Alt 는 이 상태를 순간적으로 뒤집는다
+let _marqueeOn = false;     // 마퀴 모드 — 켜져 있으면 트랙 빈 곳 드래그가 팬 대신 영역 다중선택
 let _tracks = [];          // [{key,label,color,engineIndex}]
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
@@ -1685,7 +1686,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1947,7 +1948,8 @@ function renderTakes() {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); showTakeMenu(e.clientX, e.clientY, tk.id); });
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('pointerdown', (e) => {
-      if (e.target.classList.contains('daw-trim') || e.target.classList.contains('daw-fadeh')) return;   // 핸들은 트림·페이드
+      // 핸들은 트림·페이드 — 단 Ctrl/Cmd 클릭은 다중선택이 우선이라 핸들이어도 그냥 통과시킨다
+      if ((e.target.classList.contains('daw-trim') || e.target.classList.contains('daw-fadeh')) && !(e.ctrlKey || e.metaKey)) return;
       if (e.button !== 0) return;   // 우클릭은 컨텍스트 메뉴만 — 재생선·선택 건드리지 않음
       e.preventDefault(); e.stopPropagation();
       // 선택 관리 — Ctrl/Cmd = 토글(멀티), 그 외 = 미선택이면 단독 선택
@@ -2034,6 +2036,7 @@ const MIN_CLIP = 0.02;   // 최소 클립 길이(초)
 // 트림 핸들: dir -1=좌, +1=우. 드래그로 inOff/dur 갱신, up 시 엔진 커밋
 function wireTrim(handle, tk, el, wave, dir) {
   handle.addEventListener('pointerdown', (e) => {
+    if (e.ctrlKey || e.metaKey) return;   // Ctrl/Cmd 클릭은 트림 대신 다중선택으로 (버블시켜 클립 pointerdown 이 처리)
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.inOff, bDur = tk.dur, bStart = tk.start;
@@ -2076,6 +2079,7 @@ function commitTrim(tk) {
 // 페이드 핸들: dir -1=인, +1=아웃. 코너 드래그로 길이 갱신, up 시 커밋
 function wireFade(handle, tk, paint, dir) {
   handle.addEventListener('pointerdown', (e) => {
+    if (e.ctrlKey || e.metaKey) return;   // Ctrl/Cmd 클릭은 페이드 대신 다중선택으로 (버블시켜 클립 pointerdown 이 처리)
     e.preventDefault(); e.stopPropagation();
     selectTrack(tk.trackId); _selClipId = tk.id;
     const startX = e.clientX, bIn = tk.fadeIn, bOut = tk.fadeOut;
@@ -2940,6 +2944,44 @@ function adjustBpm(factor) {
   setBpm(nw);
   pushUndo(() => setBpm(old), () => setBpm(nw), tr('studio.u.bpmAdjust'));
 }
+// 마퀴(영역 드래그) 다중선택 — 뷰포트 좌표 기준 사각형과 클립 요소의 겹침만 보면 되니
+// 스크롤/줌 오프셋 계산이 필요 없다(둘 다 실제 화면 rect 로 비교).
+function startMarquee(e) {
+  e.preventDefault();
+  const box = document.createElement('div');
+  box.className = 'daw-marquee';
+  document.body.appendChild(box);
+  const x0 = e.clientX, y0 = e.clientY;
+  const additive = e.ctrlKey || e.metaKey || e.shiftKey;   // 기존 선택에 더하기
+  const baseSel = additive ? new Set(_selClips) : new Set();
+  const move = (ev) => {
+    const l = Math.min(x0, ev.clientX), t = Math.min(y0, ev.clientY);
+    const w = Math.abs(ev.clientX - x0), h = Math.abs(ev.clientY - y0);
+    box.style.left = l + 'px'; box.style.top = t + 'px'; box.style.width = w + 'px'; box.style.height = h + 'px';
+    const r1 = { left: l, top: t, right: l + w, bottom: t + h };
+    const picked = new Set(baseSel);
+    document.querySelectorAll('.daw-take-clip').forEach(el => {
+      const r2 = el.getBoundingClientRect();
+      if (r1.left < r2.right && r1.right > r2.left && r1.top < r2.bottom && r1.bottom > r2.top) {
+        const id = Number(el.dataset.clipId);
+        if (id) picked.add(id);
+      }
+    });
+    if (picked.size !== _selClips.size || [...picked].some(id => !_selClips.has(id))) {
+      _selClips = picked; renderTakes();
+    }
+  };
+  const up = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
+    box.remove();
+    _selClipId = _selClips.size === 1 ? [..._selClips][0] : (_selClips.size ? _selClipId : null);
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
+}
 // ── 다중선택 클립보드 (복사/잘라내기/붙여넣기/삭제) ──
 function selectedTakes() { return _takes.filter(t => _selClips.has(t.id)); }
 function clearClipSelection() { if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); } }
@@ -3742,6 +3784,7 @@ function wire() {
   $('daw-lanes').addEventListener('pointerdown', (e) => {
     const area = e.target.closest('.daw-area');
     if (!area || e.target.closest('.daw-clip, .daw-take-clip, .daw-drag-badge')) return;
+    if (_marqueeOn && e.button === 0) { startMarquee(e); return; }
     const lane = area.closest('.daw-lane-rec');
     if (lane) selectTrack(Number(lane.dataset.recid));
     grabPan(e);
@@ -3818,6 +3861,15 @@ function wire() {
     $('st-magnet').classList.toggle('on', _magnetOn);
     $('st-magnet').setAttribute('aria-pressed', String(_magnetOn));
     flashTake(_magnetOn ? tr('studio.lbl.magnetOn') : tr('studio.lbl.magnetOff'));
+  });
+
+  // 마퀴(영역 드래그 다중선택) 모드 on/off — 세션 동안만 유지(자석처럼 저장 안 함, st-range-mode 와 동일 패턴)
+  $('st-marquee').addEventListener('click', () => {
+    _marqueeOn = !_marqueeOn;
+    $('st-marquee').classList.toggle('on', _marqueeOn);
+    $('st-marquee').setAttribute('aria-pressed', String(_marqueeOn));
+    $('daw-lanes').classList.toggle('marquee-mode', _marqueeOn);
+    flashTake(_marqueeOn ? tr('studio.lbl.marqueeOn') : tr('studio.lbl.marqueeOff'));
   });
 
   // 클립 카드 투명도(모든 트랙 일괄) — 클릭 위치에 슬라이더 팝오버

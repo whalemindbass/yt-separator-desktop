@@ -2852,6 +2852,10 @@ body { display: flex; flex-direction: column; }
   -webkit-mask: url("data:image/png;base64,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") center/contain no-repeat;
   mask: url("data:image/png;base64,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") center/contain no-repeat;
 }
+.ico-marquee { display: inline-block; width: 14px; height: 14px; border: 1.6px dashed currentColor; border-radius: 2px; }
+/* 마퀴(영역 드래그) 다중선택 — 트랙 위를 드래그해 만든 사각형 */
+.daw-marquee { position: fixed; z-index: 500; pointer-events: none; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 2px; }
+#daw-lanes.marquee-mode .daw-area { cursor: crosshair; }
 .daw-rtog:hover:not(:disabled) { color: var(--tx-1); background: var(--elev); }
 .daw-rtog:disabled { opacity: .4; cursor: default; }
 .daw-rtog.on { color: var(--accent-fg); background: var(--accent); }
@@ -3043,16 +3047,20 @@ body { display: flex; flex-direction: column; }
    각자에 나눠 걸어서(아래) overflow:hidden 없이도 같은 모양이 나오게 했다. */
 .daw-area-wrap {
   position: relative; border-radius: 5px;
-  /* 클립 투명도(◐, --op)는 배경·테두리만 옅게 만든다 — opacity 를 이 래퍼에 걸면
-     안의 이름 텍스트(.daw-lane-name)까지 같이 흐려져서 안 읽힌다는 지적으로,
-     색 자체를 transparent 쪽으로 섞는 방식(color-mix 이중 적용)으로 바꿨다. */
-  border: 1px solid color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 45%, transparent) calc(var(--op, 1) * 100%), transparent);
+  /* 테두리는 여기 안 건다 — 이 래퍼는 레인 전체 폭(곡 길이)으로 고정이라, 스템을
+     드래그해 오프셋을 주면 안의 .daw-clip 만 움직이고 여기 테두리는 그대로 남아
+     "카드가 안 따라온다"는 제보로 이어졌다. 테두리도 .daw-clip 자신에게 옮겨서
+     이름 띠·파형과 같이 움직이게 한다(아래). */
 }
 .daw-area-wrap .daw-area { position: absolute; inset: 0; overflow: hidden; }
 .daw-lane-rec .daw-area { position: relative; overflow: hidden; }
-/* border-radius+overflow 를 래퍼가 아니라 여기 직접 건다 — 래퍼(.daw-area-wrap)엔
-   overflow:hidden 을 못 두니(위 설명), 클립 자기 자신이 파형을 카드 모양대로 잘라야 한다. */
-.daw-clip { position: absolute; inset: 0; overflow: hidden; border-radius: 5px; background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)) calc(var(--op, 1) * 100%), transparent); }
+/* border-radius+overflow+테두리를 래퍼가 아니라 여기 직접 건다 — 래퍼(.daw-area-wrap)엔
+   overflow:hidden 을 못 두니(위 설명), 클립 자기 자신이 파형을 카드 모양대로 잘라야 하고,
+   테두리도 자기 위치(left/width)를 따라가야 드래그해도 카드처럼 붙어 움직인다.
+   클립 투명도(◐, --op)는 배경·테두리만 옅게 만든다 — opacity 를 걸면 안의 이름
+   텍스트(.daw-lane-name)까지 같이 흐려져서 안 읽힌다는 지적으로, 색 자체를
+   transparent 쪽으로 섞는 방식(color-mix 이중 적용)으로 했다. */
+.daw-clip { position: absolute; inset: 0; overflow: hidden; border-radius: 5px; background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)) calc(var(--op, 1) * 100%), transparent); border: 1px solid color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 45%, transparent) calc(var(--op, 1) * 100%), transparent); }
 .daw-clip.rec { background: color-mix(in srgb, color-mix(in srgb, var(--danger) 15%, var(--elev)) calc(var(--op, 1) * 100%), transparent); border-color: color-mix(in srgb, color-mix(in srgb, var(--danger) 45%, transparent) calc(var(--op, 1) * 100%), transparent); }
 .daw-clip svg { opacity: var(--op, 1); }   /* 파형 그래픽만 — 이름 띠엔 svg 가 없어 안전 */
 /* 이름 띠 — take 클립의 .daw-clip-namebar 와 같은 패턴. renderWaves() 가 .daw-clip 만
@@ -3392,10 +3400,9 @@ body { display: flex; flex-direction: column; }
 .daw-head { border-bottom: 1px solid color-mix(in srgb, var(--surface) 82%, #000); }
 .daw-head { background: var(--surface); }
 .daw-lane.selected .daw-head { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
-.daw-clip { border: 0; }
-/* .daw-take-clip 은 border 그대로 둔다 — studio-pro-final.png 참고해 카드 테두리를
-   줬다(위 .daw-take-clip 규칙). 여긴 원래 "플랫, 테두리 없음"으로 다 밀던 자리라 여기서
-   다시 0 으로 깔아뭉개면 그 규칙이 무의미해진다. */
+/* .daw-clip 도 .daw-take-clip 처럼 border 그대로 둔다 — 예전엔 여기서 0 으로 깔아뭉개고
+   테두리를 .daw-area-wrap(레인 전체 폭, 안 움직임)에 대신 걸어 놨었는데, 스템 드래그 시
+   카드가 안 따라오는 원인이었다(제보). 지금은 .daw-clip 자신이 테두리를 갖는다(위). */
 .daw-ruler { font-variant-numeric: tabular-nums; }
 
 /* 타임라인 그리드 — 룰러 눈금에 맞춘 은은한 세로선 */
