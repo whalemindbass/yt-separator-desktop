@@ -1522,6 +1522,14 @@ ipcMain.handle('video:export', async (event, payload) => {
     if (silentIdx < 0) { args.push('-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'); silentIdx = nextInput++; }
     return silentIdx;
   }
+  // anullsrc 는 내부 샘플 포맷이 실제 디코드된 오디오(보통 fltp)와 달라서, concat 필터가
+  // 이 무음 구간 바로 뒤에 오는 조용한(낮은 진폭) 구간과 이어붙일 때 그 뒤 구간 대부분을
+  // 무음으로 뭉개버리는 실측 확인된 버그가 있다(실사용 신고 — "영상 앞부분엔 소리가 없다가
+  // 중간에 들어오게 편집하면 노이즈[띄엄띄엄 끊기는 잡음] 발생". anullsrc 대신 진짜 파일의
+  // 무음 구간을 이어붙이면 안 생기고, 무음 뒤에 큰 소리 구간만 오면 안 생긴다 — 격리해서
+  // 실측 확인). concat 전에 무음 스트림 포맷을 뒤에 올 실제 오디오와 명시적으로 맞춰주면
+  // (aformat) 사라진다. 세 군데(무음 단독 구간, xfade 양쪽 무음 대체) 모두 씀.
+  const SILENT_AFORMAT = ',aformat=sample_fmts=fltp:channel_layouts=stereo:sample_rates=48000';
   // 영상 트랙이 없는 구간(mp3/wav 단독, PIP 배경)을 위한 공용 검은 화면 입력(지연 생성).
   let blackIdx = -1;
   function ensureBlack(w, h) {
@@ -1646,7 +1654,7 @@ ipcMain.handle('video:export', async (event, payload) => {
   function buildAudio(sources, dur, label) {
     const d = dur.toFixed(3);
     if (!sources || !sources.length) {
-      parts.push(`[${ensureSilent()}:a]atrim=duration=${d},asetpts=PTS-STARTPTS[${label}]`);
+      parts.push(`[${ensureSilent()}:a]atrim=duration=${d},asetpts=PTS-STARTPTS${SILENT_AFORMAT}[${label}]`);
       return;
     }
     const raw = `${label}_raw`;
@@ -1728,10 +1736,10 @@ ipcMain.handle('video:export', async (event, payload) => {
       const transitionType = XFADE_TRANSITIONS.has(s.transitionType) ? s.transitionType : 'fade';
       parts.push(`[xva${i}][xvb${i}]xfade=transition=${transitionType}:duration=${dur}:offset=0[v${i}]`);
       parts.push(s.hasAudioA === false
-        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xaa${i}]`
+        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS${SILENT_AFORMAT}[xaa${i}]`
         : `[${ix.a}:a]atrim=start=${fsec(s.aIn)}:duration=${(s.dur * speedA).toFixed(3)}${atempoChain(speedA)},asetpts=PTS-STARTPTS[xaa${i}]`);
       parts.push(s.hasAudioB === false
-        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS[xab${i}]`
+        ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS${SILENT_AFORMAT}[xab${i}]`
         : `[${ix.b}:a]atrim=start=${fsec(s.bIn)}:duration=${(s.dur * speedB).toFixed(3)}${atempoChain(speedB)},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
       vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i);
