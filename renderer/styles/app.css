@@ -2843,6 +2843,7 @@ body { display: flex; flex-direction: column; }
 .daw-ruler-ctrl { position: absolute; left: 0; top: 0; width: 172px; height: 24px; z-index: 6; display: flex; align-items: stretch; gap: 0; padding: 0; background: var(--surface); border-right: 1px solid var(--border); cursor: default; }
 .daw-rtog { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: var(--tx-3); cursor: pointer; padding: 0; }
 .daw-rtog svg { width: 20px; height: 20px; }
+#st-clip-opacity { font-size: 15px; line-height: 1; }
 /* 자석 아이콘 — 사용자가 직접 준 래스터(magnet.png)를 CSS mask 로 씀. 형제 아이콘들과 같이
    color 를 그대로 물려받아야(테마·hover·on 상태) 해서 <img> 대신 mask-image 를 쓴다 —
    background-color: currentColor 가 .daw-rtog 의 color 체인(테마/hover/.on/disabled)을

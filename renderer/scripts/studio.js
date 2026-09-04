@@ -396,7 +396,6 @@ function renderRecLanes() {
     const lane = document.createElement('div');
     lane.className = 'daw-lane daw-lane-rec' + (isAudio ? ' daw-lane-audio' : '');
     lane.style.setProperty('--c', rt.color || defColor);
-    lane.style.setProperty('--op', rt.opacity != null ? rt.opacity : 1);
     if (rt.height) lane.style.height = rt.height + 'px';
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
@@ -416,7 +415,6 @@ function renderRecLanes() {
             ${rBtnHtml}
             <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="${tr('studio.t.mute')}" aria-pressed="${!!rt.mute}">M</button>
             <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="${tr('studio.t.solo')}" aria-pressed="${!!rt.solo}">S</button>
-            <button class="daw-ms daw-op-btn" data-m="op" title="${tr('studio.t.clipOpacity')}">◐</button>
           </div>
           <input class="daw-vol" type="range" min="0" max="${FADER_POS}" value="${gainToFader(rt.gain != null ? rt.gain : 1)}" title="${tr('studio.t.volume')}">
           <button class="daw-ms daw-rec-del" data-m="del" title="${tr('studio.t.deleteTrack')}">✕</button>
@@ -444,10 +442,6 @@ function renderRecLanes() {
     });
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
-    lane.querySelector('.daw-op-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      openOpacityPopoverAt(e.clientX, e.clientY, rt, lane);
-    });
     vol.addEventListener('input', () => {
       rt.gain = faderToGain(vol.value); api.engine.recTrack(rt.id, { gain: rt.gain });
       if (rt.id === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = dbText(rt.gain); }   // 믹서 동기화
@@ -1684,7 +1678,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -2190,15 +2184,23 @@ function openDropdown(anchor, items) {
   const r = anchor.getBoundingClientRect();
   openDropdownAt(r.left, r.bottom + 4, items);
 }
-// 클립 카드 투명도 — 트랙 헤드 ◐ 버튼을 클릭한 위치에 슬라이더 팝오버. 값은 렌더러
-// 전용 메타(color/height 와 같은 자리, 엔진엔 안 보냄)라 buildProjectObject/applyTrackMeta/
-// prevMeta 세 곳에 같은 패턴으로 얹혀 있다.
-function openOpacityPopoverAt(x, y, rt, lane) {
+// 클립 카드 투명도 — 룰러 위 버튼줄(자석 옆) ◐ 버튼을 클릭한 위치에 슬라이더 팝오버.
+// 모든 트랙에 일괄 적용되는 화면 표시 설정이라(프로젝트 데이터 아님) #daw-lanes 에
+// CSS 변수 하나로 걸고 localStorage 에 남겨 다음에 열어도 유지한다.
+let _clipOpacity = Number(localStorage.getItem('yss:clipOpacity'));
+if (!(_clipOpacity >= 0.15 && _clipOpacity <= 1)) _clipOpacity = 1;
+function applyClipOpacity() { $('daw-lanes')?.style.setProperty('--op', _clipOpacity); }
+function setClipOpacity(v) {
+  _clipOpacity = Math.max(0.15, Math.min(1, v));
+  localStorage.setItem('yss:clipOpacity', String(_clipOpacity));
+  applyClipOpacity();
+}
+function openOpacityPopoverAt(x, y) {
   document.querySelector('.daw-ctx')?.remove();
   const pop = document.createElement('div');
   pop.className = 'daw-ctx daw-op-pop';
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
-  const v0 = Math.round((rt.opacity != null ? rt.opacity : 1) * 100);
+  const v0 = Math.round(_clipOpacity * 100);
   pop.innerHTML = `<div class="daw-op-row">
     <span class="lbl">${tr('studio.t.clipOpacity')}</span>
     <input type="range" min="15" max="100" value="${v0}" class="daw-op-slider">
@@ -2210,11 +2212,8 @@ function openOpacityPopoverAt(x, y, rt, lane) {
   if (r.bottom > innerHeight - m) pop.style.top = Math.max(m, y - r.height) + 'px';
   const slider = pop.querySelector('.daw-op-slider'), val = pop.querySelector('.val');
   slider.addEventListener('input', () => {
-    const v = Number(slider.value) / 100;
     val.textContent = slider.value + '%';
-    rt.opacity = v;
-    lane.style.setProperty('--op', v);
-    markDirty();
+    setClipOpacity(Number(slider.value) / 100);
   });
   const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
@@ -2301,7 +2300,7 @@ function saveTakeSet(name) {
   // 트랙 레이아웃(개수·게인·뮤트·솔로) + 트랙별 FX 체인까지 통째로 저장
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, mute: !!r.mute, solo: !!r.solo,
-    name: r.name || '', color: r.color || '', height: r.height || 0, opacity: r.opacity != null ? r.opacity : 1,
+    name: r.name || '', color: r.color || '', height: r.height || 0,
     fxOrder: (_chainByTrack[r.id] || []).map(s => ({ id: s.id, index: s.index, bypass: s.bypass })),
   }));
   const takes = _takes.map(t => ({ id: t.id, file: t.file, start: secToSamples(t.start), dur: t.dur, inOff: t.inOff || 0, srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId }));
@@ -2436,7 +2435,6 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
     if (t.name) _recTracks[i].name = t.name;
     if (t.color) _recTracks[i].color = t.color;
     if (t.height) _recTracks[i].height = t.height;
-    if (t.opacity != null) _recTracks[i].opacity = t.opacity;
   });
   renderRecLanes();   // 이벤트 렌더는 메타 전이라 여기서 재렌더
 }
@@ -2457,7 +2455,7 @@ async function buildProjectObject(opts = {}) {
     ? { on: !!a.on, open: !!a.open, pts: a.pts.map(p => ({ t: p.t, v: p.v })) } : null; };
   const tracks = _recTracks.map(r => ({
     id: r.id, type: r.type || 0, gain: r.gain != null ? r.gain : 1, pan: r.pan != null ? r.pan : 0, mute: !!r.mute, solo: !!r.solo,
-    name: r.name || '', color: r.color || '', height: r.height || 0, opacity: r.opacity != null ? r.opacity : 1,
+    name: r.name || '', color: r.color || '', height: r.height || 0,
     auto: autoOut(r.id), sends: sendsOf(r).slice(),
     fx: (_chainByTrack[r.id] || []).map(s => ({ index: s.index, bypass: s.bypass, data: states[s.id] })),
   }));
@@ -3348,7 +3346,7 @@ function onEngineEvent(m) {
       break;
     }
     case 'recTracks': {
-      const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height, opacity: r.opacity }]));
+      const prevMeta = new Map(_recTracks.map(r => [r.id, { name: r.name, color: r.color, height: r.height }]));
       const RECPAL = ['var(--rec-c1)', 'var(--rec-c2)', 'var(--rec-c3)', 'var(--rec-c4)', 'var(--rec-c5)'];
       let recColorIdx = _recTracks.filter(r => r.type !== 1 && r.color).length;   // 이미 배정된 녹음 트랙 수만큼 팔레트 순번을 이어간다
       _recTracks = (m.list || []).map(r => {
@@ -3813,6 +3811,13 @@ function wire() {
     $('st-magnet').classList.toggle('on', _magnetOn);
     $('st-magnet').setAttribute('aria-pressed', String(_magnetOn));
     flashTake(_magnetOn ? tr('studio.lbl.magnetOn') : tr('studio.lbl.magnetOff'));
+  });
+
+  // 클립 카드 투명도(모든 트랙 일괄) — 클릭 위치에 슬라이더 팝오버
+  applyClipOpacity();
+  $('st-clip-opacity').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openOpacityPopoverAt(e.clientX, e.clientY);
   });
 
   // 메트로놈 on/off (설정 유지)
