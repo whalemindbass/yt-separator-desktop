@@ -726,7 +726,7 @@
         <span class="daw-sp"></span>
         
         <button id="st-shortcuts" class="btn" title="단축키 보기" data-i18n-title="studio.h.shortcutsTitle" data-i18n="studio.h.shortcuts">단축키</button>
-        <button id="st-audio-settings" class="btn" disabled title="오디오 시작 후 사용 가능" data-i18n-title="studio.h.needAudio" data-i18n="studio.audioSettings">오디오 설정</button>
+        <button id="st-audio-settings" class="btn" data-i18n="studio.audioSettings">오디오 설정</button>
       </div>
 
       <div class="daw-midrow">
@@ -1176,6 +1176,26 @@
           <button id="trn-tuner-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
         </div>
       </section>
+    </div>
+
+    <!-- 하단 연습 녹음 독 — 어느 도구를 보고 있어도 항상 떠 있다(training.js prWire 등) -->
+    <div class="trn-practice-bar">
+      <span class="pr-dot" id="pr-dot" aria-hidden="true"></span>
+      <button id="pr-start" class="btn btn-sm" type="button" data-i18n="training.pr.start">연습 녹음 시작</button>
+      <button id="pr-stop" class="btn btn-sm" type="button" hidden data-i18n="training.pr.stop">연습 종료</button>
+      <button id="pr-rec" class="btn btn-sm pr-rec-btn" type="button" disabled data-i18n="training.pr.recStart">녹음</button>
+      <div class="pr-tone-group">
+        <select id="pr-tone" class="pr-select" data-i18n-title="training.pr.toneTitle"></select>
+        <button id="pr-tone-load" class="mini" type="button" data-i18n="training.pr.toneLoad">불러오기</button>
+        <input id="pr-tone-name" class="pr-tone-name" type="text" data-i18n-placeholder="training.pr.toneNamePh" placeholder="톤 이름" />
+        <button id="pr-tone-save" class="mini" type="button" disabled data-i18n="training.pr.toneSave">저장</button>
+      </div>
+      <label class="pr-check">
+        <input id="pr-metro-bake" type="checkbox" />
+        <span data-i18n="training.pr.metroBake">메트로놈도 녹음</span>
+      </label>
+      <span class="pr-status" id="pr-status"></span>
+      <div class="pr-takes" id="pr-takes"></div>
     </div>
   </main>
 

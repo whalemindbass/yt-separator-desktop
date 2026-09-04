@@ -13,6 +13,7 @@ import { TabView, transcribeBass, toMono } from './tabview.js';
 import { StaffView } from './staffview.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
 import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
+import { getPresets, setPresets, upsertPreset } from './fx-presets.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -60,11 +61,6 @@ let _clipboard = [];          // 복사/잘라낸 클립 스냅샷 [{file,inOff,
 let _activePresetId = null;
 let _presetGather = null;     // 저장: {name,id?,states:{slotId:data},need:[ids],meta:[{index,bypass}],order:[ids]}
 let _pendingPreset = null;    // 로드: {slots:[{index,bypass,data}]}
-
-// ── FX 프리셋(톤) — 체인 전체 스냅샷 ──
-function getPresets() { try { return JSON.parse(localStorage.getItem('yss:fx-presets') || '[]'); } catch { return []; } }
-function setPresets(a) { try { localStorage.setItem('yss:fx-presets', JSON.stringify(a)); } catch {} }
-function upsertPreset(p) { const a = getPresets(); const i = a.findIndex(x => x.id === p.id); if (i >= 0) a[i] = p; else a.push(p); setPresets(a); }
 
 function startGather(opts) {   // 현재 트랙 체인 상태를 모아 프리셋 생성/갱신
   if (_selTrack == null) { flashTake(tr('studio.m.selectTrack')); return; }
@@ -476,7 +472,7 @@ function renderRecLanes() {
       openDropdownAt(e.clientX, e.clientY, [
         { label: tr('studio.lbl.rename'), fn: () => startRenameTrack(rt.id) },
         { label: tr('studio.lbl.changeColor'), fn: () => lane.querySelector('.nm i').click() },
-        { label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd() },
+        { label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd(0, 'studio') },
         { label: tr('studio.lbl.deleteTrack'), fn: () => del.click() },
       ]);
     });
@@ -1526,7 +1522,7 @@ function stopStudio() {
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
   if (!armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
-  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath); }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, 'studio'); }
   if (!_playing) playStudio();
   // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
@@ -1677,7 +1673,12 @@ function updateTuner(freq) {
 }
 
 function setEnabled(on) {
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-audio-settings', 'st-monitor']
+  // st-audio-settings 는 일부러 뺐다 — VST 폴더 하나가 스캔 중 엔진을 죽이면(scanPlugins
+  // 는 'ready' 마다 자동으로 돎, onEngineEvent 참고) 재시작할 때마다 다시 크래시하는
+  // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
+  // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
+  // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1691,7 +1692,7 @@ let _clipSeq = Date.now() * 1000;   // 단조증가 → 루프·같은 ms 에도
 function nextClipId() { return ++_clipSeq; }
 async function newAudioTrack() {   // 오디오(임포트) 트랙 생성 후 새 id 반환
   const before = _recTracks.length;
-  api.engine.recTrackAdd(1);   // type 1 = 오디오(녹음 불가)
+  api.engine.recTrackAdd(1, 'studio');   // type 1 = 오디오(녹음 불가)
   await new Promise(res => { const t0 = Date.now(); const iv = setInterval(() => { if (_recTracks.length > before || Date.now() - t0 > 2000) { clearInterval(iv); res(); } }, 25); });
   return _recTracks.length ? _recTracks[_recTracks.length - 1].id : null;
 }
@@ -3325,6 +3326,9 @@ function onEngineEvent(m) {
         _recTracksWaiters.filter(w => w.gen === m.gen).forEach(w => w.resolve(true));
       }
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
+      // 트레이닝(연습 녹음)과 엔진을 공유한다 — 녹음 트랙이 생기고 없어질 때마다 알려서,
+      // 트레이닝이 이 세션을 밟지 않게 한다(engineOwnerBlocking, main.js 참고).
+      api.engine?.reportSession?.('studio', _recTracks.length > 0);
       renderRecLanes(); updateSoloDim();
       if (!selValid(_selTrack)) {   // 스템 선택은 유지
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
@@ -3472,11 +3476,12 @@ async function startEngine(manual) {
   _devReconnectPhase = loadDevConfig() ? 'checking' : 'idle';
   setEngineStatus(_devReconnectPhase === 'checking' ? 'reconnect' : 'connect');
   showBoot('loading');
-  const r = await api.engine.start([]).catch(() => ({ ok: false }));
+  const r = await api.engine.start([], 'studio').catch(() => ({ ok: false }));
   if (!r || !r.ok) {
     setEngineStatus('failed');
     showBoot('failed');
     if (btn) { btn.disabled = false; btn.hidden = false; btn.textContent = tr('studio.lbl.audioRetry'); }
+    if (r && r.busy) flashTake(tr('studio.m.trainingBusy'));
     return false;
   }
   // 성공해도 'ready' 이벤트가 와야 실제로 쓸 수 있다 → 막은 거기서 걷는다
@@ -3608,7 +3613,7 @@ function wire() {
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
-    if (_recArmed) api.engine.recordArm(_projectPath); else { api.engine.recordStop(); clearRecLive(); }
+    if (_recArmed) api.engine.recordArm(_projectPath, 'studio'); else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });
@@ -3728,18 +3733,18 @@ function wire() {
     $('daw-ruler-wrap').classList.toggle('range-mode', _rangeMode);
     flashTake(_rangeMode ? tr('studio.m.rangeModeOn') : tr('studio.m.rangeModeOff'));
   });
-  $('st-add-rec').addEventListener('click', () => api.engine.recTrackAdd());   // 코너 ＋ = 녹음 트랙 추가
+  $('st-add-rec').addEventListener('click', () => api.engine.recTrackAdd(0, 'studio'));   // 코너 ＋ = 녹음 트랙 추가
   // 빈 화면의 행동 버튼 — 기존 메뉴와 같은 동작을 그대로 부른다(동작이 갈라지지 않게)
   $('empty-load-song')?.addEventListener('click', openSongPicker);
   $('empty-open-proj')?.addEventListener('click', () => openProject());
-  $('empty-add-rec')?.addEventListener('click', () => api.engine.recTrackAdd());
+  $('empty-add-rec')?.addEventListener('click', () => api.engine.recTrackAdd(0, 'studio'));
   $('empty-add-audio')?.addEventListener('click', pickImportAudio);
   // 트랙 빈 영역(레인 스크롤) 우클릭 = 트랙 추가
   $('daw-tscroll').addEventListener('contextmenu', (e) => {
     if (e.target.closest('.daw-lane-rec, .daw-take-clip, .daw-clip')) return;   // 트랙/클립 위는 각자 메뉴
     if (!_started) return;
     e.preventDefault();
-    openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd() }]);
+    openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd(0, 'studio') }]);
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });

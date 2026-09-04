@@ -1045,6 +1045,21 @@ const { AudioEngine } = require('./engine-client');
 let audioEngine = null;
 let lastRecordFile = null;   // 마지막으로 녹음을 걸어 둔 파일 — 엔진이 죽었을 때 되살릴 대상
 
+// 스튜디오와 트레이닝(연습 녹음)은 엔진 프로세스·세션을 하나 공유한다(아래 getEngine
+// 이 만드는 audioEngine 이 앱 전체에 유일) — 그래서 둘이 동시에 트랙을 만들고 녹음을
+// 걸면 서로의 세션을 덮어써 버린다. 완전한 동시 격리(세션 다중화)는 엔진을 다시 짜야
+// 하는 큰 작업이라, 대신 "누가 지금 내용을 갖고 있냐"만 보고 반대쪽을 막는다.
+// 스튜디오는 탭을 벗어나도 로드된 프로젝트가 엔진에 그대로 남아있으므로 "탭이 보이는지"
+// 가 아니라 "세션에 녹음 트랙/스템이 있는지"로 판단한다(studio.js 가 recTracks 바뀔 때마다
+// report). 트레이닝은 연습 녹음을 시작한 뒤부터 정지/탭 이탈 전까지만 소유한다.
+let studioHasContent = false;
+let trainingActive = false;
+function engineOwnerBlocking(who) {
+  if (who === 'training' && studioHasContent) return 'studio';
+  if (who === 'studio' && trainingActive) return 'training';
+  return null;
+}
+
 // ── 마지막 크래시 한 건 ────────────────────────────────────
 // 로그를 쌓지 않는다는 원칙은 그대로다. 파일 하나를 덮어쓰고, 다음 실행 때 보여 준 뒤 지운다.
 function crashPath() { return path.join(app.getPath('userData'), 'lastcrash.json'); }
@@ -1140,9 +1155,17 @@ function getEngine() {
   }
   return audioEngine;
 }
-ipcMain.handle('engine:start', (_e, stems) => {
+ipcMain.handle('engine:start', (_e, stems, who) => {
+  const owner = engineOwnerBlocking(who);
+  if (owner) return { ok: false, busy: true, owner };
   const eng = getEngine();
   return { ok: eng.start(Array.isArray(stems) ? stems : []), exe: eng.exePath };
+});
+// 스튜디오/트레이닝이 서로의 세션을 밟지 않게, 각자 "나 지금 내용 있어/녹음 중이야"를
+// 알려온다(엔진에는 안 전달, 이 소유권 플래그만 갱신). engineOwnerBlocking 참고.
+ipcMain.on('engine:reportSession', (_ev, who, active) => {
+  if (who === 'studio') studioHasContent = !!active;
+  else if (who === 'training') trainingActive = !!active;
 });
 // 엔진이 죽었을 때 "직전에 뭘 시켰는지" 알 수 있게 마지막 명령을 남겨둔다(크래시 진단용).
 // base64 프리셋 데이터처럼 큰 값은 크기만 남기고 실제 값은 버린다.
@@ -1154,6 +1177,12 @@ function summarizeCmd(cmd) {
   return out;
 }
 ipcMain.handle('engine:cmd',  (_e, cmd) => {
+  // 세션을 새로 만드는 명령(트레이닝의 recTrackAdd)만 who 태그를 실어 보낸다 — 반대쪽이
+  // 쓰는 중이면 엔진엔 아예 안 보내고 거절(engineOwnerBlocking 참고).
+  if (cmd && cmd.cmd === 'recTrackAdd' && cmd.who) {
+    const owner = engineOwnerBlocking(cmd.who);
+    if (owner) return { ok: false, busy: true, owner };
+  }
   // 정상적으로 멈췄으면 파일은 엔진이 마무리한다 — 되살릴 대상이 아니다
   if (cmd && cmd.cmd === 'recordStop') lastRecordFile = null;
   if (cmd && cmd.cmd === 'export') engineExporting = true;   // exportDone/exportError/exit 에서 해제
@@ -1201,7 +1230,9 @@ function nextTakeNumber(dir) {
   } catch {}
   return max + 1;
 }
-ipcMain.handle('engine:recordArm', (_ev, projectKey) => {
+ipcMain.handle('engine:recordArm', (_ev, projectKey, who) => {
+  const owner = engineOwnerBlocking(who);
+  if (owner) return { ok: false, busy: true, owner };
   const dir = mediaDirFor(projectKey);
   const n = nextTakeNumber(dir);
   const file = path.join(dir, `take-${n}.wav`);

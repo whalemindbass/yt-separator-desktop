@@ -191,7 +191,7 @@ contextBridge.exposeInMainWorld('yssApi', {
 
   // 실시간 오디오 엔진 (JUCE 사이드카)
   engine: {
-    start:       (stems)  => ipcRenderer.invoke('engine:start', stems),
+    start:       (stems, who) => ipcRenderer.invoke('engine:start', stems, who),
     cmd:         (c)      => ipcRenderer.invoke('engine:cmd', c),
     quit:        ()       => ipcRenderer.invoke('engine:quit'),
     loadStems:   (paths)  => ipcRenderer.invoke('engine:cmd', { cmd: 'loadStems', paths }),
@@ -209,6 +209,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     tuner:       (on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'tuner', on }),
     inputConfig: (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'inputConfig', ...(opts || {}) }),
     metro:       (on, bpm, phase, interval)=> ipcRenderer.invoke('engine:cmd', { cmd: 'metro', on, bpm, phase: phase || 0, interval: interval || 0 }),
+    metroBake:   (on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'metroBake', on }),
     listDevices: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'listDevices' }),
     setDevice:   (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'setDevice', ...(opts || {}) }),
     fxAdd:       (track, index)     => ipcRenderer.invoke('engine:cmd', { cmd: 'fxAdd', track, index }),
@@ -221,7 +222,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     fxSaveState: (track, slot)      => ipcRenderer.invoke('engine:cmd', { cmd: 'fxSaveState', track, slot }),
     fxSetState:  (track, slot, data)=> ipcRenderer.invoke('engine:cmd', { cmd: 'fxSetState', track, slot, data }),
     fxChainReq:  (track)            => ipcRenderer.invoke('engine:cmd', { cmd: 'fxChainReq', track }),
-    recordArm:   (projectKey) => ipcRenderer.invoke('engine:recordArm', projectKey),
+    recordArm:   (projectKey, who) => ipcRenderer.invoke('engine:recordArm', projectKey, who),
     recordStop:  ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'recordStop' }),
     takeRemove:  (id)     => ipcRenderer.invoke('engine:cmd', { cmd: 'takeRemove', id }),
     takeClear:   ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'takeClear' }),
@@ -231,12 +232,13 @@ contextBridge.exposeInMainWorld('yssApi', {
     takeSplit:   (id, at, newId) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeSplit', id, at, newId }),
     takeFade:    (id, fadeIn, fadeOut) => ipcRenderer.invoke('engine:cmd', { cmd: 'takeFade', id, fadeIn, fadeOut }),
     stemOffset:  (samples) => ipcRenderer.invoke('engine:cmd', { cmd: 'stemOffset', samples }),
-    recTrackAdd:    (type)    => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackAdd', type: type || 0 }),
+    recTrackAdd:    (type, who) => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackAdd', type: type || 0, who }),
     recTrackRemove: (id)      => ipcRenderer.invoke('engine:cmd', { cmd: 'recTrackRemove', id }),
     recArm:         (id)      => ipcRenderer.invoke('engine:cmd', { cmd: 'recArm', id }),
     recTrack:       (id, opts)=> ipcRenderer.invoke('engine:cmd', { cmd: 'recTrack', id, ...(opts || {}) }),
     recTracksReq:   ()        => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracks' }),
     recTracksReset: (tracks, gen) => ipcRenderer.invoke('engine:cmd', { cmd: 'recTracksReset', tracks, gen }),
+    reportSession: (who, active) => ipcRenderer.send('engine:reportSession', who, active),
     onEvent:     (fn)     => {
       const h = (_ev, m) => fn(m);
       ipcRenderer.on('engine:event', h);

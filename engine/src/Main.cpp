@@ -737,6 +737,7 @@ public:
         metroInterval = interval;                 // 샘플 단위 정밀 박 간격(감지값). <=1 이면 bpm 기반
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
     }
+    void setMetroBake (bool on) { metroBake = on; }   // 연습 녹음 — 켜면 메트로놈 클릭이 녹음 파일에도 섞인다
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
     // 하드웨어 입력 채널별 peak (읽고 리셋). 설정 창에서 어느 단자에 신호가 있는지 본다.
     Array<var> inputChannelLevels()
@@ -1690,6 +1691,8 @@ public:
         for (auto& rt : recTracks) { rt->pdcBuf.setSize (2, pdcCapacity); rt->pdcBuf.clear(); rt->pdcWrite = 0; rt->pdcActive = 0; }
         pdcMaxReported = -1;
         recomputePdc();
+        metroRecBuf.setSize (2, block);
+        metroRecBuf.clear();
         scratch.setSize (2, block);
         stemFxBuf.setSize (2, block);   // 오디오 스레드에서 재할당되지 않도록 미리 확보
         fxBuf.setSize (2, block);
@@ -1995,6 +1998,12 @@ public:
 
         // 메트로놈 클릭 — 다운비트(phase) + 정밀 박 간격(interval) 균일 그리드.
         // 재생 중일 때만, 박 경계에서만 클릭(음원 밖·다운비트 이전 포함).
+        // "메트로놈도 녹음"(metroBake, 연습 녹음 전용)이 켜져 있으면 같은 클릭 값을
+        // metroRecBuf 에도 더해 둔다 — 아래 녹음 블록이 입력에 얹어서 파일에 쓴다.
+        // (원래 클릭은 outputs 에만 섞여 모니터링 전용이고, 녹음은 inputs 원본을 그대로
+        // 쓰던 것 — 그래서 지금까진 메트로놈이 녹음 파일에 안 들어갔다.)
+        const bool bakeMetroThisBlock = metroBake.load() && recordArmed.load()
+                                         && numSamples <= metroRecBuf.getNumSamples();
         if (metroOn.load() && numOut > 0)
         {
             const int clickLen = (int) (deviceSampleRate * 0.06);
@@ -2002,6 +2011,9 @@ public:
             if (interval <= 1.0) interval = 60.0 / metroBpm.load() * deviceSampleRate;   // 폴백
             const double phase = (double) metroPhase.load();
             const bool playing_ = playing.load();
+            if (bakeMetroThisBlock) metroRecBuf.clear (0, numSamples);
+            float* bkL = bakeMetroThisBlock ? metroRecBuf.getWritePointer (0) : nullptr;
+            float* bkR = bakeMetroThisBlock ? metroRecBuf.getWritePointer (1) : nullptr;
             for (int i = 0; i < numSamples; ++i)
             {
                 if (playing_)
@@ -2015,6 +2027,7 @@ public:
                     const float env = std::exp (-(float) clickPos / ((float) deviceSampleRate * 0.012f));
                     const float s = 0.4f * env * std::sin (2.0f * 3.14159265f * 1000.0f * (float) clickPos / (float) deviceSampleRate);
                     for (int c = 0; c < numOut; ++c) outputs[c][i] += s;
+                    if (bkL != nullptr) { bkL[i] += s; bkR[i] += s; }
                     if (++clickPos > clickLen) clickPos = -1;
                 }
             }
@@ -2083,9 +2096,28 @@ public:
                 if (auto* w = activeWriter.load())
                 {
                     const float *iL, *iR; pickInputs (inputs, numIn, iL, iR);
-                    const float* chans[2] = { iL, iR };
-                    if (iL != nullptr && ! w->write (chans, numSamples))
-                        ++recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
+                    if (bakeMetroThisBlock && iL != nullptr)
+                    {
+                        // metroRecBuf 엔 이미 이번 블록 클릭 값이 들어 있다(위 메트로놈 블록) —
+                        // 원본 입력 포인터는 다른 곳에서도 참조될 수 있어 안 건드리고, 이
+                        // 스크래치에 입력을 더해서 쓴다.
+                        auto* bL = metroRecBuf.getWritePointer (0);
+                        auto* bR = metroRecBuf.getWritePointer (1);
+                        for (int i = 0; i < numSamples; ++i) { bL[i] += iL[i]; bR[i] += iR[i]; }
+                        FloatVectorOperations::max (bL, bL, -1.0f, numSamples);
+                        FloatVectorOperations::min (bL, bL,  1.0f, numSamples);
+                        FloatVectorOperations::max (bR, bR, -1.0f, numSamples);
+                        FloatVectorOperations::min (bR, bR,  1.0f, numSamples);
+                        const float* chans[2] = { bL, bR };
+                        if (! w->write (chans, numSamples))
+                            ++recDropBlocks;
+                    }
+                    else
+                    {
+                        const float* chans[2] = { iL, iR };
+                        if (iL != nullptr && ! w->write (chans, numSamples))
+                            ++recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
+                    }
                 }
         }
     }
@@ -2210,6 +2242,10 @@ private:
     std::atomic<double> metroInterval { 0.0 };  // 정밀 박 간격(샘플). <=1 이면 bpm 기반
     int64 lastBeatIdx = std::numeric_limits<int64>::min();
     int clickPos = -1;
+    // 연습 녹음(트레이닝 탭)에서 "메트로놈도 녹음" 켰을 때만 씀 — 평소 녹음은 입력만
+    // 그대로 파일에 쓴다(메트로놈은 모니터링 버스에만 섞임, 아래 processBlock 참고).
+    std::atomic<bool> metroBake { false };
+    AudioBuffer<float> metroRecBuf;   // 녹음용 클릭 스크래치. 오디오 스레드에서 재할당 금지 — audioDeviceAboutToStart 에서 크기 확보
 
     TimeSliceThread writerThread;
     std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
@@ -2300,6 +2336,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "tuner")       engine.setTuner ((bool) c["on"]);
     else if (cmd == "inputConfig") engine.setInputConfig (c["mode"], c["chL"], c["chR"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
+    else if (cmd == "metroBake")   engine.setMetroBake ((bool) c["on"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") { StringArray extra; if (auto* a = c["paths"].getArray()) for (auto& v : *a) extra.add (v.toString()); engine.scanPlugins (extra); }
