@@ -1852,14 +1852,34 @@ function renderLanes() {
     lane.querySelector('.ve-pip')?.addEventListener('click', (e) => { e.stopPropagation(); openPipPopover(vt, e.currentTarget); });
     lane.querySelector('.ve-del').addEventListener('click', (e) => {
       e.stopPropagation();
-      const removedClips = _veClips.filter(c => c.trackId === vt.id);
+      // 이 트랙의 클립뿐 아니라 그 짝(자동 연결된 영상↔오디오 groupId, 수동 그룹)도 같이
+      // 지운다 — 짝은 항상 "다른" 트랙에 있어서(영상 임포트 시 영상트랙+오디오트랙이 따로
+      // 생김) 트랙 id로만 걸러내면 안 걸린 채 남는다. 실사용 신고: 영상 트랙만 ✕로 지웠더니
+      // 자동으로 같이 생겼던 "그 영상의 원본 소리" 오디오 클립이 다른(안 지운) 오디오
+      // 트랙에 조용히 남아있다가 내보내기 때 amix 로 계속 섞여 들어갔다(카메라 마이크
+      // 잡음이 스튜디오 보컬 밑에 깔려 "노이즈"로 들림).
+      const onTrack = _veClips.filter(c => c.trackId === vt.id);
+      const removedSet = new Set(onTrack);
+      onTrack.forEach((c) => {
+        const p = groupPartner(c); if (p) removedSet.add(p);
+        manualGroupMemberIds(c).forEach((id) => { const m = _veClips.find(x => x.id === id); if (m) removedSet.add(m); });
+      });
+      const removedClips = [...removedSet].map((c) => ({ clip: c, idx: _veClips.indexOf(c) }));
       const removedIdx = _veTracks.indexOf(vt);
       pushUndo(
-        () => { _veTracks.splice(removedIdx, 0, vt); _veClips.push(...removedClips); },
-        () => { _veTracks = _veTracks.filter(t => t.id !== vt.id); _veClips = _veClips.filter(c => c.trackId !== vt.id); },
+        () => {
+          _veTracks.splice(removedIdx, 0, vt);
+          removedClips.sort((a, b) => a.idx - b.idx).forEach((r) => _veClips.splice(r.idx, 0, r.clip));
+        },
+        () => {
+          _veTracks = _veTracks.filter((t) => t.id !== vt.id);
+          const ids = new Set(removedClips.map((r) => r.clip.id));
+          _veClips = _veClips.filter((c) => !ids.has(c.id));
+        },
       );
-      _veClips = _veClips.filter(c => c.trackId !== vt.id);
-      _veTracks = _veTracks.filter(t => t.id !== vt.id);
+      const ids = new Set(removedClips.map((r) => r.clip.id));
+      _veClips = _veClips.filter((c) => !ids.has(c.id));
+      _veTracks = _veTracks.filter((t) => t.id !== vt.id);
       ensureLayers(); renderLanes(); layout();
     });
     const lbl = lane.querySelector('.lbl');
