@@ -96,6 +96,9 @@
   .hero-sub{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-top:44px;flex-wrap:wrap}
   .hero-lede{font-size:18px;line-height:1.7;color:var(--paper-dim);max-width:34ch}
   .ctas{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .cta-main{display:flex;flex-direction:column;align-items:center;gap:9px}
+  .hero-portable{font:500 12.5px/1 var(--body);color:var(--paper-dim);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-soft);transition:color .2s,text-decoration-color .2s}
+  .hero-portable:hover{color:var(--paper);text-decoration-color:var(--mint-dim)}
   .btn-magnet{position:relative;display:inline-flex;align-items:center;gap:10px;font:600 15px/1 var(--body);
     padding:19px 30px;border-radius:99px;background:var(--mint);color:var(--ink);cursor:pointer;border:0;text-decoration:none;
     transition:transform .15s cubic-bezier(.2,.9,.3,1.3)}
@@ -251,7 +254,10 @@
     <div class="hero-sub">
       <p class="hero-lede" data-i18n="hero.lede">어떤 곡이든 무료로 스템 분리하고, 원곡 영상을 보며 녹음·믹스한 뒤 영상까지 편집해 내보내는 데스크톱 스튜디오. 모든 처리는 내 PC 안에서 끝납니다.</p>
       <div class="ctas">
-        <a class="btn-magnet" id="dlBtn1" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/Dr.studio-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaDownload">Windows용 다운로드</span></a>
+        <div class="cta-main">
+          <a class="btn-magnet" id="dlBtn1" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/Dr.studio-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaDownload">Windows용 다운로드</span></a>
+          <a class="hero-portable" id="dlBtnPortable" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/Dr.studio.exe" target="_blank" rel="noopener" data-i18n="hero.ctaPortable">포터블 버전 다운로드</a>
+        </div>
         <a class="btn-ghost" href="#how"><span data-i18n="hero.ctaHow">작동 방식 보기</span> <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h10M9 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
       </div>
     </div>
@@ -400,7 +406,7 @@ window.I18N = {"ko": {
   "hero.kicker": "무료 · 로컬 처리 · WINDOWS",
   "hero.title": "<span>곡을 나누고,</span><span>내 연주를 더해,</span><span><span class=\"fx\">영상까지</span> 완성한다.</span>",
   "hero.lede": "어떤 곡이든 무료로 스템 분리하고, 원곡 영상을 보며 녹음·믹스한 뒤 영상까지 편집해 내보내는 데스크톱 스튜디오. 모든 처리는 내 PC 안에서 끝납니다.",
-  "hero.ctaDownload": "Windows용 다운로드", "hero.ctaHow": "작동 방식 보기",
+  "hero.ctaDownload": "Windows용 다운로드", "hero.ctaHow": "작동 방식 보기", "hero.ctaPortable": "포터블 버전 다운로드",
   "hero.meta": "<span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span>",
   "mani.title": "전부, 내 PC 안에서 끝납니다.",
   "mani.sub": "업로드도, 회원가입도, 워터마크도 없습니다. 내 곡도 내 연주도, 여기서 시작해 여기서 끝납니다.",
@@ -436,7 +442,7 @@ window.I18N = {"ko": {
   "hero.kicker": "FREE · LOCAL · WINDOWS",
   "hero.title": "<span>SPLIT.</span><span>RECORD.<span class=\"fx\"> EDIT.</span></span><span>SHIP IT.</span>",
   "hero.lede": "A free desktop studio that splits any song into stems, lets you record and mix over the original video, then edits and exports the footage itself — nothing leaves your machine.",
-  "hero.ctaDownload": "Download for Windows", "hero.ctaHow": "Watch the workflow",
+  "hero.ctaDownload": "Download for Windows", "hero.ctaHow": "Watch the workflow", "hero.ctaPortable": "Download portable version",
   "hero.meta": "<span>Free</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>Installer</b> &amp; <b>Portable</b></span>",
   "mani.title": "Nothing leaves your machine.",
   "mani.sub": "No uploads, no accounts, no watermark. Your song and your take start here — and end here too.",
