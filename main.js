@@ -1628,6 +1628,19 @@ ipcMain.handle('video:export', async (event, payload) => {
   }
 
   const parts = [];
+  // 세그먼트 경계에서 무음(anullsrc) 뒤에 곧바로 실제 소리가 이어붙거나, 서로 다른
+  // 소스끼리 이어붙을 때 그 접합부 진폭이 0이 아닌 지점에서 뚝 끊기고 이어지면 사람
+  // 귀엔 "틱/팝" 클릭 잡음으로 들린다(실사용 신고: "영상 앞부분엔 소리가 없다가 중간에
+  // 들어오게 편집하면 노이즈 발생" — 그 무음→소리 경계가 정확히 이 자리다. 파형 자체는
+  // 멀쩡해도 콘캣이 하드컷이라 생긴다). 사람 귀엔 안 들리는 3ms 짜리 페이드 인/아웃을
+  // 세그먼트 오디오 양끝에 걸어 이 클릭만 없앤다 — 클립에 사용자가 직접 건 페이드
+  // (fadeFrag, 사용자가 설정한 구간)와는 별개로, 세그먼트 이어붙임 자체의 안전장치다.
+  const DECLICK_D = 0.003;
+  function declickFrag(dur) {
+    const fd = Math.min(DECLICK_D, dur / 2);
+    if (fd <= 0) return 'anull';
+    return `afade=t=in:st=0:d=${fd.toFixed(6)},afade=t=out:st=${(dur - fd).toFixed(6)}:d=${fd.toFixed(6)}`;
+  }
   // 오디오 소스 배열(0개=무음, 1개=그대로, N개=amix 로 동시 믹스) → 라벨 하나. 모든 구간 종류가 공용으로 쓴다.
   // 소스마다 배속(speed)이 다를 수 있다(트랙마다 다른 클립) — atempo 는 믹스 전에 각자 건다.
   function buildAudio(sources, dur, label) {
@@ -1636,17 +1649,19 @@ ipcMain.handle('video:export', async (event, payload) => {
       parts.push(`[${ensureSilent()}:a]atrim=duration=${d},asetpts=PTS-STARTPTS[${label}]`);
       return;
     }
+    const raw = `${label}_raw`;
     if (sources.length === 1) {
       const s = sources[0];
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${label}]`);
-      return;
+      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${raw}]`);
+    } else {
+      const subs = sources.map((s, j) => {
+        const lb = `${label}_s${j}`;
+        parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${lb}]`);
+        return `[${lb}]`;
+      });
+      parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${raw}]`);
     }
-    const subs = sources.map((s, j) => {
-      const lb = `${label}_s${j}`;
-      parts.push(`[${inputIndexFor(s.file)}:a]atrim=start=${fsec(s.start)}:end=${fsec(s.end)}${fadeFrag('a', s)}${atempoChain(s.speed)},asetpts=PTS-STARTPTS[${lb}]`);
-      return `[${lb}]`;
-    });
-    parts.push(`${subs.join('')}amix=inputs=${subs.length}:duration=longest[${label}]`);
+    parts.push(`[${raw}]${declickFrag(dur)}[${label}]`);
   }
 
   // ── "레이어"(트랙 PIP·추적 오버레이) 소스 전처리 캐시 ──────────────────
