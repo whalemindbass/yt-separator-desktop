@@ -3064,14 +3064,15 @@ body { display: flex; flex-direction: column; }
   border-radius: 5px 5px 0 0;
   background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 78%, #000 15%) calc(var(--op, 1) * 100%), transparent);
 }
-/* 이름 텍스트만 sticky — containing block 이 .daw-lane-namebar(absolute) 라 take 클립의
-   .daw-clip-name 과 같은 이유로 left 는 그냥 4px 로 충분하다(헤드 폭 안 더해도 안 깔림 —
-   전엔 이 요소가 grid 칸에 직접 얹혀 있어서 176px 이 필요했다, 지금은 구조가 다르다). */
+/* sticky 였다가 뺐다 — 스템은 트랙 전체(곡 길이만큼)라 한 번 붙으면 화면 안 어디든
+   스크롤해도 평생 그 자리에 고정된 것처럼 보여서(제보: "따라다니는 느낌이 아니라
+   그냥 박혀있다") 콘텐츠와 그냥 같이 스크롤되게 뺐다 — 트랙 이름은 어차피 헤드의
+   .lbl-t 에 항상 보인다(스크롤 무관), 이 배지는 카드 위 장식용 라벨일 뿐이다. */
 .daw-lane-name {
-  position: sticky; left: 4px; z-index: 1; pointer-events: none;
   display: block; width: fit-content; max-width: calc(100% - 8px);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 600 10.5px/18px var(--mono); letter-spacing: .02em; color: #fff;
+  pointer-events: none; margin-left: 4px;
 }
 .daw-ph { position: absolute; top: 0; left: 0; width: 1px; background: var(--accent); z-index: 4; pointer-events: none; will-change: transform; }
 .daw-master { display: flex; align-items: center; gap: 7px; font: 700 10px/1 var(--mono); letter-spacing: .06em; color: var(--tx-3); }
