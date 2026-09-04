@@ -3034,8 +3034,15 @@ body { display: flex; flex-direction: column; }
    radius/border 를 거기 걸면 다시 그릴 때마다 사라졌다 생기며 깜빡이고, 무엇보다
    .daw-lane-namebar(이름 띠)까지 이 카드 모양대로 위쪽만 깎이게 하려면 클립·이름 띠를
    같이 담는 이 바깥 래퍼에서 잘라야 한다. */
+/* overflow:hidden 을 여기 걸었더니 이름 라벨(.daw-lane-name, 아래 sticky)의 sticky 가
+   먹통이 됐다(제보: 스크롤해도 라벨이 안 따라옴) — position:sticky 는 자기와 실제
+   스크롤 컨테이너(#daw-tscroll) 사이에 overflow:hidden 조상이 하나라도 끼면 그 조상을
+   기준으로 "고정"돼 버려서, 그 조상 자체는 안 움직이니 그냥 콘텐츠와 같이 스크롤되는
+   것처럼 보인다(진짜로는 sticky가 "그 조상 안에서" 고정된 것 — 조상이 안 움직이니
+   화면에서도 안 움직여 보이는 것뿐). 카드 둥근 모서리는 대신 .daw-clip/.daw-lane-namebar
+   각자에 나눠 걸어서(아래) overflow:hidden 없이도 같은 모양이 나오게 했다. */
 .daw-area-wrap {
-  position: relative; border-radius: 5px; overflow: hidden;
+  position: relative; border-radius: 5px;
   /* 클립 투명도(◐, --op)는 배경·테두리만 옅게 만든다 — opacity 를 이 래퍼에 걸면
      안의 이름 텍스트(.daw-lane-name)까지 같이 흐려져서 안 읽힌다는 지적으로,
      색 자체를 transparent 쪽으로 섞는 방식(color-mix 이중 적용)으로 바꿨다. */
@@ -3043,14 +3050,18 @@ body { display: flex; flex-direction: column; }
 }
 .daw-area-wrap .daw-area { position: absolute; inset: 0; overflow: hidden; }
 .daw-lane-rec .daw-area { position: relative; overflow: hidden; }
-.daw-clip { position: absolute; inset: 0; overflow: hidden; background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)) calc(var(--op, 1) * 100%), transparent); }
+/* border-radius+overflow 를 래퍼가 아니라 여기 직접 건다 — 래퍼(.daw-area-wrap)엔
+   overflow:hidden 을 못 두니(위 설명), 클립 자기 자신이 파형을 카드 모양대로 잘라야 한다. */
+.daw-clip { position: absolute; inset: 0; overflow: hidden; border-radius: 5px; background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 26%, var(--elev)) calc(var(--op, 1) * 100%), transparent); }
 .daw-clip.rec { background: color-mix(in srgb, color-mix(in srgb, var(--danger) 15%, var(--elev)) calc(var(--op, 1) * 100%), transparent); border-color: color-mix(in srgb, color-mix(in srgb, var(--danger) 45%, transparent) calc(var(--op, 1) * 100%), transparent); }
 .daw-clip svg { opacity: var(--op, 1); }   /* 파형 그래픽만 — 이름 띠엔 svg 가 없어 안전 */
 /* 이름 띠 — take 클립의 .daw-clip-namebar 와 같은 패턴. renderWaves() 가 .daw-clip 만
    갈아치우고 이 형제는 안 건드리니 확대·축소해도 안 없어진다. 배경만 --op 로 옅어지고
-   .daw-lane-name(글자)은 아래서 그대로 둔다 — opacity 상속 경로 밖(형제 관계)이라 안전. */
+   .daw-lane-name(글자)은 아래서 그대로 둔다 — opacity 상속 경로 밖(형제 관계)이라 안전.
+   위쪽 모서리만 둥글게(카드 위 가장자리) — overflow:hidden 없이 배경 자체 모양으로. */
 .daw-lane-namebar {
   position: absolute; left: 0; right: 0; top: 0; height: 18px; z-index: 1;
+  border-radius: 5px 5px 0 0;
   background: color-mix(in srgb, color-mix(in srgb, var(--c, var(--accent)) 78%, #000 15%) calc(var(--op, 1) * 100%), transparent);
 }
 /* 이름 텍스트만 sticky — containing block 이 .daw-lane-namebar(absolute) 라 take 클립의
@@ -3401,8 +3412,6 @@ body { display: flex; flex-direction: column; }
 /* 트랙 헤더 좌측 컬러 스트립 — 얇게(2px), glow 없음 */
 .daw-head::before { width: 2px; box-shadow: none; }
 .daw-head .nm i { box-shadow: none; }
-/* 클립 모서리 정돈 — .daw-take-clip 은 radius 그대로 둔다(위에서 5px 줌, 같은 이유) */
-.daw-clip { border-radius: 0; }
 /* 오디오(임포트) 트랙 클립 = 다른 색(녹음 클립과 구분) */
 .daw-lane-audio .daw-take-clip { background: color-mix(in srgb, var(--c, var(--stem-bass)) 14%, var(--elev)); }
 .daw-lane:not(.selected):hover .daw-head { background: color-mix(in srgb, var(--tx-1) 4%, var(--surface)); }
