@@ -3226,7 +3226,7 @@ async function openDevModal(d) {
         <option value="0" ${_inCfg.mode === 1 ? '' : 'selected'}>${tr('studio.x.modeMono')}</option>
         <option value="1" ${_inCfg.mode === 1 ? 'selected' : ''}>${tr('studio.x.modeStereo')}</option>
       </select></label>
-      <label class="dev-field"><span id="dv-chl-lb">${tr('studio.lbl.inputChannel')}</span><select id="dv-chl">${chOpts(_inCfg.chL)}</select></label>
+      <label class="dev-field"><span id="dv-chl-lb">${_inCfg.mode === 1 ? tr('studio.lbl.leftChannel') : tr('studio.lbl.inputChannel')}</span><select id="dv-chl">${chOpts(_inCfg.chL)}</select></label>
       <label class="dev-field" id="dv-chr-row" ${_inCfg.mode === 1 ? '' : 'hidden'}><span>${tr('studio.x.rightChannel')}</span><select id="dv-chr">${chOpts(_inCfg.chR)}</select></label>
       <div class="dev-field"><span>${tr('studio.x.inputSignal')}</span><div class="dev-inmeters" id="dv-inmeters">${
         chNames.map((n, i) => `<div class="dev-inm"><b>${i + 1}</b><i data-ch="${i}"></i><em>${esc(n)}</em></div>`).join('')
