@@ -245,6 +245,10 @@ let _recTracksWaiters = [];   // waitRecTracks() 대기자 — recTracks 이벤�
 let _exporting = false, _exportMp3 = null, _exportTmp = null;   // export 진행 상태
 // 녹음 대상 = 녹음(type 0) 트랙만
 const armedRecId = () => (_recTracks.find(r => r.armed && r.type !== 1) || _recTracks.find(r => r.type !== 1) || {}).id;
+// 실제 녹음 시작 시 "어느 트랙들에 파일을 열지" 결정할 때만 쓴다(복수) — 임포트 대상 트랙
+// 고르기 등 "대표 트랙 하나"가 필요한 나머지 자리는 전부 armedRecId() 그대로 쓴다(여러 곳에서
+// 이미 그 의미로 쓰이고 있어 반환 타입을 바꾸면 다 깨진다 — 그래서 별도 헬퍼로 뺐다).
+const armedRecIds = () => _recTracks.filter(r => r.armed && r.type !== 1).map(r => r.id);
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
@@ -410,6 +414,11 @@ function renderRecLanes() {
     lane.dataset.selid = rt.id;
     lane.dataset.type = isAudio ? 'audio' : 'rec';
     const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="${tr('studio.t.arm')}" aria-pressed="${!!rt.armed}">R</button>`;
+    // 이 트랙의 입력 채널 배지 — 여러 트랙을 동시에 arm 해서 각자 다른 인풋으로 녹음할 때
+    // (실사용 문의: 인풋1/인풋2 동시 녹음) 트랙마다 따로 지정할 수 있게. 오디오(임포트) 트랙은
+    // 녹음 대상이 아니라 입력 채널 자체가 의미 없다.
+    const inLabel = rt.inMode === 1 ? `${(rt.inChL ?? 0) + 1}/${(rt.inChR ?? 1) + 1}` : `${(rt.inChL ?? 0) + 1}`;
+    const inBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-in" data-m="in" title="${tr('studio.lbl.inputChannel')}">IN ${inLabel}</button>`;
     const rp100 = Math.round((rt.pan != null ? rt.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="${tr('studio.t.editTrackFx')}">
@@ -421,6 +430,7 @@ function renderRecLanes() {
         <div class="ctrls">
           <div class="daw-btn-grp">
             ${rBtnHtml}
+            ${inBtnHtml}
             <button class="daw-ms${rt.mute ? ' on' : ''}" data-m="mute" title="${tr('studio.t.mute')}" aria-pressed="${!!rt.mute}">M</button>
             <button class="daw-ms${rt.solo ? ' on' : ''}" data-m="solo" title="${tr('studio.t.solo')}" aria-pressed="${!!rt.solo}">S</button>
           </div>
@@ -436,6 +446,7 @@ function renderRecLanes() {
       <div class="daw-area"></div>
       <div class="daw-lane-resize" title="${tr('studio.t.dragResize')}"></div>`;
     const rBtn = lane.querySelector('[data-m="arm"]');
+    const inBtn = lane.querySelector('[data-m="in"]');
     const mBtn = lane.querySelector('[data-m="mute"]');
     const sBtn = lane.querySelector('[data-m="solo"]');
     const vol = lane.querySelector('.daw-vol');
@@ -443,10 +454,15 @@ function renderRecLanes() {
     const del = lane.querySelector('[data-m="del"]');
     // 헤드 클릭 = 트랙 선택 (버튼/슬라이더 조작은 각자 처리, 그래도 선택은 됨)
     lane.querySelector('.daw-head').addEventListener('pointerdown', () => selectTrack(rt.id));
-    if (rBtn) rBtn.addEventListener('click', (e) => {   // R = 이 트랙을 녹음 대상으로 선택(arm). 녹음 시작은 ● 또는 R키
+    if (rBtn) rBtn.addEventListener('click', (e) => {   // R = 이 트랙을 녹음 대상으로 토글(arm) — 여러 트랙 동시 가능. 녹음 시작은 ● 또는 R키
       e.stopPropagation();
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
+    });
+    if (inBtn) inBtn.addEventListener('click', (e) => {   // IN = 이 트랙만의 입력 채널(모노/스테레오+번호) 지정
+      e.stopPropagation();
+      selectTrack(rt.id);
+      openTrackInputPopoverAt(rt, e.clientX, e.clientY);
     });
     mBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); rt.mute = on; api.engine.recTrack(rt.id, { mute: on }); });
     sBtn.addEventListener('click', (e) => { e.stopPropagation(); const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); rt.solo = on; api.engine.recTrack(rt.id, { solo: on }); updateSoloDim(); });
@@ -1530,7 +1546,7 @@ function stopStudio() {
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
   if (!armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
-  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, 'studio'); }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, armedRecIds(), 'studio'); }
   if (!_playing) playStudio();
   // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
@@ -2226,6 +2242,53 @@ function openOpacityPopoverAt(x, y) {
     val.textContent = slider.value + '%';
     setClipOpacity(Number(slider.value) / 100);
   });
+  const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+// 트랙별 입력 채널 팝오버 — 오디오 설정 모달의 모노/스테레오+채널 선택(openDevModal,
+// dv-inmode/dv-chl/dv-chr)과 같은 모양을 트랙 하나에만 적용하는 축소판. 여러 트랙을
+// 동시에 arm 해서 각자 다른 인풋으로 녹음할 때(실사용 문의) 이걸로 트랙마다 지정한다.
+function openTrackInputPopoverAt(rt, x, y) {
+  document.querySelector('.daw-ctx')?.remove();
+  const chNames = (_inCfg.names && _inCfg.names.length)
+    ? _inCfg.names
+    : Array.from({ length: Math.max(1, _deviceInfo?.in || 1) }, (_, i) => tr('studio.p.inputN', { n: i + 1 }));
+  const chOpts = (cur) => chNames.map((n, i) =>
+    `<option value="${i}" ${i === cur ? 'selected' : ''}>${i + 1}. ${esc(n)}</option>`).join('');
+  const mode = rt.inMode === 1 ? 1 : 0, chL = rt.inChL || 0, chR = rt.inChR != null ? rt.inChR : 1;
+  const pop = document.createElement('div');
+  pop.className = 'daw-ctx daw-in-pop';
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+  pop.innerHTML = `
+    <div class="daw-op-row"><span class="lbl">${tr('studio.x.inputMode')}</span>
+      <select class="in-mode">
+        <option value="0" ${mode === 1 ? '' : 'selected'}>${tr('studio.x.modeMono')}</option>
+        <option value="1" ${mode === 1 ? 'selected' : ''}>${tr('studio.x.modeStereo')}</option>
+      </select>
+    </div>
+    <div class="daw-op-row"><span class="lbl in-chl-lb">${mode === 1 ? tr('studio.lbl.leftChannel') : tr('studio.lbl.inputChannel')}</span>
+      <select class="in-chl">${chOpts(chL)}</select>
+    </div>
+    <div class="daw-op-row in-chr-row" ${mode === 1 ? '' : 'hidden'}><span class="lbl">${tr('studio.x.rightChannel')}</span>
+      <select class="in-chr">${chOpts(chR)}</select>
+    </div>`;
+  document.body.appendChild(pop);
+  const r = pop.getBoundingClientRect(), m = 8;
+  if (r.right > innerWidth - m) pop.style.left = Math.max(m, innerWidth - r.width - m) + 'px';
+  if (r.bottom > innerHeight - m) pop.style.top = Math.max(m, y - r.height) + 'px';
+  const push = () => api.engine.recTrackSetInput(rt.id, {
+    mode: Number(pop.querySelector('.in-mode').value),
+    chL: Number(pop.querySelector('.in-chl').value),
+    chR: Number(pop.querySelector('.in-chr').value),
+  });
+  pop.querySelector('.in-mode').addEventListener('change', (e) => {
+    const st = e.target.value === '1';
+    pop.querySelector('.in-chr-row').hidden = !st;
+    pop.querySelector('.in-chl-lb').textContent = st ? tr('studio.lbl.leftChannel') : tr('studio.lbl.inputChannel');
+    push();
+  });
+  pop.querySelector('.in-chl').addEventListener('change', push);
+  pop.querySelector('.in-chr').addEventListener('change', push);
   const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -3692,11 +3755,11 @@ function wire() {
   }
   $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
   $('st-rec').addEventListener('click', () => {
-    if (!_recArmed && !armedRecId()) { flashTake(tr('studio.m.addRecTrackAndArm')); return; }
+    if (!_recArmed && !armedRecIds().length) { flashTake(tr('studio.m.addRecTrackAndArm')); return; }
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
-    if (_recArmed) api.engine.recordArm(_projectPath, 'studio'); else { api.engine.recordStop(); clearRecLive(); }
+    if (_recArmed) api.engine.recordArm(_projectPath, armedRecIds(), 'studio'); else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });

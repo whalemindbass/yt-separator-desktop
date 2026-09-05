@@ -1043,7 +1043,7 @@ app.on('window-all-closed', () => {
 // ── 실시간 오디오 엔진(JUCE 사이드카) 브리지 ──────────────
 const { AudioEngine } = require('./engine-client');
 let audioEngine = null;
-let lastRecordFile = null;   // 마지막으로 녹음을 걸어 둔 파일 — 엔진이 죽었을 때 되살릴 대상
+let lastRecordFiles = [];   // 마지막으로 녹음을 걸어 둔 파일들 — 여러 트랙 동시 녹음 지원 후 배열. 엔진이 죽었을 때 되살릴 대상
 
 // 스튜디오와 트레이닝(연습 녹음)은 엔진 프로세스·세션을 하나 공유한다(아래 getEngine
 // 이 만드는 audioEngine 이 앱 전체에 유일) — 그래서 둘이 동시에 트랙을 만들고 녹음을
@@ -1144,13 +1144,16 @@ function getEngine() {
     audioEngine.on('exit',  (c, crashed) => {
       engineExporting = false;   // 엔진이 죽었으면 내보내기도 끝난 것(실패든 뭐든) — 닫기를 막을 이유 없음
       // 죽었는데 녹음 중이었다면 쓰다 만 WAV 가 남아 있다. 헤더를 고쳐 되살릴 수 있게 넘긴다.
-      let take = null;
-      if (crashed && lastRecordFile) take = repairWav(lastRecordFile);
-      lastRecordFile = null;
+      let take = null, takes = [];
+      if (crashed && lastRecordFiles.length) {
+        takes = lastRecordFiles.map(repairWav).filter(Boolean);
+        take = takes[0] || null;   // 기존(단일 take) 복구 모달은 그대로, 여러 개면 take 는 그중 하나만 대표로
+      }
+      lastRecordFiles = [];
       // 엔진(네이티브 프로세스)이 비정상 종료하면 JS 스택트레이스가 없다 — 재현 없이는 원인을
       // 알 방법이 없었다. 직전에 보낸 명령이라도 남겨두면 다음에 같은 크래시가 나도 실마리가 된다.
       if (crashed) noteCrash('engine', null, { message: `오디오 엔진 비정상 종료`, exitCode: c, lastCmd: lastEngineCmd });
-      try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c, crashed: !!crashed, take }); } catch {}
+      try { mainWindow?.webContents.send('engine:event', { ev: 'exit', code: c, crashed: !!crashed, take, takes }); } catch {}
     });
   }
   return audioEngine;
@@ -1184,7 +1187,7 @@ ipcMain.handle('engine:cmd',  (_e, cmd) => {
     if (owner) return { ok: false, busy: true, owner };
   }
   // 정상적으로 멈췄으면 파일은 엔진이 마무리한다 — 되살릴 대상이 아니다
-  if (cmd && cmd.cmd === 'recordStop') lastRecordFile = null;
+  if (cmd && cmd.cmd === 'recordStop') lastRecordFiles = [];
   if (cmd && cmd.cmd === 'export') engineExporting = true;   // exportDone/exportError/exit 에서 해제
   // 엔진은 재시작하면 사용자가 추가한 VST 폴더를 기억 못 한다 — 스캔할 때마다 여기서 채워 넣는다.
   // 렌더러(scanPlugins() 호출부)는 이 폴더들의 존재를 몰라도 된다.
@@ -1230,14 +1233,29 @@ function nextTakeNumber(dir) {
   } catch {}
   return max + 1;
 }
-ipcMain.handle('engine:recordArm', (_ev, projectKey, who) => {
+// trackIds — armed 된 녹음 트랙 id 배열. 여러 트랙을 동시에 armRecord 하려면 트랙 수만큼
+// take 번호를 한 번에(순차로) 미리 확보해야 한다 — nextTakeNumber 를 트랙마다 따로 부르면
+// 디렉터리를 매번 다시 훑어 아직 파일이 없는 같은 번호를 여럿한테 줘버린다(충돌).
+// 옛 호출부(recordArm(projectKey, who) — 트랙 지정 없이 "지금 armed 된 트랙 하나" 였던
+// 시절, training.js·test/crash.test.js 가 아직 이 모양으로 부른다) 도 그대로 받는다:
+// 두 번째 인자가 배열이 아니라 문자열/undefined 면 트랙 지정이 없던 걸로 보고 who 로 민다.
+ipcMain.handle('engine:recordArm', (_ev, projectKey, trackIds, who) => {
+  if (!Array.isArray(trackIds)) { who = trackIds; trackIds = null; }
   const owner = engineOwnerBlocking(who);
   if (owner) return { ok: false, busy: true, owner };
   const dir = mediaDirFor(projectKey);
-  const n = nextTakeNumber(dir);
-  const file = path.join(dir, `take-${n}.wav`);
-  lastRecordFile = file;   // 엔진이 죽으면 이 파일을 되살려야 한다
-  return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
+  let n = nextTakeNumber(dir);
+  if (!trackIds) {
+    // 트랙 지정 없음 — 파일 하나만 계산해 예전 그대로의 단일 명령으로 보낸다. 엔진 쪽은
+    // firstArmedTrackId() 로 지금 armed 된 트랙(있으면) 에 알아서 붙인다(Main.cpp dispatch 참고).
+    const file = path.join(dir, `take-${n}.wav`);
+    lastRecordFiles = [file];
+    return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
+  }
+  if (!trackIds.length) return { ok: false, error: 'armed 트랙 없음' };
+  const files = trackIds.map((trackId) => ({ trackId, file: path.join(dir, `take-${n++}.wav`) }));
+  lastRecordFiles = files.map((f) => f.file);   // 엔진이 죽으면 이 파일들을 되살려야 한다
+  return { ok: getEngine().send({ cmd: 'recordArm', files }), files };
 });
 // 저장 안 한 채 녹음부터 한 take 는 이번 실행 한정 폴더(_미저장-...)에 있다 — 프로젝트를
 // 처음 저장하는 순간(또는 그 뒤 어느 저장이든) 그 프로젝트의 media/ 로 옮겨준다. 이미 제

@@ -168,6 +168,22 @@ static void applyClipFades (AudioBuffer<float>& buf, int64 pos, int64 len, int64
 }
 
 
+// 트랙별 녹음 세션 — armed 된 트랙마다 하나씩(녹음 중일 때만) 만든다. 여러 트랙을 동시에
+// 각자 다른 파일·다른 입력 채널로 녹음하기 위함(예전엔 이게 엔진 전역에 하나뿐이라 트랙
+// 하나만 녹음 가능했다 — 실사용 문의: "인풋1/인풋2를 트랙 두 개에 동시에 따로 녹음 가능?").
+// 소유(생성/해제)는 message 스레드(armRecord/finishRecordingFor)만 하고, RecTrack::rec
+// 포인터 자체의 읽기/쓰기는 항상 Engine::takesLock 으로 감싼다(오디오 스레드는 ScopedTryLock
+// 으로 락 실패 시 그 블록만 건너뛴다 — recTracks 벡터 자체를 지키던 기존 락을 그대로 재사용).
+struct RecSession
+{
+    std::unique_ptr<AudioFormatWriter::ThreadedWriter> writer;
+    std::atomic<AudioFormatWriter::ThreadedWriter*> active { nullptr };
+    std::atomic<int64> recordedStart { -1 };
+    std::atomic<int> recDropBlocks { 0 };   // 쓰기 실패(FIFO 오버런) 블록 수 — 트랙별
+    File outFile;
+    int writerChans = 1;
+};
+
 // 트랙 (내 녹음/오디오 임포트 — 각각 뮤트/솔로/게인 + 독립 FX 체인). type: 0=녹음, 1=오디오(녹음불가)
 struct RecTrack
 {
@@ -191,6 +207,14 @@ struct RecTrack
     AudioBuffer<float> pdcBuf;
     std::atomic<int> pdcDelay { 0 };
     int pdcActive = 0, pdcWrite = 0;
+    // 트랙별 입력 채널(모노/스테레오 + 하드웨어 입력 번호) — 예전엔 엔진 전역에 하나뿐이라
+    // 트랙마다 다른 인풋을 물릴 수 없었다. 기본값은 엔진 전역 설정과 같은 기본값(모노 1번).
+    std::atomic<int> inMode { 0 }, inChL { 0 }, inChR { 1 };
+    // 이 트랙이 "녹음 대상으로 선택됐다"(라디오였다가 토글로 바뀜, 여러 트랙 동시 가능) —
+    // 실제 파일에 쓰는 중인지는 이거와 별개(rec 참고). armed 만 켜져 있으면 라이브 모니터링만.
+    std::atomic<bool> armed { false };
+    // 이 트랙의 진행 중인 녹음 세션(armed 상태에서 recordArm 이후에만 존재).
+    std::unique_ptr<RecSession> rec;
 };
 
 // 센드 버스 A/B — 트랙에서 보낸 신호를 모아 자체 FX 를 태우고 마스터로 합류.
@@ -333,7 +357,7 @@ class Engine : public AudioIODeviceCallback
 {
 public:
     Engine() : writerThread ("rec") { fmt.registerBasicFormats(); }   // 기본 녹음 트랙 없음 (사용자가 추가)
-    ~Engine() override { finishRecording(); }
+    ~Engine() override { for (auto& rt : recTracks) finishRecordingFor (*rt); }
 
     bool addStem (const String& path)
     {
@@ -392,11 +416,14 @@ public:
     }
 
     // ---- 녹음 ----
-    void armRecord (const File& out)
+    // trackId 별로 각자 파일을 연다 — 여러 트랙을 동시에 armRecord 하면 각자 독립된 세션이
+    // 생겨 서로 다른 입력 채널(RecTrack::inMode/inChL/inChR)로 동시에 녹음된다.
+    void armRecord (int trackId, const File& out)
     {
-        finishRecording();
-        { auto* rt = findRec (armedTrack.load()); if (rt == nullptr || rt->type != 0) { std::cerr << "[engine] no armed rec track\n"; return; } }
-        outFile = out;
+        auto* rt = findRec (trackId);
+        if (rt == nullptr || rt->type != 0) { std::cerr << "[engine] armRecord: 트랙 " << trackId << " 없음/녹음불가\n"; return; }
+        if (! rt->armed.load()) { std::cerr << "[engine] armRecord: 트랙 " << trackId << " 는 arm 안 됨\n"; return; }
+        finishRecordingFor (*rt);   // 이미 세션이 있으면(재시작 등) 먼저 마무리
         auto* dev = currentDevice;
         if (dev == nullptr) { std::cerr << "[engine] no device\n"; return; }
         if (numInputChans <= 0) { std::cerr << "[engine] no input channels — cannot record\n"; return; }
@@ -404,14 +431,13 @@ public:
         std::unique_ptr<FileOutputStream> os (out.createOutputStream());
         if (os == nullptr) { std::cerr << "[engine] cannot open " << out.getFullPathName() << "\n"; return; }
 
-        // 장치 채널 수가 아니라 입력 구성(모노/스테레오)을 따른다 — 모노면 1채널 파일
-        const int recCh = jmin (recordChannels(), jmax (1, numInputChans));
+        // 장치 채널 수가 아니라 이 트랙의 입력 구성(모노/스테레오)을 따른다 — 모노면 1채널 파일
+        const int recCh = jmin (recordChannelsFor (*rt), jmax (1, numInputChans));
         WavAudioFormat wav;
         auto* w = wav.createWriterFor (os.get(), deviceSampleRate, (unsigned int) recCh, 24, {}, 0);
         if (w == nullptr) { std::cerr << "[engine] writer create failed\n"; return; }
         os.release();
 
-        writerChans = recCh;
         // FIFO 크기 트레이드오프 — 크게 잡을수록 디스크가 잠깐 밀려도 드롭(=녹음에 '틱')이
         // 안 나지만, 그만큼 크래시 순간 FIFO 안에 남아 디스크로 못 내려간 채 통째로 유실될
         // 수 있는 오디오도 늘어난다(파일에 이미 쓰인 바이트는 main.js repairWav() 가 헤더를
@@ -426,15 +452,25 @@ public:
         // 버텨내는 여유는 남는다 — 일반적인 OS/디스크 순간 지연(수십~수백 ms)보다 한 자릿수
         // 이상 크다. 더 줄일수록 유실 창은 더 작아지지만 실제 디스크 스톨(백신 스캔, 인덱싱,
         // 네트워크 드라이브 등) 내성이 줄어 드롭에 의한 틱이 생길 위험이 커진다 — 이 값은 그
-        // 균형점.
-        threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 16));
-        activeWriter.store (threadedWriter.get());
-        recordArmed = true;
-        recordedStart = -1;
-        std::cerr << "[engine] armed (rec on next play block)\n";
+        // 균형점(트랙마다 각자 writerThread 를 공유해서 씀 — TimeSliceThread 는 여러
+        // ThreadedWriter 를 동시에 서비스하도록 설계돼 있다).
+        auto sess = std::make_unique<RecSession>();
+        sess->outFile = out;
+        sess->writerChans = recCh;
+        sess->writer.reset (new AudioFormatWriter::ThreadedWriter (w, writerThread, 1 << 16));
+        sess->active.store (sess->writer.get());
+        sess->recordedStart = -1;
+        { const ScopedLock sl (takesLock); rt->rec = std::move (sess); }   // 포인터 교체 — 오디오 스레드와 경합 지점
+        activeRecCount.fetch_add (1, std::memory_order_relaxed);
+        std::cerr << "[engine] armed (rec on next play block) track " << trackId << "\n";
     }
 
-    void stopRecord() { finishRecording(); }
+    void stopRecord()
+    {
+        // armed 된 모든 트랙을 각자 마무리 — 예전엔 세션이 하나뿐이라 finishRecording() 한
+        // 번으로 끝났지만, 이제 여러 트랙이 동시에 녹음 중일 수 있다.
+        for (auto& rt : recTracks) finishRecordingFor (*rt);
+    }
     void removeTake (int64 id)
     {
         const ScopedLock sl (takesLock);
@@ -475,7 +511,7 @@ public:
         tp->id = tid;
         if (tid >= nextTakeId) nextTakeId = tid + 1;
         tp->start = start;
-        tp->trackId = trackId > 0 ? trackId : armedTrack.load();
+        tp->trackId = trackId > 0 ? trackId : firstArmedTrackId();
         const ScopedLock sl (takesLock);
         takesPlay.push_back (std::move (tp));
     }
@@ -1004,6 +1040,16 @@ public:
                   << " ch " << inChL.load() << "/" << inChR.load() << "\n";
         emitDeviceInfo();
     }
+    // 트랙별 입력 채널 — 위 setInputConfig 와 같은 모양이지만 트랙 하나에만 적용. 여러 트랙을
+    // 각자 다른 인풋에 물려 동시에 녹음하려면 이걸로 트랙마다 따로 지정한다.
+    void setRecTrackInput (int id, const var& mode, const var& chL, const var& chR)
+    {
+        auto* rt = findRec (id); if (rt == nullptr) return;
+        if (! mode.isVoid()) rt->inMode = ((int) mode == 1) ? 1 : 0;
+        if (! chL.isVoid())  rt->inChL  = jmax (0, (int) chL);
+        if (! chR.isVoid())  rt->inChR  = jmax (0, (int) chR);
+        emitRecTracks();   // 렌더러 IN 배지 갱신
+    }
     void setMaster (float g)   { masterGain = g; }
     void setMonitor (float g)  { monitorGain = g; }
     void setInputMonitor (bool on) { monitorInputOn = on; }
@@ -1013,6 +1059,10 @@ public:
 
     // ---- 녹음 트랙 (여러 개) ----
     RecTrack* findRec (int id) { for (auto& t : recTracks) if (t->id == id) return t.get(); return nullptr; }
+    // "그 트랙"(단수) 이 필요한 자리(예: trackId 안 준 loadTake 의 기본값)를 위한 대표값 —
+    // armed 된 첫 번째 녹음 트랙. 여러 트랙이 동시에 armed 일 수 있게 된 뒤에도 이런 "단일
+    // 대표" 의미가 필요한 곳은 그대로 첫 번째 것을 쓴다(렌더러 쪽 armedRecId() 와 같은 규칙).
+    int firstArmedTrackId() const { for (auto& t : recTracks) if (t->type == 0 && t->armed.load()) return t->id; return 0; }
     void recomputeSolos()   // 오디오 스레드가 락 없이 읽는 솔로 캐시 갱신 (message 스레드)
     {
         bool ss = false; for (auto& s : stems)     if (s->solo.load()) { ss = true; break; }
@@ -1031,7 +1081,10 @@ public:
             o->setProperty ("mute", t->mute.load());
             o->setProperty ("solo", t->solo.load());
             o->setProperty ("type", t->type);
-            o->setProperty ("armed", t->id == armedTrack.load());
+            o->setProperty ("armed", t->armed.load());
+            o->setProperty ("inMode", t->inMode.load());
+            o->setProperty ("inChL", t->inChL.load());
+            o->setProperty ("inChR", t->inChR.load());
             list.add (var (o));
         }
         auto* r = ev ("recTracks");
@@ -1045,15 +1098,19 @@ public:
         auto t = std::make_unique<RecTrack>();
         const int newId = nextRecId++;
         t->id = newId; t->type = type;
+        // 새 트랙 기본 입력 채널 = 지금 엔진 전역 설정(오디오 설정 모달 값) — 트랙마다 따로
+        // 바꾸기 전까진 그 값을 그대로 물려받는다.
+        t->inMode = inMode.load(); t->inChL = inChL.load(); t->inChR = inChR.load();
+        const bool noneArmedYet = firstArmedTrackId() == 0;
         { const ScopedLock sl (takesLock); recTracks.push_back (std::move (t)); }
-        if (type == 0 && findRec (armedTrack.load()) == nullptr) armedTrack = newId;   // 녹음 트랙만 자동 arm
+        if (type == 0 && noneArmedYet) { auto* nt = findRec (newId); if (nt) nt->armed = true; }   // 녹음 트랙만, 아무도 armed 아니면 자동 arm
         recomputeSolos();   // 다른 모든 트랙/스템 변경 지점은 이걸 부른다 — 여기만 빠져 있었다
         emitRecTracks();
     }
     void removeRecTrack (int id)
     {
         auto* rt = findRec (id);
-        if (rt != nullptr) clearChain (*rt);   // 에디터 창 닫기 (message 스레드)
+        if (rt != nullptr) { finishRecordingFor (*rt); clearChain (*rt); }   // 녹음 중이면 먼저 마무리 + 에디터 창 닫기 (message 스레드)
         {
             const ScopedLock sl (takesLock);
             takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
@@ -1061,11 +1118,20 @@ public:
             recTracks.erase (std::remove_if (recTracks.begin(), recTracks.end(),
                                  [id] (auto& t) { return t->id == id; }), recTracks.end());
         }
-        if (armedTrack.load() == id) armedTrack = recTracks.empty() ? 0 : recTracks.front()->id;
         recomputeSolos();
         emitRecTracks();
     }
-    void armRec (int id) { if (auto* rt = findRec (id)) if (rt->type == 0) { armedTrack = id; emitRecTracks(); } }   // 오디오 트랙은 녹음 대상 불가
+    // 오디오 트랙은 녹음 대상 불가. 라디오(단일 선택)가 아니라 토글 — 여러 트랙을 동시에
+    // arm 할 수 있다(실사용 문의: 인풋1/인풋2 동시 녹음). 이미 녹음 중인 트랙을 arm 해제하면
+    // 그 녹음도 같이 끝낸다.
+    void armRec (int id)
+    {
+        auto* rt = findRec (id); if (rt == nullptr || rt->type != 0) return;
+        const bool next = ! rt->armed.load();
+        rt->armed = next;
+        if (! next) finishRecordingFor (*rt);
+        emitRecTracks();
+    }
     // 녹음 트랙 전체 재구성 (녹음 저장 불러오기 — 트랙 수·상태 복원). 새 id 는 emitRecTracks 로 통지.
     void setRecTracks (const var& list, int gen)
     {
@@ -1083,11 +1149,11 @@ public:
                 if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
                 if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
                 applySends (*t, v["sends"]);
+                t->inMode = inMode.load(); t->inChL = inChL.load(); t->inChR = inChR.load();
                 const ScopedLock sl (takesLock);
                 recTracks.push_back (std::move (t));
             }
-        armedTrack = 0;
-        for (auto& t : recTracks) if (t->type == 0) { armedTrack = t->id; break; }   // 첫 녹음 트랙 arm
+        for (auto& t : recTracks) if (t->type == 0) { t->armed = true; break; }   // 첫 녹음 트랙만 arm
         recomputeSolos();
         emitRecTracks();
     }
@@ -1693,6 +1759,8 @@ public:
         recomputePdc();
         metroRecBuf.setSize (2, block);
         metroRecBuf.clear();
+        recBakeBuf.setSize (2, block);
+        recBakeBuf.clear();
         scratch.setSize (2, block);
         stemFxBuf.setSize (2, block);   // 오디오 스레드에서 재할당되지 않도록 미리 확보
         fxBuf.setSize (2, block);
@@ -1738,7 +1806,7 @@ public:
 
     void audioDeviceStopped() override
     {
-        finishRecording();
+        for (auto& rt : recTracks) finishRecordingFor (*rt);
         for (auto& s : stems) s->rs->releaseResources();
         writerThread.stopThread (500);
         currentDevice = nullptr;
@@ -1755,6 +1823,16 @@ public:
         R = (inMode.load() == 1) ? inputs[jlimit (0, numIn - 1, inChR.load())] : inputs[a];
     }
     int recordChannels() const { return inMode.load() == 1 ? 2 : 1; }
+    // 트랙별 입력 채널 버전 — 여러 트랙이 동시에 각자 다른 하드웨어 입력을 모니터링·녹음할 때 씀.
+    // 위 pickInputs()/recordChannels()(엔진 전역 설정)는 튜너·전역 입력 미터가 계속 쓰므로 그대로 둔다.
+    void pickInputsFor (const RecTrack& rt, const float* const* inputs, int numIn, const float*& L, const float*& R) const
+    {
+        if (numIn <= 0 || inputs == nullptr) { L = R = nullptr; return; }
+        const int a = jlimit (0, numIn - 1, rt.inChL.load());
+        L = inputs[a];
+        R = (rt.inMode.load() == 1) ? inputs[jlimit (0, numIn - 1, rt.inChR.load())] : inputs[a];
+    }
+    int recordChannelsFor (const RecTrack& rt) const { return rt.inMode.load() == 1 ? 2 : 1; }
 
     // 포스페이더 센드 — 페이더·팬이 반영된 트랙 출력을 센드량만큼 버스에 더한다.
     // 센드가 0 이고 직전에도 0 이면 아무것도 하지 않는다(램프가 끝난 상태라 더할 게 없음).
@@ -1910,7 +1988,6 @@ public:
             const ScopedTryLock stl (takesLock);   // recTracks/takesPlay 보호
             if (stl.isLocked())
             {
-                const int armed = armedTrack.load();
                 const bool monOn = monitorInputOn.load();
                 for (auto& rt : recTracks)
                 {
@@ -1951,9 +2028,9 @@ public:
                             }
                         }
 
-                    if (rt->id == armed && monOn && numIn > 0)   // armed 트랙만 라이브 입력 모니터
+                    if (rt->armed.load() && monOn && numIn > 0)   // armed 트랙만, 각자 자기 채널로 라이브 입력 모니터
                     {
-                        const float *iL, *iR; pickInputs (inputs, numIn, iL, iR);
+                        const float *iL, *iR; pickInputsFor (*rt, inputs, numIn, iL, iR);
                         if (iL != nullptr)
                         {
                             fxBuf.addFrom (0, 0, iL, numSamples);
@@ -2002,7 +2079,7 @@ public:
         // metroRecBuf 에도 더해 둔다 — 아래 녹음 블록이 입력에 얹어서 파일에 쓴다.
         // (원래 클릭은 outputs 에만 섞여 모니터링 전용이고, 녹음은 inputs 원본을 그대로
         // 쓰던 것 — 그래서 지금까진 메트로놈이 녹음 파일에 안 들어갔다.)
-        const bool bakeMetroThisBlock = metroBake.load() && recordArmed.load()
+        const bool bakeMetroThisBlock = metroBake.load() && activeRecCount.load (std::memory_order_relaxed) > 0
                                          && numSamples <= metroRecBuf.getNumSamples();
         if (metroOn.load() && numOut > 0)
         {
@@ -2084,57 +2161,79 @@ public:
         }
         lastMasterGain = master;
 
-        // 녹음
-        if (recordArmed.load())
+        // 녹음 — 트랙마다 각자 세션(rec)이 있으면 각자 파일에, 각자 입력 채널로 쓴다.
+        // 여러 트랙이 동시에 녹음 중일 수 있어 recTracks 를 순회한다(예전엔 세션이 하나뿐이라
+        // if 한 번이면 됐다). takesLock 은 rt->rec 포인터 자체를 message 스레드(armRecord/
+        // finishRecordingFor)와 공유하는 락 — 못 잡으면 이번 블록은 그냥 녹음을 건너뛴다
+        // (아주 짧은 순간이라 다음 블록에 바로 이어지고, 위 믹싱 루프도 같은 원칙으로 짜여 있다).
         {
-            if (recordedStart.load() < 0 && playing.load())
-                recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart). playhead 는 이미 +numSamples 됨
-
-            // 장치 입력을 통째로 넘기지 않고 선택한 채널만 기록한다.
-            // (예전엔 2in 인터페이스에서 안 쓰는 2번 채널까지 들어가 한쪽이 무음인 파일이 나왔다)
-            if (recordedStart.load() >= 0 && numIn > 0)
-                if (auto* w = activeWriter.load())
+            const ScopedTryLock stl (takesLock);
+            if (stl.isLocked())
+            {
+                for (auto& rt : recTracks)
                 {
-                    const float *iL, *iR; pickInputs (inputs, numIn, iL, iR);
-                    if (bakeMetroThisBlock && iL != nullptr)
-                    {
-                        // metroRecBuf 엔 이미 이번 블록 클릭 값이 들어 있다(위 메트로놈 블록) —
-                        // 원본 입력 포인터는 다른 곳에서도 참조될 수 있어 안 건드리고, 이
-                        // 스크래치에 입력을 더해서 쓴다.
-                        auto* bL = metroRecBuf.getWritePointer (0);
-                        auto* bR = metroRecBuf.getWritePointer (1);
-                        for (int i = 0; i < numSamples; ++i) { bL[i] += iL[i]; bR[i] += iR[i]; }
-                        FloatVectorOperations::max (bL, bL, -1.0f, numSamples);
-                        FloatVectorOperations::min (bL, bL,  1.0f, numSamples);
-                        FloatVectorOperations::max (bR, bR, -1.0f, numSamples);
-                        FloatVectorOperations::min (bR, bR,  1.0f, numSamples);
-                        const float* chans[2] = { bL, bR };
-                        if (! w->write (chans, numSamples))
-                            ++recDropBlocks;
-                    }
-                    else
-                    {
-                        const float* chans[2] = { iL, iR };
-                        if (iL != nullptr && ! w->write (chans, numSamples))
-                            ++recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
-                    }
+                    auto* sess = rt->rec.get();
+                    if (sess == nullptr) continue;
+                    if (sess->recordedStart.load() < 0 && playing.load())
+                        sess->recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart)
+
+                    // 장치 입력을 통째로 넘기지 않고 이 트랙이 고른 채널만 기록한다.
+                    // (예전엔 2in 인터페이스에서 안 쓰는 2번 채널까지 들어가 한쪽이 무음인 파일이 나왔다)
+                    if (sess->recordedStart.load() >= 0 && numIn > 0)
+                        if (auto* w = sess->active.load())
+                        {
+                            const float *iL, *iR; pickInputsFor (*rt, inputs, numIn, iL, iR);
+                            if (bakeMetroThisBlock && iL != nullptr)
+                            {
+                                // metroRecBuf 엔 이번 블록 클릭 값만 들어 있다(위 메트로놈 블록,
+                                // 읽기 전용으로 다룬다 — 트랙이 여럿이면 각자 자기 입력을 더해야
+                                // 하므로 공용 버퍼를 직접 뭉개면 다음 트랙이 잘못된 값을 본다).
+                                // 트랙별 스크래치(recBakeBuf, 오디오 스레드 안에서만 재사용)에
+                                // "클릭 + 이 트랙의 입력"을 새로 만들어 그것만 쓴다.
+                                recBakeBuf.setSize (2, numSamples, false, false, true);
+                                auto* bL = recBakeBuf.getWritePointer (0);
+                                auto* bR = recBakeBuf.getWritePointer (1);
+                                const auto* ckL = metroRecBuf.getReadPointer (0);
+                                const auto* ckR = metroRecBuf.getReadPointer (1);
+                                for (int i = 0; i < numSamples; ++i) { bL[i] = ckL[i] + iL[i]; bR[i] = ckR[i] + (iR != nullptr ? iR[i] : iL[i]); }
+                                FloatVectorOperations::max (bL, bL, -1.0f, numSamples);
+                                FloatVectorOperations::min (bL, bL,  1.0f, numSamples);
+                                FloatVectorOperations::max (bR, bR, -1.0f, numSamples);
+                                FloatVectorOperations::min (bR, bR,  1.0f, numSamples);
+                                const float* chans[2] = { bL, bR };
+                                if (! w->write (chans, numSamples))
+                                    ++sess->recDropBlocks;
+                            }
+                            else
+                            {
+                                const float* chans[2] = { iL, iR };
+                                if (iL != nullptr && ! w->write (chans, numSamples))
+                                    ++sess->recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
+                            }
+                        }
                 }
+            }
         }
     }
 
 private:
-    void finishRecording()
+    // 트랙 하나의 녹음 세션을 마무리(있으면) — writer flush+close, take 이벤트 하나 발행.
+    // armRecord(재시작 전 정리)/armRec(arm 해제)/removeRecTrack/stopRecord/소멸자에서 부른다.
+    void finishRecordingFor (RecTrack& rt)
     {
-        if (! recordArmed.exchange (false) && threadedWriter == nullptr) return;
-        activeWriter.store (nullptr);
-        threadedWriter.reset();   // flush + close
+        std::unique_ptr<RecSession> sess;
+        { const ScopedLock sl (takesLock); sess = std::move (rt.rec); }   // 포인터만 짧게 잠그고 뺀다
+        if (sess == nullptr) return;
+        activeRecCount.fetch_sub (1, std::memory_order_relaxed);
+        sess->active.store (nullptr);
+        sess->writer.reset();   // flush + close
         {
-            const int dropped = recDropBlocks.exchange (0);
+            const int dropped = sess->recDropBlocks.exchange (0);
             if (dropped > 0)
-                std::cerr << "[engine] WARN 녹음 중 " << dropped
+                std::cerr << "[engine] WARN 트랙 " << rt.id << " 녹음 중 " << dropped
                           << " 블록 쓰기 실패 — 파일에 끊김이 있을 수 있음" << std::endl;
         }
-        const int64 start = recordedStart.exchange (-1);
+        const int64 start = sess->recordedStart.exchange (-1);
         if (start >= 0)
         {
             const int64 comp = inLatSamp + outLatSamp;                 // 왕복 지연 = PDC
@@ -2143,13 +2242,13 @@ private:
             // 녹음 파일을 재생 버퍼로 등록 (녹음은 이미 디바이스 SR → 리샘플 없음)
             {
                 auto tp = std::make_unique<TakePlay>();
-                tp->len = loadClipBuffer (outFile, tp->buf);
+                tp->len = loadClipBuffer (sess->outFile, tp->buf);
                 if (tp->len > 0)
                 {
                     const int64 takeId = nextTakeId++;
                     tp->id = takeId;
                     tp->start = timelineStart;
-                    tp->trackId = armedTrack.load();
+                    tp->trackId = rt.id;
                     lastTakeId = takeId;
                     const ScopedLock sl (takesLock);
                     takesPlay.push_back (std::move (tp));
@@ -2158,8 +2257,8 @@ private:
 
             auto* o = ev ("take");
             o->setProperty ("id", lastTakeId);   // 렌더러 클립 식별용(고유 id)
-            o->setProperty ("trackId", armedTrack.load());
-            o->setProperty ("file", outFile.getFullPathName());
+            o->setProperty ("trackId", rt.id);
+            o->setProperty ("file", sess->outFile.getFullPathName());
             o->setProperty ("startPlayhead", start);
             o->setProperty ("roundtripComp", comp);
             o->setProperty ("timelineStart", timelineStart);
@@ -2215,9 +2314,9 @@ private:
     std::atomic<int64> stemOffset { 0 };
     AudioDeviceManager* devmgr = nullptr;
 
-    // 녹음 트랙 (여러 개) + 녹음 대상(armed) + 솔로 캐시(오디오 스레드 락-프리 판독)
+    // 녹음 트랙 (여러 개) + 솔로 캐시(오디오 스레드 락-프리 판독) — 녹음 대상(armed)은
+    // 이제 트랙마다(RecTrack::armed) 갖고, 몇 개나 동시에 armed 여도 된다.
     std::vector<std::unique_ptr<RecTrack>> recTracks;
-    std::atomic<int>  armedTrack { 0 };
     int nextRecId = 1;
     std::atomic<int64> nextTakeId { 1 };   // 테이크 전역 고유 id (start 와 무관)
     int64 lastTakeId = 0;
@@ -2245,16 +2344,13 @@ private:
     // 연습 녹음(트레이닝 탭)에서 "메트로놈도 녹음" 켰을 때만 씀 — 평소 녹음은 입력만
     // 그대로 파일에 쓴다(메트로놈은 모니터링 버스에만 섞임, 아래 processBlock 참고).
     std::atomic<bool> metroBake { false };
-    AudioBuffer<float> metroRecBuf;   // 녹음용 클릭 스크래치. 오디오 스레드에서 재할당 금지 — audioDeviceAboutToStart 에서 크기 확보
+    AudioBuffer<float> metroRecBuf;   // 녹음용 클릭 스크래치(클릭 값만, 읽기 전용으로 다룸). 오디오 스레드에서 재할당 금지 — audioDeviceAboutToStart 에서 크기 확보
+    AudioBuffer<float> recBakeBuf;    // "클릭+이 트랙의 입력" 합성용 트랙별 재사용 스크래치. 마찬가지로 재할당 금지
 
+    // 녹음 writer 는 이제 트랙마다(RecTrack::rec) 있다 — writerThread(TimeSliceThread)만
+    // 여러 ThreadedWriter 가 공유하는 전역으로 남는다(JUCE 설계상 원래 하나로 여럿을 서비스).
     TimeSliceThread writerThread;
-    std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
-    std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
-    std::atomic<bool>  recordArmed { false };
-    int writerChans = 1;                  // 녹음 writer 채널 수 (입력과 불일치 시 write 스킵)
-    std::atomic<int> recDropBlocks { 0 }; // 쓰기 실패(FIFO 오버런) 블록 수
-    std::atomic<int64> recordedStart { -1 };
-    File outFile;
+    std::atomic<int> activeRecCount { 0 };   // 지금 파일에 쓰는 중인 트랙 수 — metroBake 게이트용
 };
 
 // 재생 위치를 주기적으로 emit (message 스레드)
@@ -2308,10 +2404,26 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "play")        engine.play();
     else if (cmd == "stop")        engine.stop();
     else if (cmd == "seek")        engine.setPos ((int64) (double) c["pos"]);
-    else if (cmd == "recordArm")   engine.armRecord (File (c["file"].toString().isNotEmpty()
-                                            ? c["file"].toString()
-                                            : File::getCurrentWorkingDirectory().getChildFile ("take.wav").getFullPathName()));
+    else if (cmd == "recordArm")
+    {
+        // 트랙마다 파일 하나씩 — 여러 트랙을 동시에 armRecord 해서 각자 다른 입력으로
+        // 동시에 녹음한다(실사용 문의: 인풋1/인풋2 동시 녹음). files 가 없으면(옛 호출부
+        // 호환) file 하나만 온 걸로 보고 첫 armed 트랙에 적용.
+        if (auto* files = c["files"].getArray())
+        {
+            for (auto& item : *files)
+            {
+                const String f = item["file"].toString();
+                if (f.isNotEmpty()) engine.armRecord ((int) item["trackId"], File (f));
+            }
+        }
+        else if (c["file"].toString().isNotEmpty())
+        {
+            engine.armRecord (engine.firstArmedTrackId(), File (c["file"].toString()));
+        }
+    }
     else if (cmd == "recordStop")  engine.stopRecord();
+    else if (cmd == "recTrackSetInput") engine.setRecTrackInput ((int) c["id"], c["mode"], c["chL"], c["chR"]);
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
     else if (cmd == "takeLoad")    engine.loadTake (c["file"].toString(), (int64) (double) c["start"], (int) c["trackId"], (int64) (double) c["id"]);
