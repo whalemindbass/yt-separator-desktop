@@ -3472,9 +3472,6 @@ function onEngineEvent(m) {
         _recTracksWaiters.filter(w => w.gen === m.gen).forEach(w => w.resolve(true));
       }
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
-      // 트레이닝(연습 녹음)과 엔진을 공유한다 — 녹음 트랙이 생기고 없어질 때마다 알려서,
-      // 트레이닝이 이 세션을 밟지 않게 한다(engineOwnerBlocking, main.js 참고).
-      api.engine?.reportSession?.('studio', _recTracks.length > 0);
       renderRecLanes(); updateSoloDim();
       if (!selValid(_selTrack)) {   // 스템 선택은 유지
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙

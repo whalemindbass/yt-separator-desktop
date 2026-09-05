@@ -388,12 +388,8 @@ function tunOnEngineChange() {
 let _engineReadyWaiters = [];
 api?.engine?.onEvent((m) => {
   if (m.ev === 'ready') { _engineOn = true; tunOnEngineChange(); _engineReadyWaiters.splice(0).forEach(r => r()); }
-  else if (m.ev === 'exit') { _engineOn = false; tunOnEngineChange(); prOnEngineExit(); }
+  else if (m.ev === 'exit') { _engineOn = false; tunOnEngineChange(); }
   else if (m.ev === 'pitch' && _tunToolActive) tunUpdateUI(m.freq);
-  else if (m.ev === 'recTracks') prOnRecTracks(m);
-  else if (m.ev === 'take') prOnTake(m);
-  else if (m.ev === 'fxChain') prOnFxChain(m);
-  else if (m.ev === 'fxState') prOnFxState(m);
 });
 function waitEngineReady(timeoutMs) {
   if (_engineOn) return Promise.resolve(true);
@@ -401,192 +397,6 @@ function waitEngineReady(timeoutMs) {
     const t = setTimeout(() => resolve(_engineOn), timeoutMs);
     _engineReadyWaiters.push(() => { clearTimeout(t); resolve(true); });
   });
-}
-
-// ── 연습 녹음(하단 독) ──
-// 스튜디오로 옮겨가지 않고도 트레이닝 탭에서 바로 연습을 녹음한다. 엔진은 앱 전체에
-// 하나뿐이라(main.js audioEngine) 스튜디오가 프로젝트(녹음 트랙)를 갖고 있는 동안엔
-// 여기서 시작할 수 없다 — main.js 가 engineOwnerBlocking 으로 막고 busy 로 답한다.
-// 반대로 여기서 연습 중이면 스튜디오 쪽 엔진 시작도 막힌다(대칭, main.js 참고).
-let _prTrackId = null;      // 방금 만든 연습 트랙의 엔진 쪽 id
-let _prRecording = false;
-let _prBusy = false;        // 시작/정지 처리 중 중복 클릭 방지
-let _prChainSlots = [];     // 로드된 톤의 슬롯 목록([{id,index,bypass}]) — 재저장용
-let _prPresetGather = null; // 저장 진행 상태: {name, states, need, meta, order}
-let _prMetroBake = localStorage.getItem('yss:prMetroBake') === '1';
-let _prTakes = [];          // 이번 연습 세션에서 녹음된 테이크들 [{file,at}]
-
-function prActive() { return _prTrackId != null; }
-function prReportActive(active) { api?.engine?.reportSession?.('training', active); }
-
-function prStatus(msg) {
-  const el = $('pr-status'); if (el) el.textContent = msg || '';
-}
-function prFlash(msg) {
-  prStatus(msg);
-  clearTimeout(prFlash._t);
-  prFlash._t = setTimeout(() => prStatus(''), 3200);
-}
-function prRenderTakes() {
-  const box = $('pr-takes'); if (!box) return;
-  box.innerHTML = _prTakes.map((tk, i) => `
-    <div class="pr-take" data-i="${i}">
-      <span class="n">#${_prTakes.length - i}</span>
-      <audio src="${toYtsepUrl(tk.file)}" controls preload="none"></audio>
-    </div>`).join('');
-}
-function prRenderTones() {
-  const sel = $('pr-tone'); if (!sel) return;
-  const cur = sel.value;
-  const ps = getPresets();
-  sel.innerHTML = `<option value="">${t('training.pr.toneNone')}</option>` +
-    ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  if (ps.some(p => p.id === cur)) sel.value = cur;
-}
-
-function prSetUIState() {
-  const startBtn = $('pr-start'), stopBtn = $('pr-stop'), rec = $('pr-rec'), dot = $('pr-dot');
-  if (startBtn) startBtn.hidden = prActive();
-  if (stopBtn) stopBtn.hidden = !prActive();
-  if (rec) { rec.disabled = !prActive() || _prBusy; rec.classList.toggle('on', _prRecording); rec.textContent = _prRecording ? t('training.pr.recStop') : t('training.pr.recStart'); }
-  if (dot) dot.classList.toggle('on', prActive());
-}
-
-async function prStart() {
-  if (prActive() || _prBusy) return;
-  _prBusy = true; prSetUIState();
-  const r = await api.engine.start([], 'training').catch(() => ({ ok: false }));
-  if (!r || !r.ok) {
-    _prBusy = false; prSetUIState();
-    prFlash(r && r.busy ? t('training.pr.busyStudio') : t('training.pr.startFail'));
-    return;
-  }
-  const ready = await waitEngineReady(8000);
-  if (!ready) { _prBusy = false; prSetUIState(); prFlash(t('training.pr.startFail')); return; }
-  // 스튜디오가 쓰고 남긴 게 있을 수 있으니(예: 방금까지 빈 프로젝트) 깨끗하게 비우고 시작한다.
-  await api.engine.recTracksReset([]);
-  await api.engine.takeClear();
-  _prTakes = []; prRenderTakes();
-  prReportActive(true);
-  const addRes = await api.engine.recTrackAdd(0, 'training');
-  if (!addRes || !addRes.ok) {
-    _prBusy = false; prReportActive(false); prSetUIState();
-    prFlash(addRes && addRes.busy ? t('training.pr.busyStudio') : t('training.pr.startFail'));
-    return;
-  }
-  // 새 트랙 id 는 recTracks 이벤트로 비동기로 온다(prOnRecTracks) — 여기서 잠깐 기다린다.
-  await new Promise((resolve) => {
-    const t0 = Date.now();
-    (function poll() { if (_prTrackId != null || Date.now() - t0 > 4000) resolve(); else setTimeout(poll, 60); })();
-  });
-  _prBusy = false;
-  if (_prTrackId == null) { prReportActive(false); prFlash(t('training.pr.startFail')); prSetUIState(); return; }
-  await api.engine.metroBake(_prMetroBake);
-  prSetUIState();
-}
-async function prStop() {
-  if (!prActive()) return;
-  if (_prRecording) await prRecStop();
-  _prBusy = true; prSetUIState();
-  await api.engine.recTracksReset([]);
-  await api.engine.takeClear();
-  _prTrackId = null; _prChainSlots = [];
-  _prBusy = false;
-  prReportActive(false);
-  prSetUIState();
-}
-async function prRecStart() {
-  if (!prActive() || _prRecording || _prBusy) return;
-  const r = await api.engine.recordArm('__training_practice__', 'training');
-  if (!r || !r.ok) { prFlash(r && r.busy ? t('training.pr.busyStudio') : t('training.pr.startFail')); return; }
-  _prRecording = true; prSetUIState();
-  await api.engine.play();
-}
-async function prRecStop() {
-  if (!_prRecording) return;
-  await api.engine.stop();
-  await api.engine.recordStop();
-  _prRecording = false; prSetUIState();
-}
-function prOnEngineExit() {
-  if (!prActive()) return;
-  _prTrackId = null; _prRecording = false; _prBusy = false;
-  prReportActive(false); prSetUIState();
-}
-function prOnRecTracks(m) {
-  if (!prActive() && _prTrackId != null) return;   // 정지된 뒤 늦게 온 이벤트는 무시
-  const list = m.list || [];
-  if (_prTrackId == null) {
-    const mine = list.find(x => x.type !== 1);   // 방금 우리가 만든 그 하나뿐인 녹음 트랙
-    if (mine) _prTrackId = mine.id;
-  } else if (!list.some(x => x.id === _prTrackId)) {
-    _prTrackId = null;   // 트랙이 사라졌다(엔진 재시작 등) — 세션 종료로 취급
-    prReportActive(false);
-  }
-  prSetUIState();
-}
-function prOnTake(m) {
-  if (!prActive() || m.trackId !== _prTrackId) return;
-  _prTakes.unshift({ file: m.file, at: Date.now() });
-  prRenderTakes();
-}
-function prOnFxChain(m) {
-  if (m.trackId !== _prTrackId) return;
-  _prChainSlots = m.list || [];
-  const btn = $('pr-tone-save'); if (btn) btn.disabled = !_prChainSlots.length;
-}
-function prOnFxState(m) {
-  if (!_prPresetGather) return;
-  _prPresetGather.states[m.id] = m.data;
-  if (_prPresetGather.need.every(id => _prPresetGather.states[id] != null)) {
-    const g = _prPresetGather; _prPresetGather = null;
-    const slots = g.order.map((id, i) => ({ index: g.meta[i].index, bypass: g.meta[i].bypass, data: g.states[id] }));
-    upsertPreset({ id: g.id || ('p' + Date.now()), name: g.name, slots });
-    prFlash(t('training.pr.toneSaved'));
-    prRenderTones();
-  }
-}
-async function prLoadTone() {
-  if (!prActive()) return;
-  const sel = $('pr-tone');
-  const id = sel && sel.value;
-  if (!id) return;
-  const p = getPresets().find(x => x.id === id);
-  if (!p) return;
-  await api.engine.fxSetChain(_prTrackId, p.slots.map(s => ({ index: s.index, data: s.data, bypass: s.bypass })));
-}
-function prSaveTone() {
-  if (!prActive() || !_prChainSlots.length) return;
-  const nameInp = $('pr-tone-name');
-  const name = (nameInp && nameInp.value.trim()) || t('training.pr.toneUntitled');
-  const sel = $('pr-tone');
-  const existingId = sel && sel.value ? sel.value : null;
-  _prPresetGather = {
-    name, id: existingId, states: {},
-    need: _prChainSlots.map(s => s.id),
-    meta: _prChainSlots.map(s => ({ index: s.index, bypass: s.bypass })),
-    order: _prChainSlots.map(s => s.id),
-  };
-  for (const s of _prChainSlots) api.engine.fxSaveState(_prTrackId, s.id);
-}
-
-function prWire() {
-  $('pr-start')?.addEventListener('click', prStart);
-  $('pr-stop')?.addEventListener('click', prStop);
-  $('pr-rec')?.addEventListener('click', () => { if (_prRecording) prRecStop(); else prRecStart(); });
-  $('pr-tone-load')?.addEventListener('click', prLoadTone);
-  $('pr-tone-save')?.addEventListener('click', prSaveTone);
-  const metroBakeEl = $('pr-metro-bake');
-  if (metroBakeEl) {
-    metroBakeEl.checked = _prMetroBake;
-    metroBakeEl.addEventListener('change', () => {
-      _prMetroBake = metroBakeEl.checked;
-      localStorage.setItem('yss:prMetroBake', _prMetroBake ? '1' : '0');
-      if (prActive()) api.engine.metroBake(_prMetroBake);
-    });
-  }
-  prRenderTones();
-  prSetUIState();
 }
 
 // ── BPM 트레이너 ──
@@ -751,8 +561,6 @@ export function initTraining() {
     if (nav) showTool(nav.dataset.tool);
   });
 
-  prWire();
-
   const logGoalDailyEl = $('log-goal-daily'), logGoalMonthlyEl = $('log-goal-monthly');
   if (logGoalDailyEl) logGoalDailyEl.value = usageGetGoals().dailyMin;
   if (logGoalMonthlyEl) logGoalMonthlyEl.value = usageGetGoals().monthlyMin;
@@ -856,7 +664,6 @@ export function initTraining() {
     new MutationObserver(() => {
       if (trainingView.hidden) {
         pmStop(); btStop(); tunLeave();
-        if (prActive()) prStop();
       } else {
         if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
           tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
