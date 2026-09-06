@@ -2816,6 +2816,22 @@ ipcMain.handle('usage:save', (_ev, data) => {
     return true;
   } catch { return false; }
 });
+// 연습 기록 메모 — usageLog.json 과 같은 이유로 실제 파일에 둔다.
+function notesFile() {
+  return path.join(app.getPath('userData'), 'trainingNotes.json');
+}
+ipcMain.handle('notes:load', () => {
+  try {
+    const j = JSON.parse(fs.readFileSync(notesFile(), 'utf-8'));
+    return Array.isArray(j) ? j : [];
+  } catch { return []; }
+});
+ipcMain.handle('notes:save', (_ev, data) => {
+  try {
+    writeJsonAtomic(notesFile(), JSON.stringify(Array.isArray(data) ? data : []));
+    return true;
+  } catch { return false; }
+});
 // 영상 편집 탭 — library.json/usageLog.json 과 같은 패턴. 프로젝트가 하나뿐이라(여러 개
 // 관리하는 라이브러리 개념은 아직 없다) "저장" 버튼 없이 편집할 때마다 자동 저장하고,
 // 탭에 들어올 때 그대로 복원한다 — 탭을 나가거나 앱을 껐다 켜도 작업이 안 사라진다.

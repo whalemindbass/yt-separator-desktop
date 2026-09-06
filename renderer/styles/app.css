@@ -2549,7 +2549,9 @@ body { display: flex; flex-direction: column; }
 .log-cell.today { border-color: var(--accent); }
 .log-cell.sel { box-shadow: 0 0 0 2px var(--accent); }
 .log-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
-.log-daynum { position: relative; z-index: 1; pointer-events: none; }
+.log-daybox { position: relative; z-index: 1; pointer-events: none; display: flex; flex-direction: column; align-items: center; line-height: 1.1; gap: 1px; }
+.log-notecount { font-size: 7.5px; font-weight: 700; color: var(--tx-3); }
+.log-cell.has .log-notecount { color: var(--tx-2); }
 /* 상세 + 목표 설정 — 오른쪽 사이드 컬럼에 세로로. 달력 옆이라 폭이 좁으니(220px) 여기
    안에서는 계속 세로로 쌓아도 괜찮다. */
 .log-side { display: flex; flex-direction: column; gap: 22px; }
@@ -2580,11 +2582,64 @@ body { display: flex; flex-direction: column; }
 }
 .log-goal-input:focus { border-color: var(--accent); }
 .log-goal-input-row span { font-size: 11.5px; color: var(--tx-3); flex: none; }
+/* 연습 기록 메모 — 목표 블록 아래 남는 사이드 공간을 쓴다. 일일/전체 탭으로 전환. */
+.log-notes { display: flex; flex-direction: column; gap: 10px; padding-top: 18px; border-top: 1px solid var(--border); min-height: 0; }
+.log-notes-tabs { display: flex; gap: 4px; background: var(--elev-2); border-radius: 8px; padding: 2px; flex: none; }
+.log-notes-tab { flex: 1; border: none; background: transparent; color: var(--tx-3); font: 600 11.5px var(--sans); padding: 6px 0; border-radius: 6px; cursor: pointer; }
+.log-notes-tab:hover { color: var(--tx-1); }
+.log-notes-tab.on { background: var(--elev); color: var(--tx-1); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.log-notes-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.log-note-add-btn {
+  height: 30px; flex: none; border: 1px dashed var(--border-mid); background: transparent;
+  color: var(--tx-2); font: 600 12px var(--sans); border-radius: var(--r-sm); cursor: pointer;
+}
+.log-note-add-btn:hover { color: var(--tx-1); border-color: var(--accent); }
+.log-notes-search {
+  flex: none; height: 28px; box-sizing: border-box; padding: 0 10px; background: var(--input);
+  border: 1px solid var(--border-mid); border-radius: var(--r-sm); color: var(--tx-1); font: 500 12px var(--sans); outline: none;
+}
+.log-notes-search:focus { border-color: var(--accent); }
+.log-notes-filter-row { display: flex; gap: 6px; flex: none; }
+.log-notes-sel {
+  flex: 1; min-width: 0; height: 26px; box-sizing: border-box; padding: 0 6px; background: var(--input);
+  border: 1px solid var(--border-mid); border-radius: 6px; color: var(--tx-1); font: 500 11px var(--sans); outline: none;
+}
+.log-notes-range { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--tx-3); flex: none; }
+.log-notes-range input {
+  flex: 1; min-width: 0; height: 24px; box-sizing: border-box; padding: 0 4px; background: var(--input);
+  border: 1px solid var(--border-mid); border-radius: 6px; color: var(--tx-1); font: 500 10.5px var(--mono); outline: none;
+}
+.log-notes-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.log-notes-empty { font-size: 11.5px; color: var(--tx-3); padding: 10px 2px; text-align: center; }
+.log-notes-item { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 7px; background: var(--elev-2); cursor: pointer; }
+.log-notes-item:hover { background: var(--elev); }
+.log-notes-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.log-notes-item-title { font: 600 12px var(--sans); color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-notes-item-date { font: 500 10px var(--mono); color: var(--tx-3); }
+.log-notes-item-del { flex: none; width: 18px; height: 18px; border: none; background: transparent; color: var(--tx-3); cursor: pointer; border-radius: 4px; font-size: 12px; line-height: 1; }
+.log-notes-item-del:hover { color: var(--tx-1); background: var(--elev); }
+/* 메모 작성 페이지 — .log-main 과 같은 그리드 셀(1열)을 차지, 열려 있을 때만 .log-main 대신 보인다 */
+.log-note-editor { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.log-note-editor-head { display: flex; align-items: center; justify-content: space-between; }
+.log-note-editor-date { font: 700 15px var(--sans); color: var(--tx-1); }
+.log-note-title {
+  height: 34px; flex: none; box-sizing: border-box; padding: 0 12px; background: var(--input);
+  border: 1px solid var(--border-mid); border-radius: var(--r-sm); color: var(--tx-1); font: 600 14px var(--sans); outline: none;
+}
+.log-note-title:focus { border-color: var(--accent); }
+.log-note-body {
+  flex: 1; min-height: 260px; resize: vertical; box-sizing: border-box; padding: 10px 12px; background: var(--input);
+  border: 1px solid var(--border-mid); border-radius: var(--r-sm); color: var(--tx-1); font: 400 13px/1.6 var(--sans); outline: none;
+}
+.log-note-body:focus { border-color: var(--accent); }
+.log-note-editor-actions { display: flex; justify-content: flex-end; gap: 8px; flex: none; }
+.log-note-editor-actions .danger { color: #e5484d; border-color: #e5484d; }
 /* 좁은 창에서는 옆 컬럼을 둘 자리가 없으니 세로로 되돌린다 */
 @media (max-width: 700px) {
   .log-page { grid-template-columns: minmax(0, 1fr); }
-  .log-side { flex-direction: row; gap: 32px; }
+  .log-side { flex-direction: row; flex-wrap: wrap; gap: 32px; }
   .log-detail { flex: 1; padding-bottom: 0; border-bottom: 0; }
+  .log-notes { flex: 1 1 240px; border-top: 0; padding-top: 0; }
 }
 
 /* 튜너 — 스튜디오 도구창 안에서는 daw-fx 아사이드 폭을 그대로 물려받지만, 트레이닝

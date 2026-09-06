@@ -21,6 +21,154 @@ const api = window.yssApi;
 // 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까지는 못 읽으니까.
 const LOG_CAT_COLORS = { studio: 'var(--accent)', library: '#4f8fd1', training: '#d98e42' };
 let _logYear = 0, _logMonth = 0;   // 0-indexed month
+let _logSelectedDate = '';   // 지금 상세/메모가 보여주는 날짜(logShowDetail 이 세팅)
+
+// ── 연습 기록 메모 ──
+// usageLog.json 과 같은 이유(localStorage 는 통째로 날아갈 수 있고 업데이트에도
+// library.json 같은 실제 파일만큼 안전하지 않다)로 trainingNotes.json 에 저장한다.
+// usage.js 와 달리 이 화면 하나에서만 쓰므로 별도 모듈로 안 뺐다.
+let _notes = [];
+const notesReady = (async () => {
+  try {
+    const d = await api?.notes?.load();
+    if (Array.isArray(d)) _notes = d;
+  } catch { /* 파일이 없거나 깨졌으면 빈 상태로 시작 */ }
+})();
+function notesPersist() { notesReady.then(() => api?.notes?.save(_notes)); }
+function notesForDate(dateKey) {
+  return _notes.filter(n => n.date === dateKey).sort((a, b) => b.createdAt - a.createdAt);
+}
+function notesAdd(date, title, body) {
+  const n = {
+    id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+    date, title, body, createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  _notes.push(n);
+  notesPersist();
+  return n;
+}
+function notesUpdate(id, title, body) {
+  const n = _notes.find(x => x.id === id);
+  if (!n) return;
+  n.title = title; n.body = body; n.updatedAt = Date.now();
+  notesPersist();
+}
+function notesDelete(id) {
+  _notes = _notes.filter(n => n.id !== id);
+  notesPersist();
+}
+function noteItemHTML(n, showDate) {
+  const title = (n.title || '').trim() || (n.body || '').split('\n')[0].trim() || t('training.log.noteUntitled');
+  return `<div class="log-notes-item" data-id="${esc(n.id)}">
+    <div class="log-notes-item-main">
+      <div class="log-notes-item-title">${esc(title)}</div>
+      ${showDate ? `<div class="log-notes-item-date">${esc(n.date)}</div>` : ''}
+    </div>
+    <button class="log-notes-item-del" type="button" data-id="${esc(n.id)}" aria-label="delete">✕</button>
+  </div>`;
+}
+function renderDailyNotes() {
+  const box = $('log-notes-daily-list');
+  if (!box) return;
+  const list = notesForDate(_logSelectedDate);
+  box.innerHTML = list.length ? list.map(n => noteItemHTML(n, false)).join('') : `<div class="log-notes-empty">${t('training.log.noteEmpty')}</div>`;
+}
+let _notesSearch = '', _notesPeriod = 'all', _notesSort = 'date', _notesFrom = '', _notesTo = '';
+function notesFilteredAll() {
+  const now = new Date();
+  const todayKey = logDateKey(now.getFullYear(), now.getMonth(), now.getDate());
+  let from = null, to = null;
+  if (_notesPeriod === '7d') {
+    const d = new Date(now); d.setDate(d.getDate() - 6);
+    from = logDateKey(d.getFullYear(), d.getMonth(), d.getDate()); to = todayKey;
+  } else if (_notesPeriod === 'month') {
+    from = logDateKey(_logYear, _logMonth, 1);
+    to = logDateKey(_logYear, _logMonth, new Date(_logYear, _logMonth + 1, 0).getDate());
+  } else if (_notesPeriod === 'custom') {
+    from = _notesFrom || null; to = _notesTo || null;
+  }
+  const q = _notesSearch.trim().toLowerCase();
+  const list = _notes.filter(n => {
+    if (from && n.date < from) return false;
+    if (to && n.date > to) return false;
+    if (q && !((n.title || '').toLowerCase().includes(q) || (n.body || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+  list.sort((a, b) => _notesSort === 'updated'
+    ? b.updatedAt - a.updatedAt
+    : (b.date.localeCompare(a.date) || b.createdAt - a.createdAt));
+  return list;
+}
+function renderAllNotes() {
+  const box = $('log-notes-all-list');
+  if (!box) return;
+  box.innerHTML = notesFilteredAll().map(n => noteItemHTML(n, true)).join('')
+    || `<div class="log-notes-empty">${t('training.log.noteEmpty')}</div>`;
+}
+function notesAllTabOn() { return document.querySelector('.log-notes-tab[data-mode="all"]')?.classList.contains('on'); }
+function notesRefreshVisible() { renderDailyNotes(); if (notesAllTabOn()) renderAllNotes(); }
+// 메모 작성 페이지 — .log-main(달력) 자리를 대신 차지한다(같은 그리드 셀).
+let _noteEditId = null;     // null = 새 메모, 아니면 편집 중인 메모 id
+let _noteEditDate = '';     // 그 메모(또는 새로 만들 메모)가 속한 날짜 — 달력 배지 갱신용
+function noteEditorOpen(existing) {
+  _noteEditId = existing ? existing.id : null;
+  _noteEditDate = existing ? existing.date : _logSelectedDate;
+  $('log-main').hidden = true;
+  $('log-note-editor').hidden = false;
+  $('log-note-editor-date').textContent = _noteEditDate;
+  $('log-note-title').value = existing ? (existing.title || '') : '';
+  $('log-note-body').value = existing ? (existing.body || '') : '';
+  $('log-note-delete').hidden = !existing;
+  $('log-note-title').focus();
+}
+function noteEditorClose() {
+  $('log-note-editor').hidden = true;
+  $('log-main').hidden = false;
+  _noteEditId = null;
+}
+function noteEditorSave() {
+  const title = $('log-note-title').value.trim();
+  const body = $('log-note-body').value;
+  if (!title && !body.trim()) { noteEditorClose(); return; }   // 빈 메모는 그냥 취소 취급
+  if (_noteEditId) notesUpdate(_noteEditId, title, body);
+  else notesAdd(_noteEditDate, title, body);
+  const date = _noteEditDate;
+  noteEditorClose();
+  notesRefreshVisible();
+  logRefreshDayNotes(date);
+}
+function noteEditorDelete() {
+  if (!_noteEditId) { noteEditorClose(); return; }
+  if (!confirm(t('training.log.noteDeleteConfirm'))) return;
+  notesDelete(_noteEditId);
+  const date = _noteEditDate;
+  noteEditorClose();
+  notesRefreshVisible();
+  logRefreshDayNotes(date);
+}
+// 목록(일일/전체)의 ✕ 버튼으로 지우는 경로 — 지우려는 메모가 지금 편집기에 열려 있는
+// 바로 그 메모면 편집기도 같이 닫는다(이미 사라진 메모를 붙들고 있으면 안 되니까).
+function noteListDelete(note) {
+  if (!note || !confirm(t('training.log.noteDeleteConfirm'))) return;
+  if (_noteEditId === note.id) noteEditorClose();
+  notesDelete(note.id);
+  notesRefreshVisible();
+  logRefreshDayNotes(note.date);
+}
+// 전체 그리드를 새로 안 그리고(달력 선택 상태가 날아간다) 배지 하나만 갱신한다.
+function logRefreshDayNotes(dateKey) {
+  const cell = document.querySelector(`.log-cell[data-date="${dateKey}"]`);
+  const box = cell?.querySelector('.log-daybox');
+  if (!box) return;
+  const n = notesForDate(dateKey).length;
+  let badge = box.querySelector('.log-notecount');
+  if (n > 0) {
+    if (!badge) { badge = document.createElement('span'); badge.className = 'log-notecount'; box.appendChild(badge); }
+    badge.textContent = `${t('training.log.noteCountLabel')} : ${n}`;
+  } else {
+    badge?.remove();
+  }
+}
 function logDateKey(y, m, d) {
   return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 }
@@ -63,6 +211,8 @@ function logRingHTML(rec) {
     arcs + `</svg>`;
 }
 function logShowDetail(dateKey) {
+  _logSelectedDate = dateKey;
+  renderDailyNotes();
   const log = logLoad();
   const rec = log[dateKey] || {};
   const dateEl = $('log-detail-date'); if (dateEl) dateEl.textContent = dateKey;
@@ -120,7 +270,11 @@ function logRenderMonth() {
     cell.type = 'button';
     cell.className = 'log-cell' + (total > 0 ? ' has' : '') + (key === todayKey ? ' today' : '');
     cell.dataset.date = key;
-    cell.innerHTML = logRingHTML(rec) + `<span class="log-daynum">${d}</span>`;
+    const noteCount = notesForDate(key).length;
+    cell.innerHTML = logRingHTML(rec) +
+      `<span class="log-daybox"><span class="log-daynum">${d}</span>` +
+      (noteCount ? `<span class="log-notecount">${esc(t('training.log.noteCountLabel'))} : ${noteCount}</span>` : '') +
+      `</span>`;
     grid.appendChild(cell);
   }
   logRenderMonthProgress();
@@ -595,6 +749,41 @@ export function initTraining() {
     document.querySelectorAll('.log-cell.sel').forEach(c => c.classList.remove('sel'));
     cell.classList.add('sel');
     logShowDetail(cell.dataset.date);
+  });
+
+  // 연습 기록 메모
+  document.querySelector('.log-notes-tabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.log-notes-tab');
+    if (!btn) return;
+    document.querySelectorAll('.log-notes-tab').forEach(b => b.classList.toggle('on', b === btn));
+    document.querySelectorAll('.log-notes-panel').forEach(p => { p.hidden = p.dataset.mode !== btn.dataset.mode; });
+    if (btn.dataset.mode === 'all') renderAllNotes();
+  });
+  $('log-note-add')?.addEventListener('click', () => noteEditorOpen(null));
+  $('log-note-cancel')?.addEventListener('click', noteEditorClose);
+  $('log-note-save')?.addEventListener('click', noteEditorSave);
+  $('log-note-delete')?.addEventListener('click', noteEditorDelete);
+  const noteListClick = (list, e) => {
+    const del = e.target.closest('.log-notes-item-del');
+    if (del) { noteListDelete(list.find(x => x.id === del.dataset.id)); return; }
+    const item = e.target.closest('.log-notes-item');
+    if (item) { const n = list.find(x => x.id === item.dataset.id); if (n) noteEditorOpen(n); }
+  };
+  $('log-notes-daily-list')?.addEventListener('click', (e) => noteListClick(notesForDate(_logSelectedDate), e));
+  $('log-notes-all-list')?.addEventListener('click', (e) => noteListClick(notesFilteredAll(), e));
+  $('log-notes-search')?.addEventListener('input', () => { _notesSearch = $('log-notes-search').value; renderAllNotes(); });
+  $('log-notes-period')?.addEventListener('change', () => {
+    _notesPeriod = $('log-notes-period').value;
+    $('log-notes-range').hidden = _notesPeriod !== 'custom';
+    renderAllNotes();
+  });
+  $('log-notes-sort')?.addEventListener('change', () => { _notesSort = $('log-notes-sort').value; renderAllNotes(); });
+  $('log-notes-from')?.addEventListener('change', () => { _notesFrom = $('log-notes-from').value; renderAllNotes(); });
+  $('log-notes-to')?.addEventListener('change', () => { _notesTo = $('log-notes-to').value; renderAllNotes(); });
+  notesReady.then(() => {
+    notesRefreshVisible();
+    // 달력 배지(메모 개수)도 로드 전엔 0으로 그려졌을 수 있다 — 로드 끝나면 다시 그린다.
+    if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'log') logRenderMonth();
   });
 
   const pmBpmEl = $('pm-bpm'), pmSigEl = $('pm-sig'), pmSubdivEl = $('pm-subdiv'), pmVolEl = $('pm-vol');

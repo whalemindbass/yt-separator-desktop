@@ -987,7 +987,7 @@
            달력으로만 그려서 보여준다(집계 로직은 usage.js 하나뿐). -->
       <section class="training-panel on" data-tool="log">
         <div class="log-page" id="tool-log">
-          <div class="log-main">
+          <div id="log-main" class="log-main">
             <div class="log-head">
               <button id="log-prev" class="btn btn-sm pm-step" type="button" aria-label="prev">‹</button>
               <span id="log-month-label" class="log-month">—</span>
@@ -999,6 +999,19 @@
             </div>
             <div id="log-weekdays" class="log-weekdays"></div>
             <div id="log-grid" class="log-grid"></div>
+          </div>
+
+          <div id="log-note-editor" class="log-note-editor" hidden>
+            <div class="log-note-editor-head">
+              <span id="log-note-editor-date" class="log-note-editor-date">—</span>
+              <button id="log-note-cancel" class="btn btn-sm" type="button" data-i18n="training.log.noteCancel">취소</button>
+            </div>
+            <input id="log-note-title" class="log-note-title" type="text" spellcheck="false" data-i18n-placeholder="training.log.noteTitlePh" placeholder="제목" />
+            <textarea id="log-note-body" class="log-note-body" spellcheck="false" data-i18n-placeholder="training.log.noteBodyPh" placeholder="내용을 입력하세요"></textarea>
+            <div class="log-note-editor-actions">
+              <button id="log-note-delete" class="btn btn-sm danger" type="button" data-i18n="training.log.noteDelete" hidden>삭제</button>
+              <button id="log-note-save" class="btn primary btn-sm" type="button" data-i18n="training.log.noteSave">저장</button>
+            </div>
           </div>
 
           <div class="log-side">
@@ -1023,6 +1036,38 @@
                   <input id="log-goal-monthly" type="number" min="0" step="30" class="log-goal-input" />
                   <span data-i18n="training.log.min">분</span>
                 </div>
+              </div>
+            </div>
+
+            <div class="log-notes">
+              <div class="log-notes-tabs">
+                <button class="log-notes-tab on" type="button" data-mode="daily" data-i18n="training.log.noteDaily">일일</button>
+                <button class="log-notes-tab" type="button" data-mode="all" data-i18n="training.log.noteAll">전체</button>
+              </div>
+              <div class="log-notes-panel" data-mode="daily">
+                <button id="log-note-add" class="log-note-add-btn" type="button" data-i18n="training.log.noteAddBtn">+ 새 메모</button>
+                <div id="log-notes-daily-list" class="log-notes-list"></div>
+              </div>
+              <div class="log-notes-panel" data-mode="all" hidden>
+                <input id="log-notes-search" type="text" class="log-notes-search" spellcheck="false" data-i18n-placeholder="training.log.noteSearchPh" placeholder="검색" />
+                <div class="log-notes-filter-row">
+                  <select id="log-notes-period" class="log-notes-sel">
+                    <option value="all" data-i18n="training.log.periodAll">전체 기간</option>
+                    <option value="7d" data-i18n="training.log.period7d">최근 7일</option>
+                    <option value="month" data-i18n="training.log.periodMonth">이번 달</option>
+                    <option value="custom" data-i18n="training.log.periodCustom">직접 입력</option>
+                  </select>
+                  <select id="log-notes-sort" class="log-notes-sel">
+                    <option value="date" data-i18n="training.log.sortDate">날짜순</option>
+                    <option value="updated" data-i18n="training.log.sortUpdated">수정순</option>
+                  </select>
+                </div>
+                <div id="log-notes-range" class="log-notes-range" hidden>
+                  <input type="date" id="log-notes-from" />
+                  <span>~</span>
+                  <input type="date" id="log-notes-to" />
+                </div>
+                <div id="log-notes-all-list" class="log-notes-list"></div>
               </div>
             </div>
           </div>

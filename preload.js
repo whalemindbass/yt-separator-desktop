@@ -189,6 +189,12 @@ contextBridge.exposeInMainWorld('yssApi', {
     save: (data) => ipcRenderer.invoke('usage:save', data),
   },
 
+  // 연습 기록 메모 — 같은 패턴(trainingNotes.json)
+  notes: {
+    load: ()     => ipcRenderer.invoke('notes:load'),
+    save: (data) => ipcRenderer.invoke('notes:save', data),
+  },
+
   // 실시간 오디오 엔진 (JUCE 사이드카)
   engine: {
     start:       (stems, who) => ipcRenderer.invoke('engine:start', stems, who),
