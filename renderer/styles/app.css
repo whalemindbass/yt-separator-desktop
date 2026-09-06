@@ -2452,7 +2452,7 @@ body { display: flex; flex-direction: column; }
 .tuner-freq { text-align: center; font: 500 10.5px var(--mono); color: var(--tx-3); }
 .metro-row .btn { flex: none; }
 .metro-row .btn.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-.metro-bpm { width: 60px; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--tx-1); font: 600 13px/1 var(--mono); outline: none; }
+.metro-bpm { width: 60px; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--tx-1); font: 600 10px/1 var(--mono); outline: none; }
 
 /* 트레이닝 뷰 — home-body/home-nav 와 같은 사이드바+본문 그리드. 지금은 메트로놈 하나뿐이지만
    도구가 늘어도 왼쪽 목록에 항목만 추가하면 되는 구조로 처음부터 잡아 둔다. */
