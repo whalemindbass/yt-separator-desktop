@@ -210,6 +210,7 @@ contextBridge.exposeInMainWorld('yssApi', {
     inputConfig: (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'inputConfig', ...(opts || {}) }),
     metro:       (on, bpm, phase, interval)=> ipcRenderer.invoke('engine:cmd', { cmd: 'metro', on, bpm, phase: phase || 0, interval: interval || 0 }),
     metroBake:   (on)     => ipcRenderer.invoke('engine:cmd', { cmd: 'metroBake', on }),
+    metroPattern:(beatsPerBar, subdiv) => ipcRenderer.invoke('engine:cmd', { cmd: 'metroPattern', beatsPerBar, subdiv }),
     listDevices: ()       => ipcRenderer.invoke('engine:cmd', { cmd: 'listDevices' }),
     setDevice:   (opts)   => ipcRenderer.invoke('engine:cmd', { cmd: 'setDevice', ...(opts || {}) }),
     fxAdd:       (track, index)     => ipcRenderer.invoke('engine:cmd', { cmd: 'fxAdd', track, index }),

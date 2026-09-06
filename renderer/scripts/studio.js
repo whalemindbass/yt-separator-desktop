@@ -131,6 +131,11 @@ let _beatInterval = 0;  // 감지된 정밀 박 간격(초) — 메트로놈 균
 const secPerBar = () => BEATS_PER_BAR * 60 / _bpm;
 const secPerBeat = () => 60 / _bpm;
 let _metroOn = false;
+let _metroBake = false, _metroBeats = 4, _metroSubdiv = 1;   // 메트로놈도 녹음 / 박자표(마디당 박 수) / 세분화(박당 클릭 수, 1=없음)
+function pushMetroExtra() {   // metro()와 별개 커맨드라 따로 보낸다 — 엔진 재시작 시에도 다시 밀어 넣어야 한다
+  api.engine.metroBake(_metroBake);
+  api.engine.metroPattern(_metroBeats, _metroSubdiv);
+}
 // 엔진에 지금 BPM·그리드 위상을 다시 밀어 넣는다 — bpm/그리드가 바뀔 때, 그리고 엔진이
 // 새로 켜졌을 때(장치 재연결 등으로 프로세스가 새로 뜨면 엔진 쪽 메트로놈 상태는 기억 못 한다)
 // 매번 호출한다. 켜져 있지 않아도 보낸다 — on=false 로 엔진 쪽을 확실히 꺼 둔다.
@@ -1702,7 +1707,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -2289,6 +2294,42 @@ function openTrackInputPopoverAt(rt, x, y) {
   });
   pop.querySelector('.in-chl').addEventListener('change', push);
   pop.querySelector('.in-chr').addEventListener('change', push);
+  const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+// 메트로놈 설정 팝오버 — 메트로놈도 녹음 여부 + 박자표(마디당 박 수) + 세분화(박 사이 잔클릭).
+// openTrackInputPopoverAt 과 같은 뼈대(.daw-ctx, 바깥 클릭 시 닫힘).
+function openMetroPopoverAt(x, y) {
+  document.querySelector('.daw-ctx')?.remove();
+  const beatOpts = Array.from({ length: 7 }, (_, i) => i + 2)   // 2박~8박
+    .map(n => `<option value="${n}" ${n === _metroBeats ? 'selected' : ''}>${n}${tr('studio.x.beatsSuffix')}</option>`).join('');
+  const subOpts = [
+    [1, tr('studio.x.subdivNone')], [2, tr('studio.x.subdiv8th')],
+    [3, tr('studio.x.subdivTriplet')], [4, tr('studio.x.subdiv16th')],
+  ].map(([v, label]) => `<option value="${v}" ${v === _metroSubdiv ? 'selected' : ''}>${label}</option>`).join('');
+  const pop = document.createElement('div');
+  pop.className = 'daw-ctx daw-in-pop';
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+  pop.innerHTML = `
+    <div class="daw-op-row"><label><input type="checkbox" class="mt-bake" ${_metroBake ? 'checked' : ''}> ${tr('studio.x.metroBake')}</label></div>
+    <div class="daw-op-row"><span class="lbl">${tr('studio.x.timeSig')}</span><select class="mt-beats">${beatOpts}</select></div>
+    <div class="daw-op-row"><span class="lbl">${tr('studio.x.subdivision')}</span><select class="mt-subdiv">${subOpts}</select></div>`;
+  document.body.appendChild(pop);
+  const r = pop.getBoundingClientRect(), m = 8;
+  if (r.right > innerWidth - m) pop.style.left = Math.max(m, innerWidth - r.width - m) + 'px';
+  if (r.bottom > innerHeight - m) pop.style.top = Math.max(m, y - r.height) + 'px';
+  pop.querySelector('.mt-bake').addEventListener('change', (e) => {
+    _metroBake = e.target.checked;
+    localStorage.setItem('yss:metroBake', _metroBake ? '1' : '0');
+    api.engine.metroBake(_metroBake);
+  });
+  const pushPattern = () => {
+    localStorage.setItem('yss:metroBeats', String(_metroBeats));
+    localStorage.setItem('yss:metroSubdiv', String(_metroSubdiv));
+    api.engine.metroPattern(_metroBeats, _metroSubdiv);
+  };
+  pop.querySelector('.mt-beats').addEventListener('change', (e) => { _metroBeats = Number(e.target.value); pushPattern(); });
+  pop.querySelector('.mt-subdiv').addEventListener('change', (e) => { _metroSubdiv = Number(e.target.value); pushPattern(); });
   const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
   setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
@@ -3334,6 +3375,7 @@ function onEngineEvent(m) {
       setEnabled(true);
       api.engine.scanPlugins();   // 미리 스캔 → 톤 불러오기·VST 추가 즉시 가능
       updateMetro();   // 새로 뜬 엔진 프로세스는 메트로놈 on/off 를 기억 못 한다 — 다시 밀어 넣는다
+      pushMetroExtra();   // 메트로놈도 녹음/박자표/세분화도 마찬가지로 다시 밀어 넣는다
       // 장치가 여러 개면 엔진은 그중 첫 번째로 붙는다(ASIO 드라이버가 여럿일 때 특히) —
       // 저장해 둔 게 있으면 그쪽으로 다시 붙인다. 목록을 받아야 실제로 있는 장치인지
       // 확인할 수 있으므로 'devices' 응답에서 처리한다(reconnectSavedDevice). phase 는
@@ -3951,6 +3993,13 @@ function wire() {
     updateMetro();
     flashTake(_metroOn ? tr('studio.lbl.metroOn') : tr('studio.lbl.metroOff'));
   });
+
+  // 메트로놈 설정(메트로놈도 녹음 / 박자표 / 세분화) — 설정 유지
+  _metroBake = localStorage.getItem('yss:metroBake') === '1';
+  _metroBeats = Number(localStorage.getItem('yss:metroBeats')) || 4;
+  _metroSubdiv = Number(localStorage.getItem('yss:metroSubdiv')) || 1;
+  pushMetroExtra();
+  $('st-metro-cfg').addEventListener('click', (e) => { e.stopPropagation(); openMetroPopoverAt(e.clientX, e.clientY); });
 
   // 내 소리 모니터 on/off
   let _monOn = true;

@@ -772,8 +772,14 @@ public:
         metroOn = on; if (bpm > 20.0) metroBpm = bpm; metroPhase = phase;
         metroInterval = interval;                 // 샘플 단위 정밀 박 간격(감지값). <=1 이면 bpm 기반
         lastBeatIdx = std::numeric_limits<int64>::min();   // 재생 시작 시 첫 박 경계 전 스퓨리어스 클릭 방지
+        lastSubIdx = std::numeric_limits<int64>::min();
     }
-    void setMetroBake (bool on) { metroBake = on; }   // 연습 녹음 — 켜면 메트로놈 클릭이 녹음 파일에도 섞인다
+    void setMetroBake (bool on) { metroBake = on; }   // 켜면 메트로놈 클릭이 녹음 파일에도 섞인다
+    void setMetroPattern (int beats, int subdiv)   // 박자표(마디당 박 수) + 세분화(박당 클릭 수)
+    {
+        metroBeatsPerBar = jmax (1, beats);
+        metroSubdiv = jmax (1, subdiv);
+    }
     float inputLevel() { return inPeak.exchange (0.0f); }   // 마지막 peak 읽고 리셋
     // 하드웨어 입력 채널별 peak (읽고 리셋). 설정 창에서 어느 단자에 신호가 있는지 본다.
     Array<var> inputChannelLevels()
@@ -2084,10 +2090,14 @@ public:
         if (metroOn.load() && numOut > 0)
         {
             const int clickLen = (int) (deviceSampleRate * 0.06);
+            const int subClickLen = (int) (deviceSampleRate * 0.03);
             double interval = metroInterval.load();
             if (interval <= 1.0) interval = 60.0 / metroBpm.load() * deviceSampleRate;   // 폴백
             const double phase = (double) metroPhase.load();
             const bool playing_ = playing.load();
+            const int beatsPerBar = jmax (1, metroBeatsPerBar.load());
+            const int subdiv = jmax (1, metroSubdiv.load());
+            const double subInterval = interval / (double) subdiv;
             if (bakeMetroThisBlock) metroRecBuf.clear (0, numSamples);
             float* bkL = bakeMetroThisBlock ? metroRecBuf.getWritePointer (0) : nullptr;
             float* bkR = bakeMetroThisBlock ? metroRecBuf.getWritePointer (1) : nullptr;
@@ -2097,15 +2107,40 @@ public:
                 {
                     const int64 beatIdx = (int64) std::floor (((double) (phStart + i) - phase) / interval + 1e-6);
                     if (lastBeatIdx == std::numeric_limits<int64>::min()) lastBeatIdx = beatIdx;   // 시작 지점: 클릭 없이 기준만
-                    else if (beatIdx != lastBeatIdx) { lastBeatIdx = beatIdx; clickPos = 0; }       // 경계 넘을 때만
+                    else if (beatIdx != lastBeatIdx)   // 경계 넘을 때만
+                    {
+                        lastBeatIdx = beatIdx; clickPos = 0;
+                        curClickAccent = (((beatIdx % beatsPerBar) + beatsPerBar) % beatsPerBar) == 0;   // 마디 첫 박(다운비트)
+                    }
+                    if (subdiv > 1)   // 세분화 잔클릭 — 메인 박과 별개 트래커로 관리(서로 안 밟는다)
+                    {
+                        const int64 subIdx = (int64) std::floor (((double) (phStart + i) - phase) / subInterval + 1e-6);
+                        if (lastSubIdx == std::numeric_limits<int64>::min()) lastSubIdx = subIdx;
+                        else if (subIdx != lastSubIdx)
+                        {
+                            lastSubIdx = subIdx;
+                            const int64 subMod = ((subIdx % subdiv) + subdiv) % subdiv;
+                            if (subMod != 0) subClickPos = 0;   // 메인 박 경계와 겹치면(subMod==0) 잔클릭 생략 — 메인 클릭이 이미 울린다
+                        }
+                    }
                 }
                 if (clickPos >= 0)
                 {
                     const float env = std::exp (-(float) clickPos / ((float) deviceSampleRate * 0.012f));
-                    const float s = 0.4f * env * std::sin (2.0f * 3.14159265f * 1000.0f * (float) clickPos / (float) deviceSampleRate);
+                    const float freq = curClickAccent ? 1300.0f : 1000.0f;
+                    const float amp  = curClickAccent ? 0.5f : 0.4f;
+                    const float s = amp * env * std::sin (2.0f * 3.14159265f * freq * (float) clickPos / (float) deviceSampleRate);
                     for (int c = 0; c < numOut; ++c) outputs[c][i] += s;
                     if (bkL != nullptr) { bkL[i] += s; bkR[i] += s; }
                     if (++clickPos > clickLen) clickPos = -1;
+                }
+                if (subClickPos >= 0)
+                {
+                    const float env = std::exp (-(float) subClickPos / ((float) deviceSampleRate * 0.006f));
+                    const float s = 0.18f * env * std::sin (2.0f * 3.14159265f * 1700.0f * (float) subClickPos / (float) deviceSampleRate);
+                    for (int c = 0; c < numOut; ++c) outputs[c][i] += s;
+                    if (bkL != nullptr) { bkL[i] += s; bkR[i] += s; }
+                    if (++subClickPos > subClickLen) subClickPos = -1;
                 }
             }
         }
@@ -2341,8 +2376,13 @@ private:
     std::atomic<double> metroInterval { 0.0 };  // 정밀 박 간격(샘플). <=1 이면 bpm 기반
     int64 lastBeatIdx = std::numeric_limits<int64>::min();
     int clickPos = -1;
-    // 연습 녹음(트레이닝 탭)에서 "메트로놈도 녹음" 켰을 때만 씀 — 평소 녹음은 입력만
-    // 그대로 파일에 쓴다(메트로놈은 모니터링 버스에만 섞임, 아래 processBlock 참고).
+    bool curClickAccent = false;   // 지금 울리는 메인 클릭이 다운비트(마디 첫 박)인지 — 클릭 길이 내내 유지
+    int64 lastSubIdx = std::numeric_limits<int64>::min();
+    int subClickPos = -1;
+    std::atomic<int> metroBeatsPerBar { 4 };   // 박자표(마디당 박 수) — 다운비트 강세 계산용
+    std::atomic<int> metroSubdiv { 1 };        // 세분화(박당 클릭 수). 1=없음, 2=8분, 3=3연음, 4=16분
+    // "메트로놈도 녹음" 켰을 때만 씀 — 평소 녹음은 입력만 그대로 파일에 쓴다
+    // (메트로놈은 모니터링 버스에만 섞임, 아래 processBlock 참고).
     std::atomic<bool> metroBake { false };
     AudioBuffer<float> metroRecBuf;   // 녹음용 클릭 스크래치(클릭 값만, 읽기 전용으로 다룸). 오디오 스레드에서 재할당 금지 — audioDeviceAboutToStart 에서 크기 확보
     AudioBuffer<float> recBakeBuf;    // "클릭+이 트랙의 입력" 합성용 트랙별 재사용 스크래치. 마찬가지로 재할당 금지
@@ -2449,6 +2489,7 @@ static void dispatch (Engine& engine, const var& c)
     else if (cmd == "inputConfig") engine.setInputConfig (c["mode"], c["chL"], c["chR"]);
     else if (cmd == "metro")       engine.setMetro ((bool) c["on"], (double) c["bpm"], (int64) (double) c["phase"], (double) c["interval"]);
     else if (cmd == "metroBake")   engine.setMetroBake ((bool) c["on"]);
+    else if (cmd == "metroPattern") engine.setMetroPattern ((int) c["beatsPerBar"], (int) c["subdiv"]);
     else if (cmd == "listDevices") engine.listDevices();
     else if (cmd == "setDevice")   engine.setDevice (c);
     else if (cmd == "scanPlugins") { StringArray extra; if (auto* a = c["paths"].getArray()) for (auto& v : *a) extra.add (v.toString()); engine.scanPlugins (extra); }
