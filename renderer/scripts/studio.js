@@ -3685,7 +3685,7 @@ function wire() {
     else if (isDel) deleteSelectedClips();
     else if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
-    else { if (_recArmed) stopAll(); else { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); armRecPlay(); } }
+    else { if (_recArmed) stopAll(); else { if (!armedRecIds().length) { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); } armRecPlay(); } }
   });
   // 언어를 바꾸면 이미 그려둔 스템 라벨·패널 문구가 옛 언어로 남는다 → 다시 그린다
   onLocaleChange(() => {
