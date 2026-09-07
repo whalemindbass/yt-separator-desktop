@@ -652,8 +652,18 @@ $('reset-btn').addEventListener('click', async () => {
 // ── 분리할 대상 고르기 (링크 / 내 파일) ─────────
 // 고른 쪽에 필요한 것만 남긴다 — 내 파일은 이미 손에 있으니 주소 칸도, 받아올 화질도 쓸 데가 없다.
 const srcLink = $('src-link'), srcFile = $('src-file');
-const linkRow = $('link-row'), qualityRow = $('quality-row');
+const linkRow = $('link-row'), qualityRow = $('quality-row'), audioOnlyRow = $('audio-only-row');
+const audioOnlyToggle = $('audio-only-toggle');
 let srcMode = 'link';
+// 음원만 다운로드 — 영상 없이 오디오 스트림만 받는다(더 빠름·용량↓). 화질 선택은 이 경우 무의미.
+let audioOnly = localStorage.getItem('yss:audioOnly') === '1';
+if (audioOnlyToggle) audioOnlyToggle.checked = audioOnly;
+function refreshQualityRowVisibility() { qualityRow.hidden = srcMode !== 'link' || audioOnly; }
+audioOnlyToggle?.addEventListener('change', () => {
+  audioOnly = audioOnlyToggle.checked;
+  localStorage.setItem('yss:audioOnly', audioOnly ? '1' : '0');
+  refreshQualityRowVisibility();
+});
 
 /** 다운로드나 스템 분리가 돌고 있는가 — 화면만 갈아치우면 뒤에서 계속 돈다 */
 function jobRunning() { return !progWrap.hidden || !sepWrap.hidden; }
@@ -676,7 +686,8 @@ function setSource(mode, fromUser = false) {
   srcLink.setAttribute('aria-pressed', String(isLink));
   srcFile.setAttribute('aria-pressed', String(!isLink));
   linkRow.hidden = !isLink;
-  qualityRow.hidden = !isLink;
+  if (audioOnlyRow) audioOnlyRow.hidden = !isLink;
+  refreshQualityRowVisibility();
   return true;
 }
 srcLink.addEventListener('click', () => { if (setSource('link', true)) urlInput.focus(); });
@@ -838,7 +849,7 @@ dlBtn.addEventListener('click', async () => {
     if (p.speed) progSpeed.textContent = fmtBytes(p.speed) + '/s';
   });
 
-  const opts = { title: currentProbe?.title, id: currentProbe?.id, quality: currentQuality };
+  const opts = { title: currentProbe?.title, id: currentProbe?.id, quality: currentQuality, audioOnly };
   let res;
   try {
     res = await api.ytdlp.download(urlInput.value.trim(), opts);
@@ -1148,7 +1159,7 @@ async function runBatchQueue() {
             if (typeof p.ratio === 'number') { item.progress = Math.round(p.ratio * 100); renderBatchQueue(); }
           });
           let dl;
-          try { dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality }); }
+          try { dl = await api.ytdlp.download(item.source, { title: meta.title, id: meta.id, quality: currentQuality, audioOnly }); }
           finally { unsubBatchDl?.(); unsubBatchDl = null; }
           if (batchCancelRequested) { item.status = 'canceled'; item.progress = null; renderBatchQueue(); continue; }
           if (!dl || !dl.ok) throw new Error(dl?.error || 'download failed');

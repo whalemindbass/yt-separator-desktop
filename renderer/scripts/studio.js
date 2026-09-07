@@ -53,6 +53,17 @@ let _rangeMode = false;     // 영역 선택 모드(룰러 드래그 = 내보내
 let _magnetOn = true;       // 자석 스냅(그리드 + 클립 경계) — Alt 는 이 상태를 순간적으로 뒤집는다
 let _marqueeOn = false;     // 마퀴 모드 — 켜져 있으면 트랙 빈 곳 드래그가 팬 대신 영역 다중선택
 let _tracks = [];          // [{key,label,color,engineIndex}]
+// 스템 일괄 볼륨 — 개별 스템 페이더(t.gain, 저장/undo 대상)는 안 건드리고, 엔진에
+// 실제로 나가는 순간에만 이 배율을 곱한다. 프로젝트 파일엔 저장하지 않는(세션 전용)
+// 편의 컨트롤 — 곡/프로젝트를 새로 열 때마다 1(0dB)로 리셋한다.
+let _stemGroupGain = 1;
+function stemGainOut(t) { return (t.gain != null ? t.gain : 1) * _stemGroupGain; }
+function pushAllStemGains() { _tracks.forEach(t => api.engine.track(t.engineIndex, { gain: stemGainOut(t) })); }
+function resetStemGroupGain() {   // 곡/프로젝트를 새로 열 때마다 — 이전 곡의 배율이 새 곡에 묻어가면 안 된다
+  _stemGroupGain = 1;
+  const s = $('mx-stem-group'); if (s) s.value = FADER_UNITY_POS;
+  const v = $('mx-stem-group-val'); if (v) v.textContent = dbText(1);
+}
 let _chain = [];              // 선택된 트랙의 FX 체인 미러 (_chainByTrack[_selTrack])
 let _chainByTrack = {};       // trackId → [{id,index,name,hasEditor,bypass}]
 let _selTrack = null;         // 선택(편집 대상) 녹음 트랙 id — 이펙트 패널 대상
@@ -355,7 +366,7 @@ function renderTracks() {
     mBtn.addEventListener('click', () => { const on = mBtn.classList.toggle('on'); mBtn.setAttribute('aria-pressed', String(on)); t.mute = on; api.engine.track(t.engineIndex, { mute: on }); markDirty(); });
     sBtn.addEventListener('click', () => { const on = sBtn.classList.toggle('on'); sBtn.setAttribute('aria-pressed', String(on)); t.solo = on; api.engine.track(t.engineIndex, { solo: on }); updateSoloDim(); markDirty(); });
     vol.addEventListener('input', () => {
-      t.gain = faderToGain(vol.value); api.engine.track(t.engineIndex, { gain: t.gain }); markDirty();
+      t.gain = faderToGain(vol.value); api.engine.track(t.engineIndex, { gain: stemGainOut(t) }); markDirty();
       if (stemIdOf(t.engineIndex) === _selTrack) { $('mx-track').value = vol.value; $('mx-track-val').textContent = dbText(t.gain); }   // 믹서 동기화
     });
     vol.addEventListener('dblclick', (e) => { e.stopPropagation(); vol.value = FADER_UNITY_POS; vol.dispatchEvent(new Event('input')); });
@@ -572,7 +583,7 @@ function selTrackLabel(id) {
 function selTrackGain(id) { const o = selTrackObj(id); return o && o.gain != null ? o.gain : 1; }
 function applySelTrackGain(id, g) {   // 볼륨 라우팅 — 스템=track(index), 녹음=recTrack(id)
   const o = selTrackObj(id); if (o) o.gain = g;
-  if (isStemId(id)) api.engine.track(id - STEM_ID_BASE, { gain: g });
+  if (isStemId(id)) api.engine.track(id - STEM_ID_BASE, { gain: g * _stemGroupGain });
   else api.engine.recTrack(id, { gain: g });
   markDirty();
 }
@@ -1707,7 +1718,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1750,6 +1761,7 @@ async function pickImportAudio() {
 function closeSong() {
   api.engine.loadStems([]);
   _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null; _auto = new Map();
+  resetStemGroupGain();
   _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0; _modelKey = null; _libraryItemId = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
   const em = $('daw-video-empty'); if (em) em.hidden = false;
@@ -1777,6 +1789,7 @@ async function loadSong(item, opts) {
   _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
   _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
+  resetStemGroupGain();
 
   const keys = Object.keys(it.stemPaths || {});
   _tracks = keys.map((k, i) => ({ key: k, label: stemLabel(k), color: STEM_COLOR[k] || 'var(--accent)', engineIndex: i }));
@@ -2822,6 +2835,7 @@ export async function loadProjectData(filePath, raw) {
   } finally { _openingProject = false; }
 }
 async function applyProject(p) {
+  resetStemGroupGain();
   const sr = deviceSr();
   // 저장 당시 레이트로 잰 샘플을 지금 레이트로 옮긴다. 44.1k 로 저장한 것을 48k 로 열면
   // 환산 없이는 모든 클립이 44100/48000 배 자리로 가 통째로 당겨진 것처럼 들린다.
@@ -2844,7 +2858,7 @@ async function applyProject(p) {
         const t = _tracks.find(x => x.key === m.key); if (!t) return;
         t.gain = m.gain != null ? m.gain : 1; t.pan = m.pan != null ? m.pan : 0; t.mute = !!m.mute; t.solo = !!m.solo;
         t.sends = Array.isArray(m.sends) ? m.sends.slice(0, BUS_COUNT) : [0, 0];
-        api.engine.track(t.engineIndex, { gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, sends: t.sends });
+        api.engine.track(t.engineIndex, { gain: stemGainOut(t), pan: t.pan, mute: t.mute, solo: t.solo, sends: t.sends });
         const lane = document.querySelector(`.daw-lane[data-key="${t.key}"]`); if (!lane) return;
         const v = lane.querySelector('.daw-vol'); if (v) v.value = gainToFader(t.gain);
         const pn = lane.querySelector('.daw-pan'); if (pn) { const pv = Math.round(t.pan * 100); pn.value = pv; pn.classList.toggle('off', pv === 0); }
@@ -3745,6 +3759,14 @@ function wire() {
   };
   $('mx-master').addEventListener('input', (e) => applyMaster(Number(e.target.value)));
   $('mx-master').addEventListener('dblclick', () => applyMaster(FADER_UNITY_POS));   // 더블클릭 = 100% (유니티)
+  // 스템 일괄 볼륨 — 개별 스템 페이더는 그대로 두고 엔진에 나가는 gain만 이 배율만큼 스케일
+  const applyStemGroup = (pos) => {
+    _stemGroupGain = faderToGain(pos);
+    $('mx-stem-group').value = pos; $('mx-stem-group-val').textContent = dbText(_stemGroupGain);
+    pushAllStemGains();
+  };
+  $('mx-stem-group').addEventListener('input', (e) => applyStemGroup(Number(e.target.value)));
+  $('mx-stem-group').addEventListener('dblclick', () => applyStemGroup(FADER_UNITY_POS));
   // 선택 트랙 볼륨 페이더 (믹서 우측)
   const applyTrackVol = (pos) => {
     if (!selValid(_selTrack)) return;

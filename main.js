@@ -2068,17 +2068,21 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
   const outTemplate = path.join(outDir, base + '.%(ext)s');
   const progressTpl = 'PROG {"status":"downloading","dl":%(progress.downloaded_bytes)s,"total":%(progress.total_bytes)s,"tot_est":%(progress.total_bytes_estimate)s,"speed":%(progress.speed)s,"eta":%(progress.eta)s}';
 
+  // 음원만 받고 싶은 경우(영상 불필요) — 화질 선택 자체가 무의미해진다.
+  const audioOnly = !!opts.audioOnly;
   // 화질 선택 (용량 절약)
   const quality = String(opts.quality || '1080').toLowerCase();
   const heightCap = ({ '2160': 2160, '1440': 1440, '1080': 1080, '720': 720, '480': 480, '360': 360 })[quality] || 1080;
-  const formatSpec = `bv*[height<=${heightCap}][ext=mp4]+ba[ext=m4a]/b[height<=${heightCap}]/best`;
+  const formatSpec = audioOnly
+    ? 'bestaudio[ext=m4a]/bestaudio/best'
+    : `bv*[height<=${heightCap}][ext=mp4]+ba[ext=m4a]/b[height<=${heightCap}]/best`;
 
   const args = [
     '--newline',
     '--no-warnings',
     '--no-playlist',
     '-f', formatSpec,
-    '--merge-output-format', 'mp4',
+    ...(audioOnly ? [] : ['--merge-output-format', 'mp4']),
     '--ffmpeg-location', FFMPEG_DIR,
     '-o', outTemplate,
     '--progress-template', progressTpl,
@@ -2089,7 +2093,7 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
     const proc = spawn(YTDLP_BIN, args, { windowsHide: true });
     activeDownload = proc;
     let lastFile = null;
-    let phase = 'video'; // yt-dlp는 video 다음에 audio 처리
+    let phase = audioOnly ? 'audio' : 'video'; // yt-dlp는 (영상 받을 땐) video 다음에 audio 처리
     const send = (data) => { try { mainWindow?.webContents?.send('ytdlp:progress', data); } catch {} };
 
     let mergedFile = null;   // [Merger] 가 알려주는 최종 결과 경로 (가장 신뢰도 높음)

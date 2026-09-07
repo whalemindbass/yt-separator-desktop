@@ -360,6 +360,12 @@
         <span id="provider-status" class="settings-hint"></span>
       </div>
 
+      <div class="settings-row" id="audio-only-row">
+        <span class="settings-label" data-i18n="sep.label.audioOnly">음원만</span>
+        <label class="switch"><input type="checkbox" id="audio-only-toggle" /><span></span></label>
+        <span class="settings-hint" data-i18n="sep.audioOnly.hint">영상 없이 오디오만 받습니다 (더 빠르고 용량↓)</span>
+      </div>
+
       <div class="settings-row" id="quality-row">
         <span class="settings-label" data-i18n="sep.label.quality">영상 화질</span>
         <div class="pill-row" id="quality-pills">
@@ -748,6 +754,12 @@
         <button id="st-fx-add" class="daw-fx-add" disabled data-i18n="studio.h.addVst">＋ VST 추가</button>
         <div class="daw-fx-empty" data-i18n="studio.h.fxEmpty1">녹음 트랙을 선택하면<br>해당 트랙의 입력 이펙트가 표시됩니다</div>
         <div class="daw-mixer">
+          <div class="mx-stem-group">
+            <span class="mx-stem-group-lbl" data-i18n="studio.mx.stemGroup">스템 볼륨</span>
+            <input id="mx-stem-group" class="mx-stem-group-fader" type="range" min="0" max="1000" value="720" disabled title="모든 스템 트랙에 함께 적용되는 배율 (더블클릭=0.0 dB)" data-i18n-title="studio.h.stemGroupVol">
+            <span class="mx-val" id="mx-stem-group-val">0.0 dB</span>
+          </div>
+          <div class="mx-strips-row">
           <div class="mx-strip">
             <div class="mx-val" id="mx-master-val">0.0 dB</div>
             <div class="mx-fader-wrap">
@@ -783,6 +795,7 @@
               <div class="mx-meter" data-mid="95002"><i class="l"></i><i class="r"></i></div>
             </div>
             <button class="mx-lbl mx-bus-lbl" id="mx-busB-lbl" data-bus="1" title="클릭하면 이 버스의 이펙트 편집" data-i18n-title="studio.h.busEdit">B</button>
+          </div>
           </div>
         </div>
         <!-- 선택 트랙 → 버스 센드량 (포스페이더) -->
