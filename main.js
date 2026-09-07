@@ -2139,16 +2139,19 @@ ipcMain.handle('ytdlp:download', async (_ev, url, opts = {}) => {
       // 진행률 라인 아닌 실제 로그만 콘솔 (PROG spam 방지)
     });
     // 결과 파일 확정 — [Merger] 경로 > [download] Destination > outDir 스캔 순으로 신뢰
+    // 음원만 받으면 컨테이너가 mp4/webm이 아니라 opus/aac/ogg 등으로 나올 수 있다 —
+    // 두 정규식(1차 후보 확인, 폴백 스캔) 모두에서 오디오 전용 확장자까지 인정해야 한다.
+    const MEDIA_EXT_RE = /\.(mp4|mkv|webm|m4a|mp3|wav|opus|aac|ogg|flac)$/i;
     const resolveOutputFile = () => {
       for (const cand of [mergedFile, lastFile]) {
         if (!cand) continue;
         const p = path.isAbsolute(cand) ? cand : path.join(outDir, cand);
-        if (fs.existsSync(p) && /\.(mp4|mkv|webm|m4a|mp3|wav)$/i.test(p)) return p;
+        if (fs.existsSync(p) && MEDIA_EXT_RE.test(p)) return p;
       }
       // 폴백 1: base 로 시작하는 파일. 폴백 2: outDir 에서 가장 최근 미디어 파일
       try {
         const media = fs.readdirSync(outDir)
-          .filter((f) => /\.(mp4|mkv|webm)$/i.test(f))
+          .filter((f) => MEDIA_EXT_RE.test(f))
           .map((f) => ({ f, m: fs.statSync(path.join(outDir, f)).mtimeMs }))
           .sort((a, b) => b.m - a.m);
         const byBase = media.find((x) => x.f.startsWith(base));
