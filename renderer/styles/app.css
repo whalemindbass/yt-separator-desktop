@@ -2538,7 +2538,7 @@ body { display: flex; flex-direction: column; }
 .log-weekdays span { text-align: center; font-size: 11px; color: var(--tx-3); }
 .log-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
 .log-cell {
-  position: relative; aspect-ratio: 1; border-radius: 10px; border: 1px solid transparent;
+  position: relative; aspect-ratio: 1; border-radius: 50%; border: 1px solid transparent;
   background: transparent; color: var(--tx-2); font: 600 12.5px var(--mono);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   transition: transform .1s var(--ease);
@@ -2546,12 +2546,17 @@ body { display: flex; flex-direction: column; }
 .log-cell.empty { visibility: hidden; cursor: default; }
 .log-cell.has { color: var(--tx-1); }
 .log-cell:not(.empty):hover { transform: scale(1.06); }
-.log-cell.today { border-color: var(--accent); }
-.log-cell.sel { box-shadow: 0 0 0 2px var(--accent); }
+.log-cell.today { border-color: var(--accent); border-width: 2px; }
 .log-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
-.log-daybox { position: relative; z-index: 1; pointer-events: none; display: flex; flex-direction: column; align-items: center; line-height: 1.1; gap: 1px; }
-.log-notecount { font-size: 7.5px; font-weight: 700; color: var(--tx-3); }
+.log-daybox {
+  position: relative; z-index: 1; pointer-events: none; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; line-height: 1.1; gap: 1px; border-radius: 50%; transition: background .12s var(--ease);
+}
+.log-notecount { font-size: 10px; font-weight: 700; color: var(--tx-3); }
 .log-cell.has .log-notecount { color: var(--tx-2); }
+/* 선택한 날 — 링 대신 가운데 날짜·메모 표시 배경을 테마 색으로 채운다 */
+.log-cell.sel .log-daybox { background: var(--accent); color: var(--accent-fg); padding: 4px 7px; min-width: 26px; min-height: 26px; }
+.log-cell.sel .log-notecount { color: var(--accent-fg); opacity: .85; }
 /* 상세 + 목표 설정 — 오른쪽 사이드 컬럼에 세로로. 달력 옆이라 폭이 좁으니(220px) 여기
    안에서는 계속 세로로 쌓아도 괜찮다. */
 .log-side { display: flex; flex-direction: column; gap: 22px; }
