@@ -1,0 +1,398 @@
+<title>Distillation Bench</title>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #fcfcfb;
+    --surface-1: #f3f2ee;
+    --surface-2: #e9e7e1;
+    --border: #dcdad3;
+    --text-primary: #16150f;
+    --text-secondary: #52514e;
+    --text-muted: #8a887f;
+    --series-student: #2a78d6;   /* fast model */
+    --series-teacher: #eb6834;   /* slow/accurate model */
+    --series-gt: #1baf7a;        /* ground truth reference */
+    --good: #1baf7a;
+    --shadow: 0 1px 2px rgba(20,18,10,.04), 0 8px 24px -12px rgba(20,18,10,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #17181a;
+      --surface-1: #1e2023;
+      --surface-2: #26282c;
+      --border: #34363b;
+      --text-primary: #f3f4f2;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8b8d92;
+      --series-student: #3987e5;
+      --series-teacher: #d95926;
+      --series-gt: #199e70;
+      --good: #199e70;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #17181a;
+    --surface-1: #1e2023;
+    --surface-2: #26282c;
+    --border: #34363b;
+    --text-primary: #f3f4f2;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8b8d92;
+    --series-student: #3987e5;
+    --series-teacher: #d95926;
+    --series-gt: #199e70;
+    --good: #199e70;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 400 14px/1.55 'IBM Plex Sans', system-ui, sans-serif;
+  }
+  h1, h2, h3 { font-family: 'Sora', system-ui, sans-serif; margin: 0; text-wrap: balance; }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  header.top { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+  .eyebrow { font: 600 11px/1 'IBM Plex Mono'; letter-spacing: .08em; text-transform: uppercase; color: var(--series-teacher); }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -.01em; }
+  .sub { color: var(--text-secondary); font-size: 13.5px; max-width: 62ch; }
+  .setup {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 4px;
+    font: 500 12px/1.4 'IBM Plex Mono'; color: var(--text-muted);
+  }
+  .setup b { color: var(--text-secondary); font-weight: 600; }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; margin: 22px 0 30px;
+    padding: 10px 14px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .badge {
+    font: 600 10.5px/1 'IBM Plex Mono'; letter-spacing: .04em; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 5px; background: var(--surface-2); color: var(--text-secondary);
+  }
+  .badge.live { background: color-mix(in oklab, var(--good) 18%, transparent); color: var(--good); }
+  .toolbar .fill { flex: 1; }
+  .file-btn {
+    font: 500 12.5px 'IBM Plex Sans'; color: var(--text-primary); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 7px; padding: 7px 12px; cursor: pointer;
+  }
+  .file-btn:hover { border-color: var(--series-student); }
+  #file-input { display: none; }
+  #file-name { font: 500 12px 'IBM Plex Mono'; color: var(--text-muted); }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 36px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow);
+  }
+  .tile .label { font: 600 11px/1 'IBM Plex Mono'; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+  .tile .value { font: 700 28px/1.1 'Sora'; letter-spacing: -.01em; }
+  .tile .value .unit { font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
+  .tile .note { font-size: 12px; color: var(--text-secondary); }
+
+  section.panel {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px 24px 20px; margin-bottom: 22px; box-shadow: var(--shadow);
+  }
+  section.panel > h2 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+  section.panel > .panel-sub { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 18px; }
+
+  .legend { display: flex; gap: 16px; margin-bottom: 4px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font: 500 12px 'IBM Plex Sans'; color: var(--text-secondary); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+
+  .chart-svg { width: 100%; height: auto; overflow: visible; }
+  .bar { cursor: pointer; }
+  .bar-label { font: 600 11px 'IBM Plex Mono'; fill: var(--text-secondary); }
+  .axis-label { font: 500 11px 'IBM Plex Mono'; fill: var(--text-muted); }
+  .grid-line { stroke: var(--border); stroke-width: 1; }
+
+  .tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font: 500 12px/1.4 'IBM Plex Mono'; color: var(--text-primary);
+    box-shadow: var(--shadow); opacity: 0; transform: translate(-50%, -100%);
+    transition: opacity .08s;
+    max-width: 220px;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-title { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+
+  table.songs { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.songs th, table.songs td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  table.songs th:first-child, table.songs td:first-child { text-align: left; }
+  table.songs th { font: 600 10.5px 'IBM Plex Mono'; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  table.songs td { font-family: 'IBM Plex Mono'; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  table.songs td:first-child { font-family: 'IBM Plex Sans'; color: var(--text-primary); }
+  .table-wrap { overflow-x: auto; }
+
+  .note-block { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .note-block code { font: 500 12px 'IBM Plex Mono'; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">Stem Separation · Distillation Bench</span>
+    <h1>느린 모델을 빠른 모델에 옮겨심기</h1>
+    <p class="sub">Teacher(4-stem+, 정확하지만 느림)의 출력을 정답 삼아 Student(경량 모델)를 distillation 학습시켰을 때, 속도와 품질이 각각 얼마나 바뀌는지 측정한다.</p>
+    <div class="setup">
+      <span><b>Teacher</b> htdemucs_core.onnx</span>
+      <span><b>Student</b> TinySeparator (conv encoder-decoder)</span>
+      <span><b>Chunk</b> 12s @ 44.1kHz stereo</span>
+      <span><b>Loss</b> L1 + STFT</span>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <span class="badge" id="data-badge">예시 데이터</span>
+    <span class="fill"></span>
+    <span id="file-name">results.json 없음</span>
+    <label class="file-btn" for="file-input">결과 파일 불러오기</label>
+    <input type="file" id="file-input" accept="application/json">
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section class="panel">
+    <h2>추론 속도 — 청크당(ms)</h2>
+    <p class="panel-sub">12초 청크 하나를 분리하는 데 걸리는 시간. 짧을수록 좋음.</p>
+    <div class="legend">
+      <span class="legend-item"><i class="legend-dot" style="background:var(--series-teacher)"></i>Teacher</span>
+      <span class="legend-item"><i class="legend-dot" style="background:var(--series-student)"></i>Student</span>
+    </div>
+    <svg class="chart-svg" id="speed-chart" viewBox="0 0 900 260"></svg>
+  </section>
+
+  <section class="panel">
+    <h2>품질 — Student가 Teacher를 얼마나 따라했는가 (SDR, dB)</h2>
+    <p class="panel-sub">스템별로 student 출력과 teacher 출력 사이 SDR. 높을수록 teacher에 가까움(0dB 근처면 사실상 구분 불가 수준).</p>
+    <div class="legend">
+      <span class="legend-item"><i class="legend-dot" style="background:var(--series-student)"></i>vs Teacher</span>
+    </div>
+    <svg class="chart-svg" id="quality-chart" viewBox="0 0 900 260"></svg>
+  </section>
+
+  <section class="panel" id="gt-panel" hidden>
+    <h2>절대 품질 — 진짜 정답(MUSDB18 홀드아웃) 대비</h2>
+    <p class="panel-sub">teacher/student/기존 빠른 모델을 각각 진짜 stem과 비교한 SDR. student가 baseline보다 teacher 쪽에 가까워졌는지가 핵심.</p>
+    <div class="legend">
+      <span class="legend-item"><i class="legend-dot" style="background:var(--series-gt)"></i>Teacher</span>
+      <span class="legend-item"><i class="legend-dot" style="background:var(--series-student)"></i>Student</span>
+      <span class="legend-item"><i class="legend-dot" style="background:var(--text-muted)"></i>기존 빠른 모델</span>
+    </div>
+    <svg class="chart-svg" id="gt-chart" viewBox="0 0 900 300"></svg>
+  </section>
+
+  <section class="panel">
+    <h2>곡별 상세</h2>
+    <p class="panel-sub">val 스플릿에서 무작위로 뽑은 곡들의 stem별 SDR(vs teacher).</p>
+    <div class="table-wrap">
+      <table class="songs" id="songs-table"></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>측정 방법</h2>
+    <p class="note-block">
+      속도는 <code>onnxruntime</code>(teacher)와 <code>torch</code>(student)로 동일한 12초 더미 청크를 20회 반복 추론해 평균낸 값. GPU 컬럼은 CUDA 실행 공급자가 있을 때만 채워진다.
+      품질(SDR)은 <code>10·log10(‖target‖² / ‖target − pred‖²)</code> — 별도 스케일 보정 없는 단순 SDR이라, 논문급 벤치마크로 쓰려면 <code>museval</code>(BSSEval)로 바꿀 것.
+      학습/평가 스플릿은 청크가 아니라 <b>곡 단위</b>로 나눠 같은 곡이 train과 val에 걸치는 걸 막았다.
+    </p>
+  </section>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+  const EXAMPLE_RESULTS = {
+    generated_at: '2026-09-08T00:00:00Z',
+    device: 'cpu',
+    example: true,
+    speed: {
+      teacher_ms_per_chunk: { cpu: 842, gpu: 96 },
+      student_ms_per_chunk: { cpu: 91, gpu: 11 },
+    },
+    quality_vs_teacher: { drums: 4.1, bass: 3.6, other: 2.9, vocals: 3.4 },
+    quality_vs_ground_truth: {
+      teacher:      { drums: 6.8, bass: 6.1, other: 4.4, vocals: 6.5 },
+      student:      { drums: 5.9, bass: 5.2, other: 3.6, vocals: 5.7 },
+      baseline_fast: { drums: 5.3, bass: 4.6, other: 3.1, vocals: 5.0 },
+    },
+    per_song: [
+      { song: 'song_014', drums: 4.4, bass: 3.9, other: 3.1, vocals: 3.6 },
+      { song: 'song_027', drums: 3.6, bass: 3.2, other: 2.4, vocals: 3.0 },
+      { song: 'song_033', drums: 4.8, bass: 4.0, other: 3.4, vocals: 3.9 },
+      { song: 'song_041', drums: 3.9, bass: 3.4, other: 2.6, vocals: 3.1 },
+      { song: 'song_058', drums: 4.2, bass: 3.7, other: 3.0, vocals: 3.5 },
+    ],
+  };
+
+  const STEM_LABEL = { drums: '드럼', bass: '베이스', other: '기타 악기', vocals: '보컬' };
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function fmt(n, d = 1) { return Number(n).toFixed(d); }
+
+  function renderTiles(r) {
+    const t = r.speed.teacher_ms_per_chunk.cpu;
+    const s = r.speed.student_ms_per_chunk.cpu ?? r.speed.student_ms_per_chunk[r.device];
+    const speedup = t / s;
+    const q = r.quality_vs_teacher;
+    const avgSdr = Object.values(q).reduce((a, b) => a + b, 0) / Object.values(q).length;
+    let retained = null;
+    if (r.quality_vs_ground_truth) {
+      const g = r.quality_vs_ground_truth;
+      const avg = (o) => Object.values(o).reduce((a, b) => a + b, 0) / Object.values(o).length;
+      retained = (avg(g.student) / avg(g.teacher)) * 100;
+    }
+    $('tiles').innerHTML = `
+      <div class="tile">
+        <span class="label">속도 향상</span>
+        <span class="value mono">${fmt(speedup, 1)}<span class="unit">×</span></span>
+        <span class="note">CPU 기준 ${Math.round(t)}ms → ${Math.round(s)}ms</span>
+      </div>
+      <div class="tile">
+        <span class="label">평균 SDR (vs Teacher)</span>
+        <span class="value mono">${fmt(avgSdr, 1)}<span class="unit">dB</span></span>
+        <span class="note">4개 스템 평균</span>
+      </div>
+      <div class="tile">
+        <span class="label">${retained !== null ? '절대 품질 유지율' : '측정 곡 수'}</span>
+        <span class="value mono">${retained !== null ? fmt(retained, 0) + '<span class="unit">%</span>' : (r.per_song?.length ?? '—')}</span>
+        <span class="note">${retained !== null ? 'teacher 대비 진짜 정답과의 SDR 비율' : 'val 스플릿 청크 그룹'}</span>
+      </div>`;
+  }
+
+  // 얇은 마크, 둥근 데이터 끝, 막대 사이 2px 여백 — marks-and-anatomy 스펙
+  function groupedBarChart(svg, { categories, series, unit, maxOverride }) {
+    svg.innerHTML = '';
+    const W = 900, H = 260, padL = 46, padR = 16, padT = 10, padB = 34;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const allVals = series.flatMap(s => s.values);
+    const max = maxOverride ?? Math.max(...allVals) * 1.25;
+    const groupW = plotW / categories.length;
+    const barGap = 3, barW = Math.min(30, (groupW - barGap * (series.length + 1)) / series.length);
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const mk = (tag, attrs) => { const el = document.createElementNS(ns, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+
+    // grid
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const y = padT + plotH - (i / ticks) * plotH;
+      svg.appendChild(mk('line', { class: 'grid-line', x1: padL, x2: W - padR, y1: y, y2: y }));
+      const val = (i / ticks) * max;
+      const t = mk('text', { class: 'axis-label', x: padL - 8, y: y + 3, 'text-anchor': 'end' });
+      t.textContent = fmt(val, val < 10 ? 1 : 0);
+      svg.appendChild(t);
+    }
+
+    categories.forEach((cat, ci) => {
+      const groupX = padL + ci * groupW;
+      series.forEach((s, si) => {
+        const v = s.values[ci];
+        const h = (v / max) * plotH;
+        const x = groupX + barGap + si * (barW + barGap) + (groupW - series.length * (barW + barGap) - barGap) / 2;
+        const y = padT + plotH - h;
+        const rect = mk('rect', {
+          class: 'bar', x, y, width: barW, height: Math.max(h, 2), rx: 4, ry: 4, fill: s.color,
+        });
+        rect.addEventListener('mousemove', (e) => showTip(e, `${cat}`, `${s.name}: ${fmt(v, 1)}${unit}`));
+        rect.addEventListener('mouseleave', hideTip);
+        svg.appendChild(rect);
+      });
+      const lbl = mk('text', { class: 'axis-label', x: groupX + groupW / 2, y: H - padB + 18, 'text-anchor': 'middle' });
+      lbl.textContent = cat;
+      svg.appendChild(lbl);
+    });
+  }
+
+  function showTip(e, title, body) {
+    const tip = $('tooltip');
+    tip.innerHTML = `<div class="tt-title">${title}</div>${body}`;
+    tip.style.left = e.clientX + 'px';
+    tip.style.top = (e.clientY - 10) + 'px';
+    tip.classList.add('show');
+  }
+  function hideTip() { $('tooltip').classList.remove('show'); }
+
+  function renderSpeed(r) {
+    const devices = Object.keys(r.speed.teacher_ms_per_chunk);
+    groupedBarChart($('speed-chart'), {
+      categories: devices.map(d => d.toUpperCase()),
+      unit: 'ms',
+      series: [
+        { name: 'Teacher', color: css('--series-teacher'), values: devices.map(d => r.speed.teacher_ms_per_chunk[d]) },
+        { name: 'Student', color: css('--series-student'), values: devices.map(d => r.speed.student_ms_per_chunk[d] ?? r.speed.student_ms_per_chunk[r.device]) },
+      ],
+    });
+  }
+
+  function renderQuality(r) {
+    const stems = Object.keys(r.quality_vs_teacher);
+    groupedBarChart($('quality-chart'), {
+      categories: stems.map(s => STEM_LABEL[s] || s),
+      unit: 'dB',
+      series: [
+        { name: 'vs Teacher', color: css('--series-student'), values: stems.map(s => r.quality_vs_teacher[s]) },
+      ],
+    });
+  }
+
+  function renderGroundTruth(r) {
+    if (!r.quality_vs_ground_truth) { $('gt-panel').hidden = true; return; }
+    $('gt-panel').hidden = false;
+    const g = r.quality_vs_ground_truth;
+    const stems = Object.keys(g.teacher);
+    groupedBarChart($('gt-chart'), {
+      categories: stems.map(s => STEM_LABEL[s] || s),
+      unit: 'dB',
+      series: [
+        { name: 'Teacher', color: css('--series-gt'), values: stems.map(s => g.teacher[s]) },
+        { name: 'Student', color: css('--series-student'), values: stems.map(s => g.student[s]) },
+        { name: '기존 빠른 모델', color: css('--text-muted'), values: stems.map(s => (g.baseline_fast || {})[s] ?? 0) },
+      ],
+    });
+  }
+
+  function renderTable(r) {
+    const rows = r.per_song || [];
+    const stems = ['drums', 'bass', 'other', 'vocals'];
+    const table = $('songs-table');
+    table.innerHTML = `<thead><tr><th>곡</th>${stems.map(s => `<th>${STEM_LABEL[s]}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(row => `<tr><td>${row.song}</td>${stems.map(s => `<td>${fmt(row[s], 1)} dB</td>`).join('')}</tr>`).join('')}</tbody>`;
+  }
+
+  function renderAll(r) {
+    renderTiles(r);
+    renderSpeed(r);
+    renderQuality(r);
+    renderGroundTruth(r);
+    renderTable(r);
+    $('data-badge').textContent = r.example ? '예시 데이터' : '실제 결과';
+    $('data-badge').classList.toggle('live', !r.example);
+  }
+
+  $('file-input').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    $('file-name').textContent = f.name;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { renderAll(JSON.parse(reader.result)); }
+      catch { $('file-name').textContent = f.name + ' — JSON 파싱 실패'; }
+    };
+    reader.readAsText(f);
+  });
+
+  renderAll(EXAMPLE_RESULTS);
+</script>

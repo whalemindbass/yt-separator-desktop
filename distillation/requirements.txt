@@ -1,0 +1,8 @@
+numpy
+soundfile
+librosa
+onnxruntime
+torch
+torchaudio
+tqdm
+museval
