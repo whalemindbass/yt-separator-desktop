@@ -4237,7 +4237,7 @@ function wire() {
   wrap?.addEventListener('dragover', (e) => e.preventDefault());
   wrap?.addEventListener('drop', (e) => {
     e.preventDefault();
-    const paths = [...(e.dataTransfer?.files || [])].map(f => f.path).filter(Boolean);
+    const paths = [...(e.dataTransfer?.files || [])].map(f => api.pathForFile(f)).filter(Boolean);
     if (paths.length) importVideoFiles(paths, null);
   });
 }
