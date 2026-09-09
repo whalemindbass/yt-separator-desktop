@@ -31,6 +31,27 @@ static DynamicObject* ev (const char* name)
 static var strArr (const StringArray& a) { Array<var> v; for (auto& s : a) v.add (s); return var (v); }
 template <typename T> static var numArr (const Array<T>& a) { Array<var> v; for (auto x : a) v.add ((double) x); return var (v); }
 
+// AudioDeviceManager 를 처음 initialiseWithDefaultDevices(2, 2) 로 연 뒤로는, 이후
+// setAudioDeviceSetup 에서 useDefaultInputChannels=true 를 줘도 JUCE 가 "기본값"을
+// 그 최초 요청 채널 수(2)로 계속 되돌린다 — 입력 4채널(예: RME Babyface Pro FS,
+// 밸런스 1/2 + 아날로그 3/4)짜리 장치로 갈아타도 실제로는 앞 2채널만 활성화된 채로
+// 남는다(제보: 입력 채널이 2개까지만 보임). 장치가 실제로 보고하는 입력 채널 수만큼
+// 전부 활성화해 둔다 — 트랙별 입력 채널 선택(recTrackSetInput)이 그중 원하는 채널만
+// 골라 쓰므로, 다 켜 둬도 안 쓰는 채널은 그냥 안 읽힐 뿐 문제 없다.
+static void expandInputChannels (AudioDeviceManager& dm)
+{
+    auto* dev = dm.getCurrentAudioDevice();
+    if (dev == nullptr) return;
+    const int n = dev->getInputChannelNames().size();
+    if (n <= 0) return;
+    AudioDeviceManager::AudioDeviceSetup s; dm.getAudioDeviceSetup (s);
+    BigInteger bits; bits.setRange (0, n, true);
+    if (s.inputChannels == bits && ! s.useDefaultInputChannels) return;   // 이미 전부 켜져 있으면 재적용 생략
+    s.inputChannels = bits;
+    s.useDefaultInputChannels = false;
+    dm.setAudioDeviceSetup (s, true);
+}
+
 // FX 체인 슬롯 (입력 이펙트 여러 개 직렬)
 // ── 볼륨 자동화 ──────────────────────────────────────────────
 // 시간축 브레이크포인트. 점 사이는 선형 보간, 양 끝은 첫/끝 값 유지.
@@ -763,6 +784,7 @@ public:
         }
         if (devmgr->getCurrentAudioDevice() == nullptr)
             devmgr->initialiseWithDefaultDevices (2, 2);
+        expandInputChannels (*devmgr);
         listDevices();
     }
 
@@ -2557,6 +2579,7 @@ int main (int argc, char* argv[])
         e->setProperty ("to", dm.getCurrentAudioDeviceType());
         emit (var (e));
     }
+    expandInputChannels (dm);
 
     Engine engine;
     engine.setDeviceManager (&dm);
