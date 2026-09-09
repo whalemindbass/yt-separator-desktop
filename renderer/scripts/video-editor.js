@@ -3823,7 +3823,7 @@ async function importVideoFiles(paths, trackId) {
                                 // 잘못 뜨던 버그).
   for (const p of paths) {
     const meta = await probeVideo(p);
-    if (!meta.dur) continue;
+    if (!meta.dur) { console.warn('[importVideoFiles] 길이(duration)를 못 읽어 건너뜀:', p); continue; }
     const { hasAudio, isHDR } = await api.video.probeAudio(p);
     const name = p.split(/[\\/]/).pop();
     // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
@@ -4237,7 +4237,12 @@ function wire() {
   wrap?.addEventListener('dragover', (e) => e.preventDefault());
   wrap?.addEventListener('drop', (e) => {
     e.preventDefault();
-    const paths = [...(e.dataTransfer?.files || [])].map(f => api.pathForFile(f)).filter(Boolean);
+    const files = [...(e.dataTransfer?.files || [])];
+    const resolved = files.map(f => ({ name: f.name, path: api.pathForFile(f) }));
+    console.log('[ve-drop] 드롭된 파일', resolved);   // 진단용 — 문제 재현되면 F12 콘솔에서 확인
+    const paths = resolved.map(r => r.path).filter(Boolean);
+    if (paths.length !== files.length)
+      console.warn('[ve-drop] 일부 파일 경로를 못 얻음', resolved.filter(r => !r.path).map(r => r.name));
     if (paths.length) importVideoFiles(paths, null);
   });
 }

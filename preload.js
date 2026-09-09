@@ -3,7 +3,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('yssApi', {
   // 드래그드롭 파일 → 절대경로 (Electron 43: File.path 제거됨 → webUtils)
-  pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
+  pathForFile: (file) => {
+    try { return webUtils.getPathForFile(file); }
+    catch (e) { console.error('[pathForFile] 실패:', file?.name, file?.type, e); return ''; }
+  },
   // 앱 메타
   getVersion:      () => ipcRenderer.invoke('app:version'),
   getPlatform:     () => ipcRenderer.invoke('app:platform'),
