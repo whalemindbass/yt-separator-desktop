@@ -3829,6 +3829,7 @@ async function importVideoFiles(paths, trackId) {
     // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
     // 얹고 싶을 때를 위해 받되, 썸네일·내보내기는 이 클립엔 다르게 처리해야 한다.
     const isAudioOnly = !meta.w || !meta.h;
+    console.log('[importVideoFiles] 처리 중', { p, meta, hasAudio, isAudioOnly });   // 진단용
 
     if (isAudioOnly) {
       ensureAudioTrack();
