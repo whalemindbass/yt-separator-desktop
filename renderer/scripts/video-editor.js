@@ -3816,6 +3816,18 @@ async function importVideoFiles(paths, trackId) {
     else { audioTid = newAudioTrack(false, tid); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
     for (const c of _veClips.filter(x => x.trackId === audioTid)) audioCursor = Math.max(audioCursor, c.start + c.dur);
   }
+  // 영상 자체에 붙어 나온 오디오(위 ensureAudioTrack)와, 이 배치에 같이 끼워 넣은
+  // "독립된" 오디오 전용 파일(mp3 등)은 서로 다른 트랙이어야 한다 — 영상+mp3를 같이
+  // 임포트했더니 mp3가 영상의 오디오 트랙에 묻혀 들어가서 트랙이 2개로만 보이고
+  // "영상만 들어왔다"고 오인하게 만든 실사용 제보. 완전히 별도 상태로 관리한다.
+  let stAudioTid = null, stAudioTrackRef = null, createdStAudioTrack = false, stAudioCursor = 0;
+  function ensureStandaloneAudioTrack() {
+    if (stAudioTid != null) return;
+    const existing = _veTracks.find(t => t.kind === 'audio' && !_veClips.some(c => c.trackId === t.id));
+    if (existing) { stAudioTid = existing.id; }
+    else { stAudioTid = newAudioTrack(false, audioTid || tid); stAudioTrackRef = _veTracks.find(t => t.id === stAudioTid); createdStAudioTrack = true; }
+    for (const c of _veClips.filter(x => x.trackId === stAudioTid)) stAudioCursor = Math.max(stAudioCursor, c.start + c.dur);
+  }
 
   const added = [];
   let importedFileCount = 0;   // 토스트에 쓸 "파일 개수" — 영상 1개가 클립 2개(영상+짝지어진
@@ -3831,10 +3843,10 @@ async function importVideoFiles(paths, trackId) {
     const isAudioOnly = !meta.w || !meta.h;
 
     if (isAudioOnly) {
-      ensureAudioTrack();
-      const clip = { id: nextClipId(), trackId: audioTid, file: p, name, start: audioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
+      ensureStandaloneAudioTrack();
+      const clip = { id: nextClipId(), trackId: stAudioTid, file: p, name, start: stAudioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
       _veClips.push(clip); added.push(clip); importedFileCount++;
-      audioCursor += meta.dur;
+      stAudioCursor += meta.dur;
       continue;
     }
 
@@ -3860,6 +3872,7 @@ async function importVideoFiles(paths, trackId) {
   const addedTracks = [];
   if (createdVideoTrack) addedTracks.push(videoTrackRef);
   if (createdAudioTrack) addedTracks.push(audioTrackRef);
+  if (createdStAudioTrack) addedTracks.push(stAudioTrackRef);
   if (added.length) {
     pushUndo(
       () => {
