@@ -64,7 +64,8 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   let savedRaw = null;
   if (fs.existsSync(PROJ)) {
     savedRaw = JSON.parse(fs.readFileSync(PROJ, 'utf-8'));
-    expect('저장된 트랙 1개(영상)', (savedRaw.tracks || []).length, 1);
+    // 파일마다 새 트랙을 받는다 — keep은 미리 만들어둔 빈 트랙을 재사용, doomed는 새 트랙.
+    expect('저장된 트랙 2개(영상, 파일마다 하나씩)', (savedRaw.tracks || []).length, 2);
     expect('저장된 클립 2개', (savedRaw.clips || []).length, 2);
   }
 
@@ -76,7 +77,7 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [PROJ] });
   await js(`document.getElementById('ve-open-project').click(); true`);
   for (let i = 0; i < 30; i++) { if (await js(`document.querySelectorAll('.ve-clip-missing').length`) > 0) break; await wait(200); }
-  expect('연 뒤 트랙 다시 1개로(새로 만든 임시 트랙은 사라짐)', await js(`document.querySelectorAll('.ve-lane:not(.audio):not(.text)').length`), 1);
+  expect('연 뒤 트랙은 저장된 2개로(새로 만든 임시 트랙은 사라짐)', await js(`document.querySelectorAll('.ve-lane:not(.audio):not(.text)').length`), 2);
   expect('클립 2개 복원됨', await js(`document.querySelectorAll('.ve-clip:not(.audio)').length`), 2);
   expect('지운 파일 클립엔 빨간 X 붙음', await js(`document.querySelectorAll('.ve-clip-missing').length`), 1);
   const missingName = await js(`(() => {

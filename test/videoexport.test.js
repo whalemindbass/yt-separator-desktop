@@ -70,7 +70,9 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const r = spawnSync(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-show_entries', 'stream=codec_type',
       '-of', 'default=noprint_wrappers=1', OUT], { encoding: 'utf-8' });
     const out = r.stdout || '';
-    near('총 길이 ≈ 5초(3+2)', parseFloat((/duration=([\d.]+)/.exec(out) || [])[1] || 0), 5, 0.2);
+    // 파일마다 새 트랙을 받아 red/blue 가 각자 트랙에 0초부터 겹쳐 놓이므로(순차 아님),
+    // 합성 길이는 더 긴 쪽(red, 3초) 기준이다.
+    near('총 길이 ≈ 3초(각자 트랙에 0초부터 겹침 — 더 긴 쪽 기준)', parseFloat((/duration=([\d.]+)/.exec(out) || [])[1] || 0), 3, 0.2);
     expect('비디오 스트림 있음', out.includes('codec_type=video'), true);
     expect('오디오 스트림 있음(무음 소스도 anullsrc 로 채워짐)', out.includes('codec_type=audio'), true);
   }
@@ -81,7 +83,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   let proj = null;
   try { proj = JSON.parse(fs.readFileSync(projFile, 'utf-8')); } catch {}
   expect('videoProject.json 에 클립 2개 저장됨', proj?.clips?.length, 2);
-  expect('videoProject.json 에 트랙 1개 저장됨', proj?.tracks?.length, 1);
+  expect('videoProject.json 에 트랙 2개 저장됨(파일마다 새 트랙)', proj?.tracks?.length, 2);
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

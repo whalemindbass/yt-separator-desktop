@@ -33,7 +33,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
 (async () => {
   const { app: eApp, js } = await bootMain({ settle: 2000 });
 
-  section('1) 임포트 (연속 배치: red 0~3초, blue 3~5초)');
+  section('1) 임포트 (파일마다 새 트랙 — red/blue 각자 자기 트랙에 0초부터)');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
@@ -47,13 +47,20 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   }
   expect('클립 2개 임포트됨', n, 2);
 
-  section('2) blue 를 왼쪽으로 1초(40px) 끌어 red 꼬리와 겹침');
+  section('2) blue 를 red 트랙으로 끌어와서(파일마다 새 트랙이라 지금은 서로 다른 트랙) red 꼬리와 1초(40px) 겹치게');
   await js(`(() => {
     const clip = [...document.querySelectorAll('.ve-clip')].find(el => el.querySelector('.ve-clip-lbl').textContent === 'blue.mp4');
+    const redClip = [...document.querySelectorAll('.ve-clip')].find(el => el.querySelector('.ve-clip-lbl').textContent === 'red.mp4');
     const r = clip.getBoundingClientRect();
+    const redY = redClip.getBoundingClientRect().top + 5;
+    // red는 3초(120px)짜리라 blue가 2초(80px) 지점에서 시작해야 꼬리와 1초 겹친다 —
+    // blue는 지금(자기 트랙에 0초로 임포트된 상태) left=0이니 목표 지점까지의 절대 이동량을 쓴다.
+    const targetLeft = 80;
+    const curLeft = parseFloat(clip.style.left) || 0;
+    const dx = targetLeft - curLeft;
     clip.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 5, clientY: r.top + 5, pointerId: 9, bubbles: true }));
-    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 5 - 40, clientY: r.top + 5, pointerId: 9, bubbles: true }));
-    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 5 - 40, clientY: r.top + 5, pointerId: 9, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 5 + dx, clientY: redY, pointerId: 9, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 5 + dx, clientY: redY, pointerId: 9, bubbles: true }));
   })(); true`);
   await wait(150);
   const positions = await js(`[...document.querySelectorAll('.ve-clip')].map(el => ({

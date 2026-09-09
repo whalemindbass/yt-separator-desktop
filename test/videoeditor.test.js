@@ -60,7 +60,8 @@ makeClip(BLUE, 'testsrc2', 2);
     expect('첫 클립 이름', clips[0].label, 've_test_red.mp4');
     expect('둘째 클립 이름', clips[1].label, 've_test_blue.mp4');
     expect('첫 클립은 0부터 시작', clips[0].left, 0);
-    near('둘째 클립이 첫 클립 뒤에 이어붙음(≈3초*40px)', clips[1].left, 3 * 40, 40);
+    // 파일마다 새 트랙을 받으므로(각자 자기 트랙에 0초부터) 둘째 클립도 0에서 시작한다.
+    expect('둘째 클립도 자기 트랙에서 0부터 시작', clips[1].left, 0);
     near('첫 클립 폭 ≈ 3초', clips[0].width, 3 * 40, 40);
     near('둘째 클립 폭 ≈ 2초', clips[1].width, 2 * 40, 40);
   }
@@ -69,14 +70,16 @@ makeClip(BLUE, 'testsrc2', 2);
   s = await js(`({ 빈상태숨음: document.getElementById('ve-empty').hidden })`);
   expect('빈 상태 숨음', s.빈상태숨음, true);
 
-  section('4) 두 번째 트랙 — 새 트랙은 목록 맨 위(Vegas 관례)');
+  section('4) 새 트랙 추가 — 새 트랙은 목록 맨 위(Vegas 관례)');
+  // 방금 임포트에서 파일마다 새 트랙을 받아 이미 영상 트랙이 2개(red 자리+blue 자리)다 —
+  // 여기서 하나 더 추가하면 3개.
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
   await wait(100);
   s = await js(`({
     트랙수: document.querySelectorAll('.ve-lane').length,
     맨위트랙에클립없음: document.querySelectorAll('.ve-lane')[0].querySelectorAll('.ve-clip').length,
   })`);
-  expect('트랙 2개', s.트랙수, 2);
+  expect('트랙 3개(임포트로 생긴 2개 + 방금 추가)', s.트랙수, 3);
   expect('새 트랙은 비어있고 맨 위', s.맨위트랙에클립없음, 0);
 
   section('5) 클립 드래그로 이동');

@@ -3789,45 +3789,18 @@ function probeVideo(file) {
 // 오디오 트랙엔 그와 짝지어진(groupId 공유) 오디오 클립이 따로 생긴다 — 기본으로 그룹이라
 // 서로 따라 움직이지만, 필요하면 U 로 그룹을 풀고 따로 삭제·편집할 수 있다.
 async function importVideoFiles(paths, trackId) {
-  let tid = trackId;
-  const createdVideoTrack = tid == null;
-  // append=true — 이 트랙은 맨 위로 튀어 오르면 안 된다. 반복해서(파일 하나씩) 임포트할
-  // 때마다 앞서 만든 "영상N/오디오N" 쌍 사이에 새로 끼어들면 순서가 뒤섞이고, 기존
-  // 트랙들의 위치가 밀리면서 번호(trackLabel 이 목록 위치로 매기는 순번)까지 바뀌어
-  // 버린다 — 항상 맨 아래에 이어 붙여야 "영1 오1 영2 오2..." 순서와 기존 번호가 지켜진다.
-  if (createdVideoTrack) tid = newVideoTrack(false, true);   // 되돌리기는 아래서 임포트 전체를 한 덩어리로 묶는다
-  const videoTrackRef = createdVideoTrack ? _veTracks.find(t => t.id === tid) : null;
-  let videoCursor = 0;
-  for (const c of _veClips.filter(x => x.trackId === tid)) videoCursor = Math.max(videoCursor, c.start + c.dur);
-
-  let audioTid = null, audioTrackRef = null, createdAudioTrack = false, audioCursor = 0;
-  function ensureAudioTrack() {
-    if (audioTid != null) return;
-    // 같은 임포트 배치 안에서는 트랙을 같이 쓴다(영상들을 순서대로 이어붙일 때 그 오디오도
-    // 나란히 이어져야 자연스럽다) — 단, 그 오디오 트랙이 "완전히 비어 있을 때만" 재사용한다.
-    // 예전엔 kind==='audio' 인 트랙을 무조건 재사용해서, 서로 다른(따로따로 실행한) 임포트
-    // 호출의 오디오가 전부 그 하나의 트랙에 계속 쌓였다(영상은 각자 새 트랙이 생기는데
-    // 오디오만 계속 합쳐지는 버그 — 트랙이 이미 비어 있는지를 video 쪽과 똑같은 기준으로
-    // 확인해야 한다).
-    const existing = _veTracks.find(t => t.kind === 'audio' && !_veClips.some(c => c.trackId === t.id));
-    if (existing) { audioTid = existing.id; }
-    // afterTrackId=tid — 이 영상 트랙(tid) 바로 다음 자리에 끼워서 "영1 오1" 처럼 붙어
-    // 있게 한다(요청: "영1 오1 영2 오2" 여야 하는데 "영1 영2 오1 오2" 로 나왔다).
-    else { audioTid = newAudioTrack(false, tid); audioTrackRef = _veTracks.find(t => t.id === audioTid); createdAudioTrack = true; }
-    for (const c of _veClips.filter(x => x.trackId === audioTid)) audioCursor = Math.max(audioCursor, c.start + c.dur);
-  }
-  // 영상 자체에 붙어 나온 오디오(위 ensureAudioTrack)와, 이 배치에 같이 끼워 넣은
-  // "독립된" 오디오 전용 파일(mp3 등)은 서로 다른 트랙이어야 한다 — 영상+mp3를 같이
-  // 임포트했더니 mp3가 영상의 오디오 트랙에 묻혀 들어가서 트랙이 2개로만 보이고
-  // "영상만 들어왔다"고 오인하게 만든 실사용 제보. 완전히 별도 상태로 관리한다.
-  let stAudioTid = null, stAudioTrackRef = null, createdStAudioTrack = false, stAudioCursor = 0;
-  function ensureStandaloneAudioTrack() {
-    if (stAudioTid != null) return;
-    const existing = _veTracks.find(t => t.kind === 'audio' && !_veClips.some(c => c.trackId === t.id));
-    if (existing) { stAudioTid = existing.id; }
-    else { stAudioTid = newAudioTrack(false, audioTid || tid); stAudioTrackRef = _veTracks.find(t => t.id === stAudioTid); createdStAudioTrack = true; }
-    for (const c of _veClips.filter(x => x.trackId === stAudioTid)) stAudioCursor = Math.max(stAudioCursor, c.start + c.dur);
-  }
+  // 파일마다(영상이든 오디오든) 자기만의 새 트랙을 받는다 — 영상 하나 = 영상트랙+
+  // 페어오디오트랙, 오디오 파일 하나 = 그 파일만의 트랙. 예전엔 같은 배치 안에서
+  // "같은 종류끼리는 빈 트랙 하나를 같이 쓴다"였는데, 영상 여러 개를 같이 넣으면
+  // 전부 트랙 하나에 이어붙어(뒤섞여 보이고) 오디오 파일이 영상의 오디오 트랙에
+  // 묻혀버리는 등 실사용 제보가 계속 나와서 — "임포트한 소스 하나 = 트랙 세트 하나"
+  // 로 단순화했다.
+  // trackId(있으면)는 딱 이번 배치의 "맨 처음 영상 파일"에만 재사용한다 — "+트랙"
+  // 누르고 바로 "가져오기" 했을 때 빈 트랙이 하나 더 늘어나지 않게 하려는 용도라,
+  // 두 번째 이후 파일까지 거기로 몰아넣을 이유는 없다.
+  let firstVideoTrackId = trackId;
+  const addedTracks = [];   // [{ track, kind, afterId(오디오만) }] — 생성 순서 그대로, 되돌리기/다시하기용
+  let anchorTid = null;     // 다음 새 트랙을 그 바로 다음에 끼워 넣기 위한 기준(방금 만든 트랙)
 
   const added = [];
   let importedFileCount = 0;   // 토스트에 쓸 "파일 개수" — 영상 1개가 클립 2개(영상+짝지어진
@@ -3843,51 +3816,54 @@ async function importVideoFiles(paths, trackId) {
     const isAudioOnly = !meta.w || !meta.h;
 
     if (isAudioOnly) {
-      ensureStandaloneAudioTrack();
-      const clip = { id: nextClipId(), trackId: stAudioTid, file: p, name, start: stAudioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
+      const stAudioTid = newAudioTrack(false, anchorTid);
+      addedTracks.push({ track: _veTracks.find(t => t.id === stAudioTid), kind: 'audio', afterId: anchorTid });
+      anchorTid = stAudioTid;
+      const clip = { id: nextClipId(), trackId: stAudioTid, file: p, name, start: 0, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio, isAudioOnly: true };
       _veClips.push(clip); added.push(clip); importedFileCount++;
-      stAudioCursor += meta.dur;
       continue;
     }
+
+    let vtid;
+    if (firstVideoTrackId != null) { vtid = firstVideoTrackId; firstVideoTrackId = null; }
+    else { vtid = newVideoTrack(false, true); addedTracks.push({ track: _veTracks.find(t => t.id === vtid), kind: 'video' }); }
+    anchorTid = vtid;
 
     // HDR(PQ/HLG) 소스 — 내보낼 때 SDR 로 그냥 바꾸면 화면이 씻겨나가서 톤매핑이 필요하다.
     // hdr 값은 false 아니면 ffprobe 의 color_transfer 이름 그대로('smpte2084'/'arib-std-b67')
     // — main.js 가 이 이름을 zscale 필터에 그대로 넘긴다.
-    const vClip = { id: nextClipId(), trackId: tid, file: p, name, start: videoCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false, hdr: isHDR || false };
+    const vClip = { id: nextClipId(), trackId: vtid, file: p, name, start: 0, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: meta.w, h: meta.h, hasAudio: false, isAudioOnly: false, hdr: isHDR || false };
     if (hasAudio) {
-      ensureAudioTrack();
+      const audioTid = newAudioTrack(false, vtid);
+      addedTracks.push({ track: _veTracks.find(t => t.id === audioTid), kind: 'audio', afterId: vtid });
+      anchorTid = audioTid;
       const groupId = vClip.id;
       vClip.groupId = groupId;
-      const aClip = { id: nextClipId(), trackId: audioTid, file: p, name, start: audioCursor, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio: true, isAudioOnly: true, groupId };
+      const aClip = { id: nextClipId(), trackId: audioTid, file: p, name, start: 0, inOff: 0, srcDur: meta.dur, dur: meta.dur, w: 0, h: 0, hasAudio: true, isAudioOnly: true, groupId };
       _veClips.push(vClip); added.push(vClip);
       _veClips.push(aClip); added.push(aClip);
-      audioCursor += meta.dur;
     } else {
       _veClips.push(vClip); added.push(vClip);
     }
     importedFileCount++;
-    videoCursor += meta.dur;
   }
 
-  const addedTracks = [];
-  if (createdVideoTrack) addedTracks.push(videoTrackRef);
-  if (createdAudioTrack) addedTracks.push(audioTrackRef);
-  if (createdStAudioTrack) addedTracks.push(stAudioTrackRef);
   if (added.length) {
     pushUndo(
       () => {
         _veClips = _veClips.filter(c => !added.includes(c));
-        _veTracks = _veTracks.filter(t => !addedTracks.includes(t));
+        _veTracks = _veTracks.filter(t => !addedTracks.some(a => a.track === t));
       },
       () => {
-        // addedTracks 는 [영상(있으면), 오디오(있으면)] 순서로 쌓여 있다 — 영상을 먼저
-        // 되살려야 오디오를 그 바로 다음 자리에 다시 끼워 넣을 기준(tid)을 찾을 수 있다.
-        for (const t of addedTracks) {
-          if (t.kind === 'audio') {
-            const vi = _veTracks.findIndex(x => x.id === tid);
-            _veTracks.splice(vi >= 0 ? vi + 1 : _veTracks.length, 0, t);
+        // 생성 순서 그대로 다시 끼워 넣는다 — 오디오 트랙의 anchor(afterId)는 자기보다
+        // 먼저 이 루프에서 이미 되살아나 있으므로(생성이 항상 anchor 다음이었다) 순서만
+        // 지키면 findIndex 가 항상 유효하다.
+        for (const a of addedTracks) {
+          if (a.kind === 'audio') {
+            const vi = _veTracks.findIndex(x => x.id === a.afterId);
+            _veTracks.splice(vi >= 0 ? vi + 1 : _veTracks.length, 0, a.track);
           } else {
-            _veTracks.push(t);
+            _veTracks.push(a.track);
           }
         }
         _veClips.push(...added);

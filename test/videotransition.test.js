@@ -43,7 +43,7 @@ function pxAt(file, tSec, x, y) {
 (async () => {
   const { app: eApp, js } = await bootMain({ settle: 2000 });
 
-  section('1) 임포트(red 0~2초, blue 2~4초, 같은 트랙) + blue 를 1초 겹치게 끌기');
+  section('1) 임포트(파일마다 새 트랙 — red/blue 각자 0초부터) + blue 를 red 트랙으로 끌어와 1초 겹치게');
   await js(`document.querySelector('.tab[data-view="video"]').click(); true`);
   await wait(300);
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="video"]').click(); true`);
@@ -54,10 +54,17 @@ function pxAt(file, tSec, x, y) {
   expect('클립 2개 임포트됨', n, 2);
   await js(`(() => {
     const clip = [...document.querySelectorAll('.ve-clip')].find(el => el.querySelector('.ve-clip-lbl').textContent === 'blue.mp4');
+    const redClip = [...document.querySelectorAll('.ve-clip')].find(el => el.querySelector('.ve-clip-lbl').textContent === 'red.mp4');
     const r = clip.getBoundingClientRect();
+    const redY = redClip.getBoundingClientRect().top + 5;
+    // red는 2초(80px)짜리라 blue가 1초(40px) 지점에서 시작해야 꼬리와 1초 겹친다 —
+    // blue는 지금(자기 트랙에 0초로 임포트된 상태) left=0이니 목표 지점까지의 절대 이동량을 쓴다.
+    const targetLeft = 40;
+    const curLeft = parseFloat(clip.style.left) || 0;
+    const dx = targetLeft - curLeft;
     clip.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 5, clientY: r.top + 5, pointerId: 9, bubbles: true }));
-    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 5 - 40, clientY: r.top + 5, pointerId: 9, bubbles: true }));
-    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 5 - 40, clientY: r.top + 5, pointerId: 9, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.left + 5 + dx, clientY: redY, pointerId: 9, bubbles: true }));
+    document.dispatchEvent(new PointerEvent('pointerup', { clientX: r.left + 5 + dx, clientY: redY, pointerId: 9, bubbles: true }));
   })(); true`);
   await wait(150);
   const blueLeft = await js(`parseFloat([...document.querySelectorAll('.ve-clip')].find(el => el.querySelector('.ve-clip-lbl').textContent === 'blue.mp4').style.left)`);
