@@ -3829,7 +3829,6 @@ async function importVideoFiles(paths, trackId) {
     // 화면 크기가 0 이면(mp3/wav 등) 영상 트랙이 아예 없다 — 배경음악처럼 오디오만
     // 얹고 싶을 때를 위해 받되, 썸네일·내보내기는 이 클립엔 다르게 처리해야 한다.
     const isAudioOnly = !meta.w || !meta.h;
-    console.log('[importVideoFiles] 처리 중', { p, meta, hasAudio, isAudioOnly });   // 진단용
 
     if (isAudioOnly) {
       ensureAudioTrack();
@@ -4240,11 +4239,16 @@ function wire() {
     e.preventDefault();
     const files = [...(e.dataTransfer?.files || [])];
     const resolved = files.map(f => ({ name: f.name, path: api.pathForFile(f) }));
-    console.log('[ve-drop] 드롭된 파일', resolved);   // 진단용 — 문제 재현되면 F12 콘솔에서 확인
     const paths = resolved.map(r => r.path).filter(Boolean);
     if (paths.length !== files.length)
       console.warn('[ve-drop] 일부 파일 경로를 못 얻음', resolved.filter(r => !r.path).map(r => r.name));
-    if (paths.length) importVideoFiles(paths, null);
+    if (!paths.length) return;
+    // pickImportVideo()와 같은 규칙 — 드롭할 때마다 새 트랙 쌍을 만들면(항상 null) 방금
+    // 만든 오디오 트랙이 화면 아래로 밀려나 안 보여서 "영상만 들어왔다"고 오인하기 쉽다
+    // (실사용 제보: 클립은 다 만들어졌는데 트랙이 매번 늘어나서 못 찾은 경우).
+    const top = _veTracks.find(t => t.kind === 'video');
+    const reuse = top && !_veClips.some(c => c.trackId === top.id);
+    importVideoFiles(paths, reuse ? top.id : null);
   });
 }
 
