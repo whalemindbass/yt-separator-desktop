@@ -164,7 +164,8 @@
   @media(max-width:520px){.bento{grid-template-columns:1fr}}
   .btile{border-radius:20px;padding:26px;border:1px solid var(--line-soft);background:var(--ink-2);
     display:flex;flex-direction:column;justify-content:flex-end;position:relative;overflow:hidden;
-    transition:border-color .25s,transform .25s}
+    transition:border-color .25s,transform .25s;min-width:0}
+  .btile h4,.btile p{word-break:keep-all;overflow-wrap:break-word}
   .btile:hover{border-color:var(--mint-dim);transform:translateY(-3px)}
   .btile h4{font:700 17px/1.35 var(--disp);letter-spacing:-.01em;margin:0}
   .btile p{margin-top:8px;font-size:13px;line-height:1.6;color:var(--paper-dim)}
@@ -173,6 +174,14 @@
   .btile.big h4{font-size:28px}
   .btile.big p{font-size:15px;max-width:30ch;color:color-mix(in srgb,var(--paper) 76%,transparent)}
   .btile.wide{grid-column:span 2}
+  /* 520px 이하 싱글컬럼에서 .big/.wide 의 grid-column:span 2 를 안 풀어주면,
+     explicit 컬럼은 1개뿐인데 아이템이 2칸을 요구해서 브라우저가 암묵적 2번째 컬럼을
+     만든다 — 그 암묵 컬럼은 1fr 아니라 콘텐츠 기준 auto라서 폭이 한쪽으로 쏠린다
+     (실사용 제보: 모바일에서 "저지연 모니터링"/"내장 튜너" 타일만 좁게 찌그러짐).
+     span:1 로 리셋해서 애초에 암묵 컬럼이 생기지 않게 한다.
+     주의: 위 .btile.big/.wide 규칙 뒤에 와야 함 — grid-area 단축 속성이 같은
+     specificity라 소스 순서로 이겨버려서, media 안에만 두면(더 앞줄) 무효화됨. */
+  @media(max-width:520px){.btile.big,.btile.wide{grid-column:span 1}}
   .chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:10px}
   .chip{display:inline-flex;align-items:center;gap:8px;padding:9px 15px;border-radius:99px;background:var(--ink-2);
     border:1px solid var(--line-soft);font:500 13px/1 var(--body);color:var(--paper-dim)}
