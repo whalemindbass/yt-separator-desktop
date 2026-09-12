@@ -303,11 +303,23 @@ function logEnter() {
 // 밀린다 — 그래서 25ms 마다 깨어나 앞으로 100ms 안의 클릭을 미리 예약해 둔다.
 const PM_LOOKAHEAD_MS = 25;
 const PM_SCHEDULE_AHEAD = 0.1;   // 초
+// 세분화는 예전엔 그냥 "박 안에 몇 등분" 이라 균등 나눗셈 하나로 됐는데, 바운스(스윙)는
+// 등분이 아니라 길게-짧게(2:1) 라서 그 가정이 깨진다 — 그래서 "몇 등분" 대신 "박 하나를
+// 채우는 상대 길이 배열"(합이 1) 로 일반화한다. 등분할 종류는 그냥 다 같은 길이로 채운 배열.
+const PM_SUBDIV_PATTERNS = {
+  1: [1],
+  2: [0.5, 0.5],
+  3: [1 / 3, 1 / 3, 1 / 3],           // 8분음표 3연음(셋잇단음표) — 한 박에 3개
+  4: [0.25, 0.25, 0.25, 0.25],
+  6: [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6], // 16분음표 3연음 — 한 박에 6개(3연음의 2배 빠르기)
+  swing: [2 / 3, 1 / 3],              // 바운스 — 길게(2/3)-짧게(1/3), 스윙 8분음표
+};
+function pmSubdivKey(v) { return PM_SUBDIV_PATTERNS[v] ? v : '1'; }
 let _pmCtx = null, _pmGain = null, _pmTimer = null;
 let _pmNextTime = 0, _pmBeat = 0, _pmSub = 0, _pmPlaying = false;
 let _pmBpm = Number(localStorage.getItem('yss:pmBpm')) || 120;
 let _pmSig = Number(localStorage.getItem('yss:pmSig')) || 4;
-let _pmSubdiv = Number(localStorage.getItem('yss:pmSubdiv')) || 1;
+let _pmSubdiv = pmSubdivKey(localStorage.getItem('yss:pmSubdiv'));
 let _pmVol = Number(localStorage.getItem('yss:pmVol'));
 if (!(_pmVol >= 0 && _pmVol <= 1)) _pmVol = 0.6;
 let _pmTapTimes = [];
@@ -328,13 +340,14 @@ function pmEnsureCtx() {
 function renderBeatDots(boxId, sig, subdiv) {
   const box = $(boxId);
   if (!box) return;
+  const steps = (PM_SUBDIV_PATTERNS[subdiv] || PM_SUBDIV_PATTERNS[1]).length;
   box.innerHTML = '';
   for (let i = 0; i < sig; i++) {
     const d = document.createElement('span');
     d.className = 'pm-beat-dot' + (i === 0 ? ' accent' : '');
     d.dataset.beat = String(i);
     box.appendChild(d);
-    for (let s = 1; s < subdiv; s++) {
+    for (let s = 1; s < steps; s++) {
       const tick = document.createElement('span');
       tick.className = 'pm-beat-tick';
       tick.dataset.beat = String(i);
@@ -358,7 +371,9 @@ function pmFlashBeat(beatIdx, delayMs) {
   setTimeout(() => pmFlashEl(document.querySelector(`#pm-beats .pm-beat-dot[data-beat="${beatIdx}"]`), hold), delayMs);
 }
 function pmFlashTick(beatIdx, subIdx, delayMs) {
-  const hold = Math.min(90, (60000 / _pmBpm / _pmSubdiv) * 0.6);
+  const pattern = PM_SUBDIV_PATTERNS[_pmSubdiv] || PM_SUBDIV_PATTERNS[1];
+  const w = pattern[subIdx] ?? (1 / pattern.length);
+  const hold = Math.min(90, w * (60000 / _pmBpm) * 0.6);
   setTimeout(() => pmFlashEl(document.querySelector(`#pm-beats .pm-beat-tick[data-beat="${beatIdx}"][data-sub="${subIdx}"]`), hold), delayMs);
 }
 function pmClick(time, kind, beatIdx, subIdx) {
@@ -378,12 +393,13 @@ function pmClick(time, kind, beatIdx, subIdx) {
   else pmFlashBeat(beatIdx, delayMs);
 }
 function pmScheduler() {
+  const pattern = PM_SUBDIV_PATTERNS[_pmSubdiv] || PM_SUBDIV_PATTERNS[1];
   while (_pmNextTime < _pmCtx.currentTime + PM_SCHEDULE_AHEAD) {
     const isBeat = _pmSub === 0;
     const isAccent = isBeat && _pmBeat === 0;
     pmClick(_pmNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', _pmBeat, _pmSub);
-    _pmNextTime += (60 / _pmBpm) / _pmSubdiv;
-    _pmSub = (_pmSub + 1) % _pmSubdiv;
+    _pmNextTime += pattern[_pmSub] * (60 / _pmBpm);
+    _pmSub = (_pmSub + 1) % pattern.length;
     if (_pmSub === 0) _pmBeat = (_pmBeat + 1) % _pmSig;
   }
 }
@@ -541,9 +557,10 @@ function tunOnEngineChange() {
 }
 let _engineReadyWaiters = [];
 api?.engine?.onEvent((m) => {
-  if (m.ev === 'ready') { _engineOn = true; tunOnEngineChange(); _engineReadyWaiters.splice(0).forEach(r => r()); }
-  else if (m.ev === 'exit') { _engineOn = false; tunOnEngineChange(); }
+  if (m.ev === 'ready') { _engineOn = true; tunOnEngineChange(); fbOnEngineChange(); _engineReadyWaiters.splice(0).forEach(r => r()); }
+  else if (m.ev === 'exit') { _engineOn = false; tunOnEngineChange(); fbOnEngineChange(); }
   else if (m.ev === 'pitch' && _tunToolActive) tunUpdateUI(m.freq);
+  else if (m.ev === 'pitch' && _fbSession?.cfg?.quizMode === 'play' && _fbSession.awaitingAnswer) fbOnPitch(m.freq);
 });
 function waitEngineReady(timeoutMs) {
   if (_engineOn) return Promise.resolve(true);
@@ -552,6 +569,604 @@ function waitEngineReady(timeoutMs) {
     _engineReadyWaiters.push(() => { clearTimeout(t); resolve(true); });
   });
 }
+
+// ── 지판 암기 ──
+// 프렛보드 음이름 암기 트레이너. 네 모드: 보고 맞히기(see, 한 자리 보고 음이름 맞히기)/듣고
+// 찾기(hear, 음이름 듣고 자리 하나 찾기)/스케일 찾기(scale, 매 문제마다 근음을 무작위로
+// 바꿔가며 그 스케일에 속하는 음을 전부 골라 확인)는 오디오와 무관하고, 실전 연주 인식(play)
+// 만 튜너와 같은 엔진 pitch 이벤트를 재사용해 실제로 그 자리를 연주하는지 확인한다(그래서
+// 엔진이 꺼져 있으면 play 모드일 때만 안내 화면으로 대체된다) — "연주" 자체가 의미 없는
+// 스케일 찾기는 이 모드 대상에서 뺀다. 정답률은 위치별로 fretboardStats.json 에 영구
+// 저장해서, 약한 자리가 다음에도 더 자주 나오게 가중치를 준다(스케일 찾기는 한 문제에 정답
+// 위치가 여럿이라 이 위치별 통계 대상에서는 제외한다).
+const FB_INSTRUMENTS = {
+  guitar6: { strings: [40, 45, 50, 55, 59, 64], fretMaxCap: 22, defaultFretMax: 12 }, // E2 A2 D3 G3 B3 E4
+  bass4:   { strings: [28, 33, 38, 43],         fretMaxCap: 20, defaultFretMax: 12 }, // E1 A1 D2 G2
+  bass5:   { strings: [23, 28, 33, 38, 43],     fretMaxCap: 20, defaultFretMax: 12 }, // B0 E1 A1 D2 G2
+};
+const FB_NOTE_NAMES = TUN_NOTE_NAMES; // 튜너와 표기를 통일(샵만, 자연음 필터로 온음 구분)
+const FB_NATURAL_IDX = new Set([0, 2, 4, 5, 7, 9, 11]); // C D E F G A B
+const FB_SCALES = {
+  major:      { intervals: [0, 2, 4, 5, 7, 9, 11] },
+  minor:      { intervals: [0, 2, 3, 5, 7, 8, 10] },
+  majorPenta: { intervals: [0, 2, 4, 7, 9] },
+  minorPenta: { intervals: [0, 3, 5, 7, 10] },
+};
+
+let _fbStats = { positions: {} };
+const fbStatsReady = (async () => {
+  try {
+    const d = await api?.fretboard?.load();
+    if (d?.positions && typeof d.positions === 'object') _fbStats.positions = d.positions;
+  } catch { /* 파일이 없거나 깨졌으면 빈 상태로 시작 */ }
+})();
+function fbPersistStats() { fbStatsReady.then(() => api?.fretboard?.save(_fbStats)); }
+
+function fbClampInt(v, min, max, fallback) {
+  // localStorage.getItem() 은 값이 없으면 null 을 주는데 Number(null) === 0(유한수) 이라
+  // 아래 isFinite 체크를 그냥 통과해버린다 — 그러면 "기본값 없음" 이 "0으로 클램프" 로
+  // 둔갑해서, 처음 켠 앱에서 프렛 범위가 0~0, 세션 길이가 5(문항수 최소값)로 나온다.
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+let _fbInstrument = FB_INSTRUMENTS[localStorage.getItem('yss:fbInstrument')] ? localStorage.getItem('yss:fbInstrument') : 'guitar6';
+let _fbFretMin = fbClampInt(localStorage.getItem('yss:fbFretMin'), 0, FB_INSTRUMENTS[_fbInstrument].fretMaxCap, 0);
+let _fbFretMax = fbClampInt(localStorage.getItem('yss:fbFretMax'), 0, FB_INSTRUMENTS[_fbInstrument].fretMaxCap, FB_INSTRUMENTS[_fbInstrument].defaultFretMax);
+if (_fbFretMax < _fbFretMin) _fbFretMax = _fbFretMin;
+let _fbStrings = (() => {
+  try {
+    const arr = JSON.parse(localStorage.getItem('yss:fbStrings') || 'null');
+    if (Array.isArray(arr) && arr.length) return arr.filter((i) => i >= 0 && i < FB_INSTRUMENTS[_fbInstrument].strings.length);
+  } catch { /* 무시 — 아래 기본값으로 */ }
+  return FB_INSTRUMENTS[_fbInstrument].strings.map((_, i) => i);
+})();
+let _fbNaturalsOnly = localStorage.getItem('yss:fbNaturalsOnly') === '1';
+let _fbSessionMode = localStorage.getItem('yss:fbSessionMode') === 'timed' ? 'timed' : 'count';
+let _fbSessionValue = fbClampInt(localStorage.getItem('yss:fbSessionValue'), 5, 600, _fbSessionMode === 'timed' ? 120 : 20);
+let _fbQuizMode = ['see', 'hear', 'scale', 'play'].includes(localStorage.getItem('yss:fbQuizMode')) ? localStorage.getItem('yss:fbQuizMode') : 'see';
+let _fbScaleType = FB_SCALES[localStorage.getItem('yss:fbScaleType')] ? localStorage.getItem('yss:fbScaleType') : 'major';
+let _fbScaleBox = localStorage.getItem('yss:fbScaleBox') === '1';
+
+let _fbScreen = 'config'; // 'config' | 'quiz' | 'summary'
+let _fbSession = null;    // null = 설정 화면, 세션 시작하면 _fbCfgSnapshot() 을 고정해 담는다
+let _fbTimerInterval = null;
+let _fbPlayListening = false;
+let _fbPlaySmoothBuf = [], _fbPlayStableHits = 0, _fbPlayLastMidi = null;
+let _fbPlayTimeout = null;
+
+function fbCfgSnapshot() {
+  return {
+    instrument: _fbInstrument,
+    fretMin: _fbFretMin, fretMax: _fbFretMax,
+    strings: _fbStrings.slice(),
+    naturalsOnly: _fbNaturalsOnly,
+    sessionMode: _fbSessionMode, sessionValue: _fbSessionValue,
+    quizMode: _fbQuizMode, scaleType: _fbScaleType, scaleBox: _fbScaleBox,
+  };
+}
+function fbCandidatePositions(cfg) {
+  const inst = FB_INSTRUMENTS[cfg.instrument];
+  const out = [];
+  for (const s of cfg.strings) {
+    if (s < 0 || s >= inst.strings.length) continue;
+    for (let fret = cfg.fretMin; fret <= cfg.fretMax; fret++) {
+      const midi = inst.strings[s] + fret;
+      const pc = ((midi % 12) + 12) % 12;
+      if (cfg.naturalsOnly && !FB_NATURAL_IDX.has(pc)) continue;
+      out.push({ stringIdx: s, fret, midi, pc, noteName: FB_NOTE_NAMES[pc], key: `${cfg.instrument}:${s}:${fret}` });
+    }
+  }
+  return out;
+}
+// 정답률이 낮은 자리일수록 훨씬 자주 뽑히게(간격반복 라이트) — 세션을 넘어 누적된
+// _fbStats 기준이라 여러 세션에 걸쳐서도 약점이 계속 우선 출제된다.
+function fbWeightOf(pos) {
+  const rec = _fbStats.positions[pos.key];
+  if (!rec || !rec.attempts) return 1.6; // 미출제 위치는 살짝 우대해 커버리지를 넓힌다
+  const acc = rec.correct / rec.attempts;
+  return 1 + 4 * Math.pow(1 - acc, 2);
+}
+function fbPickNext(session) {
+  const full = fbCandidatePositions(session.cfg);
+  // 후보가 몇 개 안 되면(범위를 좁게 잡은 경우) 직전 반복 방지 필터가 약점 가중치를
+  // 통째로 눌러버린다 — 후보 2~3개짜리에서 "직전 것만 빼고" 를 적용하면 사실상 강제
+  // 교대가 돼서 가중 재출제가 무력화된다. 후보가 충분히 많을 때만 필터를 건다.
+  let pool = full.length > 4 ? full.filter((p) => !session.recentKeys.includes(p.key)) : full;
+  if (!pool.length) pool = full;
+  if (!pool.length) return null;
+  const weights = pool.map(fbWeightOf);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+}
+function fbNoteChoicesPool(cfg) {
+  const idxs = cfg.naturalsOnly ? [...FB_NATURAL_IDX] : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+  return idxs.map((i) => FB_NOTE_NAMES[i]);
+}
+function fbShuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  return arr;
+}
+// 스케일 찾기 — 근음(rootPc)을 문제마다 무작위로 바꿔가며, 그 스케일에 속하는 음이름을
+// 가진 자리를 전부 모은다. naturalsOnly 는 여기선 안 따진다(스케일 소속 여부 자체가 이미
+// 음 종류를 정해주니까). 위치별 정답률(fbWeightOf/fbPickNext) 은 문제 하나에 정답 위치가
+// 여럿이라 안 맞아서, 스케일 모드는 그 통계 대상에서 뺀다.
+const FB_SCALE_LABEL_KEY = {
+  major: 'training.fb.scaleMajor', minor: 'training.fb.scaleMinor',
+  majorPenta: 'training.fb.scaleMajorPenta', minorPenta: 'training.fb.scaleMinorPenta',
+};
+function fbScaleCorrectSet(cfg, rootPc, scaleKey, fretMin, fretMax) {
+  const pcSet = new Set(FB_SCALES[scaleKey].intervals.map((iv) => (rootPc + iv) % 12));
+  const inst = FB_INSTRUMENTS[cfg.instrument];
+  const set = new Set();
+  for (const s of cfg.strings) {
+    for (let fret = fretMin; fret <= fretMax; fret++) {
+      const pc = ((inst.strings[s] + fret) % 12 + 12) % 12;
+      if (pcSet.has(pc)) set.add(`${s}:${fret}`);
+    }
+  }
+  return set;
+}
+function fbPickScaleRoot(session) {
+  let root = Math.floor(Math.random() * 12);
+  if (session.lastScaleRoot != null && root === session.lastScaleRoot) root = (root + 1 + Math.floor(Math.random() * 11)) % 12;
+  return root;
+}
+// "포지션 박스 단위" 옵션 — 넥 전체(설정한 프렛 범위 전체)에서 스케일 음을 한꺼번에 찾게
+// 하면 자리가 많아서(특히 범위를 넓게 잡으면) 한눈에 안 들어온다. 켜면 매 문제마다 고정폭
+// (한 손 포지션에 흔히 들어가는 4프렛)짜리 구간을 무작위로 골라 그 안에서만 찾게 한다.
+// CAGED 처럼 스케일 타입별로 정확한 손모양 박스를 정의하진 않는다(기타 전용이 되고, 베이스엔
+// 안 맞는다) — 대신 악기 무관하게 넥을 기계적으로 잘라 쓰는 더 단순하고 범용적인 방식.
+const FB_SCALE_BOX_WIDTH = 4;
+function fbPickScaleBoxRange(cfg) {
+  const span = cfg.fretMax - cfg.fretMin + 1;
+  if (span <= FB_SCALE_BOX_WIDTH) return { boxMin: cfg.fretMin, boxMax: cfg.fretMax };
+  const maxStart = cfg.fretMax - FB_SCALE_BOX_WIDTH + 1;
+  const boxMin = cfg.fretMin + Math.floor(Math.random() * (maxStart - cfg.fretMin + 1));
+  return { boxMin, boxMax: boxMin + FB_SCALE_BOX_WIDTH - 1 };
+}
+
+// ── 프렛보드 다이어그램(SVG) ──
+// 실제 프렛 간격(x_n = L·(1-1/2^(n/12)))으로 그려야 지판처럼 보인다 — DOM 그리드로는
+// 이 비선형 간격을 못 낸다. 설정 범위 밖 프렛/현은 지우지 않고 흐리게만 표시해서
+// 전체 넥 안에서의 위치 감각을 유지한다. 최저음 현(stringIdx 0)을 위쪽에 그린다
+// (실제로 기타/베이스를 들고 내려다볼 때 보이는 배치).
+function fbFretX(n, neckFrets, width) {
+  const scale = (fret) => 1 - Math.pow(2, -fret / 12);
+  const full = scale(neckFrets) || 1;
+  return (scale(n) / full) * width;
+}
+function fbRenderDiagram(target, opts = {}) {
+  const container = $('fb-diagram');
+  if (!container || !_fbSession) return;
+  const cfg = _fbSession.cfg;
+  const inst = FB_INSTRUMENTS[cfg.instrument];
+  const neckFrets = Math.max(cfg.fretMax, 12);
+  const W = 640, padL = 26, padR = 26, padT = 20, padB = 26;
+  const innerW = W - padL - padR;
+  const stringGap = 34;
+  const H = padT + padB + stringGap * (inst.strings.length - 1);
+  const midOf = (f) => padL + (fbFretX(f, neckFrets, innerW) + fbFretX(f - 1, neckFrets, innerW)) / 2;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">`;
+  svg += `<rect class="fret-neck-bg" x="0" y="0" width="${W}" height="${H}" rx="8"></rect>`;
+  // 포지션 박스(스케일 찾기, "박스 단위" 옵션) — 넥 배경 위, 프렛/음표 점들 아래에 반투명
+  // 사각형으로 이번 문제가 어느 구간인지 눈에 띄게 표시한다.
+  if (opts.mode === 'scale' && opts.boxMin != null) {
+    const bx1 = opts.boxMin <= 0 ? 0 : padL + fbFretX(opts.boxMin - 1, neckFrets, innerW);
+    const bx2 = padL + fbFretX(opts.boxMax, neckFrets, innerW);
+    svg += `<rect class="fret-box" x="${bx1}" y="${padT - 14}" width="${bx2 - bx1}" height="${H - padT - padB + 28}" rx="6"></rect>`;
+  }
+  for (let f = 0; f <= neckFrets; f++) {
+    const x = padL + fbFretX(f, neckFrets, innerW);
+    svg += `<line class="${f === 0 ? 'fret-nut' : 'fret-line'}" x1="${x}" y1="${padT - 10}" x2="${x}" y2="${H - padB + 10}"></line>`;
+    if (f > 0 && [3, 5, 7, 9, 12, 15, 17, 19, 21].includes(f)) {
+      svg += `<circle class="fret-inlay" cx="${midOf(f)}" cy="${H - 8}" r="3"></circle>`;
+      svg += `<text class="fret-fretnum" x="${midOf(f)}" y="${padT - 12}" text-anchor="middle">${f}</text>`;
+    }
+  }
+  // TAB 표기 관례: 맨 위 줄이 1번 현(가장 가는/높은 음 현), 아래로 갈수록 번호가 커진다.
+  // 내부 stringIdx 는 그대로 FB_INSTRUMENTS.strings 배열 순서(낮은음→높은음, 0=최저음)를
+  // 쓴다 — 데이터 모델/통계 키는 안 건드리고 그리는 위치와 번호 라벨만 뒤집는다.
+  const nStrings = inst.strings.length;
+  inst.strings.forEach((openMidi, sIdx) => {
+    const y = padT + (nStrings - 1 - sIdx) * stringGap;
+    const enabled = cfg.strings.includes(sIdx);
+    svg += `<text class="fret-stringnum" x="13" y="${y + 4}" text-anchor="middle">${nStrings - sIdx}</text>`;
+    svg += `<line class="fret-string-line${enabled ? '' : ' off'}" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"></line>`;
+    for (let f = 0; f <= neckFrets; f++) {
+      const x = f === 0 ? padL : midOf(f);
+      const inRange = enabled && f >= cfg.fretMin && f <= cfg.fretMax;
+      const key = `${sIdx}:${f}`;
+      let cls = 'fret-pos-dot';
+      if (opts.mode === 'scale') {
+        const outOfBox = opts.boxMin != null && (f < opts.boxMin || f > opts.boxMax);
+        if (!inRange || outOfBox) cls += ' dim';
+        const isCorrect = !!opts.correctSet?.has(key);
+        const isSelected = !!opts.selected?.has(key);
+        if (opts.submitted) {
+          if (isSelected && isCorrect) cls += ' correct';
+          else if (isSelected && !isCorrect) cls += ' wrong';
+          else if (isCorrect) cls += ' target'; // 선택 안 했는데 정답이던 자리(놓침)
+        } else if (isSelected) {
+          cls += ' selected';
+        }
+      } else {
+        const isTarget = !!(opts.reveal && target && target.stringIdx === sIdx && target.fret === f);
+        const isResult = !!opts.resultKeys?.includes(key);
+        // 결과 표시 자리는 설정 범위(꺼둔 현 등) 밖이라도 흐리게 죽이지 않는다 — 실제로
+        // 거기서 연주했다는 사실 자체가 중요한 정보라(특히 실전 연주 인식 모드).
+        if (!inRange && !isResult) cls += ' dim';
+        if (isResult) cls += opts.resultCorrect ? ' correct' : ' wrong';
+        else if (isTarget) cls += ' target';
+      }
+      svg += `<g class="fret-pos" data-string="${sIdx}" data-fret="${f}"><circle class="${cls}" cx="${x}" cy="${y}" r="9"></circle></g>`;
+    }
+  });
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+function fbRenderStringToggles() {
+  const box = $('fb-strings');
+  if (!box) return;
+  const inst = FB_INSTRUMENTS[_fbInstrument];
+  box.innerHTML = inst.strings.map((openMidi, i) => {
+    const label = FB_NOTE_NAMES[((openMidi % 12) + 12) % 12];
+    return `<button class="fb-string-toggle${_fbStrings.includes(i) ? ' on' : ''}" type="button" data-idx="${i}">${label}</button>`;
+  }).join('');
+}
+function fbSetInstrument(id) {
+  if (!FB_INSTRUMENTS[id] || id === _fbInstrument) return;
+  _fbInstrument = id;
+  localStorage.setItem('yss:fbInstrument', id);
+  const inst = FB_INSTRUMENTS[id];
+  _fbFretMax = Math.min(_fbFretMax, inst.fretMaxCap);
+  if (_fbFretMax < _fbFretMin) { _fbFretMin = 0; _fbFretMax = inst.defaultFretMax; }
+  _fbStrings = inst.strings.map((_, i) => i); // 악기가 바뀌면 전체 현으로 리셋
+  localStorage.setItem('yss:fbStrings', JSON.stringify(_fbStrings));
+  localStorage.setItem('yss:fbFretMin', String(_fbFretMin));
+  localStorage.setItem('yss:fbFretMax', String(_fbFretMax));
+  const minInput = $('fb-fret-min'), maxInput = $('fb-fret-max');
+  if (minInput) { minInput.max = String(inst.fretMaxCap); minInput.value = String(_fbFretMin); }
+  if (maxInput) { maxInput.max = String(inst.fretMaxCap); maxInput.value = String(_fbFretMax); }
+  fbRenderStringToggles();
+}
+function fbSetFretRange(min, max) {
+  const cap = FB_INSTRUMENTS[_fbInstrument].fretMaxCap;
+  min = fbClampInt(min, 0, cap, _fbFretMin);
+  max = fbClampInt(max, 0, cap, _fbFretMax);
+  if (min > max) { const tmp = min; min = max; max = tmp; }
+  _fbFretMin = min; _fbFretMax = max;
+  localStorage.setItem('yss:fbFretMin', String(min));
+  localStorage.setItem('yss:fbFretMax', String(max));
+  const minInput = $('fb-fret-min'), maxInput = $('fb-fret-max');
+  if (minInput) minInput.value = String(min);
+  if (maxInput) maxInput.value = String(max);
+}
+function fbToggleString(idx) {
+  const i = _fbStrings.indexOf(idx);
+  if (i >= 0) { if (_fbStrings.length <= 1) return; _fbStrings.splice(i, 1); }
+  else _fbStrings.push(idx);
+  localStorage.setItem('yss:fbStrings', JSON.stringify(_fbStrings));
+  fbRenderStringToggles();
+}
+function fbSetNaturalsOnly(v) { _fbNaturalsOnly = !!v; localStorage.setItem('yss:fbNaturalsOnly', v ? '1' : '0'); }
+function fbSetSessionMode(mode) {
+  mode = mode === 'timed' ? 'timed' : 'count';
+  if (mode === _fbSessionMode) return;
+  const prevDefault = _fbSessionMode === 'timed' ? 120 : 20;
+  _fbSessionMode = mode;
+  localStorage.setItem('yss:fbSessionMode', mode);
+  if (_fbSessionValue === prevDefault) fbSetSessionValue(mode === 'timed' ? 120 : 20);
+}
+function fbSetSessionValue(v) {
+  _fbSessionValue = fbClampInt(v, 5, 600, _fbSessionValue);
+  localStorage.setItem('yss:fbSessionValue', String(_fbSessionValue));
+  const el = $('fb-session-value'); if (el) el.value = String(_fbSessionValue);
+}
+function fbSetQuizMode(mode) {
+  if (!['see', 'hear', 'scale', 'play'].includes(mode)) return;
+  _fbQuizMode = mode;
+  localStorage.setItem('yss:fbQuizMode', mode);
+  document.querySelectorAll('#fb-mode-tabs .fb-mode-tab').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+}
+function fbSetScaleType(key) {
+  if (!FB_SCALES[key]) return;
+  _fbScaleType = key;
+  localStorage.setItem('yss:fbScaleType', key);
+}
+function fbSetScaleBox(v) { _fbScaleBox = !!v; localStorage.setItem('yss:fbScaleBox', v ? '1' : '0'); }
+
+function fbShowScreen(name) {
+  const cfgEl = $('fb-config'), quizEl = $('fb-quiz'), sumEl = $('fb-summary'), noticeEl = $('fb-play-notice');
+  const playBlocked = name === 'quiz' && _fbSession?.cfg?.quizMode === 'play' && !_engineOn;
+  if (cfgEl) cfgEl.hidden = name !== 'config';
+  if (quizEl) quizEl.hidden = !(name === 'quiz' && !playBlocked);
+  if (sumEl) sumEl.hidden = name !== 'summary';
+  if (noticeEl) noticeEl.hidden = !playBlocked;
+}
+function fbUpdateScoreUI() {
+  if (!_fbSession) return;
+  const s = $('fb-score'); if (s) s.textContent = `${_fbSession.score.correct}/${_fbSession.score.total}`;
+  const st = $('fb-streak-num'); if (st) st.textContent = String(_fbSession.streak.current);
+}
+function fbShowFeedback(correct, noteName) {
+  const el = $('fb-feedback'); if (!el) return;
+  // noteName 이 없으면(스케일 모드 — 정답이 하나가 아니라 지판에 통째로 표시된다) 전용 문구.
+  el.textContent = correct ? t('training.fb.feedbackCorrect')
+    : (noteName ? t('training.fb.feedbackWrong', { note: noteName }) : t('training.fb.feedbackWrongScale'));
+  el.classList.toggle('ok', correct);
+  el.classList.toggle('bad', !correct);
+}
+
+function fbClearPlayTimeout() { if (_fbPlayTimeout) { clearTimeout(_fbPlayTimeout); _fbPlayTimeout = null; } }
+function fbPlayEnter() {
+  if (_fbPlayListening) return;
+  _fbPlayListening = true;
+  _fbPlaySmoothBuf.length = 0; _fbPlayStableHits = 0; _fbPlayLastMidi = null;
+  api?.engine?.tuner(true);
+}
+function fbPlayExit() {
+  if (!_fbPlayListening) return;
+  _fbPlayListening = false;
+  api?.engine?.tuner(false);
+}
+function fbOnPitch(freq) {
+  if (!freq || freq < 25) { _fbPlayStableHits = 0; return; }
+  _fbPlaySmoothBuf.push(freq); if (_fbPlaySmoothBuf.length > 5) _fbPlaySmoothBuf.shift();
+  const sorted = [..._fbPlaySmoothBuf].sort((a, b) => a - b);
+  const f = sorted[sorted.length >> 1];
+  const midi = Math.round(69 + 12 * Math.log2(f / _tunRef));
+  if (midi === _fbPlayLastMidi) _fbPlayStableHits++; else { _fbPlayLastMidi = midi; _fbPlayStableHits = 1; }
+  if (_fbPlayStableHits < 2) return; // 프레임 하나로 오탐하지 않게 2연속 요구(레이턴시 감안)
+  const target = _fbSession?.current;
+  if (!target || !_fbSession.awaitingAnswer) return;
+  // 자리가 아니라 음이름만 묻는 모드라(아래 fbNextQuestion 참고) 옥타브/현은 안 따지고
+  // 음이름(pitch class)만 맞으면 정답 처리한다.
+  const pc = ((midi % 12) + 12) % 12;
+  if (pc !== target.pc) return; // 오답은 여기서 확정하지 않는다 — 다른 음을 계속 연주해보다 맞힐 수 있으니, 오답은 타임아웃에서만.
+  // 어느 현을 짚었는지는 피치만으론 하나로 못 좁히지만(같은 음이 여러 현/프렛에 있을 수 있다),
+  // 지금 연주한 정확한 음(옥타브 포함)과 일치하는 자리를 지판 위에서 전부 찾아 보여준다 —
+  // 그중 하나가 실제로 짚은 자리다. 설정에서 꺼둔 현도 포함해서 찾는다(실제로 거기서 쳤을 수
+  // 있으니까).
+  const inst = FB_INSTRUMENTS[_fbSession.cfg.instrument];
+  const neckFrets = Math.max(_fbSession.cfg.fretMax, 12);
+  const keys = [];
+  inst.strings.forEach((openMidi, sIdx) => {
+    for (let fret = 0; fret <= neckFrets; fret++) {
+      if (openMidi + fret === midi) keys.push(`${sIdx}:${fret}`);
+    }
+  });
+  fbRecordResult(true, { keys, correct: true });
+}
+function fbOnEngineChange() {
+  fbShowScreen(_fbScreen);
+  if (_fbSession && _fbSession.cfg.quizMode === 'play') {
+    if (_engineOn && _fbSession.awaitingAnswer) fbPlayEnter(); else fbPlayExit();
+  }
+}
+
+function fbRecordResult(correct, diagramResult) {
+  if (!_fbSession || !_fbSession.current || !_fbSession.awaitingAnswer) return;
+  fbClearPlayTimeout();
+  const target = _fbSession.current;
+  const rec = _fbStats.positions[target.key] || (_fbStats.positions[target.key] = { attempts: 0, correct: 0, lastSeenAt: 0 });
+  rec.attempts++; if (correct) rec.correct++;
+  rec.lastSeenAt = Date.now();
+  fbPersistStats();
+
+  _fbSession.score.total++;
+  if (correct) {
+    _fbSession.score.correct++;
+    _fbSession.streak.current++;
+    _fbSession.streak.best = Math.max(_fbSession.streak.best, _fbSession.streak.current);
+  } else {
+    _fbSession.streak.current = 0;
+  }
+  _fbSession.awaitingAnswer = false;
+  if (diagramResult) fbRenderDiagram(target, { reveal: true, resultKeys: diagramResult.keys, resultCorrect: diagramResult.correct });
+  fbShowFeedback(correct, target.noteName);
+  fbUpdateScoreUI();
+  if (_fbSession.cfg.quizMode === 'play') fbPlayExit();
+  setTimeout(() => { if (_fbSession) fbNextQuestion(); }, 700);
+}
+// 스케일 찾기 전용 — 정답 위치가 여러 개라 fbRecordResult(위치별 통계 대상 하나 가정) 와는
+// 따로 둔다. fbStats(약점 재출제용 위치별 정답률)는 건드리지 않는다.
+function fbRecordScaleResult(correct) {
+  if (!_fbSession || !_fbSession.awaitingAnswer) return;
+  _fbSession.awaitingAnswer = false;
+  _fbSession.score.total++;
+  if (correct) {
+    _fbSession.score.correct++;
+    _fbSession.streak.current++;
+    _fbSession.streak.best = Math.max(_fbSession.streak.best, _fbSession.streak.current);
+  } else {
+    _fbSession.streak.current = 0;
+  }
+  fbShowFeedback(correct, null);
+  fbUpdateScoreUI();
+  // 시간제한 없이 지판에 표시된 정답을 원하는 만큼 들여다보다가, 준비되면 직접 "다음"을 누르게 한다.
+  const nextBtn = $('fb-scale-next'); if (nextBtn) nextBtn.hidden = false;
+  const skipBtn = $('fb-skip'); if (skipBtn) skipBtn.hidden = true; // 이 시점엔 건너뛸 문제가 없다 — "다음"으로 통일
+}
+function fbRenderChoices(target) {
+  const box = $('fb-choices'); if (!box) return;
+  const pool = fbShuffle(fbNoteChoicesPool(_fbSession.cfg).filter((n) => n !== target.noteName));
+  const choices = fbShuffle([target.noteName, ...pool.slice(0, 3)]);
+  box.innerHTML = choices.map((n) => `<button class="fb-choice-btn" type="button" data-note="${n}">${n}</button>`).join('');
+}
+function fbHandleSeeAnswer(name, btn) {
+  if (!_fbSession || !_fbSession.awaitingAnswer || !_fbSession.current) return;
+  const target = _fbSession.current;
+  const correct = name === target.noteName;
+  document.querySelectorAll('#fb-choices .fb-choice-btn').forEach((b) => {
+    if (b.dataset.note === target.noteName) b.classList.add('correct');
+    else if (b === btn && !correct) b.classList.add('wrong');
+  });
+  fbRecordResult(correct);
+}
+function fbHandleDiagramClick(e) {
+  if (!_fbSession || !_fbSession.awaitingAnswer) return;
+  const posEl = e.target.closest('.fret-pos');
+  if (!posEl) return;
+  const stringIdx = Number(posEl.dataset.string), fret = Number(posEl.dataset.fret);
+  const cfg = _fbSession.cfg;
+  if (!cfg.strings.includes(stringIdx) || fret < cfg.fretMin || fret > cfg.fretMax) return; // 흐리게 표시된 자리는 무시
+  if (cfg.quizMode === 'hear') {
+    const inst = FB_INSTRUMENTS[cfg.instrument];
+    const midi = inst.strings[stringIdx] + fret;
+    const noteName = FB_NOTE_NAMES[((midi % 12) + 12) % 12];
+    const target = _fbSession.current;
+    const correct = noteName === target.noteName;
+    fbRecordResult(correct, { keys: [`${stringIdx}:${fret}`], correct });
+  } else if (cfg.quizMode === 'scale') {
+    const { boxMin, boxMax } = _fbSession.current;
+    if (cfg.scaleBox && (fret < boxMin || fret > boxMax)) return; // 박스 밖은 이번 문제 대상이 아니다
+    const key = `${stringIdx}:${fret}`;
+    if (_fbSession.selected.has(key)) _fbSession.selected.delete(key); else _fbSession.selected.add(key);
+    fbRenderDiagram(null, { mode: 'scale', selected: _fbSession.selected, correctSet: _fbSession.current.correctSet, submitted: false, boxMin: cfg.scaleBox ? boxMin : null, boxMax: cfg.scaleBox ? boxMax : null });
+  }
+}
+function fbHandleScaleConfirm() {
+  if (!_fbSession || _fbSession.cfg.quizMode !== 'scale' || !_fbSession.awaitingAnswer) return;
+  const { correctSet, boxMin, boxMax } = _fbSession.current;
+  const scaleBox = _fbSession.cfg.scaleBox;
+  const selected = _fbSession.selected;
+  let correct = selected.size === correctSet.size;
+  if (correct) for (const k of selected) { if (!correctSet.has(k)) { correct = false; break; } }
+  fbRenderDiagram(null, { mode: 'scale', selected, correctSet, submitted: true, boxMin: scaleBox ? boxMin : null, boxMax: scaleBox ? boxMax : null });
+  const confirmBtn = $('fb-scale-confirm'); if (confirmBtn) confirmBtn.hidden = true;
+  fbRecordScaleResult(correct);
+}
+function fbSkipQuestion() {
+  if (!_fbSession || !_fbSession.awaitingAnswer) return;
+  _fbSession.awaitingAnswer = false;
+  fbClearPlayTimeout();
+  fbPlayExit();
+  const confirmBtn = $('fb-scale-confirm'); if (confirmBtn) confirmBtn.hidden = true;
+  fbNextQuestion();
+}
+
+function fbNextQuestion() {
+  if (!_fbSession) return;
+  fbClearPlayTimeout();
+  const cfg = _fbSession.cfg;
+  if (cfg.sessionMode === 'count' && _fbSession.score.total >= cfg.sessionValue) { fbEndSession(); return; }
+  if (cfg.sessionMode === 'timed' && Date.now() >= _fbSession.deadlineAt) { fbEndSession(); return; }
+
+  const fb = $('fb-feedback'); if (fb) { fb.textContent = ''; fb.classList.remove('ok', 'bad'); }
+  const choices = $('fb-choices'); if (choices) choices.innerHTML = '';
+  const confirmBtn = $('fb-scale-confirm'); if (confirmBtn) confirmBtn.hidden = true;
+  const nextBtn = $('fb-scale-next'); if (nextBtn) nextBtn.hidden = true;
+  const skipBtn = $('fb-skip'); if (skipBtn) skipBtn.hidden = false;
+  const prompt = $('fb-prompt');
+
+  if (cfg.quizMode === 'scale') {
+    const rootPc = fbPickScaleRoot(_fbSession);
+    _fbSession.lastScaleRoot = rootPc;
+    let boxMin = cfg.fretMin, boxMax = cfg.fretMax;
+    if (cfg.scaleBox) ({ boxMin, boxMax } = fbPickScaleBoxRange(cfg));
+    const correctSet = fbScaleCorrectSet(cfg, rootPc, cfg.scaleType, boxMin, boxMax);
+    _fbSession.current = { rootPc, scaleKey: cfg.scaleType, correctSet, boxMin, boxMax };
+    _fbSession.selected = new Set();
+    _fbSession.awaitingAnswer = true;
+    const root = FB_NOTE_NAMES[rootPc], scale = t(FB_SCALE_LABEL_KEY[cfg.scaleType]);
+    if (prompt) prompt.textContent = cfg.scaleBox
+      ? t('training.fb.promptScaleBox', { root, scale, from: boxMin, to: boxMax })
+      : t('training.fb.promptScale', { root, scale });
+    fbRenderDiagram(null, { mode: 'scale', selected: _fbSession.selected, correctSet, submitted: false, boxMin: cfg.scaleBox ? boxMin : null, boxMax: cfg.scaleBox ? boxMax : null });
+    if (confirmBtn) confirmBtn.hidden = false;
+    return;
+  }
+
+  const pos = fbPickNext(_fbSession);
+  if (!pos) { fbEndSession(); return; } // 후보가 없음(설정 이상) — 방어적으로 종료
+  _fbSession.current = pos;
+  _fbSession.recentKeys.push(pos.key); if (_fbSession.recentKeys.length > 2) _fbSession.recentKeys.shift();
+  _fbSession.awaitingAnswer = true;
+
+  if (cfg.quizMode === 'see') {
+    if (prompt) prompt.textContent = t('training.fb.promptSee');
+    fbRenderDiagram(pos, { reveal: true });
+    fbRenderChoices(pos);
+  } else if (cfg.quizMode === 'hear') {
+    if (prompt) prompt.textContent = t('training.fb.promptHear', { note: pos.noteName });
+    fbRenderDiagram(pos, { reveal: false });
+  } else {
+    // 자리를 미리 보여주면 음이름을 안 떠올려도 그냥 따라 짚으면 되니 암기 훈련이 안 된다 —
+    // 듣고 찾기처럼 음이름만 주고, 실제 연주로 맞는지 확인한다(자리는 숨김).
+    if (prompt) prompt.textContent = t('training.fb.promptPlay', { note: pos.noteName });
+    fbRenderDiagram(pos, { reveal: false });
+    fbOnEngineChange();
+    if (_engineOn) {
+      _fbPlayTimeout = setTimeout(() => {
+        if (_fbSession?.awaitingAnswer) fbRecordResult(false, { keys: [`${pos.stringIdx}:${pos.fret}`], correct: false });
+      }, 10000);
+    }
+  }
+}
+function fbStartTimerUI() {
+  fbStopTimerUI();
+  if (_fbSession?.cfg?.sessionMode !== 'timed') return;
+  _fbTimerInterval = setInterval(() => {
+    if (!_fbSession) { fbStopTimerUI(); return; }
+    if (Date.now() >= _fbSession.deadlineAt) fbEndSession();
+  }, 1000);
+}
+function fbStopTimerUI() { if (_fbTimerInterval) { clearInterval(_fbTimerInterval); _fbTimerInterval = null; } }
+function fbStartSession() {
+  const cfg = fbCfgSnapshot();
+  if (!cfg.strings.length || cfg.fretMax < cfg.fretMin) return; // 방어: 뭐라도 있어야 시작
+  _fbSession = {
+    cfg,
+    score: { correct: 0, total: 0 },
+    streak: { current: 0, best: 0 },
+    startedAt: Date.now(),
+    deadlineAt: cfg.sessionMode === 'timed' ? Date.now() + cfg.sessionValue * 1000 : null,
+    current: null,
+    recentKeys: [],
+    lastScaleRoot: null,
+    selected: null,
+    awaitingAnswer: false,
+  };
+  _fbScreen = 'quiz';
+  fbUpdateScoreUI();
+  fbShowScreen('quiz');
+  fbStartTimerUI();
+  syncTrainingActivity();
+  fbNextQuestion();
+}
+function fbEndSession() {
+  fbClearPlayTimeout();
+  fbStopTimerUI();
+  fbPlayExit();
+  const s = _fbSession;
+  _fbScreen = 'summary';
+  fbShowScreen('summary');
+  if (s) {
+    const pct = s.score.total ? Math.round((s.score.correct / s.score.total) * 100) : 0;
+    const line = $('fb-summary-line');
+    if (line) line.textContent = t('training.fb.summaryLine', { correct: s.score.correct, total: s.score.total, pct });
+    const streak = $('fb-summary-streak');
+    if (streak) streak.textContent = t('training.fb.summaryStreak', { n: s.streak.best });
+  }
+  _fbSession = null;
+  syncTrainingActivity();
+}
+// showTool()/MutationObserver 에서 호출 — 세션 상태는 그대로 두고 화면만 다시 맞춘다
+// (다른 도구로 갔다 와도 진행 중이던 세션이 안 사라진다). 실전 연주 인식은 엔진 리스닝만
+// 붙였다 뗐다 한다(튜너와 같은 원칙).
+function fbEnter() {
+  fbRenderStringToggles();
+  fbShowScreen(_fbScreen);
+  if (_fbSession?.cfg?.quizMode === 'play' && _engineOn && _fbSession.awaitingAnswer) fbPlayEnter();
+}
+function fbLeave() { fbPlayExit(); }
 
 // ── BPM 트레이너 ──
 // 정해진 마디 수마다 템포가 자동으로 조금씩 빨라지는 연습 모드. 메트로놈과 같은 look-ahead
@@ -564,7 +1179,7 @@ let _btTarget = Number(localStorage.getItem('yss:btTarget')) || 140;
 let _btStep = Number(localStorage.getItem('yss:btStep')) || 2;
 let _btEvery = Number(localStorage.getItem('yss:btEvery')) || 2;
 let _btSig = Number(localStorage.getItem('yss:btSig')) || 4;
-let _btSubdiv = Number(localStorage.getItem('yss:btSubdiv')) || 1;
+let _btSubdiv = pmSubdivKey(localStorage.getItem('yss:btSubdiv'));
 let _btVol = Number(localStorage.getItem('yss:btVol'));
 if (!(_btVol >= 0 && _btVol <= 1)) _btVol = 0.6;
 let _btCurBpm = _btStart, _btMeasureCount = 0, _btBeat = 0, _btSub = 0, _btPlaying = false;
@@ -582,7 +1197,9 @@ function btFlashBeat(beatIdx, delayMs) {
   setTimeout(() => btFlashEl(document.querySelector(`#bt-beats .pm-beat-dot[data-beat="${beatIdx}"]`), hold), delayMs);
 }
 function btFlashTick(beatIdx, subIdx, delayMs) {
-  const hold = Math.min(90, (60000 / _btCurBpm / _btSubdiv) * 0.6);
+  const pattern = PM_SUBDIV_PATTERNS[_btSubdiv] || PM_SUBDIV_PATTERNS[1];
+  const w = pattern[subIdx] ?? (1 / pattern.length);
+  const hold = Math.min(90, w * (60000 / _btCurBpm) * 0.6);
   setTimeout(() => btFlashEl(document.querySelector(`#bt-beats .pm-beat-tick[data-beat="${beatIdx}"][data-sub="${subIdx}"]`), hold), delayMs);
 }
 function btUpdateBpmDisplay() {
@@ -604,12 +1221,13 @@ function btClick(time, kind, beatIdx, subIdx) {
   else btFlashBeat(beatIdx, delayMs);
 }
 function btScheduler() {
+  const pattern = PM_SUBDIV_PATTERNS[_btSubdiv] || PM_SUBDIV_PATTERNS[1];
   while (_btNextTime < _btCtx.currentTime + PM_SCHEDULE_AHEAD) {
     const isBeat = _btSub === 0;
     const isAccent = isBeat && _btBeat === 0;
     btClick(_btNextTime, isAccent ? 'accent' : isBeat ? 'beat' : 'sub', _btBeat, _btSub);
-    _btNextTime += (60 / _btCurBpm) / _btSubdiv;
-    _btSub = (_btSub + 1) % _btSubdiv;
+    _btNextTime += pattern[_btSub] * (60 / _btCurBpm);
+    _btSub = (_btSub + 1) % pattern.length;
     if (_btSub === 0) {
       _btBeat = (_btBeat + 1) % _btSig;
       if (_btBeat === 0) {
@@ -642,7 +1260,7 @@ function btSetSig(v) {
   btRenderBeats();
 }
 function btSetSubdiv(v) {
-  _btSubdiv = Number(v) || 1;
+  _btSubdiv = pmSubdivKey(v);
   localStorage.setItem('yss:btSubdiv', String(_btSubdiv));
   _btSub = 0;
   btRenderBeats();
@@ -687,6 +1305,7 @@ function syncTrainingActivity() {
   const activeTool = document.querySelector('.training-nav-item.on')?.dataset.tool;
   if (activeTool === 'metro-practice') usageSetIdle(!_pmPlaying);
   else if (activeTool === 'bpm-trainer') usageSetIdle(!_btPlaying);
+  else if (activeTool === 'fretboard') usageSetIdle(_fbScreen !== 'quiz');
   else usageSetIdle(false);
 }
 
@@ -701,6 +1320,7 @@ function showTool(name) {
   if (name !== 'metro-practice') pmStop();
   if (name !== 'bpm-trainer') btStop();
   if (name === 'tuner') tunEnter(); else tunLeave();
+  if (name === 'fretboard') fbEnter(); else fbLeave();
   if (name === 'log') logEnter();
   syncTrainingActivity();
 }
@@ -804,7 +1424,7 @@ export function initTraining() {
     pmRenderBeats();
   });
   pmSubdivEl?.addEventListener('change', () => {
-    _pmSubdiv = Number(pmSubdivEl.value) || 1;
+    _pmSubdiv = pmSubdivKey(pmSubdivEl.value);
     localStorage.setItem('yss:pmSubdiv', String(_pmSubdiv));
     _pmSub = 0;
     pmRenderBeats();
@@ -820,6 +1440,53 @@ export function initTraining() {
   }
   tunRenderAvailability();
   $('trn-tuner-goto-studio')?.addEventListener('click', () => {
+    document.querySelector('.tab[data-view="studio"]')?.click();
+  });
+
+  fbRenderStringToggles();
+  const fbInstEl = $('fb-instrument'), fbMinEl = $('fb-fret-min'), fbMaxEl = $('fb-fret-max'),
+        fbNaturalsEl = $('fb-naturals'), fbSessModeEl = $('fb-session-mode'), fbSessValEl = $('fb-session-value'),
+        fbScaleTypeEl = $('fb-scale-type'), fbScaleBoxEl = $('fb-scale-box');
+  if (fbInstEl) fbInstEl.value = _fbInstrument;
+  if (fbMinEl) { fbMinEl.max = String(FB_INSTRUMENTS[_fbInstrument].fretMaxCap); fbMinEl.value = String(_fbFretMin); }
+  if (fbMaxEl) { fbMaxEl.max = String(FB_INSTRUMENTS[_fbInstrument].fretMaxCap); fbMaxEl.value = String(_fbFretMax); }
+  if (fbNaturalsEl) fbNaturalsEl.value = _fbNaturalsOnly ? '1' : '0';
+  if (fbSessModeEl) fbSessModeEl.value = _fbSessionMode;
+  if (fbSessValEl) fbSessValEl.value = String(_fbSessionValue);
+  if (fbScaleTypeEl) fbScaleTypeEl.value = _fbScaleType;
+  if (fbScaleBoxEl) fbScaleBoxEl.value = _fbScaleBox ? '1' : '0';
+  document.querySelectorAll('#fb-mode-tabs .fb-mode-tab').forEach(b => b.classList.toggle('on', b.dataset.mode === _fbQuizMode));
+  fbShowScreen(_fbScreen);
+
+  fbInstEl?.addEventListener('change', () => fbSetInstrument(fbInstEl.value));
+  fbMinEl?.addEventListener('change', () => fbSetFretRange(fbMinEl.value, fbMaxEl.value));
+  fbMaxEl?.addEventListener('change', () => fbSetFretRange(fbMinEl.value, fbMaxEl.value));
+  $('fb-strings')?.addEventListener('click', (e) => {
+    const b = e.target.closest('.fb-string-toggle'); if (!b) return;
+    fbToggleString(Number(b.dataset.idx));
+  });
+  fbNaturalsEl?.addEventListener('change', () => fbSetNaturalsOnly(fbNaturalsEl.value === '1'));
+  fbSessModeEl?.addEventListener('change', () => fbSetSessionMode(fbSessModeEl.value));
+  fbSessValEl?.addEventListener('change', () => fbSetSessionValue(fbSessValEl.value));
+  fbScaleTypeEl?.addEventListener('change', () => fbSetScaleType(fbScaleTypeEl.value));
+  fbScaleBoxEl?.addEventListener('change', () => fbSetScaleBox(fbScaleBoxEl.value === '1'));
+  $('fb-mode-tabs')?.addEventListener('click', (e) => {
+    const b = e.target.closest('.fb-mode-tab'); if (!b) return;
+    fbSetQuizMode(b.dataset.mode);
+  });
+  $('fb-start')?.addEventListener('click', fbStartSession);
+  $('fb-end')?.addEventListener('click', () => { if (_fbSession) fbEndSession(); });
+  $('fb-skip')?.addEventListener('click', fbSkipQuestion);
+  $('fb-diagram')?.addEventListener('click', fbHandleDiagramClick);
+  $('fb-choices')?.addEventListener('click', (e) => {
+    const b = e.target.closest('.fb-choice-btn'); if (!b) return;
+    fbHandleSeeAnswer(b.dataset.note, b);
+  });
+  $('fb-scale-confirm')?.addEventListener('click', fbHandleScaleConfirm);
+  $('fb-scale-next')?.addEventListener('click', () => { if (_fbSession) fbNextQuestion(); });
+  $('fb-summary-restart')?.addEventListener('click', () => { _fbScreen = 'config'; fbShowScreen('config'); fbStartSession(); });
+  $('fb-summary-config')?.addEventListener('click', () => { _fbScreen = 'config'; fbShowScreen('config'); });
+  $('fb-play-goto-studio')?.addEventListener('click', () => {
     document.querySelector('.tab[data-view="studio"]')?.click();
   });
 
@@ -852,11 +1519,11 @@ export function initTraining() {
   if (trainingView) {
     new MutationObserver(() => {
       if (trainingView.hidden) {
-        pmStop(); btStop(); tunLeave();
+        pmStop(); btStop(); tunLeave(); fbLeave();
       } else {
-        if (document.querySelector('.training-nav-item.on')?.dataset.tool === 'tuner') {
-          tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
-        }
+        const activeTool = document.querySelector('.training-nav-item.on')?.dataset.tool;
+        if (activeTool === 'tuner') tunEnter();   // 튜너는 재생 상태가 아니라 그냥 "보여주는" 도구라 돌아오면 바로 다시 켠다
+        else if (activeTool === 'fretboard') fbEnter();
         syncTrainingActivity();
       }
     }).observe(trainingView, { attributes: true, attributeFilter: ['hidden'] });

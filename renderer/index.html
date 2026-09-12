@@ -992,6 +992,10 @@
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 11v6M7 17h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span data-i18n="training.tun.title">튜너</span>
       </button>
+      <button class="training-nav-item" data-tool="fretboard" type="button">
+        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="6" width="16" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M6 6v9M10 6v9M14 6v9" stroke="currentColor" stroke-width="1"/></svg>
+        <span data-i18n="training.fb.title">지판 암기</span>
+      </button>
     </nav>
 
     <div class="training-main">
@@ -1120,8 +1124,10 @@
               <select id="pm-subdiv" class="pm-select">
                 <option value="1" data-i18n="training.pm.subdiv1">기본</option>
                 <option value="2" data-i18n="training.pm.subdiv2">8분음표</option>
-                <option value="3" data-i18n="training.pm.subdiv3">셋잇단음표</option>
+                <option value="3" data-i18n="training.pm.subdiv3">8분음표 3연음</option>
+                <option value="6" data-i18n="training.pm.subdiv6">16분음표 3연음</option>
                 <option value="4" data-i18n="training.pm.subdiv4">16분음표</option>
+                <option value="swing" data-i18n="training.pm.subdivSwing">바운스(스윙)</option>
               </select>
             </div>
             <div class="pm-row">
@@ -1190,8 +1196,10 @@
             <select id="bt-subdiv" class="tool-select">
               <option value="1" data-i18n="training.pm.subdiv1">기본</option>
               <option value="2" data-i18n="training.pm.subdiv2">8분음표</option>
-              <option value="3" data-i18n="training.pm.subdiv3">셋잇단음표</option>
+              <option value="3" data-i18n="training.pm.subdiv3">8분음표 3연음</option>
+              <option value="6" data-i18n="training.pm.subdiv6">16분음표 3연음</option>
               <option value="4" data-i18n="training.pm.subdiv4">16분음표</option>
+              <option value="swing" data-i18n="training.pm.subdivSwing">바운스(스윙)</option>
             </select>
           </div>
           <div class="tool-row">
@@ -1235,6 +1243,113 @@
         <div class="tool-card tool-notice" id="trn-tuner-notice">
           <p data-i18n="training.tun.needEngine">스튜디오에서 오디오 엔진을 켜면 튜너를 쓸 수 있어요.</p>
           <button id="trn-tuner-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
+        </div>
+      </section>
+
+      <!-- 지판 암기 — 프렛보드 음이름 암기. 4가지 모드: 보고 맞히기(see, 한 자리 보고 음이름
+           맞히기)/듣고 찾기(hear, 음이름 듣고 자리 하나 찾기)/스케일 찾기(scale, 스케일에 속하는
+           음을 전부 골라 확인)/실전 연주 인식(play, 튜너와 같은 엔진 pitch 이벤트를 재사용해
+           실제로 그 자리를 연주하는지 확인 — 스케일 찾기는 "연주"라는 행위 자체가 의미 없는
+           문제 형식이라 이 모드 대상에서 뺀다). -->
+      <section class="training-panel" data-tool="fretboard">
+        <div class="fb-page" id="tool-fretboard">
+          <div id="fb-config" class="tool-card">
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.instrument">악기</span>
+              <select id="fb-instrument" class="tool-select">
+                <option value="guitar6" data-i18n="training.fb.instGuitar6">기타 (EADGBE)</option>
+                <option value="bass4" data-i18n="training.fb.instBass4">베이스 4현 (EADG)</option>
+                <option value="bass5" data-i18n="training.fb.instBass5">베이스 5현 (BEADG)</option>
+              </select>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.fretRange">프렛 범위</span>
+              <div class="fb-range-inputs">
+                <input id="fb-fret-min" class="fb-range-input" type="number" min="0" max="24" step="1" value="0" />
+                <span>–</span>
+                <input id="fb-fret-max" class="fb-range-input" type="number" min="0" max="24" step="1" value="12" />
+              </div>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.strings">현 선택</span>
+              <div id="fb-strings" class="fb-string-toggles"></div>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.accidentals">음이름</span>
+              <select id="fb-naturals" class="tool-select">
+                <option value="0" data-i18n="training.fb.accAll">전체(♯ 포함)</option>
+                <option value="1" data-i18n="training.fb.accNaturals">자연음만</option>
+              </select>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.sessionLen">세션 길이</span>
+              <div class="fb-session-inputs">
+                <select id="fb-session-mode" class="tool-select">
+                  <option value="count" data-i18n="training.fb.sessionCount">문항 수</option>
+                  <option value="timed" data-i18n="training.fb.sessionTimed">시간(초)</option>
+                </select>
+                <input id="fb-session-value" class="fb-range-input" type="number" min="5" max="600" step="5" value="20" />
+              </div>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.quizMode">모드</span>
+              <div class="fb-mode-tabs" id="fb-mode-tabs">
+                <button class="fb-mode-tab on" type="button" data-mode="see" data-i18n="training.fb.modeSee">보고 맞히기</button>
+                <button class="fb-mode-tab" type="button" data-mode="hear" data-i18n="training.fb.modeHear">듣고 찾기</button>
+                <button class="fb-mode-tab" type="button" data-mode="scale" data-i18n="training.fb.modeScale">스케일 찾기</button>
+                <button class="fb-mode-tab" type="button" data-mode="play" data-i18n="training.fb.modePlay">실전 연주 인식</button>
+              </div>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.scaleType">스케일</span>
+              <select id="fb-scale-type" class="tool-select">
+                <option value="major" data-i18n="training.fb.scaleMajor">메이저</option>
+                <option value="minor" data-i18n="training.fb.scaleMinor">마이너</option>
+                <option value="majorPenta" data-i18n="training.fb.scaleMajorPenta">메이저 펜타토닉</option>
+                <option value="minorPenta" data-i18n="training.fb.scaleMinorPenta">마이너 펜타토닉</option>
+              </select>
+            </div>
+            <div class="tool-row">
+              <span class="tool-label" data-i18n="training.fb.scaleBox">범위</span>
+              <select id="fb-scale-box" class="tool-select" title="포지션 박스 단위" data-i18n-title="training.fb.scaleBoxHint">
+                <option value="0" data-i18n="training.fb.scaleBoxOff">넥 전체</option>
+                <option value="1" data-i18n="training.fb.scaleBoxOn">포지션 박스 단위(4프렛)</option>
+              </select>
+            </div>
+            <div class="tool-actions">
+              <button id="fb-start" class="btn primary" type="button" data-i18n="training.fb.start">시작</button>
+            </div>
+          </div>
+
+          <div id="fb-quiz" class="fb-quiz-wrap" hidden>
+            <div class="fb-quiz-head">
+              <span id="fb-score" class="tool-bignum">0/0</span>
+              <span id="fb-streak" class="tool-label"><span data-i18n="training.fb.streak">연속</span> <span id="fb-streak-num">0</span></span>
+              <button id="fb-end" class="btn btn-sm" type="button" data-i18n="training.fb.end">종료</button>
+            </div>
+            <div id="fb-prompt" class="fb-prompt">—</div>
+            <div id="fb-diagram" class="fret-board"></div>
+            <div id="fb-choices" class="fb-choices"></div>
+            <button id="fb-scale-confirm" class="btn primary" type="button" data-i18n="training.fb.confirm" hidden>확인</button>
+            <button id="fb-scale-next" class="btn primary" type="button" data-i18n="training.fb.next" hidden>다음</button>
+            <div id="fb-feedback" class="fb-feedback" aria-live="polite"></div>
+            <button id="fb-skip" class="btn btn-sm" type="button" data-i18n="training.fb.skip">건너뛰기</button>
+          </div>
+
+          <div id="fb-summary" class="tool-card" hidden>
+            <h3 data-i18n="training.fb.summaryTitle">세션 결과</h3>
+            <p id="fb-summary-line">—</p>
+            <p id="fb-summary-streak">—</p>
+            <div class="tool-actions">
+              <button id="fb-summary-restart" class="btn primary" type="button" data-i18n="training.fb.restart">다시</button>
+              <button id="fb-summary-config" class="btn btn-sm" type="button" data-i18n="training.fb.backToConfig">설정으로</button>
+            </div>
+          </div>
+
+          <div id="fb-play-notice" class="tool-card tool-notice" hidden>
+            <p data-i18n="training.fb.needEngine">스튜디오에서 오디오 엔진을 켜면 실전 연주 인식을 쓸 수 있어요.</p>
+            <button id="fb-play-goto-studio" class="btn btn-sm" type="button" data-i18n="training.tun.gotoStudio">스튜디오로 이동</button>
+          </div>
         </div>
       </section>
     </div>

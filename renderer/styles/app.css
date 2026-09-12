@@ -2526,6 +2526,9 @@ body { display: flex; flex-direction: column; }
    나눈 도넛으로 보여준다(목표를 채우면 링이 가득 참). 칸을 고르면 옆 상세에서
    카테고리별 막대·분(分)을 숫자로도 보여준다 — 링만으론 정확한 분 단위까진 못 읽으니까. */
 .training-panel[data-tool="log"] { flex: 1; max-width: 860px; }
+/* 지판 암기 — 설정/요약은 다른 도구처럼 .tool-card(340px) 카드지만, 퀴즈 화면은
+   프렛보드 다이어그램이 있어서 카드 폭에 못 가둔다. 패널 자체를 log 처럼 넓힌다. */
+.training-panel[data-tool="fretboard"] { flex: 1; max-width: 900px; }
 .log-page { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 32px; align-items: start; width: 100%; }
 .log-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .log-head { display: flex; align-items: center; justify-content: space-between; }
@@ -2655,6 +2658,60 @@ body { display: flex; flex-direction: column; }
 .training-panel[data-tool="tuner"] .tuner { width: 340px; }
 .tool-notice { align-items: center; text-align: center; gap: 14px; }
 .tool-notice p { font-size: 13px; color: var(--tx-2); line-height: 1.6; margin: 0; }
+
+/* 지판 암기 — 설정 카드는 .tool-card 재사용, 퀴즈/요약 화면은 카드 폭을 벗어난다.
+   현 선택·모드 탭은 폭이 좁은 .tool-row 오른쪽 칸에 여러 개가 들어가므로 줄바꿈 허용. */
+.fb-page { display: flex; flex-direction: column; gap: 20px; width: 100%; align-items: center; }
+.fb-range-inputs { display: flex; align-items: center; gap: 6px; }
+.fb-range-input { width: 56px; text-align: center; font: 500 12px/1 var(--sans); color: var(--tx-1);
+  background: var(--input); border: 1px solid var(--border-mid); border-radius: var(--r-sm); height: 28px; box-sizing: border-box; }
+.fb-session-inputs { display: flex; align-items: center; gap: 6px; }
+.fb-session-inputs .tool-select { flex: 1; }
+.fb-string-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-string-toggle { padding: 4px 9px; border: 1px solid var(--border-mid); border-radius: 6px; background: transparent;
+  color: var(--tx-3); font: 700 11px/1 var(--mono); cursor: pointer; }
+.fb-string-toggle.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.fb-mode-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.fb-mode-tab { padding: 6px 9px; border: 1px solid var(--border-mid); border-radius: 6px; background: transparent;
+  color: var(--tx-3); font: 700 10.5px/1.2 var(--sans); cursor: pointer; }
+.fb-mode-tab.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.fb-quiz-wrap { display: flex; flex-direction: column; gap: 16px; width: 100%; align-items: center; }
+.fb-quiz-head { display: flex; align-items: center; justify-content: center; gap: 16px; width: 100%; }
+.fb-prompt { font: 700 20px/1.3 var(--sans); text-align: center; color: var(--tx-1); }
+.fb-choices { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.fb-choice-btn { padding: 12px 22px; font: 700 16px/1 var(--mono); border-radius: 8px; border: 1px solid var(--border-mid);
+  background: var(--elev-2); color: var(--tx-1); cursor: pointer; }
+.fb-choice-btn.correct { border-color: var(--ok); color: var(--ok); }
+.fb-choice-btn.wrong { border-color: var(--danger); color: var(--danger); }
+.fb-feedback { min-height: 18px; text-align: center; font-size: 13px; color: var(--tx-2); }
+.fb-feedback.ok { color: var(--ok); }
+.fb-feedback.bad { color: var(--danger); }
+
+/* 프렛보드 다이어그램 — 튜너/메트로놈과 무관한 새 시각 위젯이라 전용 클래스 패밀리로 둔다. */
+.fret-board { width: 100%; max-width: 640px; }
+.fret-board svg { width: 100%; height: auto; display: block; }
+.fret-neck-bg { fill: var(--elev-2); }
+.fret-nut { stroke: var(--tx-1); stroke-width: 4; }
+.fret-line { stroke: var(--border-mid); stroke-width: 1.5; }
+.fret-string-line { stroke: var(--tx-3); }
+.fret-string-line.off { opacity: .18; }
+.fret-inlay { fill: var(--border-mid); }
+.fret-fretnum { fill: var(--tx-4); font: 700 9px var(--mono); }
+.fret-stringnum { fill: var(--tx-3); font: 700 10px var(--mono); }
+/* 스케일 찾기 — "포지션 박스 단위" 옵션 켰을 때 이번 문제 구간을 눈에 띄게 감싸는 사각형 */
+.fret-box { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--accent);
+  stroke-width: 1.5; stroke-dasharray: 5 4; }
+.fret-pos { cursor: pointer; }
+.fret-pos-dot { fill: var(--elev-2); stroke: var(--border-mid); stroke-width: 1.5; }
+.fret-pos-dot.dim { opacity: .2; pointer-events: none; }
+.fret-pos-dot.target { fill: var(--accent); stroke: var(--accent); }
+/* 스케일 찾기 — 확인 누르기 전 사용자가 고른 자리(아직 정오답 모름) */
+.fret-pos-dot.selected { fill: color-mix(in srgb, var(--accent) 35%, transparent); stroke: var(--accent); stroke-width: 2; }
+.fret-pos-dot.correct { fill: var(--ok); stroke: var(--ok); }
+.fret-pos-dot.wrong { fill: var(--danger); stroke: var(--danger); }
 
 /* 연습용 메트로놈 — 곡 BPM 과 무관한 독립 도구. 큰 BPM 숫자를 중심에 두고 위아래 조절은
    빠른 ±1/±5 버튼으로(다이얼·드래그보다 정확히 원하는 값에 바로 닿는다).
@@ -4583,6 +4640,7 @@ body { background: var(--bg) !important; }
   font-size: 20px; color: color-mix(in srgb, var(--c, var(--accent)) 70%, var(--tx-3)); opacity: .3; pointer-events: none;
 }
 .ve-wave { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ve-wave svg { width: 100%; height: 100%; display: block; } /* 스튜디오 .daw-clip svg 와 동일 규칙 */
 
 /* 가사 패널 — 예전엔 화면 전체를 어둡게 덮는 모달이었다. 재생 중에 재생선을 보면서
    Enter 를 눌러야 하는 도구인데 그 미리보기 자체를 덮어버리면 정작 봐야 할 화면이 안

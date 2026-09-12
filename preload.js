@@ -198,6 +198,12 @@ contextBridge.exposeInMainWorld('yssApi', {
     save: (data) => ipcRenderer.invoke('notes:save', data),
   },
 
+  // 지판 암기 위치별 정답률 — 같은 패턴(fretboardStats.json)
+  fretboard: {
+    load: ()     => ipcRenderer.invoke('fretboardStats:load'),
+    save: (data) => ipcRenderer.invoke('fretboardStats:save', data),
+  },
+
   // 실시간 오디오 엔진 (JUCE 사이드카)
   engine: {
     start:       (stems, who) => ipcRenderer.invoke('engine:start', stems, who),

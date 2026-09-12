@@ -69,6 +69,9 @@ const DEFAULT_STUBS = {
   // 연습 기록 메모도 같은 이유로 흉내 낸다(training.js 모듈 최상단에서 바로 부른다).
   'notes:load': () => ([]),
   'notes:save': () => true,
+  // 지판 암기 정답률도 같은 이유로 흉내 낸다(training.js 모듈 최상단에서 바로 부른다).
+  'fretboardStats:load': () => ({ positions: {} }),
+  'fretboardStats:save': () => true,
   // 영상 편집 탭 임포트가 파일마다 부른다(오디오 스트림 유무는 ffprobe 로 확인).
   // false 가 기본값 — bootRenderer 로 도는 테스트들의 합성 mp4 픽스처(testsrc 등)는 실제로
   // 오디오가 없다. true 로 두면(예전) 이 스텁 하나 때문에 영상/오디오 트랙 자동 분리가
