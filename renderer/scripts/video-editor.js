@@ -7,7 +7,7 @@ import { t as tr } from './i18n.js';
 import { esc, fmtDelta } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
 import { getClipThumb } from './video-thumbs.js';
-import { getFilePeaks, drawWaveform } from './video-waveform.js';
+import { getFileChannels, renderWaveSvg } from './video-waveform.js';
 import { BoxTracker } from './video-tracker.js';
 
 const api = window.yssApi;
@@ -2365,7 +2365,7 @@ function renderClips() {
       } else {
         // 오디오 전용(mp3/wav 등, 영상 트랙 없음) 클립은 캡처할 프레임 자체가 없다 —
         // 필름스트립 대신 음표 표시만 둔다.
-        el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span><canvas class="ve-wave"></canvas>` : `<div class="ve-thumbs"></div>`)
+        el.innerHTML = (c.isAudioOnly ? `<span class="ve-audio-icon">♪</span><div class="ve-wave"></div>` : `<div class="ve-thumbs"></div>`)
           + `<span class="ve-clip-lbl">${esc(c.name)}</span>
           ${c.speed && c.speed !== 1 ? `<span class="ve-clip-speed">${(c.speed).toFixed(2).replace(/\.?0+$/, '')}×</span>` : ''}
           ${c.isMulticam ? `<span class="ve-mc-badge" title="${esc(tr('video.mcAngles'))}">CAM ${c.mcAngles.length}</span>` : ''}
@@ -2463,19 +2463,16 @@ function renderClips() {
   updateClipToolbarUI();
 }
 // 오디오 클립 파형 — video-thumbs.js 의 paintThumbs 와 같은 패턴(캐시 있으면 바로 그리고,
-// 없으면 디코드가 끝난 뒤 다시 불려서 그린다). 캔버스 크기는 클립 엘리먼트의 실제 렌더
-// 크기(줌·트랙 높이)를 그대로 따라간다 — 고정 크기로 미리 만들어두면 확대/축소 때마다 흐리거나
-// 잘려 보인다.
+// 없으면 디코드가 끝난 뒤 다시 불려서 그린다). 스튜디오(studio.js renderWaves)와 완전히
+// 같은 방식(buildWaveSvg, SVG 폴리곤)으로 그린다 — 예전엔 캔버스에 열마다 사각형을 따로
+// 찍어서 스튜디오보다 각지고 투박해 보였다(제보). SVG 는 벡터라 화면 배율/줌과 무관하게
+// 항상 매끈하다.
 function paintWave(c) {
   const clipEl = document.querySelector(`.ve-clip[data-clip-id="${c.id}"]`);
-  const canvas = clipEl?.querySelector('.ve-wave');
-  if (!canvas) return;
-  const rect = clipEl.getBoundingClientRect();
-  const w = Math.max(4, Math.round(rect.width)), h = Math.max(4, Math.round(rect.height));
-  if (canvas.width !== w) canvas.width = w;
-  if (canvas.height !== h) canvas.height = h;
-  const peaks = getFilePeaks(c, toYtsepUrl, paintWave);
-  if (peaks) drawWaveform(canvas, peaks, c.inOff, c.dur);
+  const wave = clipEl?.querySelector('.ve-wave');
+  if (!wave) return;
+  const decoded = getFileChannels(c, toYtsepUrl, paintWave);
+  if (decoded) renderWaveSvg(wave, decoded, c.inOff, c.dur, '#fff', clipEl.getBoundingClientRect().width);
 }
 // 영상 임포트 시 자동으로 짝지어진 오디오 클립(Vegas Pro 관례: groupId 공유) — 그룹인
 // 클립은 이동/트림/분할/삭제가 서로 따라간다. "U" 로 그룹을 풀면 그때부턴 따로 논다.
