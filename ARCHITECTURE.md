@@ -1,4 +1,4 @@
-# Dr.studio — 구조와 배포
+# underdaw — 구조와 배포
 
 이 문서는 코드를 읽기 전에 먼저 읽는 지도다. 파일 목록이 아니라 **무엇이 무엇을 부르고, 어디로 배포되는지**를 적는다.
 구조가 바뀌면 이 문서도 같은 커밋에서 고친다.
@@ -73,12 +73,12 @@ electron-builder 빌드 → GitHub Releases 업로드 → **에셋 정합성 검
 - **버전은 릴리즈할 때만 하나씩** 올린다. 기능 커밋에서 미리 올리지 않는다.
 - 릴리즈 노트는 `gh release edit vX.Y.Z --notes-file -` 로 따로 쓴다.
   **사용자가 체감하는 것만** 적는다. 내부 리팩터·파일명은 적지 않는다.
-- 산출물 이름은 버전이 안 붙는다: `Dr.studio-Setup.exe` · `Dr.studio.exe` · `Dr.studio-Setup.exe.blockmap`.
+- 산출물 이름은 버전이 안 붙는다: `underdaw-Setup.exe` · `underdaw.exe` · `underdaw-Setup.exe.blockmap`.
   `package.json` 의 `build.nsis.artifactName` 이 정본이다.
 
 ### 자동 업데이트가 깨지는 지점
 
-`latest.yml` 의 `size`·`sha512` 는 **업로드된 `Dr.studio-Setup.exe` 와 정확히 일치해야 한다.**
+`latest.yml` 의 `size`·`sha512` 는 **업로드된 `underdaw-Setup.exe` 와 정확히 일치해야 한다.**
 electron-builder 가 업로드 도중 실패한 뒤 `latest.yml` 만 재생성되면 둘이 어긋나고, 사용자 쪽 업데이트가
 검증 실패로 죽는다. 릴리즈 후 반드시 확인:
 
@@ -88,7 +88,7 @@ gh release view vX.Y.Z --repo whalemindbass/yt-separator-releases --json assets 
 grep -E '^\s*size:' dist/latest.yml      # 두 값이 같아야 한다
 ```
 
-어긋나면 `gh release upload vX.Y.Z dist/Dr.studio-Setup.exe --clobber` 로 교체한다.
+어긋나면 `gh release upload vX.Y.Z dist/underdaw-Setup.exe --clobber` 로 교체한다.
 
 ---
 

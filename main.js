@@ -123,7 +123,7 @@ const DIALOG_TEXT = {
     importVideoFiles: '영상 파일 임포트 (여러 개 가능)',
     importImageFiles: '이미지 파일 임포트 (여러 개 가능)',
     fMedia: '영상/오디오', fAudio: '오디오', fVideo: '영상', fImage: '이미지', fAll: '모든 파일', fProject: 'YSS 프로젝트',
-    fVideoProject: 'Dr.studio 영상 프로젝트',
+    fVideoProject: 'underdaw 영상 프로젝트',
     importLut: 'LUT 파일 선택(.cube)', fLut: 'LUT(.cube)',
   },
   en: {
@@ -143,7 +143,7 @@ const DIALOG_TEXT = {
     importVideoFiles: 'Import video files (multiple allowed)',
     importImageFiles: 'Import image files (multiple allowed)',
     fMedia: 'Video / audio', fAudio: 'Audio', fVideo: 'Video', fImage: 'Image', fAll: 'All files', fProject: 'YSS project',
-    fVideoProject: 'Dr.studio video project',
+    fVideoProject: 'underdaw video project',
     importLut: 'Choose a LUT file (.cube)', fLut: 'LUT (.cube)',
   },
 };
@@ -575,6 +575,14 @@ function isPortableBuild() {
   return !!process.env.PORTABLE_EXECUTABLE_FILE;
 }
 
+// MSIX(스토어/사이드로드) 설치본인지 — Electron이 이 값을 직접 세팅해준다. 이 경우는
+// 설치 폴더 자체가 읽기 전용(Program Files\WindowsApps)이라 NSIS/포터블 방식의 자가
+// 업데이트가 아예 불가능하고, 업데이트는 스토어(또는 로컬 사이드로드는 재설치)가
+// 알아서 처리한다 — 앱이 따로 조회·안내할 게 없다.
+function isWindowsStoreBuild() {
+  return !!process.windowsStore;
+}
+
 function cmpVer(a, b) {
   const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
   const pb = String(b || '').split('.').map(n => parseInt(n, 10) || 0);
@@ -611,6 +619,7 @@ async function checkForUpdatesPortable() {
 
 function checkForUpdates() {
   if (isDev) { console.log('[updater] skip in dev'); return; }
+  if (isWindowsStoreBuild()) { console.log('[updater] skip — MSIX/스토어 빌드는 스토어가 자체 업데이트'); return; }
   if (isPortableBuild()) {
     checkForUpdatesPortable();
     return;

@@ -285,7 +285,7 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   //   실제로 v1.4.10 에서 "docs: point download links..." 가 그렇게 노출됐다.
   if (!String(final.body || '').trim()) {
     warn(`릴리즈 노트가 비어 있다 — 앱 업데이트 창에 엉뚱한 커밋 메시지가 뜬다. 지금 채워라:`);
-    console.log(`   ${C.dim}gh release edit ${tag} --repo ${REPO} --title "Dr.studio ${tag}" --notes-file <파일>${C.x}`);
+    console.log(`   ${C.dim}gh release edit ${tag} --repo ${REPO} --title "underdaw ${tag}" --notes-file <파일>${C.x}`);
   }
 
   console.log();

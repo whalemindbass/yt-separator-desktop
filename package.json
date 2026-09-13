@@ -1,7 +1,7 @@
 {
   "name": "yt-separator-desktop",
   "version": "1.9.12",
-  "description": "Dr.studio",
+  "description": "underdaw",
   "main": "main.js",
   "author": {
     "name": "Whale Mind",
@@ -27,7 +27,7 @@
   },
   "build": {
     "appId": "com.whalemindbass.yt-separator",
-    "productName": "Dr.studio",
+    "productName": "underdaw",
     "copyright": "© 2026 Whale Mind",
     "asar": true,
     "asarUnpack": [
@@ -75,6 +75,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "appx",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-${version}-${arch}-${target}.${ext}",
@@ -95,11 +101,25 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Dr.studio",
+      "shortcutName": "underdaw",
       "artifactName": "${productName}-Setup.${ext}"
     },
     "portable": {
       "artifactName": "${productName}.${ext}"
+    },
+    "appx": {
+      "publish": null,
+      "artifactName": "${productName}.${ext}",
+      "applicationId": "underdaw",
+      "identityName": "whalemind.underdaw",
+      "publisher": "CN=51AED3D3-DE4B-4B20-9E12-43CA7332C115",
+      "publisherDisplayName": "whalemind",
+      "displayName": "underdaw",
+      "backgroundColor": "#48DEB4",
+      "languages": [
+        "ko-KR",
+        "en-US"
+      ]
     },
     "publish": [
       {
@@ -112,15 +132,15 @@
     "fileAssociations": [
       {
         "ext": "yssproj",
-        "name": "Dr.studio Project",
-        "description": "Dr.studio 프로젝트",
+        "name": "underdaw Project",
+        "description": "underdaw 프로젝트",
         "icon": "build/yssproj.ico",
         "role": "Editor"
       },
       {
         "ext": "dsvproj",
-        "name": "Dr.studio Video Project",
-        "description": "Dr.studio 영상 편집 프로젝트",
+        "name": "underdaw Video Project",
+        "description": "underdaw 영상 편집 프로젝트",
         "icon": "build/yssproj.ico",
         "role": "Editor"
       }

@@ -317,7 +317,7 @@ export function initHome(switchView, openRecentProject) {
 
   // 버전은 설정 화면이 이미 보여 준다 — 여기서는 저작권 한 줄이면 되고, 그건 앱에 물어볼 것이 없다
   const c = $('home-copy');
-  if (c) c.textContent = `© ${new Date().getFullYear()} Dr.studio`;
+  if (c) c.textContent = `© ${new Date().getFullYear()} underdaw`;
 
   loadNotices();
   paintRecent();

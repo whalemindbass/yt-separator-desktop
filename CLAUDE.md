@@ -1,4 +1,4 @@
-# Dr.studio
+# underdaw
 
 구조·배포 전반은 **`ARCHITECTURE.md`** 에 있다. 코드를 건드리기 전에 읽어라.
 
@@ -7,7 +7,7 @@
 - **랜딩 페이지 소스는 이 레포의 `docs/` 다.** `main` 푸시 → Cloudflare 자동 배포(~1분).
   `yt-separator-releases` 레포의 `docs/` 사본은 라이브가 아니다. `docs/` 를 지우면 사이트가 죽는다.
 - 라이브가 이상하면 캐시부터 의심하지 말고, 라이브 HTML 과 **바이트 단위로 일치하는 파일**을 먼저 찾아라.
-- 릴리즈 후 `latest.yml` 의 `size`·`sha512` 가 업로드된 `Dr.studio-Setup.exe` 와 일치하는지 확인해라.
+- 릴리즈 후 `latest.yml` 의 `size`·`sha512` 가 업로드된 `underdaw-Setup.exe` 와 일치하는지 확인해라.
   어긋나면 사용자 자동 업데이트가 죽는다.
 - 렌더러는 파일 시스템에 직접 닿지 않는다. `preload.js` 의 `window.yssApi` 만 쓴다.
 - 오디오 스레드에서 블로킹 금지. 엔진 락은 `ScopedTryLock` 만.

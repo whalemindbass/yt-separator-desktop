@@ -17,6 +17,18 @@
     Goto yssCleanupDone
   ${EndIf}
 
+  ; NSIS 는 같은 appId 로 이미 설치된 게 있으면 그 InstallLocation 을 기본 설치 경로로
+  ; 그대로 제안한다(업그레이드 편의용 동작) — 근데 개명하면 그 기본값이 옛 이름 폴더("Dr.studio"
+  ; 등)를 그대로 가리켜서, 사용자가 "설치"만 누르면 새 이름인데 폴더는 계속 옛날 이름으로 깔린다.
+  ; 여기서 먼저 새 이름 경로로 되돌려 놔야: (1) 설치 마법사에 보이는 기본 경로도 새 이름으로
+  ; 뜨고, (2) 아래 "옛 폴더 정리" 블록의 "$INSTDIR 가 옛 경로랑 같으면 안 건드림" 조건도
+  ; 더는 안 걸려서 옛 폴더가 실제로 청소된다.
+  ${If} "$INSTDIR" == "$LOCALAPPDATA\Programs\Dr.studio"
+  ${OrIf} "$INSTDIR" == "$LOCALAPPDATA\Programs\YT Separator\Dr.studio"
+  ${OrIf} "$INSTDIR" == "$LOCALAPPDATA\Programs\YT Separator"
+    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\underdaw"
+  ${EndIf}
+
   ; HKCU (per-user 설치)
   ReadRegStr $_yssPrevUninstall HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.rowonss.yt-separator" "UninstallString"
   ${If} $_yssPrevUninstall != ""
@@ -58,6 +70,18 @@
     ytsep_done:
   ${EndIf}
 
+  ; "Dr.studio" → "underdaw" 개명(2026-09) — 위 "YT Separator" 단독 폴더 정리랑 완전히
+  ; 같은 이유, 같은 패턴. 이걸 안 넣으면 지난번 개명 때 겪은 "옛 폴더가 안 지워지는" 버그가
+  ; 그대로 재발한다(위 36~50번 줄 주석에 적힌 바로 그 사고).
+  ${If} "$INSTDIR" != "$LOCALAPPDATA\Programs\Dr.studio"
+    IfFileExists "$LOCALAPPDATA\Programs\Dr.studio\Uninstall Dr.studio.exe" 0 drstudio_done
+      DetailPrint "Removing previous 'Dr.studio' install..."
+      ExecWait `"$LOCALAPPDATA\Programs\Dr.studio\Uninstall Dr.studio.exe" /S _?=$LOCALAPPDATA\Programs\Dr.studio`
+      Sleep 1500
+      RMDir /r "$LOCALAPPDATA\Programs\Dr.studio"
+    drstudio_done:
+  ${EndIf}
+
   ; 옛 이름 바로가기 정리. 상위 폴더는 RMDir(비재귀) 라 비어 있을 때만 지워진다 —
   ; 사용자가 그 경로를 새 설치 위치로 골랐어도 안전.
   Delete "$DESKTOP\YT Separator.lnk"
@@ -65,6 +89,10 @@
   Delete "$SMPROGRAMS\YT Separator\YT Separator.lnk"
   RMDir  "$SMPROGRAMS\YT Separator"
   RMDir  "$LOCALAPPDATA\Programs\YT Separator"
+
+  Delete "$DESKTOP\Dr.studio.lnk"
+  Delete "$SMPROGRAMS\Dr.studio.lnk"
+  RMDir  "$LOCALAPPDATA\Programs\Dr.studio"
 
   yssCleanupDone:
 !macroend

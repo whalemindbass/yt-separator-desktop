@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: ytsep:; font-src 'self' data:; media-src 'self' blob: ytsep:; connect-src 'self' blob: ytsep: https://ytseparator.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com;" />
-  <title>Dr.studio</title>
+  <title>underdaw</title>
   <link rel="stylesheet" href="./styles/app.css" />
 </head>
 <body>
@@ -16,7 +16,7 @@
           <img src="./assets/app-icon.png" alt="" draggable="false" />
         </div>
         <div class="titles">
-          <h1>Dr.studio</h1>
+          <h1>underdaw</h1>
         </div>
       </button>
     </div>
@@ -142,7 +142,7 @@
         <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 17.2S3 12.9 3 8.1A3.9 3.9 0 0 1 10 5.6a3.9 3.9 0 0 1 7 2.5C17 12.9 10 17.2 10 17.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
         <span class="dc-text">
           <b data-i18n="home.nav.donate">후원하기</b>
-          <em data-i18n="home.nav.donateSub">Dr.studio 를 응원해 주세요</em>
+          <em data-i18n="home.nav.donateSub">underdaw 를 응원해 주세요</em>
         </span>
         <svg class="dc-out" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3h7v7M13 3 6.5 9.5M11 9v4H3V5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -161,7 +161,7 @@
       <section class="home-page on" data-page="home">
         <section class="home-hero">
           <div class="home-hero-text">
-            <h2 data-i18n="home.hero">Dr.studio 에 오신 것을 환영합니다</h2>
+            <h2 data-i18n="home.hero">underdaw 에 오신 것을 환영합니다</h2>
             <p data-i18n="home.heroSub">스템 분리부터 커버 녹음까지. 전부 이 컴퓨터에서 이뤄집니다.</p>
           </div>
           <div class="home-hero-wave" id="home-wave" aria-hidden="true"></div>
@@ -549,8 +549,13 @@
               <svg viewBox="0 0 20 20" fill="none"><path d="M6 4v12M15 4l-8 6 8 6V4Z" fill="currentColor"/></svg>
             </button>
             <span id="vc-time" class="vc-time">0:00</span>
-            <div class="vc-seek-wrap">
+            <div id="vc-seek-wrap" class="vc-seek-wrap">
               <canvas id="vc-waveform" class="vc-waveform"></canvas>
+              <div id="vc-loop-handle-a" class="vc-loop-handle" data-i18n-title="mixer.loop.handleA" title="A 지점 (드래그해서 이동)" hidden></div>
+              <div id="vc-loop-handle-b" class="vc-loop-handle" data-i18n-title="mixer.loop.handleB" title="B 지점 (드래그해서 이동)" hidden></div>
+              <div id="vc-loop-rail" class="vc-loop-rail" data-i18n-title="mixer.loop.rail" title="재생바 아래를 드래그해서 반복 구간을 설정하세요">
+                <div id="vc-loop-region" class="vc-loop-region" hidden></div>
+              </div>
               <input id="vc-seek" class="vc-seek" type="range" min="0" max="1000" value="0" step="1" />
             </div>
             <span id="vc-duration" class="vc-time">0:00</span>
