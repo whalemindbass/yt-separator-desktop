@@ -1921,7 +1921,7 @@ body { display: flex; flex-direction: column; }
 .vc-seek-wrap {
   position: relative;
   flex: 1; min-width: 0;
-  height: 30px;
+  height: 38px;
   display: flex; align-items: center;
 }
 .vc-waveform {
@@ -1940,11 +1940,35 @@ body { display: flex; flex-direction: column; }
 .vc-seek::-webkit-slider-runnable-track { background: transparent; height: 100%; }
 .vc-seek::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 3px; height: 30px; border-radius: 1px;
+  width: 3px; height: 38px; border-radius: 1px;
   background: #fff;
   cursor: pointer;
   box-shadow: 0 0 4px rgba(0,0,0,.6);
 }
+/* A-B 구간반복 — 재생바 아래쪽 얇은 띠를 드래그해서 만든다(제보: "구간반복 쓰는 법을
+   모르겠다" — A/B 버튼만 있고 시각적으로 드래그할 곳이 없었다). 띠는 항상 z-index로
+   .vc-seek 위에 떠서 그 영역의 클릭/드래그를 가로챈다 — 나머지 시크바는 그대로 탐색용. */
+.vc-loop-rail {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 9px; z-index: 3; cursor: crosshair;
+  background: rgba(255,255,255,.08); border-radius: 2px;
+}
+.vc-loop-rail:hover { background: rgba(255,255,255,.16); }
+.vc-loop-region {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 0;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 2px; pointer-events: none;
+}
+.vc-loop-handle {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 12px; margin-left: -6px;
+  z-index: 4; cursor: ew-resize;
+}
+.vc-loop-handle::after {
+  content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  transform: translateX(-50%);
+  background: var(--accent); border-radius: 1px; box-shadow: 0 0 4px rgba(0,0,0,.6);
+}
+.vc-loop-handle:hover::after, .vc-loop-handle.dragging::after { width: 3px; }
 /* 트림 버튼 그룹 */
 .vc-trim { display: inline-flex; gap: 4px; flex-shrink: 0; }
 .vc-trim-btn {

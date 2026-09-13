@@ -876,12 +876,22 @@ document.addEventListener('click', (e) => {
 });
 
 // ── A-B 구간 반복 ─────────────────────────────
-const loopABtn    = $('loop-a-btn');
-const loopBBtn    = $('loop-b-btn');
-const loopAVal    = $('loop-a-val');
-const loopBVal    = $('loop-b-val');
-const loopToggle  = $('loop-toggle');
-const loopReset   = $('loop-reset');
+// 버튼(A/B/반복/초기화)만 있던 예전 UI는 "구간반복 쓰는 법을 모르겠다"는 제보를 받았다 —
+// 어디를 눌러야 구간이 생기는지 시각적으로 드러나지 않았다. 재생바 아래에 전용 띠
+// (#vc-loop-rail)를 두고 그 위를 드래그하면 바로 A~B 구간이 생기게 했다: 드래그해서
+// 만드는 게 유튜브/DAW 루프리전과 같은 익숙한 조작이라 설명 없이도 알아챌 수 있다.
+// 버튼은 정밀 조정(현재 위치를 정확히 A/B로)용으로 그대로 남긴다.
+const loopABtn      = $('loop-a-btn');
+const loopBBtn      = $('loop-b-btn');
+const loopAVal      = $('loop-a-val');
+const loopBVal      = $('loop-b-val');
+const loopToggle    = $('loop-toggle');
+const loopReset     = $('loop-reset');
+const vcSeekWrapEl  = $('vc-seek-wrap');
+const loopRailEl    = $('vc-loop-rail');
+const loopRegionEl  = $('vc-loop-region');
+const loopHandleAEl = $('vc-loop-handle-a');
+const loopHandleBEl = $('vc-loop-handle-b');
 
 function fmtLoopTime(t) {
   if (t == null || isNaN(t)) return '—';
@@ -890,12 +900,33 @@ function fmtLoopTime(t) {
   const c = Math.floor((t - Math.floor(t)) * 10);   // 소수점 1자리 (100ms 단위)
   return `${m}:${String(s).padStart(2, '0')}.${c}`;
 }
+// 핸들/음영 구간을 A/B 시간값에 맞춰 재배치 — 드래그 중엔 매 프레임, 그 외엔 상태 바뀔 때만.
+function positionLoopHandles() {
+  if (!vcSeekWrapEl) return;
+  const dur = playerVideo.duration || 0;
+  const st = currentPlayer?.getLoopState() || { a: null, b: null };
+  const W = vcSeekWrapEl.clientWidth || 1;
+  const hasA = dur > 0 && st.a != null;
+  const hasB = dur > 0 && st.b != null;
+  if (loopHandleAEl) { loopHandleAEl.hidden = !hasA; if (hasA) loopHandleAEl.style.left = `${(st.a / dur) * W}px`; }
+  if (loopHandleBEl) { loopHandleBEl.hidden = !hasB; if (hasB) loopHandleBEl.style.left = `${(st.b / dur) * W}px`; }
+  if (loopRegionEl) {
+    const show = hasA && hasB && st.b > st.a;
+    loopRegionEl.hidden = !show;
+    if (show) {
+      loopRegionEl.style.left = `${(st.a / dur) * W}px`;
+      loopRegionEl.style.width = `${((st.b - st.a) / dur) * W}px`;
+    }
+  }
+}
 function refreshLoopUI() {
   const st = currentPlayer?.getLoopState() || { a: null, b: null, enabled: false };
   loopAVal.textContent = fmtLoopTime(st.a);
   loopBVal.textContent = fmtLoopTime(st.b);
   loopToggle.classList.toggle('on', !!st.enabled);
   saveLoop(st.a, st.b, st.enabled);
+  positionLoopHandles();
+  drawWaveform();
 }
 function resetLoopUI() {
   currentPlayer?.resetLoop();
@@ -928,6 +959,87 @@ loopReset?.addEventListener('click', () => {
   currentPlayer?.resetLoop();
   refreshLoopUI();
 });
+
+// x(px, wrap 기준) → 초, [0, duration] 범위로 클램프
+function loopTimeAtX(x) {
+  const dur = playerVideo.duration || 0;
+  const W = vcSeekWrapEl?.clientWidth || 1;
+  return Math.max(0, Math.min(dur, (x / W) * dur));
+}
+function clientXToWrapX(clientX) {
+  const rect = vcSeekWrapEl.getBoundingClientRect();
+  return clientX - rect.left;
+}
+
+// 레일(빈 구간) 드래그 — 새 A~B 구간을 만든다. 시작점을 앵커로 두고 반대쪽 끝을
+// 포인터가 따라가게 해서, 왼쪽이든 오른쪽이든 자연스럽게 끌 수 있다.
+loopRailEl?.addEventListener('pointerdown', (e) => {
+  if (!currentPlayer || !playerVideo.duration) return;
+  if (e.target !== loopRailEl && e.target !== loopRegionEl) return;   // 핸들 위는 핸들 쪽 리스너가 처리
+  e.preventDefault();
+  const anchor = loopTimeAtX(clientXToWrapX(e.clientX));
+  currentPlayer.setLoopA(anchor);
+  currentPlayer.setLoopB(anchor);
+  positionLoopHandles();
+  try { loopRailEl.setPointerCapture(e.pointerId); } catch {}   // 커서가 좁은 띠 밖으로 나가도 계속 받기 위함
+  const updateCreate = (clientX) => {
+    const t = loopTimeAtX(clientXToWrapX(clientX));
+    if (t < anchor) { currentPlayer.setLoopA(t); currentPlayer.setLoopB(anchor); }
+    else            { currentPlayer.setLoopA(anchor); currentPlayer.setLoopB(t); }
+    positionLoopHandles();
+  };
+  const onMove = (ev) => updateCreate(ev.clientX);
+  const onUp = (ev) => {
+    updateCreate(ev.clientX);   // pointerup 직전 pointermove가 없어도(순간 릴리즈) 최종 위치를 놓치지 않는다
+    loopRailEl.removeEventListener('pointermove', onMove);
+    loopRailEl.removeEventListener('pointerup', onUp);
+    loopRailEl.removeEventListener('pointercancel', onUp);
+    const st = currentPlayer.getLoopState();
+    if (st.a == null || st.b == null || st.b - st.a < 0.15) {
+      // 거의 안 움직였으면(클릭에 가까움) 만들다 만 구간으로 취급 — 원래 없었으면 지운다.
+      currentPlayer.resetLoop();
+    } else {
+      currentPlayer.setLoopEnabled(true);   // 드래그로 직접 만들었으면 바로 반복 시작
+    }
+    refreshLoopUI();
+  };
+  loopRailEl.addEventListener('pointermove', onMove);
+  loopRailEl.addEventListener('pointerup', onUp);
+  loopRailEl.addEventListener('pointercancel', onUp);
+});
+
+// 핸들 각각을 잡고 끌면 그 한쪽 끝만 움직인다(반대쪽은 고정, 서로 못 지나침).
+function bindLoopHandleDrag(handleEl, which) {
+  handleEl?.addEventListener('pointerdown', (e) => {
+    if (!currentPlayer || !playerVideo.duration) return;
+    e.preventDefault();
+    e.stopPropagation();
+    handleEl.classList.add('dragging');
+    try { handleEl.setPointerCapture(e.pointerId); } catch {}
+    const updateHandle = (clientX) => {
+      const t = loopTimeAtX(clientXToWrapX(clientX));
+      const st = currentPlayer.getLoopState();
+      const EPS = 0.05;
+      if (which === 'a') currentPlayer.setLoopA(Math.min(t, (st.b ?? Infinity) - EPS));
+      else                currentPlayer.setLoopB(Math.max(t, (st.a ?? -Infinity) + EPS));
+      positionLoopHandles();
+    };
+    const onMove = (ev) => updateHandle(ev.clientX);
+    const onUp = (ev) => {
+      updateHandle(ev.clientX);   // pointerup 직전 pointermove가 없어도 최종 위치를 놓치지 않는다
+      handleEl.removeEventListener('pointermove', onMove);
+      handleEl.removeEventListener('pointerup', onUp);
+      handleEl.removeEventListener('pointercancel', onUp);
+      handleEl.classList.remove('dragging');
+      refreshLoopUI();
+    };
+    handleEl.addEventListener('pointermove', onMove);
+    handleEl.addEventListener('pointerup', onUp);
+    handleEl.addEventListener('pointercancel', onUp);
+  });
+}
+bindLoopHandleDrag(loopHandleAEl, 'a');
+bindLoopHandleDrag(loopHandleBEl, 'b');
 
 // ── 재생 속도 (1% 단위, 10% ~ 200%) ────────────────
 const speedSlider = $('speed-slider');
@@ -1823,9 +1935,16 @@ function drawWaveform() {
       ctx.fillRect(x - 0.5, 0, 1, H);
     }
   }
-  // A-B 루프 마커
+  // A-B 루프 마커 — 경계선뿐 아니라 구간 전체를 옅게 칠해서 파형만 봐도 반복 구간이 어딘지 바로 보이게 한다.
   const st = currentPlayer?.getLoopState?.();
   if (st && dur > 0) {
+    if (st.a != null && st.b != null && st.b > st.a) {
+      const ax = (st.a / dur) * W, bx = (st.b / dur) * W;
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = accent;
+      ctx.fillRect(ax, 0, bx - ax, H);
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = accent;
     if (st.a != null) ctx.fillRect((st.a / dur) * W - 1, 0, 2, H);
     if (st.b != null) ctx.fillRect((st.b / dur) * W - 1, 0, 2, H);
@@ -1997,15 +2116,17 @@ playerVideo.addEventListener('loadedmetadata', () => {
   updateVcProgress();
   updateVcPlayIcon();
   updateTrimUI();   // duration 확정 후 트림 음영·상대길이 반영
+  positionLoopHandles();   // 마찬가지로 duration 확정 전엔 px 위치를 못 잡는다
 });
 // 창 크기 변경 시 파형 다시 그리기 (디바운스)
 let _waveResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_waveResizeTimer);
-  _waveResizeTimer = setTimeout(drawWaveform, 100);
+  _waveResizeTimer = setTimeout(() => { drawWaveform(); positionLoopHandles(); }, 100);
 });
 playerVideo.addEventListener('durationchange', () => {
   updateTrimUI();
+  positionLoopHandles();
 });
 
 export const Library = {
