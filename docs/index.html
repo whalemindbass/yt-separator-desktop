@@ -76,8 +76,18 @@
   @media(max-width:760px){.navlinks{display:none}}
 
   /* ---------- hero ---------- */
-  .hero{position:relative;min-height:100svh;display:flex;flex-direction:column;justify-content:center;
-    padding:150px 0 90px;overflow:hidden;isolation:isolate}
+  /* 제목을 줄인 뒤로 텍스트 덩어리가 히어로 한가운데 둥둥 뜬 것처럼 보였다(justify-content:
+     center 라 전체 높이 기준으로 가운데 정렬돼서, 위아래로 꽉 찬 이미지와 안 맞물림) —
+     위쪽에서 시작하게 바꿔서 이미지(top:6%)랑 시작선을 맞춘다. */
+  .hero{position:relative;min-height:100svh;display:flex;flex-direction:column;justify-content:flex-start;
+    padding:190px 0 90px;overflow:hidden;isolation:isolate}
+  /* .hero 가 flex 라, .wrap 의 margin:0 auto 가 (다른 섹션들처럼 "최대폭까지 채우고
+     가운데" 가 아니라) flex 아이템 정렬 규칙상 "내용 크기만큼만 줄어들고 그 안에서
+     가운데" 로 바뀐다(flex 아이템의 좌우 auto 마진은 stretch 보다 우선한다 — 표준
+     동작). 제목이 128px 로 아주 넓을 땐 내용 폭이 거의 1240px 에 맞먹어서 안 보이던
+     문제가, 제목을 줄이자 텍스트 덩어리가 눈에 띄게 오른쪽 가운데로 쏠려 보였다(신고
+     그대로) — nav 의 .wrap 과 좌우가 정확히 맞도록 폭을 명시해서 고정한다. */
+  .hero .wrap{width:100%}
   .hero-glow{position:absolute;inset:-10%;z-index:-2;pointer-events:none;
     background:radial-gradient(560px 560px at var(--mx,50%) var(--my,30%),color-mix(in srgb,var(--mint) 16%,transparent),transparent 65%)}
   .eq{position:absolute;left:0;right:0;bottom:0;height:220px;z-index:-1;display:flex;align-items:flex-end;gap:5px;
@@ -85,15 +95,33 @@
   .eq i{flex:1;min-width:2px;max-width:7px;border-radius:3px 3px 0 0;background:linear-gradient(to top,var(--mint-dim),transparent);
     animation:eqbar 2.6s ease-in-out infinite}
   @keyframes eqbar{0%,100%{transform:scaleY(var(--h1,.3))}50%{transform:scaleY(var(--h2,.7))}}
+  /* 히어로 우측 스튜디오 사진 — 제목을 줄여서(clamp 최대 72px) 생긴 여유를 이미지가 위아래로
+     크게 채운다(세로로 거의 히어로 높이만큼). 텍스트 뒤(z-index:-1)에 두고 왼쪽·위·아래
+     가장자리를 마스크로 흐려서 딱 잘린 사각형처럼 안 보이게 한다. */
+  .hero-visual{position:absolute;top:6%;bottom:4%;right:0;width:68%;z-index:-1;
+    display:flex;align-items:center;justify-content:flex-end;pointer-events:none}
+  .hero-visual-in{width:100%;height:100%;opacity:.92;-webkit-mask-image:linear-gradient(to right,transparent,black 34%),linear-gradient(to bottom,transparent,black 10%,black 90%,transparent);
+    -webkit-mask-composite:source-in;mask-image:linear-gradient(to right,transparent,black 34%),linear-gradient(to bottom,transparent,black 10%,black 90%,transparent);
+    mask-composite:intersect}
+  /* 박스가 원본 사진(1240x697, 가로로 넓적)보다 세로로 훨씬 좁고 길어서(위아래로 크게
+     보이려고 일부러 그렇게 만듦) object-fit:cover 가 양쪽을 꽤 잘라낸다 — 기본(가운데
+     기준)이면 오른쪽까지 잘려 나가 "오른쪽이 잘려 보인다"는 신고가 났다. 왼쪽은 어차피
+     마스크로 흐려 없어지는 쪽이라, 자를 기준을 오른쪽으로 밀어서 오른쪽 끝은 그대로
+     남기고 왼쪽에서만 더 잘리게 한다. */
+  .hero-visual-in img{width:100%;height:100%;object-fit:cover;object-position:100% center;border-radius:22px;display:block}
   .lineage{display:inline-flex;align-items:center;gap:8px;font:600 11px/1 var(--body);letter-spacing:.03em;color:var(--paper-dim);
     padding:7px 13px;border:1px solid var(--line-soft);border-radius:99px;margin-bottom:20px}
   .lineage .arrow{color:var(--mint)}
   .kicker{font:600 12px/1 var(--body);letter-spacing:.18em;color:var(--mint);display:flex;align-items:center;gap:12px}
   .kicker .r{width:26px;height:1px;background:var(--mint)}
-  .hero h1{font:700 clamp(44px,9vw,128px)/1.08 var(--disp);letter-spacing:-.03em;margin-top:24px}
+  .hero h1{font:700 clamp(32px,5vw,72px)/1.14 var(--disp);letter-spacing:-.03em;margin-top:24px}
   .hero h1 span{display:block}
   .hero h1 .fx{color:var(--mint)}
-  .hero-sub{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;margin-top:44px;flex-wrap:wrap}
+  /* space-between 이었을 땐 .wrap 이 826px 로(위 버그) 줄어 있어서 리드 문구·버튼이
+     자연히 붙어 보였다 — .wrap 을 1240px 로 바로잡고 나니 그 사이가 쫙 벌어져
+     버튼만 뚝 떨어져 보였다("동떨어짐" 신고). justify-content 를 없애고 gap 만으로
+     붙여서, 폭이 얼마든 리드 문구 바로 옆에 버튼이 뜬다. */
+  .hero-sub{display:flex;align-items:flex-end;gap:48px;margin-top:44px;flex-wrap:wrap}
   .hero-lede{font-size:18px;line-height:1.7;color:var(--paper-dim);max-width:34ch}
   .ctas{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
   .cta-main{display:flex;flex-direction:column;align-items:center;gap:9px}
@@ -256,6 +284,7 @@
 <header class="hero">
   <div class="hero-glow" id="glow"></div>
   <div class="eq" id="eq"></div>
+  <div class="hero-visual"><div class="hero-visual-in reveal"><img src="./hero-visual.webp" alt="" width="1240" height="697" loading="eager"></div></div>
   <div class="wrap">
     <div class="lineage"><span>YT Separator</span><span class="arrow">→</span><span>underdaw</span></div>
     <div class="kicker"><span class="r"></span><span data-i18n="hero.kicker">무료 · 로컬 처리 · WINDOWS</span></div>
