@@ -17,12 +17,6 @@ export const STEM_ORDER_6 = ['vocals', 'guitar', 'bass', 'drums', 'piano', 'othe
 export function stemOrderFor(modelKey) {
   return modelKey === '6stem' ? STEM_ORDER_6 : STEM_ORDER;
 }
-/** 6-stem 모드에서는 other 아이콘을 stem_other_6.png 로 오버라이드 */
-export function stemIconFor(name, modelKey) {
-  if (name === 'other' && modelKey === '6stem') return './assets/stem-icons/stem_other_6.png';
-  return './assets/stem-icons/' + (STEM_META[name]?.icon || `stem_${name}.png`);
-}
-
 /** 파일 시스템 경로 → ytsep://f/... URL */
 export function toYtsepUrl(p) {
   const s = String(p).replace(/\\/g, '/');

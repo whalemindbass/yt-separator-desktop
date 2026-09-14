@@ -1,7 +1,7 @@
 'use strict';
 // Library view — 좌측 리스트 + 우측 플레이어
 
-import { Player, STEM_META, stemOrderFor, stemIconFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
+import { Player, STEM_META, stemOrderFor, loadStemFilesToBuffers, toYtsepUrl } from './player.js';
 import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
@@ -582,13 +582,12 @@ async function mountPlayer(item) {
     for (const name of stemOrderFor(item.modelKey || '4stem')) {
       if (!stems[name]) continue;
       const meta = STEM_META[name];
-      const iconUrl = stemIconFor(name, item.modelKey || '4stem');
       const row = document.createElement('div');
       row.className = 'mixer-track';
       row.dataset.stem = name;
       row.innerHTML = `
         <div class="mixer-track-name">
-          <img class="mixer-track-icon" src="${iconUrl}" alt="" style="--stem-color:${meta.color}" />
+          <span class="mixer-track-dot" style="background:${meta.color}"></span>
           <span>${meta.label}</span>
         </div>
         <button class="mixer-solo" data-stem="${name}" title="Solo — 이 트랙만 재생">S</button>
