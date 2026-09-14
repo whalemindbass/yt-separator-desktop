@@ -25,16 +25,18 @@ dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [SRC] });
 const { bootMain, expect, near, section, wait, finish } = require('./harness');
 
 // selector 엘리먼트 중심에서 pointerdown → (dx,dy) 만큼 이동 → pointerup 을 실제 이벤트로 쏜다.
-async function dragBy(js, selector, dx, dy) {
+// shiftKey:true 로 부르면 세밀 조정 모드(FINE_DRAG_RATIO)로 끈다.
+async function dragBy(js, selector, dx, dy, shiftKey) {
   const err = await js(`(() => {
     try {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return 'NO_EL';
       const r = el.getBoundingClientRect();
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: cx, clientY: cy, pointerId: 1 }));
-      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx + ${dx}, clientY: cy + ${dy}, pointerId: 1 }));
-      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: cx + ${dx}, clientY: cy + ${dy}, pointerId: 1 }));
+      const shift = ${JSON.stringify(!!shiftKey)};
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: cx, clientY: cy, pointerId: 1, shiftKey: shift }));
+      document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx + ${dx}, clientY: cy + ${dy}, pointerId: 1, shiftKey: shift }));
+      document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: cx + ${dx}, clientY: cy + ${dy}, pointerId: 1, shiftKey: shift }));
       return null;
     } catch (e) { return String(e && (e.stack || e.message || e)); }
   })()`);
@@ -53,11 +55,12 @@ async function dragBy(js, selector, dx, dy) {
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
   expect('PIP 박스가 미리보기에 나타남', await js(`!!document.querySelector('.ve-pip-box')`), true);
-  // 처음엔 w=h=100%(풀프레임)이라 이동 여지가 없다 — 먼저 숫자칸으로 축소.
+  // 처음엔 w=h=풀프레임(320x240)이라 이동 여지가 없다 — 먼저 숫자칸으로 축소.
+  // pip-w/h 는 이제 %가 아니라 픽셀 — 30%는 320x240 기준 96x72.
   await js(`(() => {
-    document.getElementById('pip-w').value = 30;
+    document.getElementById('pip-w').value = 96;
     document.getElementById('pip-w').dispatchEvent(new Event('input', { bubbles: true }));
-    document.getElementById('pip-h').value = 30;
+    document.getElementById('pip-h').value = 72;
     document.getElementById('pip-h').dispatchEvent(new Event('input', { bubbles: true }));
   })(); true`);
   await wait(80);
@@ -129,6 +132,33 @@ async function dragBy(js, selector, dx, dy) {
   })()`);
   const { previewW: fiPreviewW, css: fiCss } = JSON.parse(fontInfo);
   near('미리보기 요소 폰트 크기도 실제로 커짐(배율 반영, 소스 320x240 기준)', fiCss, size1 * (fiPreviewW / W), 0.5);
+
+  section('4) Shift 세밀 조정 — 같은 드래그 거리라도 이동량이 훨씬 작아야 함');
+  // pip-x/y 는 %가 아니라 320x240(이 파일의 SRC 해상도) 기준 픽셀 — 다시 PIP 팝오버 연다.
+  await js(`document.querySelectorAll('.ve-lane .ve-pip')[0].click(); true`);
+  await wait(100);
+  await js(`(() => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('pip-x', 20); set('pip-y', 20); set('pip-w', 96); set('pip-h', 72);
+  })(); true`);
+  await wait(80);
+  const xNormal0 = Number(await js(`document.getElementById('pip-x').value`));
+  await dragBy(js, '.ve-pip-box', 60, 0, false);
+  await wait(80);
+  const xNormalAfter = Number(await js(`document.getElementById('pip-x').value`));
+  await js(`(() => {
+    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+    set('pip-x', 20); set('pip-y', 20);
+  })(); true`);
+  await wait(80);
+  const xFine0 = Number(await js(`document.getElementById('pip-x').value`));
+  await dragBy(js, '.ve-pip-box', 60, 0, true);
+  await wait(80);
+  const xFineAfter = Number(await js(`document.getElementById('pip-x').value`));
+  const normalDelta = xNormalAfter - xNormal0, fineDelta = xFineAfter - xFine0;
+  console.log(`  일반 드래그 이동량=${normalDelta}px, Shift 드래그 이동량=${fineDelta}px`);
+  expect('일반 드래그는 실제로 이동함', normalDelta > 5, true);
+  expect('Shift 드래그는 훨씬 적게 이동함(세밀 조정)', fineDelta > 0 && fineDelta < normalDelta * 0.3, true);
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

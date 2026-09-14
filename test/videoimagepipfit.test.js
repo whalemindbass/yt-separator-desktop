@@ -79,11 +79,12 @@ async function dragBy(js, selector, dx, dy) {
     lane.querySelector('.ve-pip').click();
   })(); true`);
   await wait(100);
+  // pip-x/y/w/h 는 이제 %가 아니라 320x240 해상도 기준 픽셀 — 75%→240, 100%→240, 12.5%→40.
   expect('팝오버 열림', await js(`!!document.querySelector('.ve-pip-pop')`), true);
-  expect('초기 폭 75%(풀프레임 100%가 아님)', await js(`document.getElementById('pip-w').value`), '75');
-  expect('초기 높이 100%', await js(`document.getElementById('pip-h').value`), '100');
-  expect('초기 가로 위치 ≈12.5%(레터박스 왼쪽 여백만큼)', await js(`document.getElementById('pip-x').value`), '13');
-  expect('초기 세로 위치 0%', await js(`document.getElementById('pip-y').value`), '0');
+  expect('초기 폭 240px(풀프레임 320px가 아님, 75%)', await js(`document.getElementById('pip-w').value`), '240');
+  expect('초기 높이 240px(풀프레임 그대로, 100%)', await js(`document.getElementById('pip-h').value`), '240');
+  expect('초기 가로 위치 40px(레터박스 왼쪽 여백만큼, 12.5%)', await js(`document.getElementById('pip-x').value`), '40');
+  expect('초기 세로 위치 0px', await js(`document.getElementById('pip-y').value`), '0');
   const boxStyle = JSON.parse(await js(`JSON.stringify((() => { const b = document.querySelector('.ve-pip-box'); return { left: b.style.left, width: b.style.width }; })())`));
   expect('상자 자체도 정확히 75% 폭으로 그려짐(반올림 없이)', boxStyle.width, '75%');
   expect('상자 왼쪽 위치도 정확히 12.5%', boxStyle.left, '12.5%');

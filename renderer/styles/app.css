@@ -2168,17 +2168,8 @@ body { display: flex; flex-direction: column; }
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
   transition: opacity .12s;
 }
-.mixer-track-icon {
-  width: 32px; height: 32px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 0 0 2px var(--stem-color, var(--border-mid));
-  transition: opacity .12s, box-shadow .12s;
-}
 .mixer-track.muted .mixer-track-name { color: var(--tx-4); }
-.mixer-track.muted .mixer-track-dot,
-.mixer-track.muted .mixer-track-icon { opacity: .35; box-shadow: 0 0 0 1px var(--border); }
+.mixer-track.muted .mixer-track-dot { opacity: .35; box-shadow: 0 0 0 1px var(--border); }
 .mixer-track.muted .mixer-val { color: var(--tx-4); }
 
 /* thumb color-coded per stem */
@@ -2236,7 +2227,7 @@ body { display: flex; flex-direction: column; }
 }
 /* Solo가 하나라도 켜져있는데 자기 자신이 solo가 아니면 트랙을 흐리게 (mute와 유사한 시각) */
 .mixer-tracks.has-solo .mixer-track:not(.soloed) .mixer-track-name { color: var(--tx-4); }
-.mixer-tracks.has-solo .mixer-track:not(.soloed) .mixer-track-icon { opacity: .35; box-shadow: 0 0 0 1px var(--border); }
+.mixer-tracks.has-solo .mixer-track:not(.soloed) .mixer-track-dot { opacity: .35; box-shadow: 0 0 0 1px var(--border); }
 .mixer-tracks.has-solo .mixer-track:not(.soloed) .mixer-val { color: var(--tx-4); }
 
 /* ── 커뮤니티 (네이티브) ─────────────────────────── */
@@ -2928,6 +2919,29 @@ body { display: flex; flex-direction: column; }
 .daw-fx-select { width: 100%; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--tx-1); font: 500 12px/1.3 var(--sans); outline: none; margin-bottom: 7px; }
 .daw-fx-add { width: 100%; padding: 9px; border: 1px dashed var(--border-mid); background: transparent; color: var(--tx-3); border-radius: 8px; font-size: 12px; cursor: pointer; }
 .daw-fx-add:disabled { opacity: .4; cursor: default; }
+
+/* 스템 속도 팝업 — 설정(라벨+숫자+%+시작 한 줄)과 처리중(진행바+취소) 두 화면을 같은
+   박스 안에서 바꿔 낀다. 라벨/숫자/% 는 왼쪽에 붙여 모으고, %뒤 margin-right:auto 로
+   시작 버튼만 오른쪽 끝으로 밀어낸다(다 떨어뜨리는 space-between 대신). */
+.daw-speed-modal { width: 400px; }
+.daw-speed-body { padding: 16px; }
+#stsp-setup, #stsp-progress { display: flex; flex-direction: column; gap: 8px; }
+.daw-speed-row { display: flex; align-items: center; gap: 6px; }
+.daw-speed-lab { font-size: 12.5px; color: var(--tx-2); flex: none; }
+.daw-speed-row input { width: 56px; flex: none; background: var(--input); border: 1px solid var(--border); border-radius: 6px; padding: 6px 4px; color: var(--tx-1); font: 600 13px var(--mono); text-align: center; outline: none; }
+.daw-speed-row input:focus { border-color: var(--accent); }
+.daw-speed-pct { font-size: 12.5px; color: var(--tx-3); flex: none; margin-right: auto; }
+.daw-speed-err { font-size: 11.5px; color: var(--danger); }
+.daw-speed-barwrap { height: 8px; border-radius: 4px; background: var(--elev); overflow: hidden; }
+.daw-speed-bar { height: 100%; width: 0%; background: var(--accent); transition: width .2s ease; }
+.daw-speed-status { font-size: 11.5px; color: var(--tx-3); min-height: 14px; }
+#stsp-start, #stsp-cancel { flex: none; height: 30px; padding: 0 14px; font-size: 12.5px; font-weight: 700; border-radius: 6px; cursor: pointer; }
+#stsp-cancel { align-self: flex-end; }   /* #stsp-progress 는 세로 배치라 오른쪽 끝으로 민다 */
+#stsp-start { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); }
+#stsp-start:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+#stsp-cancel { border: 1px solid var(--border-mid); background: transparent; color: var(--tx-2); }
+#stsp-cancel:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+#stsp-cancel:disabled { opacity: .5; cursor: default; }
 
 .daw-tracks { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
 /* 맨 아래 트랙 리사이즈 여유 빈칸 (컨트롤 컬럼 이어짐) */
@@ -4503,7 +4517,16 @@ body { background: var(--bg) !important; }
    (.ve-fadeh, z:3)·트림(.ve-trim, z:2) 같은 값들이 이 컨텍스트에 갇혀서, 트랙 헤드
    (.ve-head, z:2, 이 밖의 형제) 위로 새어 보이지 않는다. 클립끼리의 내부 순서(트림/페이드
    손잡이)는 그대로 유지된다 — 그 안에서만 비교되니까. */
-.ve-area { position: absolute; inset: 0; z-index: 0; background: var(--timeline); border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent); }
+/* 상단 눈금자(ve-ruler)의 초 단위 눈금을 트랙 배경에도 그대로 비친다(스튜디오
+   .daw-area 와 같은 패턴) — layout() 이 눈금 간격(px)을 --ve-grid 로 맞춰 준다.
+   background-color 를 shorthand(background) 로 덮으면 이 background-image 까지
+   같이 지워지니, 트랙 종류별 색 오버라이드는 background-color 만 쓴다(아래 audio/text). */
+.ve-area {
+  position: absolute; inset: 0; z-index: 0; background-color: var(--timeline);
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--tx-1) 8%, transparent) 0 1px, transparent 1px);
+  background-size: var(--ve-grid, 60px) 100%;
+  border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 8%, transparent);
+}
 .ve-lane-resize { position: absolute; left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; z-index: 4; }
 
 .ve-clip {
@@ -4572,7 +4595,7 @@ body { background: var(--bg) !important; }
 .ve-fadeh:hover::after { background: var(--tx-1); }
 .ve-fadeh.l { transform: translateX(-50%); } .ve-fadeh.r { transform: translateX(50%); }
 .ve-clip.audio { background: color-mix(in srgb, var(--c, var(--accent)) 20%, var(--sunken)); }
-.ve-lane.audio .ve-area { background: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
+.ve-lane.audio .ve-area { background-color: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
 
 .ve-pip-pop {
   position: fixed; z-index: 200; background: var(--elev); border: 1px solid var(--border-mid); border-radius: 9px;
@@ -4602,7 +4625,7 @@ body { background: var(--bg) !important; }
 .ve-snap-guide.h { left: 0; right: 0; height: 1px; margin-top: -0.5px; }
 
 /* ── 텍스트/타이틀 트랙 ─────────────────────────────── */
-.ve-lane.text .ve-area { background: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
+.ve-lane.text .ve-area { background-color: color-mix(in srgb, var(--c, var(--accent)) 6%, var(--timeline)); }
 .ve-clip.text {
   background: color-mix(in srgb, var(--c, var(--accent)) 24%, var(--sunken));
   display: flex; align-items: center; padding: 0 8px;
@@ -4626,7 +4649,9 @@ body { background: var(--bg) !important; }
 }
 /* 반투명 검정 배경은 기본이 아니다(요청) — 팝오버에서 켜야 나온다. main.js 의
    drawtext box=1 도 이 상태와 짝을 맞춰 같이 켜진다. */
-.ve-text-item.bg { background: rgba(0, 0, 0, .45); padding: .15em .4em; border-radius: 3px; }
+/* border-radius 없음 — 내보내기(main.js drawtext:box=1)는 둥근 모서리를 못 만든다(옵션
+   자체가 없다). 미리보기만 둥글면 실제 영상과 달라 보여서 각지게 맞춘다. */
+.ve-text-item.bg { background: rgba(0, 0, 0, .45); padding: .15em .4em; }
 .ve-text-item.sel { outline: 1.5px dashed var(--accent); outline-offset: 3px; }
 .ve-text-item-rs {
   position: absolute; right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 50%;

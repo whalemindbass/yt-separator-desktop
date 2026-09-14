@@ -61,9 +61,11 @@ const isYellow = (p) => p.r > 150 && p.g > 150 && p.b < 120;
   await js(`document.querySelector('.ve-lane .ve-pip')?.click(); true`);
   await wait(100);
   expect('PIP 팝오버 열림', await js(`!!document.getElementById('pip-x')`), true);
+  // pip-x/y/w/h 는 이제 %가 아니라 실제 해상도(320x240) 기준 픽셀 — x=-50%,y=-50%,
+  // w=200%,h=200% 와 같은 자리(중심 고정 2배 확대)를 픽셀로 그대로 환산해 넣는다.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', -50); set('pip-y', -50); set('pip-w', 200); set('pip-h', 200);
+    set('pip-x', -160); set('pip-y', -120); set('pip-w', 640); set('pip-h', 480);
   })(); true`);
   await wait(100);
   await js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { clientX: 2, clientY: 2, bubbles: true })); true`);   // 팝오버 닫기

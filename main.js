@@ -1448,40 +1448,77 @@ ipcMain.handle('video:export', async (event, payload) => {
   }
   // 세그먼트에 텍스트가 있으면 그 세그먼트의 최종 [vN] 라벨 위에 drawtext 를 하나 더
   // 쌓고, 새 라벨을 돌려준다(같은 라벨을 두 번 정의할 수 없어서) — 없으면 원래 라벨 그대로.
-  function textFrag(texts, w, h, srcLabel, i) {
+  // 배경 상자 모서리를 둥글게(bgRadius>0) 하는 옵션은 drawtext 에 없다 — 그래서 그
+  // 경우만 별도로, 미리 둥근 모서리로 깎아 둔 반투명 사각형을 먼저 overlay 로 얹고
+  // 그 위에 box 없이 텍스트만 그린다(렌더러가 캔버스로 잰 근사 크기 t.boxW/boxH 사용 —
+  // main.js 는 drawtext 내부의 정확한 text_w/text_h 를 밖에서 알 방법이 없다). 텍스트
+  // 자체의 위치/크기는 이 근사와 무관하게 여전히 drawtext 가 정확히 그린다 — 어긋날
+  // 수 있는 건 배경 상자 크기/위치뿐이고, 그 정도는 둥근 모서리 장식에선 안 티난다.
+  let _boxSeq = 0;
+  function roundedBoxLabel(bw, bh, radius, dur) {
+    const r = Math.max(0, Math.min(radius, Math.floor(Math.min(bw, bh) / 2)));
+    args.push('-f', 'lavfi', '-i', `color=black:size=${bw}x${bh}:rate=30`);
+    const boxIn = nextInput++;
+    const label = `boxfx${_boxSeq++}`;
+    // if(cond,then,else)/hypot() — ffmpeg eval 내장 함수. 코너 4개 각각 "그 코너의
+    // r×r 정사각 영역 안"이면 중심(r,r 등)까지 거리(hypot)가 r 이하일 때만 보이게,
+    // 아니면(안쪽 사각형/코너 정사각 밖) 그대로 보이게 — 결과적으로 둥근 사각형 알파
+    // 마스크. 115 ≈ 0.45*255(box=1 때 쓰던 boxcolor 알파와 같은 진하기).
+    const cornerNear = (cx, cy) => `if(lte(hypot(${cx}\\,${cy})\\,${r})\\,115\\,0)`;
+    const expr = `if(lt(X\\,${r})*lt(Y\\,${r})\\,${cornerNear(`${r}-X`, `${r}-Y`)}\\,` +
+      `if(gt(X\\,${bw - 1 - r})*lt(Y\\,${r})\\,${cornerNear(`X-${bw - 1 - r}`, `${r}-Y`)}\\,` +
+      `if(lt(X\\,${r})*gt(Y\\,${bh - 1 - r})\\,${cornerNear(`${r}-X`, `Y-${bh - 1 - r}`)}\\,` +
+      `if(gt(X\\,${bw - 1 - r})*gt(Y\\,${bh - 1 - r})\\,${cornerNear(`X-${bw - 1 - r}`, `Y-${bh - 1 - r}`)}\\,115))))`;
+    parts.push(`[${boxIn}:v]trim=duration=${fsec(Math.max(dur || 0, 0.04))},setpts=PTS-STARTPTS,format=rgba,geq=r=0:g=0:b=0:a='${expr}'[${label}]`);
+    return label;
+  }
+  function textFrag(texts, w, h, srcLabel, i, dur) {
     // 내용이 빈 캡션은 걸러낸다 — drawtext 의 textfile 이 빈 파일을 가리키면 "could not be
     // read or is empty" 로 필터그래프 전체가 죽는다(실측으로 확인).
     const active = (texts || []).filter(t => (t.content || '').trim());
     if (!active.length) return srcLabel;
-    const dstLabel = `${srcLabel}_txt`;
     // PIP 와 같은 자유도 — 프레임 테두리에 자리를 묶지 않는다, 밖으로 나간 만큼은
     // 그냥 잘려 보인다(drawtext 가 프레임 밖 좌표를 알아서 클리핑, PIP overlay 때와
     // 동일하게 실측 확인됨). 폭이 줄어들지 않는 건 이 위치 계산과는 별개 문제였다 —
     // 렌더러 쪽 CSS shrink-to-fit 버그(positionTextItem 주석 참고)가 원인이었고 거긴
     // 이미 고쳐져 있다. 여긴 그냥 중심 좌표 그대로.
-    const stages = active.map((t) => {
+    let cur = srcLabel;
+    active.forEach((t, ti) => {
       const file = writeCaptionFile(t.content);
       const fontFile = ensureFontCopied(t.fontKey) || 'malgun.ttf';
       const size = Math.max(1, Math.round(t.size || 42));
       const x = `w*${(t.x ?? 0.5).toFixed(4)}-text_w/2`;
       const y = `h*${(t.y ?? 0.85).toFixed(4)}-text_h/2`;
-      // 반투명 검정 배경(box)은 기본이 아니다 — 렌더러 팝오버에서 켠 클립만 넣는다.
-      // 패딩은 미리보기(.ve-text-item.bg, padding: .15em .4em — 1em = 폰트 크기)와 맞춘다.
-      // 고정 8px 이던 예전 값은 큰 글자에서 미리보기보다 훨씬 좁아 보였다("padding 살짝
-      // 부족" 신고). boxborderw 는 top|right|bottom|left 네 값을 받는다(실측 확인 — pad
-      // 필터와 같은 순서). 모서리를 둥글게(border-radius) 하는 옵션은 drawtext 에 없어서
-      // 여긴 반영 못 한다(미리보기만 3px 둥근 채로 남음 — 맞추려면 텍스트를 이미지로
-      // 미리 그려 오버레이하는 별도 작업이 필요하다).
-      const padV = Math.round(size * 0.15), padH = Math.round(size * 0.4);
-      const box = t.bg ? `:box=1:boxcolor=#000000@0.45:boxborderw=${padV}|${padH}|${padV}|${padH}` : '';
-      // text_align 기본값은 왼쪽 정렬 — 미리보기(.ve-text-item, text-align: center)는
-      // 여러 줄 자막의 짧은 줄도 가운데로 맞추는데, drawtext 는 x= 로 전체 블록만
-      // 가운데에 두고 그 안 각 줄은 왼쪽 정렬로 남겨서 여러 줄일 때만 어긋나 보였다
-      // ("자막 정렬이 미리보기에선 가운데인데 영상에선 좌측" 신고).
-      return `drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:text_align=center:x=${x}:y=${y}${box}`;
+      const nextLabel = `${srcLabel}_txt${ti}`;
+      if (t.bg && t.bgRadius > 0 && t.boxW && t.boxH) {
+        const boxLabel = roundedBoxLabel(Math.max(2, Math.round(t.boxW)), Math.max(2, Math.round(t.boxH)), t.bgRadius, dur);
+        // overlay 필터의 x=/y= 식에서 소문자 w/h 는 "얹는 쪽(오버레이 입력)" 자기 크기를
+        // 가리킨다(drawtext 의 w/h 와 정반대 관례라 헷갈리기 쉽다 — 실측으로 잡음: main_w
+        // 대신 w 를 쓰면 상자가 프레임 정중앙이 아니라 좌상단 쪽으로 밀려 그려졌다).
+        // 전체 프레임 기준으로 배치하려면 main_w/main_h 를 써야 한다.
+        const ox = `main_w*${(t.x ?? 0.5).toFixed(4)}-overlay_w/2`;
+        const oy = `main_h*${(t.y ?? 0.85).toFixed(4)}-overlay_h/2`;
+        const boxedLabel = `${srcLabel}_boxed${ti}`;
+        parts.push(`[${cur}][${boxLabel}]overlay=x=${ox}:y=${oy}[${boxedLabel}]`);
+        parts.push(`[${boxedLabel}]drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:text_align=center:x=${x}:y=${y}[${nextLabel}]`);
+      } else {
+        // 반투명 검정 배경(box)은 기본이 아니다 — 렌더러 팝오버에서 켠 클립만 넣는다.
+        // 패딩은 미리보기(.ve-text-item.bg, padding: .15em .4em — 1em = 폰트 크기)와 맞춘다.
+        // 고정 8px 이던 예전 값은 큰 글자에서 미리보기보다 훨씬 좁아 보였다("padding 살짝
+        // 부족" 신고). boxborderw 는 top|right|bottom|left 네 값을 받는다(실측 확인 — pad
+        // 필터와 같은 순서). 곡률(bgRadius)이 0 이면 drawtext 자체 box=1(자동 크기맞춤,
+        // 오차 없음)로 예전처럼 그대로 처리한다.
+        const padV = Math.round(size * 0.15), padH = Math.round(size * 0.4);
+        const box = t.bg ? `:box=1:boxcolor=#000000@0.45:boxborderw=${padV}|${padH}|${padV}|${padH}` : '';
+        // text_align 기본값은 왼쪽 정렬 — 미리보기(.ve-text-item, text-align: center)는
+        // 여러 줄 자막의 짧은 줄도 가운데로 맞추는데, drawtext 는 x= 로 전체 블록만
+        // 가운데에 두고 그 안 각 줄은 왼쪽 정렬로 남겨서 여러 줄일 때만 어긋나 보였다
+        // ("자막 정렬이 미리보기에선 가운데인데 영상에선 좌측" 신고).
+        parts.push(`[${cur}]drawtext=fontfile=${fontFile}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=${t.color || '#ffffff'}:text_align=center:x=${x}:y=${y}${box}[${nextLabel}]`);
+      }
+      cur = nextLabel;
     });
-    parts.push(`[${srcLabel}]${stages.join(',')}[${dstLabel}]`);
-    return dstLabel;
+    return cur;
   }
 
   const allFiles = new Set();
@@ -1611,11 +1648,18 @@ ipcMain.handle('video:export', async (event, payload) => {
   // "내보내기 실패, spawn ENAMETOOLONG" 신고를 고치며 만든 대량-클립 테스트에서 처음
   // 드러났다). 고정 소수점(toFixed) 은 지수 표기를 절대 안 쓰니 이걸로 전부 통일한다.
   const fsec = (n) => (Math.abs(n) < 1e-6 ? 0 : n).toFixed(6);
-  function fadeFrag(kind, obj) {
+  // alpha:true 로 부르면(PIP/트랙 겹침 레이어) 밝기가 아니라 투명도를 페이드한다 — 그
+  // 레이어 밑에 다른 트랙 화면이 깔려 있어서(overlay 로 합성), 밝기를 검게 죽이면
+  // 미리보기(진짜 투명도로 밑이 비쳐 보임)와 달리 불투명한 검은 사각형이 덮인 것처럼
+  // 보인다(실사용 확인 — PIP 켜고 페이드 걸었을 때만 티가 난다, 화면 전체를 채우는 클립은
+  // 밑에 아무것도 없어서 검게 죽으나 투명해지나 어차피 배경(#ve-preview 도 검정)과
+  // 똑같아 보여 지금까지 문제가 없었다).
+  function fadeFrag(kind, obj, opts) {
     const name = kind === 'v' ? 'fade' : 'afade';
+    const alpha = opts && opts.alpha ? ':alpha=1' : '';
     const fs = [];
-    if (obj.fadeInD) fs.push(`${name}=t=in:st=${obj.fadeInSt.toFixed(3)}:d=${obj.fadeInD.toFixed(3)}`);
-    if (obj.fadeOutD) fs.push(`${name}=t=out:st=${obj.fadeOutSt.toFixed(3)}:d=${obj.fadeOutD.toFixed(3)}`);
+    if (obj.fadeInD) fs.push(`${name}=t=in:st=${obj.fadeInSt.toFixed(3)}:d=${obj.fadeInD.toFixed(3)}${alpha}`);
+    if (obj.fadeOutD) fs.push(`${name}=t=out:st=${obj.fadeOutSt.toFixed(3)}:d=${obj.fadeOutD.toFixed(3)}${alpha}`);
     return fs.length ? ',' + fs.join(',') : '';
   }
   // atempo 는 필터 하나당 0.5~2.0 배만 받는다 — 그 밖(우리 UI 는 0.25~4x 허용)이면 2.0 또는
@@ -1738,7 +1782,7 @@ ipcMain.handle('video:export', async (event, payload) => {
         ? `[${ensureSilent()}:a]atrim=duration=${dur},asetpts=PTS-STARTPTS${SILENT_AFORMAT}[xab${i}]`
         : `[${ix.b}:a]atrim=start=${fsec(s.bIn)}:duration=${(s.dur * speedB).toFixed(3)}${atempoChain(speedB)},asetpts=PTS-STARTPTS[xab${i}]`);
       parts.push(`[xaa${i}][xab${i}]acrossfade=d=${dur}[a${i}]`);
-      vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i);
+      vLabels[i] = textFrag(s.texts, xw, xh, `v${i}`, i, s.dur);
     } else if (s.layers) {
       // 트랙 겹침(PIP) — 검은 배경부터 시작해 아래→위 순서로 overlay 를 쌓는다.
       // s.layers 는 위(화면 앞)→아래 순서로 와 있으니 뒤집어서 처리.
@@ -1758,7 +1802,19 @@ ipcMain.handle('video:export', async (event, payload) => {
         // 그 결과에서 이 세그먼트 몫(trim)만 떼어 페이드·scale 만 새로 적용한다.
         const preLabel = layerPreQueues.get(layerPreKey(layer)).shift();
         const speed = layer.speed || 1;
-        parts.push(`[${preLabel}]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${fadeFrag('v', layer)},setpts=(PTS-STARTPTS)/${speed},scale=${lw}:${lh}[${raw}]`);
+        // 이 레이어는 뒤에서(overlay) 다른 트랙 위에 얹힌다 — 페이드는 알파(투명도)로
+        // 걸어야 아래 트랙이 비쳐 보인다(밝기 페이드면 overlay 가 그 화소를 그대로
+        // 불투명하게 붙여 넣어 검은 사각형처럼 보인다). 알파 채널을 쓰려면 fade 필터
+        // 전에 알파 있는 픽셀 포맷으로 바꿔야 한다 — 페이드가 없는 레이어까지 매번
+        // 바꿀 필요는 없어서 실제로 페이드가 걸린 레이어에서만 붙인다.
+        // 이 레이어는 뒤에서(overlay) 다른 트랙 위에 얹힌다 — 페이드는 알파(투명도)로
+        // 걸어야 아래 트랙이 비쳐 보인다(밝기 페이드면 overlay 가 그 화소를 그대로
+        // 불투명하게 붙여 넣어 검은 사각형처럼 보인다). 알파 채널을 쓰려면 fade 필터
+        // 전에 알파 있는 픽셀 포맷으로 바꿔야 한다 — 페이드가 없는 레이어까지 매번
+        // 바꿀 필요는 없어서 실제로 페이드가 걸린 레이어에서만 붙인다.
+        const layerHasFade = layer.fadeInD || layer.fadeOutD;
+        const fadePre = layerHasFade ? ',format=yuva420p' : '';
+        parts.push(`[${preLabel}]trim=start=${fsec(layer.start)}:end=${fsec(layer.end)}${fadePre}${fadeFrag('v', layer, { alpha: true })},setpts=(PTS-STARTPTS)/${speed},scale=${lw}:${lh}[${raw}]`);
         const next = `v${i}_s${li}`;
         // 추적 키프레임 클립(layer.tStart/tEnd) — 세그먼트 양끝 위치를 overlay 필터의
         // x=/y= 표현식으로 넘겨서 ffmpeg 자체 't'(초 단위 프레임 타임스탬프, 이 레이어도
@@ -1784,7 +1840,7 @@ ipcMain.handle('video:export', async (event, payload) => {
       });
       parts.push(`[${base}]null[v${i}]`);
       buildAudio(s.audioSources, s.dur, `a${i}`);
-      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i, s.dur);
     } else if (s.isAudioOnly) {
       // 영상 트랙이 없는 구간(mp3/wav 단독) — 공용 검은 화면을 이 구간 길이만큼 잘라 쓴다.
       const w = s.refW || 1280, h = s.refH || 720;
@@ -1792,13 +1848,13 @@ ipcMain.handle('video:export', async (event, payload) => {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       parts.push(`[${bIdx}:v]trim=duration=${dur.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
-      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i, dur);
     } else {
       const dur = s.dur != null ? s.dur : (s.end - s.start);
       const w = s.refW || 1280, h = s.refH || 720;
       parts.push(`[${inputIndexFor(s.file)}:v]trim=start=${fsec(s.start)}:end=${fsec(s.end)}${hdrFrag(s.hdr)}${fadeFrag('v', s)},setpts=(PTS-STARTPTS)/${s.speed || 1}${flipFrag(s.flipH, s.flipV)}${chainFrag(s.effects)},${scalePad(w, h)}[v${i}]`);
       buildAudio(s.audioSources, dur, `a${i}`);
-      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i);
+      vLabels[i] = textFrag(s.texts, w, h, `v${i}`, i, dur);
     }
   });
   const concatIn = segments.map((_, i) => `[${vLabels[i]}][a${i}]`).join('');

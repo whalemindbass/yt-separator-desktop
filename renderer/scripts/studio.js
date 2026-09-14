@@ -14,6 +14,7 @@ import { StaffView } from './staffview.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
 import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
 import { getPresets, setPresets, upsertPreset } from './fx-presets.js';
+import { timeStretchStereo } from './pitch-shift.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -37,6 +38,18 @@ let _wired = false, _started = false;
 // 닫을 때 저장하라고 뜬다. 그다음부터 오는 recTracks 는 추가·삭제 같은 실제 편집이다.
 let _recTracksBaseline = false;
 let _sr = 44100, _dur = 0, _pxPerSec = 12;
+// 스템 일괄 재생 속도 — _baseDur(비디오 metadata 로 잰 원본 길이)를 그대로 두고, 실제로
+// 쓰는 _dur 은 항상 _baseDur/_speed 로 다시 계산한다(느리게 하면 클립 길이도 늘어나야
+// 한다는 요청 — 배속(engine playbackRate)이 아니라 진짜 타임스트레치라 파형·룰러 폭
+// 자체가 늘어난다). _speedBase 는 처음 1배가 아닌 값으로 바꾸는 순간의 BPM/그리드를
+// 얼려 둔 것 — 이후 몇 번을 다시 바꾸든 항상 이 기준에서 배율만 다시 계산해서, 반올림
+// 오차가 계속 누적되지 않는다.
+let _speed = 1, _speedBase = null, _speedBusy = false, _baseDur = 0, _speedCancelRequested = false;
+// 마지막으로 실제로 늘인/줄인 스템 파일 경로(stemsDir 에 저장돼 계속 남는다) — 프로젝트에
+// 같이 저장해 두면, 다음에 열 때 다시 늘일 필요 없이 이 파일들을 그대로 다시 불러오기만
+// 하면 된다("불러오고 또 처리하느라 시간 걸린다" 신고 — 재처리 없이 즉시 복원하게 고침).
+let _speedStemPaths = null;
+function recomputeDur() { _dur = _baseDur / (_speed || 1); }
 
 // 시간은 초로 들고 다니고, 엔진 경계에서만 샘플로 바꾼다.
 //
@@ -1625,7 +1638,12 @@ function syncVideo(t) {
   const v = $('daw-video'); if (!v || !isFinite(v.duration)) return;
   const vt = t - _stemOffset;
   if (vt < 0) { if (!v.paused) v.pause(); if (Math.abs(v.currentTime) > 0.05) v.currentTime = 0; return; }
-  const target = Math.min(vt, v.duration);
+  // vt 는 스템 타임라인 초(_speed!=1 이면 실제로 늘어난/줄어든 길이) — 비디오 자신의
+  // 원본 길이 기준으로 보려면 배속을 다시 곱해야 한다(느려졌으면 vt 가 더 크게 흐르니까
+  // 그만큼 곱해서 도로 짧은 원본 시간으로 되돌린다). playbackRate 도 같이 맞춰야 이
+  // currentTime 보정 없이도 계속 같은 속도로 따라간다.
+  if (Math.abs(v.playbackRate - _speed) > 0.001) v.playbackRate = _speed;
+  const target = Math.min(vt * _speed, v.duration);
   if (Math.abs(v.currentTime - target) > 0.15) v.currentTime = target;
   if (_playing && v.paused && vt <= v.duration) v.play().catch(() => {});
 }
@@ -1718,13 +1736,20 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
 // 곡 닫기 버튼 — 라이브러리 스템 곡을 불러온 경우에만 활성화
 function updateCloseSongBtn() {
   const el = $('st-close-song'); if (el) el.disabled = !(_started && _stemPaths);
+  const sp = $('st-speed-btn');
+  if (sp) { sp.hidden = !(_started && _stemPaths); updateSpeedBtnLabel(); }
+}
+function updateSpeedBtnLabel() {
+  const sp = $('st-speed-btn'); if (!sp) return;
+  const pct = Math.round((_speed || 1) * 100);
+  sp.textContent = pct === 100 ? tr('studio.h.speedBtn') : tr('studio.h.speedBtnPct', { pct });
 }
 
 // ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
@@ -1760,7 +1785,8 @@ async function pickImportAudio() {
 // 불러온 스템 곡 닫기(되돌리기) — 스템·영상 비움, 내 녹음/임포트 트랙은 유지
 function closeSong() {
   api.engine.loadStems([]);
-  _tracks = []; _stemOffset = 0; _dur = 0; _songKey = null; _auto = new Map();
+  _tracks = []; _stemOffset = 0; _dur = 0; _baseDur = 0; _speed = 1; _speedBase = null; _speedStemPaths = null; _songKey = null; _auto = new Map();
+  updateSpeedBtnLabel();
   resetStemGroupGain();
   _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0; _modelKey = null; _libraryItemId = null;
   const v = $('daw-video'); if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch {} }
@@ -1788,6 +1814,8 @@ async function loadSong(item, opts) {
   _modelKey = it.modelKey || '4stem';
   _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
   _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
+  _speed = 1; _speedBase = null; _speedStemPaths = null; _baseDur = 0;
+  updateSpeedBtnLabel();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
   resetStemGroupGain();
 
@@ -1888,6 +1916,167 @@ async function detectSongBpm(stems, sampleRate) {
     updateMetro();
     flashTake(tr('studio.p.bpmDetected', { bpm: _bpm }));
   } catch (e) { /* 감지 실패 — 수동 BPM 유지 */ }
+}
+
+// ── 스템 일괄 속도 조절 ──────────────────────────────
+// 재생 배율(video.playbackRate 같은 것)이 아니라 진짜 타임스트레치다 — signalsmith-stretch 로
+// 모든 스템을 오프라인으로 다시 렌더링해서(음정은 유지) 파일 자체를 늘리거나 줄이고, 그
+// 결과를 stem:saveStems 로 디스크에 새로 써서 엔진에 다시 물린다(엔진은 파일 경로만 받지
+// PCM 을 직접 못 받는다 — pitch-shift.js 의 기존 오프라인 처리와 같은 라이브러리, 같은
+// OfflineAudioContext 패턴을 재사용). 항상 원본(_stemPaths) 에서부터 다시 늘린다 — 이미
+// 늘려 놓은 결과를 또 늘리면 매번 음질이 깎이고 오차도 쌓인다.
+//
+// 녹음된 클립(take)이 있으면 막는다 — take 의 시작/길이는 절대 초 단위로 저장돼 있는데,
+// 속도를 바꾸면 그 뒤로 스템 타임라인 전체가 늘거나 줄어서 이미 녹음해 둔 클립들이
+// 엉뚱한 자리에서 울리게 된다. 되돌릴 방법(클립까지 같이 재배치)이 아직 없어서, 지금은
+// "녹음하기 전에만 속도를 정한다"로 범위를 좁힌다.
+// 프로젝트를 열 때, 저장해 둔 pathsObj(이전에 늘인 스템 파일들)가 아직 디스크에 남아 있으면
+// 다시 늘이지 않고 그대로 불러오기만 한다 — applySpeed() 의 "저장 이후" 부분만 떼어낸
+// 셈이지만, BPM/그리드/beats 는 applyProject() 가 이 함수를 부르기 전에 이미 저장된(그
+// 배속 기준으로 스케일된) 값 그대로 세팅해 놨으므로 여기서 따로 다시 계산하지 않는다.
+async function restoreSpeedFromCache(pathsObj, factor) {
+  try {
+    const paths = _tracks.map(t => pathsObj[t.key]).filter(Boolean);
+    if (paths.length !== _tracks.length) return false;   // 트랙 구성이 바뀌었으면(스템 종류 등) 그냥 재처리로
+    const { stems } = await loadStemFilesToBuffers(pathsObj);
+    api.engine.loadStems(paths);
+    _tracks.forEach(t => api.engine.track(t.engineIndex, { gain: stemGainOut(t), pan: t.pan || 0, mute: !!t.mute, solo: !!t.solo, sends: t.sends || [0, 0] }));
+    renderWaves(stems);
+    _speedStemPaths = pathsObj;
+    _speed = factor;
+    recomputeDur();
+    const v = $('daw-video'); if (v) v.playbackRate = _speed;
+    layout();
+    updateSpeedBtnLabel();
+    return true;
+  } catch { return false; }
+}
+// opts.onProgress(doneSteps, totalSteps, label) — 스템 하나 끝낼 때마다 호출(+ 저장 단계 1개
+// 더). opts.isCancelled() — 매 안전 지점(스템 시작 전/저장 직전)마다 확인해서, true 면 그
+// 순간까지 만든 결과를 전부 버리고 이전 상태 그대로 둔 채 'cancelled' 를 돌려준다(엔진/화면
+// 어느 것도 안 건드렸으니 취소해도 항상 처리 시작 전 상태 그대로). 반환값: 'ok'|'cancelled'|'error'.
+async function applySpeed(factor, opts = {}) {
+  factor = Math.max(0.25, Math.min(2, factor || 1));
+  if (!_stemPaths) return 'error';
+  if (_takes.length && !opts.fromLoad) { flashTake(tr('studio.m.speedBlockedByTakes')); return 'error'; }
+  if (_speedBusy) return 'error';
+  _speedBusy = true;
+  const isCancelled = opts.isCancelled || (() => false);
+  const report = (i, total, label) => { if (opts.onProgress) opts.onProgress(i, total, label); };
+  try {
+    // 처음으로 1배를 벗어나는 순간의 BPM/그리드를 기준으로 얼려 둔다 — 그 뒤로 배속을
+    // 몇 번을 바꾸든 항상 이 기준에서 다시 계산해서 반올림 오차가 안 쌓인다.
+    if (!_speedBase) _speedBase = { bpm: _bpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats.slice() };
+    const { stems, sampleRate } = await loadStemFilesToBuffers(_stemPaths);
+    if (isCancelled()) return 'cancelled';
+    const names = Object.keys(stems);
+    const total = names.length + 1;   // +1 = 저장·엔진 재적용 단계
+    const stretched = {};
+    for (let i = 0; i < names.length; i++) {
+      if (isCancelled()) return 'cancelled';
+      const name = names[i];
+      report(i, total, tr('studio.p.speedStretching', { name: stemLabel(name), i: i + 1, n: names.length }));
+      const ch = stems[name];
+      const r = await timeStretchStereo(ch[0], ch[1], sampleRate, factor);
+      stretched[name] = [r.L, r.R];
+    }
+    if (isCancelled()) return 'cancelled';
+    report(names.length, total, tr('studio.p.speedSaving'));
+    const save = await api.stem.saveStems(stretched, `speedtmp_${Date.now()}`, sampleRate);
+    if (!save || !save.ok) throw new Error((save && save.error) || 'saveStems failed');
+    if (isCancelled()) return 'cancelled';
+    // 이전에 늘여 둔 파일이 있으면 여기서 치운다 — 안 그러면 속도 바꿀 때마다 늘인 파일이
+    // stemsDir 에 계속 쌓인다(프로젝트에 저장해서 다음에 열 때 재사용하려고 남기는 거라
+    // 지울 수가 없었는데, "이번" 걸 새로 남기니 "저번" 건 이제 필요 없다).
+    if (_speedStemPaths) { for (const p of Object.values(_speedStemPaths)) api.library.deleteOrphan(p).catch(() => {}); }
+    _speedStemPaths = save.stemPaths;
+    const paths = _tracks.map(t => save.stemPaths[t.key]).filter(Boolean);
+    api.engine.loadStems(paths);
+    // loadStems 는 엔진 쪽 트랙을 기본값으로 되돌린다 — 볼륨/팬/뮤트/솔로/센드를 다시 밀어 넣는다.
+    _tracks.forEach(t => api.engine.track(t.engineIndex, { gain: stemGainOut(t), pan: t.pan || 0, mute: !!t.mute, solo: !!t.solo, sends: t.sends || [0, 0] }));
+    renderWaves(stretched);
+    _speed = factor;
+    recomputeDur();
+    _bpm = Math.max(20, Math.min(300, Math.round(_speedBase.bpm * factor)));
+    _beatInterval = _speedBase.beatInterval > 0 ? _speedBase.beatInterval / factor : 0;
+    _gridOffset = _speedBase.gridOffset / factor;
+    _beats = _speedBase.beats.map(t => t / factor);
+    const bpmEl = $('st-bpm'); if (bpmEl) bpmEl.value = _bpm;
+    updateMetro();
+    _exportRange = null; renderExportRange();
+    const v = $('daw-video'); if (v) v.playbackRate = _speed;
+    layout();
+    updateSpeedBtnLabel();
+    report(total, total, tr('studio.p.speedApplied', { pct: Math.round(factor * 100) }));
+    if (!opts.fromLoad) { markDirty(); flashTake(tr('studio.p.speedApplied', { pct: Math.round(factor * 100) })); }
+    return 'ok';
+  } catch (e) {
+    flashTake(tr('studio.m.speedFail', { err: (e && e.message) || e }));
+    return 'error';
+  } finally { _speedBusy = false; }
+}
+// 단축키 버튼 왼쪽의 "스템 속도" 버튼 — 팝업(daw-modal, 전체를 덮어서 처리 중엔 다른 조작이
+// 안 되게 막는다)에서 속도를 먼저 정하고 "처리 시작"을 눌러야 실제로 돈다(숫자 스핀 화살표
+// 누를 때마다 매번 다시 늘이던 예전 방식은 원하지 않는 값에서도 무겁게 여러 번 돎).
+function openSpeedModal() {
+  if (!_stemPaths) return;
+  const host = $('daw-modal');
+  const pct0 = Math.round((_speed || 1) * 100);
+  host.innerHTML = `<div class="daw-modal-box daw-speed-modal">
+    <div class="daw-modal-h"><span>${tr('studio.h.speedBtn')}</span><button class="x" id="stsp-close">✕</button></div>
+    <div class="daw-speed-body">
+      <div id="stsp-setup">
+        <div class="daw-speed-row">
+          <span class="daw-speed-lab">${tr('studio.d.speedLabel')}</span>
+          <input type="number" id="stsp-val" min="50" max="150" step="5" value="${pct0}">
+          <span class="daw-speed-pct">%</span>
+          <button id="stsp-start" class="btn pri">${tr('studio.d.speedStart')}</button>
+        </div>
+        <div id="stsp-err" class="daw-speed-err" hidden></div>
+      </div>
+      <div id="stsp-progress" hidden>
+        <div class="daw-speed-barwrap"><div id="stsp-bar" class="daw-speed-bar"></div></div>
+        <div id="stsp-status" class="daw-speed-status"></div>
+        <button id="stsp-cancel" class="btn">${tr('studio.d.speedCancel')}</button>
+      </div>
+    </div>
+  </div>`;
+  host.hidden = false;
+  const close = () => { host.hidden = true; };
+  // onclick(할당) 을 쓴다 — addEventListener 로 매번 열 때마다 새로 걸면(#daw-modal 자체는
+  // innerHTML 이 바뀔 뿐 계속 같은 엘리먼트라) 리스너가 쌓여서, 몇 번 여닫은 뒤엔 예전
+  // 호출(그땐 아직 안 막혔던)까지 섞여 뜻대로 안 닫히는 경우가 생길 수 있었다 — 할당은
+  // 항상 마지막 것 하나로 덮어써서 그럴 일이 없다.
+  $('stsp-close').onclick = () => { if (!_speedBusy) close(); };
+  // 배경 클릭으로 닫기 — 처리 중엔 취소 버튼으로만 나가게 막는다.
+  host.onclick = (e) => { if (e.target === host && !_speedBusy) close(); };
+  $('stsp-start').addEventListener('click', async () => {
+    const v = Math.max(50, Math.min(150, Number($('stsp-val').value) || 100));
+    $('stsp-val').value = v;
+    if (_takes.length) {
+      const err = $('stsp-err'); err.textContent = tr('studio.m.speedBlockedByTakes'); err.hidden = false;
+      return;
+    }
+    $('stsp-setup').hidden = true;
+    $('stsp-progress').hidden = false;
+    _speedCancelRequested = false;
+    setEnabled(false);   // 완료·취소 전까지 다른 조작 다 막는다(요청)
+    const ok = await applySpeed(v / 100, {
+      onProgress: (done, total, label) => {
+        $('stsp-bar').style.width = Math.round((done / total) * 100) + '%';
+        $('stsp-status').textContent = label;
+      },
+      isCancelled: () => _speedCancelRequested,
+    });
+    setEnabled(_started);   // 엔진이 그새 끊기지 않았으면 원래대로 다시 켠다
+    if (ok === 'cancelled') $('stsp-status').textContent = tr('studio.p.speedCancelled');
+    setTimeout(close, ok === 'cancelled' ? 500 : 400);
+  });
+  $('stsp-cancel').addEventListener('click', () => {
+    _speedCancelRequested = true;
+    $('stsp-cancel').disabled = true;
+    $('stsp-status').textContent = tr('studio.p.speedCancelling');
+  });
 }
 
 function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
@@ -2611,7 +2800,7 @@ async function buildProjectObject(opts = {}) {
     : null;
   // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
   // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
-  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, master, buses, stems, tracks, takes, tab };
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, master, buses, stems, tracks, takes, tab };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -2887,6 +3076,20 @@ async function applyProject(p) {
   _beats = Array.isArray(p.beats) ? p.beats.slice() : [];
   _detBpm = p.detBpm || 0; _beatInterval = p.beatInterval || 0;
   updateMetro();
+  // 속도가 1배가 아니었던 프로젝트 — 저장해 둔 기준(speedBase)에서 다시 늘려/줄여서
+  // 스템을 재생성한다(생성된 파일 자체는 프로젝트에 안 남기고, 열 때마다 원본에서 다시 만든다 —
+  // 관리해야 할 파일이 안 늘어난다). p.stems 가 없으면(스템 없는 프로젝트) 건너뛴다.
+  if (p.stems && p.speed && p.speed !== 1) {
+    if (p.speedBase) _speedBase = { bpm: p.speedBase.bpm, beatInterval: p.speedBase.beatInterval, gridOffset: p.speedBase.gridOffset, beats: Array.isArray(p.speedBase.beats) ? p.speedBase.beats.slice() : [] };
+    // 저장해 둔 늘인 파일이 아직 있으면(stemsDir 에 남겨 둔다) 그걸 그대로 다시 불러오기만
+    // 한다 — 처음 만들 때만 오래 걸리고, 그다음부터 프로젝트를 열 때마다 매번 다시 늘이지
+    // 않는다("불러오고 또 처리하느라 시간 걸린다" 신고 반영). 파일이 없어졌을 때만(다른
+    // 컴퓨터로 옮겼다거나) 처음부터 다시 늘인다.
+    const restored = p.speedStemPaths && typeof p.speedStemPaths === 'object'
+      ? await restoreSpeedFromCache(p.speedStemPaths, p.speed)
+      : false;
+    if (!restored) await applySpeed(p.speed, { fromLoad: true });
+  }
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   // recTracksReset 은 항상 부른다 — 예전엔 새 프로젝트에 트랙이 하나도 없으면 이 블록
   // 전체를 건너뛰어서, 엔진 쪽에 이전 프로젝트의 녹음 트랙이 그대로 남아 있었다(사용자
@@ -3699,7 +3902,7 @@ function wire() {
   $('st-close-song').addEventListener('click', closeSong);
 
   const video = $('daw-video');
-  video.addEventListener('loadedmetadata', () => { _dur = video.duration || 0; layout(); $('daw-vplay').hidden = false; });
+  video.addEventListener('loadedmetadata', () => { _baseDur = video.duration || 0; recomputeDur(); video.playbackRate = _speed || 1; layout(); $('daw-vplay').hidden = false; });
 
   const play = playStudio, stopAll = stopStudio;   // 모듈 함수 별칭
   window._dawUpdatePlayIcon = updatePlayIcon;
@@ -3869,6 +4072,7 @@ function wire() {
   });
   $('st-bpm-half').addEventListener('click', () => adjustBpm(0.5));
   $('st-bpm-double').addEventListener('click', () => adjustBpm(2));
+  $('st-speed-btn')?.addEventListener('click', openSpeedModal);
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });

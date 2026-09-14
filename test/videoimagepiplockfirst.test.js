@@ -58,9 +58,10 @@ const setField = async (js, id, v) => js(`(() => {
 
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
+  // pip-w/h 는 이제 %가 아니라 픽셀 — 이미지가 320x240 이라 풀프레임이면 그대로 320/240.
   expect('팝오버 열림', await js(`!!document.querySelector('.ve-pip-pop')`), true);
-  expect('폭이 정확히 100%(버그 재현 전제)', await js(`document.getElementById('pip-w').value`), '100');
-  expect('높이도 정확히 100%(버그 재현 전제)', await js(`document.getElementById('pip-h').value`), '100');
+  expect('폭이 정확히 320px(풀프레임, 버그 재현 전제)', await js(`document.getElementById('pip-w').value`), '320');
+  expect('높이도 정확히 240px(풀프레임, 버그 재현 전제)', await js(`document.getElementById('pip-h').value`), '240');
   expect('잠금은 기본 꺼짐', await js(`document.getElementById('pip-lock').checked`), false);
 
   section('2) 크기를 한 번도 안 바꾸고 "비율 고정"만 체크 — 그 상태로 바로 모서리 드래그(첫 리사이즈)');
@@ -71,9 +72,12 @@ const setField = async (js, id, v) => js(`(() => {
   await wait(80);
   const w1 = Number(await js(`document.getElementById('pip-w').value`));
   const h1 = Number(await js(`document.getElementById('pip-h').value`));
-  expect('폭은 늘어남', w1 > 100, true);
-  expect('첫 드래그부터 이미 비율 고정이 먹혀서 높이도 같이 늘어남(버그면 100 근처에 머무름)', h1 > 105, true);
-  near('폭:높이 비율이 1:1(체크 당시 값) 그대로 유지됨', w1 / h1, 1, 0.1);
+  expect('폭은 늘어남', w1 > 320, true);
+  expect('첫 드래그부터 이미 비율 고정이 먹혀서 높이도 같이 늘어남(버그면 240 근처에 머무름)', h1 > 252, true);
+  // 잠금은 "비율(fraction, 320x240 기준 각각의 %)"을 지킨다 — 체크 당시 폭=높이=100%(1:1
+  // fraction)였으니 그 뒤로도 fraction 비율은 1:1 그대로다. 다만 픽셀로 보면 320x240(4:3)
+  // 이 그 1:1 fraction 비율에 해당하는 실제 크기라, 늘어난 뒤 픽셀 비율도 4:3 이어야 한다.
+  near('폭:높이 픽셀 비율이 원본과 같은 4:3 그대로 유지됨', w1 / h1, 320 / 240, 0.1);
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

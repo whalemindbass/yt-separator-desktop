@@ -64,5 +64,32 @@ function toSec(tc) {   // "M:SS.mmm" → 초
   // HEAD_W(172) + 2.0초*40px = 252
   near('재생선 x 좌표', phX, 252, 3);
 
+  section('5) 트랙 배경 격자 — 눈금자와 같은 간격(--ve-grid, 스튜디오처럼 트랙 위에서도 시간을 가늠)');
+  // 기본 pxPerSec=40 → step=5초 → 격자 200px.
+  const grid1 = await js(`getComputedStyle(document.getElementById('ve-lanes')).getPropertyValue('--ve-grid').trim()`);
+  expect('기본 줌(40px/초, step=5초) — 격자 200px', grid1, '200px');
+  const bgSize1 = await js(`getComputedStyle(document.querySelector('.ve-area')).backgroundSize`);
+  expect('.ve-area 배경 크기에도 그대로 반영됨', bgSize1.split(' ')[0], '200px');
+  // 줌인 3번(40*1.3^3≈87.8, ≥80) → step=1초 → 격자 ≈87.8px.
+  await js(`document.getElementById('ve-zoom-in').click(); document.getElementById('ve-zoom-in').click(); document.getElementById('ve-zoom-in').click(); true`);
+  await wait(100);
+  const grid2 = await js(`getComputedStyle(document.getElementById('ve-lanes')).getPropertyValue('--ve-grid').trim()`);
+  near('줌인 후(step=1초) — 격자 픽셀 = pxPerSec', parseFloat(grid2), 87.8, 2);
+
+  section('6) 트랙 빈 영역 — 클릭뿐 아니라 누른 채 끌어도 계속 재생선이 따라옴(스크럽)');
+  const dragTimes = await js(`(async () => {
+    const area = document.querySelector('.ve-area');
+    const rect = area.getBoundingClientRect();
+    const times = [];
+    area.dispatchEvent(new PointerEvent('pointerdown', { clientX: rect.left + 40, clientY: rect.top + 5, bubbles: true }));
+    times.push(document.getElementById('ve-time').textContent);
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 120, clientY: rect.top + 5, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 30));
+    times.push(document.getElementById('ve-time').textContent);
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: rect.left + 120, clientY: rect.top + 5, bubbles: true }));
+    return times;
+  })()`);
+  expect('드래그 중 처음과 나중 재생 위치가 다름(계속 따라옴)', dragTimes[0] !== dragTimes[1], true);
+
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

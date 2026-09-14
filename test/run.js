@@ -37,7 +37,7 @@ const DEVICE_SENSITIVE = new Set([
   ...NODE_ONLY,
   'fileassoc.test.js', 'studio.test.js', 'shortcuts.test.js', 'metronome.test.js',
   'dirtyboot.test.js', 'devtypeswitch.test.js', 'deverror.test.js', 'beatgrid.test.js',
-  'crash.test.js',
+  'crash.test.js', 'studiospeed.test.js',
   // crashreport.test.js / save.test.js — 장치는 안 만지지만 "파일 write 완료 → 곧바로
   // read" 타이밍이 CPU 경합(병렬 동시 실행)에 취약해서 가끔 실패했다(순차론 항상 통과).
   'crashreport.test.js', 'save.test.js',

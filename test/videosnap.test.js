@@ -24,18 +24,26 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await wait(150);
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
+  // pip-x/y/w/h 는 이제 %가 아니라 픽셀 — 클립을 하나도 안 임포트했으니 getResolution() 은
+  // 기본값 1280x720 을 쓴다. 70/10/25/25% 를 그 기준으로 환산해 넣는다.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 70); set('pip-y', 10); set('pip-w', 25); set('pip-h', 25);
+    set('pip-x', 896); set('pip-y', 72); set('pip-w', 320); set('pip-h', 180);
   })(); true`);
   await wait(100);
 
+  // PIP 박스 드래그는 이제 기본 감도가 1:1 이 아니라 절충값(hostRect/해상도 비율과 1 의
+  // 중간, video-editor.js createResizeBox 참고)이라, 화면상 정확히 중앙까지만 마우스를
+  // 옮기면 그 절충 배율만큼 못 미친다 — 목표 지점까지의 이동량을 그 배율로 나눠 더 멀리
+  // 보내야 실제로 정중앙(스냅 범위 안)에 닿는다.
   const pipDrag = await js(`(() => {
     const box = document.querySelector('.ve-pip-box');
     const host = document.getElementById('ve-preview');
     const br = box.getBoundingClientRect(), hr = host.getBoundingClientRect();
     const startX = br.left + br.width / 2, startY = br.top + br.height / 2;
-    const hostCx = hr.left + hr.width / 2, hostCy = hr.top + hr.height / 2;
+    const baseRatioX = (1 + hr.width / 1280) / 2, baseRatioY = (1 + hr.height / 720) / 2;
+    const hostCx = startX + ((hr.left + hr.width / 2) - startX) / baseRatioX;
+    const hostCy = startY + ((hr.top + hr.height / 2) - startY) / baseRatioY;
     box.dispatchEvent(new PointerEvent('pointerdown', { clientX: startX, clientY: startY, bubbles: true, pointerId: 1 }));
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: hostCx, clientY: hostCy, bubbles: true, pointerId: 1 }));
     const guideV = document.querySelector('.ve-snap-guide.v');
@@ -54,9 +62,10 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   expect('드래그 중 정중앙 근처에선 가로 안내선이 뜸', pipDrag.midDrag.hShown, true);
   expect('드래그 끝나면 세로 안내선이 다시 숨음', pipDrag.afterVHidden, true);
   expect('드래그 끝나면 가로 안내선이 다시 숨음', pipDrag.afterHHidden, true);
-  // w=h=25% 인 박스가 중앙(0.5,0.5)에 스냅되면 좌상단(x,y)은 50-12.5=37.5% 여야 함.
-  near('스냅 후 pip-x ≈ 37.5%(박스 중심이 정중앙)', pipDrag.pipX, 37.5, 1);
-  near('스냅 후 pip-y ≈ 37.5%(박스 중심이 정중앙)', pipDrag.pipY, 37.5, 1);
+  // w=h=25% 인 박스가 중앙(0.5,0.5)에 스냅되면 좌상단(x,y)은 50-12.5=37.5% 여야 함
+  // — 1280x720 기준 픽셀로는 (480, 270).
+  near('스냅 후 pip-x ≈ 480px(37.5%, 박스 중심이 정중앙)', pipDrag.pipX, 480, 13);
+  near('스냅 후 pip-y ≈ 270px(37.5%, 박스 중심이 정중앙)', pipDrag.pipY, 270, 8);
 
   section('2) 텍스트 — 프레임 중앙 근처로 끌면 스냅되고 안내선이 뜸');
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="text"]').click(); true`);
@@ -104,10 +113,10 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   // 2)에서 텍스트 트랙을 다루는 동안 팝오버가 닫혔으니 트랙 A(첫 video 트랙) 걸 다시 연다.
   await js(`document.querySelectorAll('.ve-lane .ve-pip')[0].click(); true`);
   await wait(100);
-  // 트랙 A를 프레임 중앙과는 뚜렷이 다른 자리(중심 22.5%)로.
+  // 트랙 A를 프레임 중앙과는 뚜렷이 다른 자리(중심 22.5%)로 — 픽셀 환산(1280x720 기준).
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 10); set('pip-y', 10); set('pip-w', 25); set('pip-h', 25);
+    set('pip-x', 128); set('pip-y', 72); set('pip-w', 320); set('pip-h', 180);
   })(); true`);
   await wait(100);
   // 트랙 B 추가 — 다른 자리(중심 82.5%)에서 시작, A 쪽으로 끌어본다.
@@ -117,7 +126,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   await wait(100);
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 70); set('pip-y', 70); set('pip-w', 25); set('pip-h', 25);
+    set('pip-x', 896); set('pip-y', 504); set('pip-w', 320); set('pip-h', 180);
   })(); true`);
   await wait(100);
 
@@ -126,7 +135,9 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const host = document.getElementById('ve-preview');
     const br = box.getBoundingClientRect(), hr = host.getBoundingClientRect();
     const startX = br.left + br.width / 2, startY = br.top + br.height / 2;
-    const targetX = hr.left + hr.width * 0.225, targetY = hr.top + hr.height * 0.225;   // 트랙 A 중심(22.5%)
+    const baseRatioX = (1 + hr.width / 1280) / 2, baseRatioY = (1 + hr.height / 720) / 2;
+    const rawX = hr.left + hr.width * 0.225, rawY = hr.top + hr.height * 0.225;   // 트랙 A 중심(22.5%)
+    const targetX = startX + (rawX - startX) / baseRatioX, targetY = startY + (rawY - startY) / baseRatioY;
     box.dispatchEvent(new PointerEvent('pointerdown', { clientX: startX, clientY: startY, bubbles: true, pointerId: 3 }));
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: targetX, clientY: targetY, bubbles: true, pointerId: 3 }));
     const guideV = document.querySelector('.ve-snap-guide.v');
@@ -137,15 +148,18 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   })()`);
   expect('트랙A 근처로 끌면 세로 정렬선이 뜸', alignDrag.mid.vShown, true);
   expect('트랙A 근처로 끌면 가로 정렬선이 뜸', alignDrag.mid.hShown, true);
+  // 안내선(.ve-snap-guide) 위치는 미리보기 요소 기준 %라 해상도와 무관 — 그대로 22.5%.
   near('정렬선이 프레임 중앙(50%)이 아니라 트랙A 중심(22.5%)에 그려짐(가로)', alignDrag.mid.guideLeftPct, 22.5, 1);
   near('정렬선이 프레임 중앙(50%)이 아니라 트랙A 중심(22.5%)에 그려짐(세로)', alignDrag.mid.guideTopPct, 22.5, 1);
-  near('스냅 후 pip-x ≈ 10%(트랙A 와 중심이 같아짐)', alignDrag.pipX, 10, 1);
-  near('스냅 후 pip-y ≈ 10%(트랙A 와 중심이 같아짐)', alignDrag.pipY, 10, 1);
+  // pip-x/y 는 픽셀(1280x720 기준) — 10% = 128px/72px.
+  near('스냅 후 pip-x ≈ 128px(10%, 트랙A 와 중심이 같아짐)', alignDrag.pipX, 128, 13);
+  near('스냅 후 pip-y ≈ 72px(10%, 트랙A 와 중심이 같아짐)', alignDrag.pipY, 72, 8);
 
   section('4) PIP 리사이즈 — 5% 단위 근처면 딱 붙고, 멀면 안 붙음');
+  // pip-w/h 는 픽셀(1280x720 기준) — 20% = 256px/144px.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 0); set('pip-y', 0); set('pip-w', 20); set('pip-h', 20);
+    set('pip-x', 0); set('pip-y', 0); set('pip-w', 256); set('pip-h', 144);
   })(); true`);
   await wait(100);
   const sizeSnap = await js(`(() => {
@@ -153,19 +167,21 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const host = document.getElementById('ve-preview');
     const br = handle.getBoundingClientRect(), hr = host.getBoundingClientRect();
     const startX = br.left + br.width / 2, startY = br.top + br.height / 2;
-    // 20% → 30.1% 로(격자 30%에서 0.1%p 밖, SNAP_PX 이내) — 붙어야 함.
-    const nearX = startX + hr.width * 0.101;
+    const baseRatioX = (1 + hr.width / 1280) / 2;
+    // 20% → 30.1% 로(격자 30%에서 0.1%p 밖, SNAP_PX 이내) — 붙어야 함(fraction 기준, 해상도와
+    // 무관하나 드래그 감도 절충값만큼 나눠 더 멀리 끌어야 실제로 그 fraction 에 닿는다).
+    const nearX = startX + (hr.width * 0.101) / baseRatioX;
     handle.dispatchEvent(new PointerEvent('pointerdown', { clientX: startX, clientY: startY, bubbles: true, pointerId: 4 }));
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: nearX, clientY: startY, bubbles: true, pointerId: 4 }));
     const wNear = Number(document.getElementById('pip-w').value);
     document.dispatchEvent(new PointerEvent('pointerup', { clientX: nearX, clientY: startY, bubbles: true, pointerId: 4 }));
     return { wNear };
   })()`);
-  expect('20%→30.1% 로 늘리면 30%(격자)에 붙음', sizeSnap.wNear, 30);
+  expect('20%→30.1% 로 늘리면 30%(격자, =384px)에 붙음', sizeSnap.wNear, 384);
 
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 0); set('pip-y', 0); set('pip-w', 20); set('pip-h', 20);
+    set('pip-x', 0); set('pip-y', 0); set('pip-w', 256); set('pip-h', 144);
   })(); true`);
   await wait(100);
   const sizeNoSnap = await js(`(() => {
@@ -173,20 +189,22 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
     const host = document.getElementById('ve-preview');
     const br = handle.getBoundingClientRect(), hr = host.getBoundingClientRect();
     const startX = br.left + br.width / 2, startY = br.top + br.height / 2;
+    const baseRatioX = (1 + hr.width / 1280) / 2;
     // 20% → 22.5% 로(두 격자 20%/25% 사이 정중앙, 가장 안 붙기 쉬운 자리) — 안 붙어야 함.
-    const farX = startX + hr.width * 0.025;
+    const farX = startX + (hr.width * 0.025) / baseRatioX;
     handle.dispatchEvent(new PointerEvent('pointerdown', { clientX: startX, clientY: startY, bubbles: true, pointerId: 5 }));
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: farX, clientY: startY, bubbles: true, pointerId: 5 }));
     const wFar = Number(document.getElementById('pip-w').value);
     document.dispatchEvent(new PointerEvent('pointerup', { clientX: farX, clientY: startY, bubbles: true, pointerId: 5 }));
     return { wFar };
   })()`);
-  near('20%→22.5% 는 격자 사이라 그대로(±1%p)', sizeNoSnap.wFar, 22.5, 1);
+  near('20%→22.5% 는 격자 사이라 그대로(288px 근처, ±1%p=13px)', sizeNoSnap.wFar, 288, 13);
 
   section('5) Alt 를 누른 채 드래그하면 스냅을 건너뜀');
+  // 픽셀(1280x720 기준) — 35% = 448px/252px, 25% = 320px/180px.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 35); set('pip-y', 35); set('pip-w', 25); set('pip-h', 25);
+    set('pip-x', 448); set('pip-y', 252); set('pip-w', 320); set('pip-h', 180);
   })(); true`);
   await wait(100);
   const altDrag = await js(`(() => {
@@ -206,7 +224,7 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   })()`);
   expect('Alt 누르고 있으면 정중앙 2px 이내로 가도 안내선이 안 뜸(세로)', altDrag.mid.vShown, false);
   expect('Alt 누르고 있으면 정중앙 2px 이내로 가도 안내선이 안 뜸(가로)', altDrag.mid.hShown, false);
-  expect('Alt 누르고 있으면 정확히 37.5% 로 안 붙음(원본 위치대로 살짝 벗어남)', Math.abs(altDrag.pipX - 37.5) > 0.05, true);
+  expect('Alt 누르고 있으면 정확히 480px(37.5%)로 안 붙음(원본 위치대로 살짝 벗어남)', Math.abs(altDrag.pipX - 480) > 1, true);
 
   finish(app);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

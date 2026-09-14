@@ -53,11 +53,12 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   expect('클립 3개(트랙 3개) 임포트됨', clipCount, 3);
 
   section('2) 트랙C(맨 위,green)=좌상단, 트랙B(중간,blue)=우상단 PIP 지정');
+  // pip-x/y/w/h 는 이제 %가 아니라 320x240 해상도 기준 픽셀 — 0/0/25/25%, 75/0/25/25% 환산.
   await js(`(() => {
     const btns = document.querySelectorAll('.ve-lane .ve-pip');
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    btns[0].click(); set('pip-x', 0); set('pip-y', 0); set('pip-w', 25); set('pip-h', 25);
-    btns[1].click(); set('pip-x', 75); set('pip-y', 0); set('pip-w', 25); set('pip-h', 25);
+    btns[0].click(); set('pip-x', 0); set('pip-y', 0); set('pip-w', 80); set('pip-h', 60);
+    btns[1].click(); set('pip-x', 240); set('pip-y', 0); set('pip-w', 80); set('pip-h', 60);
   })(); true`);
   await wait(200);
 

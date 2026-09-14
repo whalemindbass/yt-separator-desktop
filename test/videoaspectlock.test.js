@@ -51,21 +51,24 @@ const setField = async (js, id, v) => js(`(() => {
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
+  // pip-w/h 는 이제 %가 아니라 320x240 해상도 기준 픽셀 — 40%는 128x96.
   expect('잠금 체크박스가 기본은 꺼져 있음', await js(`document.getElementById('pip-lock').checked`), false);
-  await setField(js, 'pip-w', 40);
-  await setField(js, 'pip-h', 40);
+  await setField(js, 'pip-w', 128);
+  await setField(js, 'pip-h', 96);
   await wait(80);
   // 가로로만 60px, 세로로는 안 움직이는 드래그.
   await dragBy(js, '.ve-pip-box-handle', 60, 0);
   await wait(80);
   const wUnlocked = Number(await js(`document.getElementById('pip-w').value`));
   const hUnlocked = Number(await js(`document.getElementById('pip-h').value`));
-  expect('잠금 꺼진 상태 — 폭은 늘어남', wUnlocked > 40, true);
-  expect('잠금 꺼진 상태 — 높이는 거의 그대로(가로세로 안 묶임)', Math.abs(hUnlocked - 40) <= 2, true);
+  expect('잠금 꺼진 상태 — 폭은 늘어남', wUnlocked > 128, true);
+  expect('잠금 꺼진 상태 — 높이는 거의 그대로(가로세로 안 묶임)', Math.abs(hUnlocked - 96) <= 5, true);
 
   section('2) 잠금 체크 — 이제 모서리를 가로로만 끌어도 세로도 같이 늘어남(비율 유지)');
-  await setField(js, 'pip-w', 40);
-  await setField(js, 'pip-h', 20);   // 2:1 비율로 리셋
+  // fraction(비율) 기준 40%:20% = 2:1 로 리셋 — 픽셀로는 128x48(320x240 기준).
+  // 잠금은 fraction 비율을 지키므로, 픽셀 비율은 2 * (320/240) ≈ 2.667 이 된다(아래 참고).
+  await setField(js, 'pip-w', 128);
+  await setField(js, 'pip-h', 48);
   await setField(js, 'pip-lock', true);
   await wait(80);
   expect('잠금 체크됨', await js(`document.getElementById('pip-lock').checked`), true);
@@ -73,16 +76,17 @@ const setField = async (js, id, v) => js(`(() => {
   await wait(80);
   const wLocked = Number(await js(`document.getElementById('pip-w').value`));
   const hLocked = Number(await js(`document.getElementById('pip-h').value`));
-  expect('잠긴 상태 — 폭 늘어남', wLocked > 40, true);
-  expect('잠긴 상태 — 가로만 끌었는데 높이도 같이 늘어남(비율 유지)', hLocked > 20, true);
+  expect('잠긴 상태 — 폭 늘어남', wLocked > 128, true);
+  expect('잠긴 상태 — 가로만 끌었는데 높이도 같이 늘어남(비율 유지)', hLocked > 48, true);
   const ratio = wLocked / hLocked;
-  near('폭:높이 비율이 2:1 그대로 유지됨', ratio, 2, 0.15);
+  near('폭:높이 픽셀 비율이 2*(320/240)≈2.667 그대로 유지됨(내부 fraction 비율은 2:1)', ratio, 2 * (320 / 240), 0.2);
 
   section('3) 숫자 입력칸도 잠금 상태를 지킨다 — 폭만 바꿔도 높이가 같은 비율로 따라옴');
-  await setField(js, 'pip-w', 60);
+  // 폭 192px(=60%) 로 바꾸면 fraction 비율(2:1) 유지로 높이는 96px(=0.5*192, 30%) 이 된다.
+  await setField(js, 'pip-w', 192);
   await wait(80);
   const hAfterWEdit = Number(await js(`document.getElementById('pip-h').value`));
-  near('폭을 60으로 바꾸면 높이도 2:1 비율(30)로 같이 바뀜', hAfterWEdit, 30, 2);
+  near('폭을 192로 바꾸면 높이도 같은 fraction 비율(72px, 30%)로 같이 바뀜', hAfterWEdit, 72, 5);
 
   section('4) 도형 팝오버에도 같은 잠금 체크박스가 있다');
   await js(`document.getElementById('ve-add-track-btn').click(); document.querySelector('#ve-add-track-menu [data-kind="shape"]').click(); true`);

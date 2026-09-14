@@ -35,9 +35,10 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   for (let i = 0; i < 40; i++) { if (await js(`document.querySelectorAll('.ve-clip').length`) >= 1) break; await wait(300); }
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
   await wait(100);
+  // pip-w/h 는 이제 %가 아니라 320x240 해상도 기준 픽셀 — 50%는 160x120.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-w', 50); set('pip-h', 50);
+    set('pip-w', 160); set('pip-h', 120);
   })(); true`);
   await wait(80);
   // 미리보기 실제 폭 기준으로, "옛날 클램프였다면 최대 50%(=100-scale)까지만" 이었을 값을
@@ -60,10 +61,10 @@ const { bootMain, expect, section, wait, finish } = require('./harness');
   const pipY = Number(await js(`document.getElementById('pip-y').value`));
   const pipW = Number(await js(`document.getElementById('pip-w').value`));
   const pipH = Number(await js(`document.getElementById('pip-h').value`));
-  expect('scale=50 일 때 예전 클램프 상한(50)을 넘어감 — 테두리에 안 묶임', pipX > 50, true);
-  expect('세로도 마찬가지로 상한을 넘어감', pipY > 50, true);
-  expect('폭 자체는 안 바뀜(위치만 드래그)', pipW, 50);
-  expect('높이 자체도 안 바뀜(위치만 드래그)', pipH, 50);
+  expect('scale=50% 일 때 예전 클램프 상한(160px)을 넘어감 — 테두리에 안 묶임', pipX > 160, true);
+  expect('세로도 마찬가지로 상한(120px)을 넘어감', pipY > 120, true);
+  expect('폭 자체는 안 바뀜(위치만 드래그)', pipW, 160);
+  expect('높이 자체도 안 바뀜(위치만 드래그)', pipH, 120);
 
   section('2) export — 실제로 잘려서 나오는지(overlay 가 프레임 밖 좌표를 알아서 클리핑)');
   const OUT = path.join(TMP, 'out.mp4');

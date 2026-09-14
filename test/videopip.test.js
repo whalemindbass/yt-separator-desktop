@@ -108,9 +108,10 @@ const { bootMain, expect, near, section, wait, finish } = require('./harness');
   }
   expect('단독 트랙에 클립 1개 임포트됨', n2 >= 1, true);
   await js(`document.querySelector('.ve-lane .ve-pip').click(); true`);
+  // pip-x/y/w/h 는 이제 %가 아니라 320x240 해상도 기준 픽셀 — 70/10/25/25% 그대로 환산.
   await js(`(() => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
-    set('pip-x', 70); set('pip-y', 10); set('pip-w', 25); set('pip-h', 25);
+    set('pip-x', 224); set('pip-y', 24); set('pip-w', 80); set('pip-h', 60);
   })(); true`);
   await js(`document.getElementById('ve-export').click(); document.getElementById('ve-exp-go').click(); true`);
   for (let i = 0; i < 60; i++) {

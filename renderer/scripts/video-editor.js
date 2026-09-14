@@ -96,8 +96,8 @@ let _saveTimer = null;
 function buildVideoProjectData() {
   return {
     tracks: _veTracks.map(({ id, name, color, height, hidden, kind, transform }) => ({ id, name, color, height, hidden, kind, transform })),
-    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts }) =>
-      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts })),
+    clips: _veClips.map(({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, bgRadius, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts }) =>
+      ({ id, trackId, file, name, start, inOff, srcDur, dur, w, h, hasAudio, isAudioOnly, groupId, manualGroupId, fadeIn, fadeOut, effects, hdr, isText, text, xPct, yPct, size, color, fontKey, bg, bgRadius, isImage, isShape, shapeType, wPct, hPct, fillColor, strokeColor, strokeWidth, transform, trackKeyframes, speed, transitionType, isMulticam, mcAngles, mcCuts })),
     resolution: _veResolution,
     markers: _veMarkers.map(({ id, t }) => ({ id, t })),
   };
@@ -448,21 +448,40 @@ function createResizeBox(getTf, setTf, onChange, getSiblings) {
   host.appendChild(box);
   _boxEl = box;
   syncResizeBox(getTf);
+  // 출력 해상도가(예: 1920x1080) 미리보기 실제 렌더 크기(hostRect, 흔히 그보다 훨씬
+  // 작다)보다 크면, 마우스 1px 이동이 fraction 으로는 아주 작아도 그 fraction 이 해상도
+  // 픽셀로 환산되는 순간 몇 배로 뻥튀기된다(예: 1920/480=4배) — 그래서 숫자칸(pip-x/y/w/h,
+  // 이제 %가 아니라 그 해상도 기준 픽셀)이 마우스를 살짝만 움직여도 훌쩍훌쩍 뛰는 것처럼
+  // 보인다("왜케 많이씩 움직이냐" 신고). 완전히 1:1(마우스 1px=실제 1px)로 상쇄하면 체감은
+  // 가장 좋지만, 해상도가 미리보기보다 훨씬 크면 박스를 프레임 끝에서 끝까지 옮기려고
+  // 미리보기 창 폭보다 몇 배나 더 멀리 마우스를 끌어야 한다 — 그 반동(hostRect/해상도
+  // 비율)과 원래 1 사이 절충값을 써서 체감 절반만 줄인다("트레이드오프 있는 절충안"으로
+  // 확인받음). 그 위에서 Shift 를 누르면 한 번 더(EXTRA_FINE_RATIO) 세밀해진다.
+  // 절대 위치(tf0 + 시작점 기준 총 이동량) 대신 이벤트마다 "이번 한 번의" 이동량만 누적해야,
+  // 드래그 도중 Shift 를 누르거나 떼도 그 순간 갑자기 위치가 튀지 않는다.
+  const EXTRA_FINE_RATIO = 0.25;
   box.addEventListener('pointerdown', (e) => {
     if (e.target.classList.contains('ve-pip-box-handle')) return;
     e.preventDefault(); e.stopPropagation();
     const hostRect = host.getBoundingClientRect();
     const tf0 = getTf();
-    const startX = e.clientX, startY = e.clientY;
+    const { w: resW, h: resH } = getResolution();
+    const fullX = hostRect.width / (resW || hostRect.width), fullY = hostRect.height / (resH || hostRect.height);
+    const baseRatioX = (1 + fullX) / 2, baseRatioY = (1 + fullY) / 2;
+    let lastX = e.clientX, lastY = e.clientY;
+    let accX = 0, accY = 0;
     const siblings = getSiblings ? getSiblings() : [];
     try { box.setPointerCapture(e.pointerId); } catch {}
     ensureSnapGuides();
     const mv = (ev) => {
+      const extra = ev.shiftKey ? EXTRA_FINE_RATIO : 1;
+      accX += (ev.clientX - lastX) * baseRatioX * extra; accY += (ev.clientY - lastY) * baseRatioY * extra;
+      lastX = ev.clientX; lastY = ev.clientY;
       // 프레임 테두리에 안 묶는다(요청대로) — 밖으로 나간 만큼은 export 의 overlay 와
       // 똑같이 그냥 잘려 보인다(.ve-video-layers 의 overflow:hidden). 박스/손잡이 자체는
       // #ve-preview 바로 밑이라 안 잘리니 언제든 다시 끌고 돌아올 수 있다.
-      let nx = tf0.x + (ev.clientX - startX) / hostRect.width;
-      let ny = tf0.y + (ev.clientY - startY) / hostRect.height;
+      let nx = tf0.x + accX / hostRect.width;
+      let ny = tf0.y + accY / hostRect.height;
       if (!ev.altKey) {
         const snap = snapCenter(nx + tf0.w / 2, ny + tf0.h / 2, hostRect, siblings);
         if (snap.guideX != null) nx = snap.cx - tf0.w / 2;
@@ -480,11 +499,18 @@ function createResizeBox(getTf, setTf, onChange, getSiblings) {
     e.preventDefault(); e.stopPropagation();
     const hostRect = host.getBoundingClientRect();
     const tf0 = getTf();
-    const startX = e.clientX, startY = e.clientY;
+    const { w: resW, h: resH } = getResolution();
+    const fullX = hostRect.width / (resW || hostRect.width), fullY = hostRect.height / (resH || hostRect.height);
+    const baseRatioX = (1 + fullX) / 2, baseRatioY = (1 + fullY) / 2;
+    let lastX = e.clientX, lastY = e.clientY;
+    let accX = 0, accY = 0;
     try { e.target.setPointerCapture(e.pointerId); } catch {}
     const mv = (ev) => {
-      const dxF = (ev.clientX - startX) / hostRect.width;
-      const dyF = (ev.clientY - startY) / hostRect.height;
+      const extra = ev.shiftKey ? EXTRA_FINE_RATIO : 1;
+      accX += (ev.clientX - lastX) * baseRatioX * extra; accY += (ev.clientY - lastY) * baseRatioY * extra;
+      lastX = ev.clientX; lastY = ev.clientY;
+      const dxF = accX / hostRect.width;
+      const dyF = accY / hostRect.height;
       let w, h;
       if (tf0.lock) {
         // 대각선 이동량 평균을 확대율처럼 써서 가로세로를 같은 비율로 늘린다(예전 scale
@@ -494,8 +520,9 @@ function createResizeBox(getTf, setTf, onChange, getSiblings) {
       } else {
         w = Math.max(0.02, tf0.w + dxF); h = Math.max(0.02, tf0.h + dyF);
         // lock 이 꺼져 있을 때만 5% 단위로 스냅한다 — lock 켜짐은 비율 유지가 우선이라
-        // 위 factor 계산이 그대로 지켜져야 한다(따로 스냅하면 비율이 깨짐).
-        if (!ev.altKey) { w = snapSize(w, hostRect.width); h = snapSize(h, hostRect.height); }
+        // 위 factor 계산이 그대로 지켜져야 한다(따로 스냅하면 비율이 깨짐). Shift(세밀
+        // 조정) 중에는 5% 격자 스냅도 같이 끈다 — 안 그러면 세밀하게 조정하는 의미가 없다.
+        if (!ev.altKey && !ev.shiftKey) { w = snapSize(w, hostRect.width); h = snapSize(h, hostRect.height); }
       }
       setTf({ ...tf0, w, h });
       syncResizeBox(getTf);
@@ -518,23 +545,29 @@ function closePipPopover() {
 }
 function syncPipPopoverFields(tf) {
   if (!_pipPopoverEl) return;
-  _pipPopoverEl.querySelector('#pip-x').value = Math.round(tf.x * 100);
-  _pipPopoverEl.querySelector('#pip-y').value = Math.round(tf.y * 100);
-  _pipPopoverEl.querySelector('#pip-w').value = Math.round(tf.w * 100);
-  _pipPopoverEl.querySelector('#pip-h').value = Math.round(tf.h * 100);
+  const { w: rw, h: rh } = getResolution();
+  _pipPopoverEl.querySelector('#pip-x').value = Math.round(tf.x * rw);
+  _pipPopoverEl.querySelector('#pip-y').value = Math.round(tf.y * rh);
+  _pipPopoverEl.querySelector('#pip-w').value = Math.round(tf.w * rw);
+  _pipPopoverEl.querySelector('#pip-h').value = Math.round(tf.h * rh);
 }
 function openPipPopover(track, anchorEl) {
   closePipPopover(); closeShapePopover();
   const tf = track.transform || naturalTransform(track);
+  const { w: resW, h: resH } = getResolution();
   const r = anchorEl.getBoundingClientRect();
   const pop = document.createElement('div');
   pop.className = 've-pip-pop';
   pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+  // %(비율) 대신 실제 출력 해상도 기준 픽셀로 보여준다 — 값 하나가 가리키는 실제 크기가
+  // 가로/세로에서 서로 달라(프레임이 정사각형이 아니라서) 1픽셀 단위로 세밀하게 못
+  // 맞춰지던 문제 제보 반영. 저장은 그대로 비율(0~1)로 한다(해상도 바뀌어도 배치가
+  // 안 깨지게) — 여기서 입력 시에만 지금 해상도로 픽셀 ↔ 비율을 환산한다.
   pop.innerHTML = `
-    <label>${tr('video.pipX')}<input type="number" id="pip-x" min="-200" max="200" step="1" value="${Math.round(tf.x * 100)}">%</label>
-    <label>${tr('video.pipY')}<input type="number" id="pip-y" min="-200" max="200" step="1" value="${Math.round(tf.y * 100)}">%</label>
-    <label>${tr('video.shapeW')}<input type="number" id="pip-w" min="2" max="400" step="1" value="${Math.round(tf.w * 100)}">%</label>
-    <label>${tr('video.shapeH')}<input type="number" id="pip-h" min="2" max="400" step="1" value="${Math.round(tf.h * 100)}">%</label>
+    <label>${tr('video.pipX')}<input type="number" id="pip-x" min="-20000" max="20000" step="1" value="${Math.round(tf.x * resW)}">px</label>
+    <label>${tr('video.pipY')}<input type="number" id="pip-y" min="-20000" max="20000" step="1" value="${Math.round(tf.y * resH)}">px</label>
+    <label>${tr('video.shapeW')}<input type="number" id="pip-w" min="2" max="20000" step="1" value="${Math.round(tf.w * resW)}">px</label>
+    <label>${tr('video.shapeH')}<input type="number" id="pip-h" min="2" max="20000" step="1" value="${Math.round(tf.h * resH)}">px</label>
     <label class="ve-pip-lock">${tr('video.lockAspect')}<input type="checkbox" id="pip-lock" ${tf.lock ? 'checked' : ''}></label>
     <button class="mini" id="pip-reset">${tr('video.pipReset')}</button>`;
   document.body.appendChild(pop);
@@ -557,15 +590,16 @@ function openPipPopover(track, anchorEl) {
   // 높이를 그 비율로, 높이를 바꿨으면 폭을 그 비율로 — 드래그 손잡이와 같은 감각).
   const applyFromInputs = (whichChanged) => {
     const prev = getTf();
-    const x = (Number(pop.querySelector('#pip-x').value) || 0) / 100;
-    const y = (Number(pop.querySelector('#pip-y').value) || 0) / 100;
+    const { w: rw, h: rh } = getResolution();
+    const x = (Number(pop.querySelector('#pip-x').value) || 0) / rw;
+    const y = (Number(pop.querySelector('#pip-y').value) || 0) / rh;
     const lock = pop.querySelector('#pip-lock').checked;
-    let w = Math.max(0.02, (Number(pop.querySelector('#pip-w').value) || 100) / 100);
-    let h = Math.max(0.02, (Number(pop.querySelector('#pip-h').value) || 100) / 100);
+    let w = Math.max(2 / rw, (Number(pop.querySelector('#pip-w').value) || rw) / rw);
+    let h = Math.max(2 / rh, (Number(pop.querySelector('#pip-h').value) || rh) / rh);
     if (lock && whichChanged && prev.w > 0 && prev.h > 0) {
       if (whichChanged === 'w') h = w * (prev.h / prev.w); else w = h * (prev.w / prev.h);
-      pop.querySelector('#pip-w').value = Math.round(w * 100);
-      pop.querySelector('#pip-h').value = Math.round(h * 100);
+      pop.querySelector('#pip-w').value = Math.round(w * rw);
+      pop.querySelector('#pip-h').value = Math.round(h * rh);
     }
     setTf({ x, y, w, h, lock });
     syncResizeBox(getTf);
@@ -577,8 +611,9 @@ function openPipPopover(track, anchorEl) {
   pop.querySelector('#pip-h').addEventListener('input', () => applyFromInputs('h'));
   pop.querySelector('#pip-lock').addEventListener('change', () => applyFromInputs(null));
   pop.querySelector('#pip-reset').addEventListener('click', () => {
+    const { w: rw, h: rh } = getResolution();
     pop.querySelector('#pip-x').value = 0; pop.querySelector('#pip-y').value = 0;
-    pop.querySelector('#pip-w').value = 100; pop.querySelector('#pip-h').value = 100;
+    pop.querySelector('#pip-w').value = rw; pop.querySelector('#pip-h').value = rh;
     applyFromInputs(null);
   });
   // 박스를 드래그/리사이즈했을 때 숫자 입력칸도 같이 맞춘다(반대 방향 동기화).
@@ -1309,8 +1344,45 @@ function hideLayer(el, visual) {
   const v = el.querySelector('video'), img = el.querySelector('img');
   // 래퍼(el)뿐 아니라 안쪽 태그 자체의 hidden 도 맞춰 둔다 — video:not([hidden]) 같은
   // 자손 셀렉터는 조상이 hidden 이어도 그 태그 자신의 속성만 본다.
-  if (visual) { el.hidden = true; el.style.opacity = ''; v.hidden = true; img.hidden = true; }
+  if (visual) {
+    el.hidden = true; el.style.opacity = ''; v.hidden = true; img.hidden = true;
+    // 트랜지션이 지난 프레임에 걸어 둔 clip-path/transform/mask 가 다음 번(트랜지션 없이
+    // 이 레이어를 그냥 재사용할 때)까지 남아있지 않게 같이 지운다.
+    el.style.clipPath = ''; el.style.transform = ''; el.style.maskImage = ''; el.style.webkitMaskImage = '';
+  }
   if (!v.paused) v.pause();
+}
+// ── 트랜지션(구간반복 아님, 클립 전환) 모양 — CSS 로 흉내낼 수 있는 것만 실제 방향/모양을
+// 미리보기에도 그린다. b(나중 클립, 항상 a 위에 쌓인다 — ensureLayers 의 DOM 순서)의
+// clip-path/transform/mask 만 바꾸면 하드 엣지로 겹쳐 보인다(opacity 크로스페이드가
+// 아니라 ffmpeg xfade 의 실제 방식과 같다). wipe 방향은 main.js 의 xfade 필터와 실측
+// 비교해 맞춘 것 — 예) wipeleft 는 오른쪽에서부터 새 클립이 드러나며 그 경계가 왼쪽으로
+// 밀려간다. circlecrop/circleopen/circleclose 는 지금 레이어 구조(b 가 항상 a 위)로는
+// 셋을 서로 다르게 만들 방법이 없어 셋 다 "중앙에서 커지는 원"으로 근사한다.
+// fade/dissolve/fadeblack/fadewhite/pixelize/smoothleft 는 흉내낼 CSS 방법이 마땅치
+// 않아(랜덤 픽셀·색 경유·모자이크 등) null 을 돌려주고, 호출부가 기존 크로스페이드로
+// 근사한다 — LUT 처럼 "안 보이는데 보이는 척하지 않는다"와 같은 취지.
+function transitionGeometry(type, mix) {
+  const p = Math.min(1, Math.max(0, mix));
+  switch (type) {
+    case 'wipeleft':  return { bClip: `inset(0 0 0 ${(1 - p) * 100}%)` };
+    case 'wiperight': return { bClip: `inset(0 ${(1 - p) * 100}% 0 0)` };
+    case 'wipeup':    return { bClip: `inset(${(1 - p) * 100}% 0 0 0)` };
+    case 'wipedown':  return { bClip: `inset(0 0 ${(1 - p) * 100}% 0)` };
+    case 'slideleft':  return { aTransform: `translateX(${-p * 100}%)`, bTransform: `translateX(${(1 - p) * 100}%)` };
+    case 'slideright': return { aTransform: `translateX(${p * 100}%)`, bTransform: `translateX(${-(1 - p) * 100}%)` };
+    case 'slideup':    return { aTransform: `translateY(${-p * 100}%)`, bTransform: `translateY(${(1 - p) * 100}%)` };
+    case 'slidedown':  return { aTransform: `translateY(${p * 100}%)`, bTransform: `translateY(${-(1 - p) * 100}%)` };
+    case 'circlecrop': case 'circleopen': case 'circleclose':
+      return { bClip: `circle(${p * 75}% at 50% 50%)` };
+    case 'radial':
+      // white/transparent 로 쓴다 — mask 는 브라우저에 따라 luminance 또는 alpha 기준으로
+      // 해석될 수 있는데, white(불투명·최대 휘도)=보임/transparent(알파 0)=숨김은 어느
+      // 기준으로 읽혀도 항상 같은 결과가 나온다.
+      return { bMask: `conic-gradient(white ${p * 360}deg, transparent ${p * 360}deg)` };
+    default:
+      return null;
+  }
 }
 // 클립 자체 페이드인/아웃 배율(0~1) — 같은 트랙 크로스페이드 믹스와 곱해서 합성한다.
 function fadeMul(clip, t) {
@@ -1344,6 +1416,7 @@ function syncTextLayer(container, track, t) {
     const font = TEXT_FONTS[c.fontKey] || TEXT_FONTS.malgun;
     const el = document.createElement('div');
     el.className = 've-text-item' + (c.bg ? ' bg' : '') + (c.id === _selClipId ? ' sel' : '');
+    el.style.borderRadius = c.bg ? ((c.bgRadius ?? 8) * scale) + 'px' : '';
     el.style.fontSize = ((c.size || 42) * scale) + 'px';
     el.style.color = c.color || '#ffffff';
     el.style.fontFamily = font.css;
@@ -1470,13 +1543,40 @@ function syncPreview(t) {
       const outClip = here[0], inClip = here[1];   // outClip: 먼저 시작해 곧 끝남 · inClip: 나중에 들어와 이어감
       const overlapStart = inClip.start, overlapEnd = outClip.start + outClip.dur;
       const mix = overlapEnd > overlapStart ? Math.min(1, Math.max(0, (t - overlapStart) / (overlapEnd - overlapStart))) : 1;
-      const fa = (1 - mix) * fadeMul(outClip, t), fb = mix * fadeMul(inClip, t);
-      driveLayer(a, outClip, t, visual); if (visual) { a.style.opacity = String(fa); applyClipTransform(a, outClip, track, t); } layerVideo(a).volume = fa;
-      driveLayer(b, inClip, t, visual); if (visual) { b.style.opacity = String(fb); applyClipTransform(b, inClip, track, t); } layerVideo(b).volume = fb;
+      // 오디오는 항상 크로스페이드(내보내기 쪽 acrossfade 와 같다) — 화면 트랜지션 모양과
+      // 별개다. 화면은 geo 가 있으면(하드 엣지 모양이 있으면) 자기 자신의 페이드인/아웃만
+      // 반영하고, 없으면(흉내낼 방법이 없는 타입) 예전처럼 mix 기반 크로스페이드로 근사한다.
+      const geo = visual ? transitionGeometry(inClip.transitionType || 'fade', mix) : null;
+      const av = (1 - mix) * fadeMul(outClip, t), bv = mix * fadeMul(inClip, t);
+      const fa = geo ? fadeMul(outClip, t) : av, fb = geo ? fadeMul(inClip, t) : bv;
+      driveLayer(a, outClip, t, visual);
+      if (visual) {
+        a.style.opacity = String(fa);
+        a.style.clipPath = geo?.aClip || '';
+        a.style.transform = geo?.aTransform || '';
+        a.style.maskImage = a.style.webkitMaskImage = geo?.aMask || '';
+        applyClipTransform(a, outClip, track, t);
+      }
+      layerVideo(a).volume = av;
+      driveLayer(b, inClip, t, visual);
+      if (visual) {
+        b.style.opacity = String(fb);
+        b.style.clipPath = geo?.bClip || '';
+        b.style.transform = geo?.bTransform || '';
+        b.style.maskImage = b.style.webkitMaskImage = geo?.bMask || '';
+        applyClipTransform(b, inClip, track, t);
+      }
+      layerVideo(b).volume = bv;
       any = true;
     } else if (here.length === 1) {
       const f = fadeMul(here[0], t);
-      driveLayer(a, here[0], t, visual); if (visual) { a.style.opacity = String(f); applyClipTransform(a, here[0], track, t); } layerVideo(a).volume = f;
+      driveLayer(a, here[0], t, visual);
+      if (visual) {
+        a.style.opacity = String(f);
+        a.style.clipPath = ''; a.style.transform = ''; a.style.maskImage = a.style.webkitMaskImage = '';
+        applyClipTransform(a, here[0], track, t);
+      }
+      layerVideo(a).volume = f;
       hideLayer(b, visual);
       any = true;
     } else {
@@ -1643,6 +1743,11 @@ function layout() {
     ruler.style.width = w + 'px';
     ruler.innerHTML = '';
     const step = _pxPerSec >= 80 ? 1 : _pxPerSec >= 30 ? 5 : 10;   // 초 단위 눈금 간격
+    // 트랙 배경에도 같은 간격의 세로줄을 그린다(스튜디오 .daw-area 와 같은 패턴) — 상단
+    // 눈금자를 안 보고도 트랙 위에서 바로 초 단위 위치를 가늠할 수 있게("상단 시간선이
+    // 트랙에서도 보이도록" 요청). 오프셋 없이 0초부터 시작해서 배경 격자 시작점이 항상
+    // 눈금자 눈금과 그대로 겹친다.
+    lanes.style.setProperty('--ve-grid', (step * _pxPerSec) + 'px');
     for (let s = 0; s <= fullSec() + 0.001; s += step) {
       const tk = document.createElement('span');
       tk.className = 'tk'; tk.style.left = (s * _pxPerSec) + 'px';
@@ -1921,11 +2026,18 @@ function renderLanes() {
         updateClipToolbarUI();
       });
     }
-    // 빈 영역 클릭 = 재생헤드 이동
+    // 빈 영역 클릭 = 재생헤드 이동, 누른 채 끌면 룰러·트랙 아래 빈 공간과 같은 방식으로
+    // 계속 따라가며 스크럽된다(스튜디오의 daw-lanes 빈 곳 드래그와 같은 감각 — 예전엔
+    // 클릭 한 번만 먹고 드래그 중엔 재생헤드가 안 따라왔다).
     lane.querySelector('.ve-area').addEventListener('pointerdown', (e) => {
       if (e.target.closest('.ve-clip')) return;
       const rect = e.currentTarget.getBoundingClientRect();
-      seekTo((e.clientX - rect.left) / _pxPerSec);
+      const secAt = (clientX) => Math.max(0, (clientX - rect.left) / _pxPerSec);
+      seekTo(secAt(e.clientX));
+      const onMove = (ev) => seekTo(secAt(ev.clientX));
+      const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp, { once: true });
     });
     lanes.appendChild(lane);
   });
@@ -1971,6 +2083,21 @@ const TEXT_FONTS = {
   georgia:  { label: 'Georgia',          css: "Georgia, serif" },
   consolas: { label: 'Consolas',         css: "Consolas, monospace" },
 };
+// 곡률 있는 배경 상자 크기 근사용 — 실제 시스템 폰트를 그대로 캔버스로 재서(같은 글꼴·
+// 크기라 export 의 freetype 측정과 충분히 가깝다) 폭/높이를 얻는다. 여러 줄은 가장 넓은
+// 줄 폭을 쓰고, 줄 수만큼 line-height(1.3, .ve-text-item CSS 와 동일)를 곱해 높이를 낸다.
+let _measureCanvas = null;
+function measureTextBoxPx(text, fontKey, size) {
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
+  const ctx = _measureCanvas.getContext('2d');
+  const font = TEXT_FONTS[fontKey] || TEXT_FONTS.malgun;
+  const px = Math.max(1, Math.round(size || 42));
+  ctx.font = `${font.weight || '400'} ${px}px ${font.css}`;
+  const lines = (text || '').split('\n');
+  let maxW = 0;
+  for (const line of lines) { const w = ctx.measureText(line).width; if (w > maxW) maxW = w; }
+  return { textW: Math.ceil(maxW), textH: Math.ceil(px * 1.3 * Math.max(1, lines.length)) };
+}
 // srcDur 를 넉넉히 큰 값으로 잡아둔다 — wireTrim 의 오른쪽 트림 상한(c.srcDur - c.inOff)이
 // 영상 클립처럼 "소스 길이"를 의미 있게 가질 필요가 텍스트·이미지엔 없어서, 사실상 무제한으로
 // 늘릴 수 있게 하는 값이다(Infinity 는 JSON.stringify 가 null 로 뭉개버려 프로젝트 저장이 깨진다).
@@ -1978,7 +2105,7 @@ const HUGE_CLIP_SRC_DUR = 86400;
 function addTextClipAt(trackId, atSec) {
   const clip = {
     id: nextClipId(), trackId, isText: true, start: Math.max(0, atSec), dur: 3, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
-    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
+    text: tr('video.textDefault'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false, bgRadius: 8,
   };
   _veClips.push(clip);
   pushUndo(
@@ -2035,6 +2162,7 @@ function openTextPopover(clip, anchorEl) {
       <label>${tr('video.textColor')}<input type="color" id="tx-color" value="${clip.color}"></label>
     </div>
     <label class="ve-text-pop-full">${tr('video.textBg')}<input type="checkbox" id="tx-bg" ${clip.bg ? 'checked' : ''}></label>
+    <label class="ve-text-pop-full">${tr('video.textBgRadius')}<input type="range" id="tx-bg-radius" min="0" max="40" step="1" value="${clip.bgRadius ?? 8}"></label>
     <button class="ve-text-pop-del" id="tx-delete">${tr('video.fxRemove')}</button>`;
   document.body.appendChild(pop);
   _textPopoverEl = pop; _textPopoverCurrentId = clip.id;
@@ -2048,6 +2176,7 @@ function openTextPopover(clip, anchorEl) {
     clip.size = Math.max(1, Number(pop.querySelector('#tx-size').value) || 42);
     clip.color = pop.querySelector('#tx-color').value;
     clip.bg = pop.querySelector('#tx-bg').checked;
+    clip.bgRadius = Number(pop.querySelector('#tx-bg-radius').value) || 0;
     if (lblEl) lblEl.textContent = (clip.text || '').split('\n')[0] || tr('video.textDefault');
     syncPreview(nowSec());
     scheduleSave();
@@ -2060,6 +2189,7 @@ function openTextPopover(clip, anchorEl) {
   pop.querySelector('#tx-size').addEventListener('input', apply);
   pop.querySelector('#tx-color').addEventListener('input', apply);
   pop.querySelector('#tx-bg').addEventListener('change', apply);
+  pop.querySelector('#tx-bg-radius').addEventListener('input', apply);
   pop.querySelector('#tx-delete').addEventListener('click', () => {
     closeTextPopover();
     _selClipId = clip.id;
@@ -2085,7 +2215,8 @@ function textStyleFieldsHtml(vals) {
       <label>${tr('video.textSize')}<input type="number" id="vt-size" min="8" max="200" step="1" value="${vals.size ?? 42}"></label>
       <label>${tr('video.textColor')}<input type="color" id="vt-color" value="${vals.color || '#ffffff'}"></label>
     </div>
-    <label class="ve-text-pop-full">${tr('video.textBg')}<input type="checkbox" id="vt-bg" ${vals.bg ? 'checked' : ''}></label>`;
+    <label class="ve-text-pop-full">${tr('video.textBg')}<input type="checkbox" id="vt-bg" ${vals.bg ? 'checked' : ''}></label>
+    <label class="ve-text-pop-full">${tr('video.textBgRadius')}<input type="range" id="vt-bg-radius" min="0" max="40" step="1" value="${vals.bgRadius ?? 8}"></label>`;
 }
 function wireTextStyleFields(container, applyFn) {
   const get = () => ({
@@ -2095,6 +2226,7 @@ function wireTextStyleFields(container, applyFn) {
     size: Math.max(1, Number(container.querySelector('#vt-size').value) || 42),
     color: container.querySelector('#vt-color').value,
     bg: container.querySelector('#vt-bg').checked,
+    bgRadius: Number(container.querySelector('#vt-bg-radius').value) || 0,
   });
   const onChange = () => applyFn(get());
   container.querySelector('#vt-font').addEventListener('change', onChange);
@@ -2103,6 +2235,7 @@ function wireTextStyleFields(container, applyFn) {
   container.querySelector('#vt-size').addEventListener('input', onChange);
   container.querySelector('#vt-color').addEventListener('input', onChange);
   container.querySelector('#vt-bg').addEventListener('change', onChange);
+  container.querySelector('#vt-bg-radius').addEventListener('input', onChange);
 }
 // clip 이 있으면 그 클립 하나만(개별), 없고 bulkTrack 이 있으면 그 트랙의 자막 클립
 // 전부(일괄) — 바뀔 때마다 즉시 적용한다(별도 "적용" 버튼 없음, 팝오버와 같은 방식).
@@ -2132,6 +2265,7 @@ function syncTextPopoverFields(clip) {
   set('#tx-size', clip.size);
   set('#tx-color', clip.color);
   const bg = _textPopoverEl.querySelector('#tx-bg'); if (bg) bg.checked = !!clip.bg;
+  set('#tx-bg-radius', clip.bgRadius ?? 8);
 }
 function syncTextStylePanelFields(clip) {
   if (_selClipId !== clip.id) return;
@@ -2143,6 +2277,7 @@ function syncTextStylePanelFields(clip) {
   set('#vt-size', clip.size);
   set('#vt-color', clip.color);
   const bg = body.querySelector('#vt-bg'); if (bg) bg.checked = !!clip.bg;
+  set('#vt-bg-radius', clip.bgRadius ?? 8);
 }
 
 // ── 도형(사각형/타원) — 트랙 순서=z-index 원칙을 그대로 따라야 해서(요청) 텍스트처럼
@@ -3394,7 +3529,20 @@ function buildEDL() {
     for (const track of textTracks) {
       if (track.hidden) continue;
       for (const tc of clipsAt(track.id, sampleT)) {
-        out.push({ content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color, fontKey: tc.fontKey, bg: tc.bg });
+        const item = { content: tc.text || '', x: tc.xPct, y: tc.yPct, size: tc.size, color: tc.color, fontKey: tc.fontKey, bg: tc.bg, bgRadius: tc.bgRadius };
+        // 곡률 있는 배경 상자는 main.js 가 drawtext 의 자동 크기맞춤(box=1) 대신 별도
+        // 이미지를 오버레이해서 모서리를 둥글게 깎는다 — 그러려면 상자 크기를 미리 알아야
+        // 하는데, drawtext 내부의 정확한 text_w/text_h 는 렌더러가 알 방법이 없다(ffmpeg
+        // 필터 내부 값이라 밖으로 안 새어나옴). 캔버스로 같은 글꼴·크기를 직접 재서 근사한다
+        // (measureTextBoxPx) — 몇 px 오차는 있을 수 있지만 곡률 마스크 위치용이라 티 안 남,
+        // 정작 글자 자체는 이 값과 무관하게 여전히 drawtext 가 정확히 그린다.
+        if (tc.bg && tc.bgRadius > 0) {
+          const m = measureTextBoxPx(tc.text, tc.fontKey, tc.size);
+          const padV = Math.round((tc.size || 42) * 0.15), padH = Math.round((tc.size || 42) * 0.4);
+          item.boxW = m.textW + padH * 2;
+          item.boxH = m.textH + padV * 2;
+        }
+        out.push(item);
       }
     }
     return out;
@@ -3680,7 +3828,7 @@ function finishLyricTiming(cancel) {
       const lineStart = ci * _lyricChunkSize, lineEnd = Math.min(_lyricLines.length, lineStart + _lyricChunkSize);
       const clip = {
         id: nextClipId(), trackId: tid, isText: true, start, dur, inOff: 0, srcDur: HUGE_CLIP_SRC_DUR,
-        text: _lyricLines.slice(lineStart, lineEnd).join('\n'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false,
+        text: _lyricLines.slice(lineStart, lineEnd).join('\n'), xPct: 0.5, yPct: 0.85, size: 42, color: '#ffffff', fontKey: 'malgun', bg: false, bgRadius: 8,
       };
       _veClips.push(clip); created.push(clip);
     }
