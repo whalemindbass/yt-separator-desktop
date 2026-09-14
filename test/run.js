@@ -27,7 +27,7 @@ const ROOT = path.resolve(DIR, '..');
 
 // Electron 이 필요한 것과 Node 로 충분한 것을 나눈다.
 // samplerate 는 엔진만 쓰므로 창을 띄울 이유가 없다.
-const NODE_ONLY = new Set(['samplerate.test.js', 'i18n.test.js', 'studioutil.test.js', 'enginebuild.test.js', 'devremember.test.js', 'devreconnectstatus.test.js']);
+const NODE_ONLY = new Set(['samplerate.test.js', 'i18n.test.js', 'studioutil.test.js', 'enginebuild.test.js', 'devremember.test.js', 'devreconnectstatus.test.js', 'usage.test.js']);
 
 // 실제 오디오 장치/엔진 프로세스를 만지는 스위트 — 위 NODE_ONLY(엔진을 직접 spawn)
 // 더하기, 스튜디오 탭을 열거나(engine:start 트리거) 엔진을 직접 start/kill 하는 것들.

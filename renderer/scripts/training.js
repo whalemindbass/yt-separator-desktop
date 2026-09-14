@@ -1303,10 +1303,10 @@ function btStop() {
 // 연습 기록처럼 그렇게 판단하기 애매한 화면은 탭이 열려 있으면 그냥 사용중으로 친다.
 function syncTrainingActivity() {
   const activeTool = document.querySelector('.training-nav-item.on')?.dataset.tool;
-  if (activeTool === 'metro-practice') usageSetIdle(!_pmPlaying);
-  else if (activeTool === 'bpm-trainer') usageSetIdle(!_btPlaying);
-  else if (activeTool === 'fretboard') usageSetIdle(_fbScreen !== 'quiz');
-  else usageSetIdle(false);
+  if (activeTool === 'metro-practice') usageSetIdle(!_pmPlaying, 'training');
+  else if (activeTool === 'bpm-trainer') usageSetIdle(!_btPlaying, 'training');
+  else if (activeTool === 'fretboard') usageSetIdle(_fbScreen !== 'quiz', 'training');
+  else usageSetIdle(false, 'training');
 }
 
 // ── 사이드바 도구 전환 ──

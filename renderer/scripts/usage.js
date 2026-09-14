@@ -76,7 +76,11 @@ export function usageEnter(name) {
 }
 // 지금 카테고리는 그대로 두고 "실제로 쓰고 있냐"만 바꾼다 — 메트로놈/BPM 트레이너를
 // 열어만 두고 재생은 안 하는 동안은 idle(true), 재생 중이면 idle(false).
-export function usageSetIdle(idle) {
+// forCat 을 주면 지금 카테고리가 그거랑 다를 때는 무시한다 — 트레이닝 탭을 벗어난
+// "직후"(MutationObserver 콜백은 마이크로태스크라 usageEnter(다음탭) 보다 늦게 실행된다)
+// 걸려온 판정이 이미 바뀐 다음 탭의 idle 을 잘못 덮어쓰는 걸 막는다.
+export function usageSetIdle(idle, forCat) {
+  if (forCat && forCat !== _cat) return;
   flush();
   _idle = idle;
 }
