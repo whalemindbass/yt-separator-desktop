@@ -5,10 +5,10 @@ import { Player, STEM_META, stemOrderFor, loadStemFilesToBuffers, toYtsepUrl } f
 import { t, getLocale } from './i18n.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, pctToFader, faderToPct, dbText } from './fader.js';
-import { TabView, transcribeBass, toMono } from './tabview.js';
-import { StaffView } from './staffview.js';
+import { TabView, transcribeBass, cancelTranscribe, toMono } from './tabview.js';
+import { ChordStripView } from './chordstrip.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
-import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
+import { detectChords, phaseFromChords, NON_HARMONY_STEMS } from '../workers/tab-chord.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -1557,25 +1557,25 @@ function addCheckpoint() {
 
 // ── 베이스 TAB ──────────────────────────────────────────────
 let _tabView = null;
-let _staffView = null;    // 오선보 프로토타입 — TAB 과 같은 buildScore() 결과를 그린다
+let _chordStrip = null;    // 마디별 코드명 한 줄 — TAB 과 같은 buildScore() 결과를 그린다
 let _tabBass = null;      // [L, R] — 현재 곡의 베이스 스템
 let _tabDrums = null;     // [L, R] — 박자 감지용 드럼 스템
 let _tabMix = null;       // [L, R] — 스템을 전부 합친 것. 드럼만으로 템포가 안 잡힐 때 쓴다
-let _tabHarmonyMix = null; // [L, R] — 화성 스템(보컬·other·기타·피아노)만 합친 것. 코드 검출용
+let _tabHarmonyMix = null; // [L, R] — 드럼 뺀 나머지 스템(베이스 포함) 합친 것. 코드 검출용
 let _tabSr = 44100;
 let _tabBusy = false;
 // 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
 let _tabNotes = null, _tabTuning = '4', _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
 let _tabPhase = null;     // null = 자동 판정
-let _tabKey = null;       // estimateKey() 결과 — 오선보 음이름 표기(#/b)에 쓴다
+let _tabKey = null;       // estimateKey() 결과 — 음이름 표기(#/b)에 쓴다
 let _tabChords = null;    // detectChords() 결과 — 마디 첫 박 판정(phaseFromChords)에 쓴다
-let _tabBarChords = null; // computeBarChords() 결과 — 오선보 마디 위 코드 표시
+let _tabBarChords = null; // computeBarChords() 결과 — 코드 스트립에 표시
 
 function tabEls() {
   return {
     view: $('lib-tab-view'), status: $('lib-tab-status'), run: $('lib-tab-run'),
     tuning: $('lib-tab-tuning'), barPrev: $('lib-tab-bar-prev'), barNext: $('lib-tab-bar-next'),
-    staffView: $('lib-staff-view'),
+    chordStripEl: $('lib-chord-strip'),
   };
 }
 
@@ -1627,11 +1627,11 @@ $('lib-tab-close')?.addEventListener('click', () => toggleTabOverlay(false));
   handle.addEventListener('pointercancel', endDrag);
 })();
 
-/** TAB/오선보 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 저장된 결과 복원 때도 필요해 공용으로 뺐다. */
+/** TAB/코드 스트립 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 저장된 결과 복원 때도 필요해 공용으로 뺐다. */
 function ensureLibraryTabViews() {
-  const { view, staffView } = tabEls();
+  const { view, chordStripEl } = tabEls();
   if (view && !_tabView) _tabView = new TabView(view, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
-  if (staffView && !_staffView) _staffView = new StaffView(staffView, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
+  if (chordStripEl && !_chordStrip) _chordStrip = new ChordStripView(chordStripEl, { onSeek: (sec) => { playerVideo.currentTime = sec; } });
 }
 
 function setTabSource(stems, sampleRate, item) {
@@ -1654,14 +1654,14 @@ function setTabSource(stems, sampleRate, item) {
     if (parts.length > 1) {
       _tabMix = sum(parts);
       // 코드는 화성을 가진 스템에서만 읽는다 — 없으면(2-스템 분리 등) 원본 믹스로 내려간다.
-      const harmonyParts = Object.entries(stems).filter(([k, s]) => HARMONY_STEMS.has(k) && s && s[0] && s[1]).map(([, s]) => s);
+      const harmonyParts = Object.entries(stems).filter(([k, s]) => !NON_HARMONY_STEMS.has(k) && s && s[0] && s[1]).map(([, s]) => s);
       _tabHarmonyMix = sum(harmonyParts) || _tabMix;
     }
   }
 
   const { status, run } = tabEls();
   if (_tabView) _tabView.clear();
-  if (_staffView) _staffView.clear();
+  if (_chordStrip) _chordStrip.clear();
   if (run) run.disabled = !_tabBass || _tabBusy;
   updateTabBarButtons();
 
@@ -1679,8 +1679,9 @@ function setTabSource(stems, sampleRate, item) {
     const score = _tabBeats ? buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase }) : null;
     _tabView.setScore(score);
     const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
-    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr);
-    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    _tabChords = _tabBeats && harmonyMono ? detectChords(harmonyMono, _tabSr, _tabBeats) : null;
+    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr, _tabChords);
+    if (_chordStrip) _chordStrip.render(score, key, _tabBarChords);
     updateTabBarButtons();
     if (run) run.textContent = t('tab.rerun');
     if (status) { status.classList.remove('err'); status.textContent = t('tab.doneKey', { n: _tabNotes.length, key: key ? key.name : '' }); }
@@ -1709,8 +1710,8 @@ function shiftTabBars(delta) {
   const score = buildScore(_tabNotes, _tabBeats, { phase: _tabPhase });
   _tabView.setScore(score);
   const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
-  _tabBarChords = computeBarChords(score, _tabKey, harmonyMono, _tabSr);
-  if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+  _tabBarChords = computeBarChords(score, _tabKey, harmonyMono, _tabSr, _tabChords);
+  if (_chordStrip) _chordStrip.render(score, _tabKey, _tabBarChords);
   persistTabToLibrary();
 }
 
@@ -1733,6 +1734,7 @@ async function runTabTranscribe() {
 
   _tabBusy = true;
   if (run) run.disabled = true;
+  const cancelBtn = $('lib-tab-cancel'); if (cancelBtn) cancelBtn.hidden = false;
   if (status) { status.classList.remove('err'); status.textContent = t('tab.working', { pct: 0 }); }
 
   try {
@@ -1758,7 +1760,7 @@ async function runTabTranscribe() {
     _tabNotes = r.notes; _tabTuning = r.tuning; _tabBeats = beats; _tabPhase = null;
     _tabAccent = beats && _tabDrums ? beatAccents(toMono(_tabDrums[0], _tabDrums[1]), _tabSr, beats) : null;
     // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다.
-    // 코드열 자체도 오선보 마디 위 표시에 그대로 재활용한다.
+    // 코드열 자체도 코드 스트립 표시에 그대로 재활용한다.
     _tabBarPhase = null; _tabChords = null;
     if (beats && _tabHarmonyMix) {
       try {
@@ -1775,8 +1777,8 @@ async function runTabTranscribe() {
     const score = beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null;
     _tabView.setScore(score);
     const harmonyMono = _tabHarmonyMix ? toMono(_tabHarmonyMix[0], _tabHarmonyMix[1]) : null;
-    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr);
-    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    _tabBarChords = computeBarChords(score, key, harmonyMono, _tabSr, _tabChords);
+    if (_chordStrip) _chordStrip.render(score, key, _tabBarChords);
     updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? t('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
@@ -1785,24 +1787,35 @@ async function runTabTranscribe() {
     if (run) run.textContent = t('tab.rerun');
     persistTabToLibrary();
   } catch (e) {
-    if (status) { status.textContent = t('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+    if (status) {
+      if (e && e.cancelled) { status.classList.remove('err'); status.textContent = t('tab.cancelled'); }
+      else { status.textContent = t('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+    }
   } finally {
     _tabBusy = false;
     if (run) run.disabled = !_tabBass;
+    if (cancelBtn) cancelBtn.hidden = true;
   }
 }
 
 function initTabPanel() {
   const { run, barPrev, barNext } = tabEls();
   if (run) run.addEventListener('click', runTabTranscribe);
+  $('lib-tab-cancel')?.addEventListener('click', cancelTranscribe);
   if (barPrev) barPrev.addEventListener('click', () => shiftTabBars(-1));
   if (barNext) barNext.addEventListener('click', () => shiftTabBars(1));
+  // TAB(프렛보드) 뷰는 기본으로 꺼져 있다 — 코드 스트립만으로 부족할 때만 켠다.
+  $('lib-tab-toggle')?.addEventListener('click', (e) => {
+    const view = $('lib-tab-view'); if (!view) return;
+    view.hidden = !view.hidden;
+    e.currentTarget.classList.toggle('on', !view.hidden);
+  });
   setTabSource(null, 44100);
   // 재생 위치 추적은 독립 루프로 둔다 — 파형 그리기(drawWaveform)는
   // 캔버스가 없으면 일찍 반환하므로 거기에 얹으면 같이 죽는다.
   const tick = () => {
     if (_tabView) _tabView.setTime(playerVideo.currentTime || 0);
-    if (_staffView) _staffView.setTime(playerVideo.currentTime || 0);
+    if (_chordStrip) _chordStrip.setTime(playerVideo.currentTime || 0);
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -2133,6 +2146,13 @@ export const Library = {
   selectItem,
   getSelected: () => currentItem(),
   getItems: () => items.slice(),
+  // videoPath 가 같은 항목(같은 영상을 4-stem/4-stem+/6-stem 등으로 여러 번 분리한 경우)
+  // 중 대표만 골라 낸다 — studio.js 의 곡 고르기 목록이 이 기준을 안 쓰고 자기 나름대로
+  // 중복 제거를 하다가, 실제로 채보해 둔 변형이 아니라 채보 안 된 다른 변형을 대표로
+  // 골라서 "라이브러리에선 되는데 스튜디오에선 안 보인다"는 제보가 났다(대표 기준이
+  // 둘로 갈라져 있던 게 원인). 라이브러리 사이드바가 쓰는 것과 똑같은 이 함수 하나로
+  // 통일한다.
+  getRepresentativeItems: representativeItems,
   // studio.js 가 채보를 저장한 뒤 여기 items 배열도 바로 고쳐 두려고 쓴다 — 안 그러면
   // 다음에 같은 곡을 studio.js 의 loadSong() 이 다시 열 때(같은 세션 안에서) 아직
   // refresh() 를 안 불러 옛 값(tab 없음)을 보고 재채보하라고 뜬다.

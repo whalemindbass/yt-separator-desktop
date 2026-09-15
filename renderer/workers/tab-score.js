@@ -1,5 +1,5 @@
 'use strict';
-import { chordQualityAt } from './tab-chord.js';
+import { chordAt, chordQualityAt } from './tab-chord.js';
 
 // 노트 목록 → 마디로 나눈 악보.
 //
@@ -306,22 +306,33 @@ export function estimateBarChord(items, key) {
 
 // chordQualityAt() 의 1등-2등 점수차가 이보다 작으면 장·단이 사실상 동률이란 뜻이다
 // (파워코드처럼 3음 자체가 흐린 마디) — 배열 순서상 장조로 쏠리는 걸 막으려고 그럴 땐
-// 안 믿고 조성표로 내려간다. 값은 아직 실측 없이 잡은 첫 추정 — 실제 곡으로 더 맞춰야 한다.
+// 안 믿고 자유 탐색(detectChords)으로 내려간다.
 const MIN_CHORD_CONFIDENCE = 0.06;
 
 /**
- * 마디마다 코드를 정한다 — 근음은 베이스 음에서(안 흔들린다), 성질(장·단·sus4)은 그
- * 근음 자리의 화성 스템 크로마 실측에서. 조성표(estimateBarChord)보다 우선한다 —
- * 표는 "이 자리는 보통 장조다" 라는 추정이고, 이건 실제로 그 마디에 뭐가 울렸는지다.
- * 근음을 못 찾은 마디(쉼표만 있는 마디), 오디오가 없거나, 크로마 확신이 낮으면(3음이
- * 흐린 파워코드 등) estimateBarChord() 로 내려간다.
+ * 마디마다 코드를 정한다.
+ *
+ * 근음은 되도록 베이스 음에서 온다(pickBarRootNote) — 자유 탐색보다 훨씬 안 흔들린다.
+ * lab/tab/README.md 12절에서 chordQualityAt(근음을 안다는 전제로 성질만 고르는 스코어러)
+ * 를 정답을 아는 합성 화음으로 직접 재봤더니 장·단·sus4·sus2 는 83~100% 로 안정적이었다
+ * — 그런데도 실사용(버스커 버스커 "첫사랑")에서 F-G-Em-Am 이 잘못 나온 적이 있었고,
+ * 그때 원인을 "성질 판정이 아니라 근음·마디 경계 쪽"으로 결론 냈었다. 그래서 이 함수는
+ * 여전히 베이스 근음을 1순위로 믿는다 — detectChords() 의 자유 근음 탐색(성질뿐 아니라
+ * 근음까지 크로마만으로 고름)은 검증된 적이 없고, 실측(같은 곡)에서 베이스 근음 방식보다
+ * 진행이 더 헷갈렸다(Em/G 혼동 등).
+ *
+ * detectChords() 결과(chords)는 베이스 근음이 없는 마디(마디 안에 베이스 음 자체가
+ * 없는 경우 — 인트로처럼 베이스가 몇 초씩 안 치는 구간, 사용자 제보)나 chordQualityAt
+ * 확신이 낮은 마디에만 대신 채우는 용도다. 그것도 없으면 조성표(estimateBarChord)로
+ * 내려간다.
  * @param {{bars:Array}} score  buildScore() 결과
- * @param {object|null} key  estimateKey() 결과
- * @param {Float32Array|null} harmonyMono  화성 스템만 합친 모노(HARMONY_STEMS) — 없으면 조성표만 쓴다
+ * @param {object|null} key  estimateKey() 결과 — 마지막 대비(조성표)에만 쓴다
+ * @param {Float32Array|null} harmonyMono  드럼 뺀 나머지 스템을 합친 모노(NON_HARMONY_STEMS) — 없으면 베이스 근음 경로를 못 쓴다
  * @param {number} sampleRate
+ * @param {Array|null} chords  tab-chord.js 의 detectChords() 결과(박마다 자유 탐색 코드) — 대체용
  * @returns {Array<{root:number, quality:string, name:string}|null>}  score.bars 와 같은 순서
  */
-export function computeBarChords(score, key, harmonyMono, sampleRate) {
+export function computeBarChords(score, key, harmonyMono, sampleRate, chords) {
   if (!score || !score.bars) return null;
   return score.bars.map(bar => {
     const note = pickBarRootNote(bar.items);
@@ -329,8 +340,9 @@ export function computeBarChords(score, key, harmonyMono, sampleRate) {
       const rootPc = ((note.midi % 12) + 12) % 12;
       const q = chordQualityAt(harmonyMono, sampleRate, bar.start, bar.end, rootPc);
       if (q && q.confidence >= MIN_CHORD_CONFIDENCE) return q;
-      return estimateBarChord(bar.items, key) || q;
     }
+    const c = chords && chords.length ? chordAt(chords, (bar.start + bar.end) / 2) : null;
+    if (c) return { root: c.root, quality: c.quality, name: c.name };
     return estimateBarChord(bar.items, key);
   });
 }

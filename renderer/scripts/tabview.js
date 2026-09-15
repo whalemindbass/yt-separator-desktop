@@ -19,6 +19,12 @@ function getWorker() {
   return _worker;
 }
 
+// transcribeBass() 가 지금 기다리고 있는 요청의 reject — cancelTranscribe() 가 여기로
+// 손을 뻗어 즉시 풀어 준다. 워커 자체를 죽이는 방식이라(취소 메시지를 보내는 게 아니라)
+// 워커 안에서 이미 돌고 있는 ONNX 추론을 진짜로 멈춘다 — 다음 실행은 getWorker() 가
+// 알아서 새 워커를 만든다.
+let _pendingReject = null;
+
 /**
  * 모노 오디오를 채보한다.
  * @param {Float32Array} mono
@@ -34,12 +40,14 @@ export function transcribeBass(mono, sampleRate, opts, onProgress) {
   return new Promise((resolve, reject) => {
     const id = Math.random().toString(36).slice(2);
     let cross = null;
+    _pendingReject = reject;
     const onMsg = (e) => {
       const d = e.data || {};
       if (d.id !== id) return;
       if (d.type === 'progress') { onProgress && onProgress(d.pct, d.phase); return; }
       if (d.type === 'crosscheck') { cross = d; return; }
       w.removeEventListener('message', onMsg);
+      _pendingReject = null;
       if (d.type === 'error') reject(new Error(d.error));
       else resolve({ notes: d.notes, tuning: d.tuning, cross });
     };
@@ -47,6 +55,15 @@ export function transcribeBass(mono, sampleRate, opts, onProgress) {
     const buf = new Float32Array(mono);   // 전송 후 원본을 잃지 않도록 복사
     w.postMessage({ id, type: 'transcribe', audio: buf.buffer, sampleRate, opts: opts || {}, baseUrl }, [buf.buffer]);
   });
+}
+
+/** 지금 돌고 있는 채보를 취소한다 — 진행 중이 아니면 조용히 아무 일도 안 한다. */
+export function cancelTranscribe() {
+  if (!_pendingReject) return;
+  const reject = _pendingReject; _pendingReject = null;
+  if (_worker) { _worker.terminate(); _worker = null; }   // 워커째 죽여야 추론이 진짜 멈춘다
+  const err = new Error('cancelled'); err.cancelled = true;
+  reject(err);
 }
 
 /** 스템 두 채널을 모노로 */

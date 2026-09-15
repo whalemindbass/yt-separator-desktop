@@ -134,7 +134,7 @@ const FIXED_ROOT_QUALITIES = [
  * 이때 그냥 1등을 뽑으면 배열 순서상 장조가 이긴다 — 실측(Fm7 이 F 로 나옴)에서 걸렸다.
  * 그래서 confidence(1등−2등 점수차)도 같이 돌려주고, 낮으면 부른 쪽에서 이 결과를 믿지
  * 말고 다른 단서(조성표 등)로 내려가게 한다.
- * @param {Float32Array} mixMono  화성 스템만 합친 모노(HARMONY_STEMS)
+ * @param {Float32Array} mixMono  드럼 뺀 나머지 스템을 합친 모노(NON_HARMONY_STEMS)
  * @param {number} sampleRate
  * @param {number} t0 구간 시작(초)
  * @param {number} t1 구간 끝(초)
@@ -247,13 +247,12 @@ export function chordAt(chords, t) {
   return chords[lo];
 }
 
-// 코드 검출용 — 화성(코드)을 실제로 들고 있는 스템만.
-//   드럼: 화성이 없는 잡음.
-//   베이스: 한 번에 한 음 — 화성을 못 말해준다(같은 이유로 chromaAt 도 저역을 뺀다).
-//   보컬: 이것도 한 번에 한 음(선율)이다. 코드 구성음이 아닌 경과음·꾸밈음이 섞여
-//   들어오면 크로마가 흐려진다 — 버스커 버스커 "첫사랑"(F-G-Em-Am 반복)에서 보컬을
-//   넣은 채로는 코드가 실제 진행과 무관하게 나왔다(사용자 제보). 보컬이 강한 발라드일수록
-//   영향이 클 것으로 보고 뺐다 — 반주만으로 다시 실측 확인 필요.
-export const HARMONY_STEMS = new Set(['other', 'guitar', 'piano']);
+// 코드 검출용 — 드럼만 빼고 나머지 스템 전부를 합쳐 크로마를 낸다(사용자 지시).
+// 한때는 베이스(단음이라 화성을 못 말해줌 — 같은 이유로 chromaAt 도 저역을 뺀다)와
+// 보컬(역시 단음/선율이라, 경과음·꾸밈음이 섞이면 크로마가 흐려짐 — 버스커 버스커
+// "첫사랑"(F-G-Em-Am 반복)에서 보컬을 넣은 채로는 코드가 진행과 무관하게 나온 적이
+// 있었다)도 뺐었다. 이제 그 둘도 다시 합친다 — 흐려지는 노래가 또 나오면 그때
+// 다시 좁히되, 이번엔 곡별로 확인하고 좁혀야 한다(모든 곡에 일괄 적용했던 게 문제).
+export const NON_HARMONY_STEMS = new Set(['drums']);
 
 export { ROOTS };

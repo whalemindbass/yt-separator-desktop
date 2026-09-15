@@ -493,7 +493,6 @@
             <span class="player-name-hint" data-i18n="player.name.hint">Enter로 저장</span>
           </div>
           <div class="player-meta">
-            <button id="player-tab-jump" class="btn" type="button" data-i18n="tab.title" hidden>베이스 TAB</button>
             <div class="model-toggle" id="player-model-toggle" hidden>
               <button class="model-tog-btn" data-key="4stem">4-stem</button>
               <button class="model-tog-btn" data-key="4stem-2" data-i18n-title="model.4stem2.hint" title="분리 정확도가 더 높지만 시간이 더 걸립니다">4-stem+</button>
@@ -590,12 +589,14 @@
                 <button id="lib-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
                 <button id="lib-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
               </span>
+              <button id="lib-tab-toggle" class="btn btn-sm" data-i18n="tab.showTab">TAB 보기</button>
               <button id="lib-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+              <button id="lib-tab-cancel" class="btn btn-sm" data-i18n="tab.cancel" hidden>취소</button>
               <button id="lib-tab-close" class="btn btn-sm btn-icon" title="닫기" aria-label="닫기">✕</button>
             </header>
             <div class="tab-status" id="lib-tab-status"></div>
-            <div class="tab-view" id="lib-tab-view"></div>
-            <div class="staff-view" id="lib-staff-view"></div>
+            <div class="chord-strip" id="lib-chord-strip"></div>
+            <div class="tab-view" id="lib-tab-view" hidden></div>
           </section>
         </div>
 
@@ -620,14 +621,26 @@
 
     <aside class="lib-right">
       <div class="mixer">
-        <div class="mixer-inline-row">
-          <!-- Row 1: 마스터 / 오디오 -->
+        <div class="mixer-col-a">
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.master">MASTER</label>
             <div class="master-controls">
               <input id="master-vol" class="mixer-slider master-slider" type="range" min="0" max="1000" value="720" />
               <span id="master-val" class="mixer-val">0.0 dB</span>
             </div>
+          </div>
+          <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>
+        </div>
+        <div class="mixer-inline-row">
+          <!-- 코드·채보 — 예전엔 플레이어 헤더에 따로 있던 버튼(#player-tab-jump)을
+               여기로 옮겼다(사용자 요청 — 마스터/스템 다음 순서). id·클릭 로직은
+               그대로라 library.js 는 안 건드렸다. -->
+          <div class="mixer-master mixer-master-inline">
+            <label class="mixer-label" data-i18n="mixer.chordTab">코드·채보</label>
+            <span class="mixer-tab-row">
+              <button id="player-tab-jump" class="btn" type="button" data-i18n="tab.title">베이스 TAB</button>
+              <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="tab.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span>
+            </span>
           </div>
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.audio">오디오</label>
@@ -636,8 +649,6 @@
               <button class="source-btn"    data-src="orig" data-i18n="mixer.src.orig">원본</button>
             </div>
           </div>
-
-          <!-- Row 2: 구간반복 / 메트로놈 -->
           <div class="mixer-master mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.loop">구간반복</label>
             <div class="loop-controls">
@@ -672,8 +683,6 @@
               </div>
             </div>
           </div>
-
-          <!-- Row 3: 키 / 속도 -->
           <div class="mixer-master mixer-key mixer-master-inline">
             <label class="mixer-label" data-i18n="mixer.key">키</label>
             <div class="key-controls">
@@ -697,7 +706,6 @@
             </div>
           </div>
         </div>
-        <div class="mixer-tracks" id="mixer-tracks"><!-- rendered by app.js --></div>
       </div>
     </aside>
   </main>
@@ -840,7 +848,7 @@
             <button class="daw-tool-tab" data-tool="vu" data-i18n="studio.h.inputLevel">입력 레벨</button>
             <button class="daw-tool-tab" data-tool="tuner" data-i18n="studio.h.tuner">튜너</button>
             <!-- 베이스 TAB — 라이브러리 패널과 같이 켜고 끈다 -->
-            <button class="daw-tool-tab" data-tool="tab" data-i18n="tab.title" hidden>베이스 TAB</button>
+            <button class="daw-tool-tab" data-tool="tab"><span data-i18n="tab.title">베이스 TAB</span> <span class="exp-badge" data-i18n="mixer.exp" data-i18n-title="tab.exp.desc" title="실험적 기능 — 곡에 따라 정확도 차이가 있을 수 있음">BETA</span></button>
           </div>
           <div class="daw-fx-b">
             <div class="daw-tool" id="tool-vu" data-tool="vu" hidden>
@@ -895,11 +903,13 @@
             <button id="st-tab-bar-prev" class="btn btn-sm btn-icon" data-i18n-title="tab.barPrev" title="마디 시작 앞으로" disabled>◀</button>
             <button id="st-tab-bar-next" class="btn btn-sm btn-icon" data-i18n-title="tab.barNext" title="마디 시작 뒤로" disabled>▶</button>
           </span>
+          <button id="st-tab-toggle" class="btn btn-sm" data-i18n="tab.showTab">TAB 보기</button>
           <button id="st-tab-run" class="btn btn-sm" data-i18n="tab.run">채보하기</button>
+          <button id="st-tab-cancel" class="btn btn-sm" data-i18n="tab.cancel" hidden>취소</button>
         </header>
         <div class="tab-status" id="st-tab-status"></div>
-        <div class="tab-view" id="st-tab-view"></div>
-        <div class="staff-view" id="st-staff-view"></div>
+        <div class="chord-strip" id="st-chord-strip"></div>
+        <div class="tab-view" id="st-tab-view" hidden></div>
       </div>
 
       <!-- 트랙 -->
@@ -1663,7 +1673,6 @@
     </section>
   </main>
 
-  <script src="./lib/vexflow/vexflow.js"></script>
   <script type="module" src="./scripts/app.js"></script>
 </body>
 </html>

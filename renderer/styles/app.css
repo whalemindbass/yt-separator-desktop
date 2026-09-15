@@ -991,7 +991,7 @@ body { display: flex; flex-direction: column; }
   overflow: hidden;
   display: flex; flex-direction: column;
 }
-.lib-right { grid-area: right; border-left: 1px solid var(--border); padding: 0px 18px; overflow-y: auto; background: var(--surface); }
+.lib-right { grid-area: right; border-left: 1px solid var(--border); padding: 0px 18px; overflow-y: auto; background: var(--surface); container-type: inline-size; container-name: mixer; }
 
 .lib-side {
   background: var(--surface);
@@ -1298,12 +1298,20 @@ body { display: flex; flex-direction: column; }
   .src-choice { grid-template-columns: 1fr; }
 }
 
-/* ── mixer-inline-row: 오디오/속도/구간반복/키 4개 블록 ─────────────
-   기본(우측 컬럼): 각 블록 한 줄씩, 라벨은 컨트롤 위쪽.
-   하단(스택 모드): 2x2 그리드, 라벨은 좌측, 셀 테두리로 구분.
-   ─────────────────────────────────────────────────────────────*/
+/* ── 믹서 좌우 분할 ─────────────────────────────────────────────
+   기본(우측 320px 사이드바 폭): .mixer-col-a(마스터+스템)와
+   .mixer-inline-row(코드·채보/오디오/구간반복/메트로놈/키/속도)가 위아래로
+   쌓여 한 줄짜리 세로 목록이 된다(마스터→스템→코드·채보→오디오→…). 좁은
+   뷰포트에서 좌우 두 블록으로 갈라지는 컨테이너 쿼리는 .mixer{} 정의부
+   바로 뒤에 있다(순서상 이겨야 해서). */
+.mixer-col-a {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
 
-/* 기본 (우측 컬럼) — 세로 stack, 라벨 상단 */
+/* mixer-inline-row: 코드·채보/오디오/구간반복/메트로놈/키/속도 — 항상 세로 stack, 라벨 상단 */
 .mixer .mixer-inline-row {
   display: flex;
   flex-direction: column;
@@ -1328,7 +1336,9 @@ body { display: flex; flex-direction: column; }
 .mixer-master.mixer-master-inline .speed-controls,
 .mixer-master.mixer-master-inline .loop-controls,
 .mixer-master.mixer-master-inline .metro-controls,
-.mixer-master.mixer-master-inline .master-controls { flex-shrink: 0; }
+.mixer-master.mixer-master-inline .master-controls,
+.mixer-master.mixer-master-inline .mixer-tab-row { flex-shrink: 0; }
+.mixer-tab-row { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Master 볼륨 (그룹 안에 들어옴) */
 .master-controls { display: flex; align-items: center; gap: 8px; }
@@ -1436,47 +1446,6 @@ body { display: flex; flex-direction: column; }
   padding: 0 4px; outline: none; cursor: pointer; max-width: 108px;
 }
 .metro-accent:focus { border-color: var(--accent); }
-
-/* 하단 (스택 모드) — 2×3 그리드 (6 셀), 라벨 좌측 */
-@media (max-width: 1280px), (max-height: 780px) {
-  .mixer .mixer-inline-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-auto-rows: auto;
-    gap: 0;
-  }
-  .mixer-master.mixer-master-inline {
-    flex-direction: row;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-    border-right:  1px solid var(--border);
-  }
-  .mixer-master.mixer-master-inline > .mixer-label {
-    min-width: 64px;
-    text-align: center;
-  }
-  /* 우측 컬럼: border-right 없음 */
-  .mixer-master.mixer-master-inline:nth-child(2n)  { border-right: 0; }
-  /* 마지막 행: border-bottom 없음 (6개면 5,6번째) */
-  .mixer-master.mixer-master-inline:nth-last-child(-n+2) { border-bottom: 0; }
-  /* 하단 그리드 모드 — 공간 넉넉하니 메트로놈 한 줄로 */
-  .metro-controls { flex-direction: row; align-items: center; }
-}
-
-/* mixer 컨테이너 자체 폭이 좁으면 (구간반복 셀이 넘칠 만큼): 1-column 그리드로 fallback.
-   viewport가 아닌 mixer container 폭 기준. 우측/하단 모드 상관없이 오버플로우 감지. */
-@container mixer (max-width: 760px) {
-  .mixer .mixer-inline-row {
-    grid-template-columns: 1fr;
-  }
-  .mixer-master.mixer-master-inline {
-    border-right: 0;
-  }
-  .mixer-master.mixer-master-inline:nth-child(n+2)  { border-bottom: 1px solid var(--border); }
-  .mixer-master.mixer-master-inline:last-child      { border-bottom: 0; }
-}
 
 /* Source toggle (스템 / 원본) */
 .source-toggle {
@@ -2074,8 +2043,28 @@ body { display: flex; flex-direction: column; }
   background: var(--elev);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  container-type: inline-size;
-  container-name: mixer;
+}
+/* 좁은 뷰포트(기존 1280px 리플로우로 .lib-right 가 .lib-center 아래 가로로 넓은
+   띠가 되는 상태)에선 .lib-right 자체 폭이 오히려 넓어진다 — 그 폭을 감지해
+   (컨테이너 쿼리) 좌(마스터+스템) · 우(코드·채보 맨 위 + 나머지 세로) 두 블록
+   으로 갈라 그 가로 공간을 쓴다. 컨테이너는 .mixer 자신이 아니라 .lib-right
+   여야 한다 — 사이즈 컨테이너 쿼리는 컨테이너 스스로를 대상으로 못 건다(자기
+   참조 순환이라 스펙상 무시된다) — 그래서 .lib-right 에 걸고 .mixer 를 그
+   자손으로서 규칙 대상 삼는다. */
+@container mixer (min-width: 480px) {
+  /* height:100% 로 .lib-right 의 그리드 행 높이(narrow 브레이크포인트에서
+     minmax(200px,42%))를 그대로 물려받아야 아래 두 칸이 각자 그 안에서
+     따로 스크롤된다 — 안 그러면 둘 다 내용 높이만큼 자라서 .lib-right
+     하나가 통짜로 스크롤되고, 짧은 쪽엔 빈 여백만 남는다. */
+  .mixer { flex-direction: row; align-items: stretch; height: 100%; }
+  .mixer-col-a, .mixer-inline-row {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* 좌우 경계선 — gap 자리 한가운데 */
+  .mixer-inline-row { border-left: 1px solid var(--border); padding-left: 14px; }
 }
 
 .mixer-master {
@@ -3649,9 +3638,10 @@ body { background: var(--bg) !important; }
 }
 /* 라이브러리 — 영상 위에 반투명하게 띄운다. 아래로 밀어내는 방식은 영상 크기를 건드리기
    쉬웠다(레이아웃 다툼 — 사용자가 두 번 잡아냄) — 그래서 별도 레이어로 완전히 분리했다.
-   오선보는 흰 배경에 촘촘히 그려서 진짜 반투명(영상이 그대로 비침)이면 장면 밝기에 따라
-   가독성이 들쭉날쭉해진다 — 그래서 "반투명"이라도 거의 불투명에 가깝게(92%) 잡는다.
-   video-controls(컨트롤 바)가 항상 바닥에 붙어 있어 그 위(bottom: 64px)부터 띄운다. */
+   코드 스트립은 배경 위에 촘촘히 그려서 진짜 반투명(영상이 그대로 비침)이면 장면 밝기에
+   따라 가독성이 들쭉날쭉해진다 — 그래서 "반투명"이라도 거의 불투명에 가깝게(92%) 잡는다.
+   video-controls(컨트롤 바)가 재생 중 안 보일 때(hover 도 paused 도 아닐 때)는 그
+   자리(64px)까지 마저 내려간다 — 컨트롤이 사라졌는데 빈 틈만 남아 있던 것(사용자 제보). */
 .tab-panel-overlay {
   position: absolute;
   left: 0; right: 0; bottom: 64px;
@@ -3667,8 +3657,10 @@ body { background: var(--bg) !important; }
   box-shadow: 0 -8px 24px rgba(0,0,0,.35);
   overflow-y: auto;
   display: none;
+  transition: bottom .2s ease;
 }
 .tab-panel-overlay.open { display: flex; }
+.player-video-wrap:not(.controls-active):not(.paused) .tab-panel-overlay { bottom: 0; }
 /* 위쪽 손잡이 — 드래그로 두께(높이) 조절 */
 .tab-panel-resize {
   flex: none;
@@ -3687,6 +3679,7 @@ body { background: var(--bg) !important; }
 .tab-panel-resize:hover::before, .tab-panel-resize.dragging::before { background: var(--accent); }
 #lib-tab-close { margin-left: auto; }
 #player-tab-jump.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+#st-tab-toggle.on, #lib-tab-toggle.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .tab-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tab-title {
   font-size: var(--fs-sm); font-weight: 600; color: var(--tx-2);
@@ -3774,36 +3767,45 @@ body { background: var(--bg) !important; }
 .tabv-note.unsure { opacity: .45; border-style: dashed; }
 .tabv-note.unsure.now { opacity: .8; }
 
-/* 오선보 — 따뜻한 종이톤 위 VexFlow SVG(인쇄 악보 느낌, 순백은 어두운 UI 위에서 너무
-   쨍해 보인다). TAB 과 같은 흐르는-재생선 구조: flow 가 재생선 밑을 지나가고,
-   재생선 자체는 화면에 고정된다. */
-.staff-view {
-  --staff-playhead: 30%;
+/* 코드 스트립 — 마디마다 코드명(알파벳/숫자)만 보여주는 얇은 한 줄. 오선보 대신
+   기본으로 항상 보인다. 가로 스크롤은 스크롤바 없이(모바일 스와이프 느낌)
+   — 재생 중엔 활성 마디로 자동 스크롤되니 손으로 잡을 일이 드물다. */
+.chord-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 2px;
+  scrollbar-width: none;
+}
+.chord-strip::-webkit-scrollbar { display: none; }
+.chord-strip:empty { display: none; }
+.chord-cell {
   position: relative;
+  z-index: 0;   /* 이게 없으면 position:relative 만으론 스태킹 컨텍스트가 안 생겨서
+                   음수 z-index 인 채우기(.chord-cell-fill)가 셀 밖(더 먼 조상) 기준으로
+                   쌓여 패널 배경 뒤에 숨어 버린다(육안으로 안 보임 — 실측 버그). */
+  flex: none;
+  min-width: 48px;
+  padding: 5px 8px;
+  font: 700 13px/1.1 var(--mono);
+  color: var(--tx-2);
+  background: var(--elev);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-sm);
+  cursor: pointer;
   overflow: hidden;
-  height: 190px;
-  background: #f7f3ea;
-  border-radius: 12px;
-  margin-top: 10px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.06) inset, 0 6px 18px rgba(0,0,0,.28);
+  transition: border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
-.staff-view:empty { display: none; }
-.staff-view-flow {
-  position: absolute; left: var(--staff-playhead); top: 0; bottom: 0;
-  will-change: transform;
+.chord-cell:hover { border-color: var(--accent-soft-border); }
+.chord-cell.active { color: var(--tx-1); border-color: var(--accent); }
+/* 지금 마디 안에서 얼마나 지났는지 — 왼쪽부터 채워지는 색. 텍스트는 포지션 없는
+   인라인 콘텐츠라 음수 z-index 자손보다 항상 위에 그려져 안 가려진다. */
+.chord-cell-fill {
+  position: absolute; inset: 0; z-index: -1;
+  width: 0%;
+  background: var(--accent);
+  opacity: .35;
 }
-.staff-playhead {
-  position: absolute; top: 0; bottom: 0; left: var(--staff-playhead);
-  width: 1px; background: var(--accent); z-index: 2;
-  box-shadow: 0 0 6px rgba(var(--accent-rgb), .5);
-}
-.staff-playhead::before {
-  content: ''; position: absolute; top: 0; left: -3px;
-  border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
-  border-top: 5px solid var(--accent);
-}
-/* 지금 울리는 음표만 강조한다 */
-.staffv-now, .staffv-now * { fill: var(--accent) !important; stroke: var(--accent) !important; }
 
 /* 마디 시작 옮기기 — 자동 판정이 틀렸을 때 사람이 맞춘다 */
 .tab-bars { display: inline-flex; gap: 2px; margin-left: auto; }

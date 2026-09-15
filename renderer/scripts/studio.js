@@ -9,10 +9,10 @@ import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
-import { TabView, transcribeBass, toMono } from './tabview.js';
-import { StaffView } from './staffview.js';
+import { TabView, transcribeBass, cancelTranscribe, toMono } from './tabview.js';
+import { ChordStripView } from './chordstrip.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
-import { detectChords, phaseFromChords, HARMONY_STEMS } from '../workers/tab-chord.js';
+import { detectChords, phaseFromChords, NON_HARMONY_STEMS } from '../workers/tab-chord.js';
 import { getPresets, setPresets, upsertPreset } from './fx-presets.js';
 import { timeStretchStereo } from './pitch-shift.js';
 
@@ -1261,18 +1261,21 @@ function tracksHeight() {
 }
 // ── 베이스 TAB (도구 탭) ─────────────────────────────────────
 let _tabView = null;
-let _staffView = null;     // 오선보 프로토타입 — TAB 과 같은 buildScore() 결과를 그린다
+let _chordStrip = null;     // 마디별 코드명 한 줄 — TAB 과 같은 buildScore() 결과를 그린다
 let _tabBusy = false;
 let _tabSongKey = null;    // 어느 곡의 결과인지 — 곡이 바뀌면 비운다
 // 마디 시작을 옮길 때 다시 채보하지 않으려고 결과를 들고 있는다
 let _tabNotes = null, _tabTuning = '4', _tabBeats = null, _tabAccent = null, _tabBarPhase = null;
 let _tabPhase = null;      // null = 자동 판정
-let _tabKey = null;        // estimateKey() 결과 — 오선보 음이름 표기(#/b)에 쓴다
-let _tabChords = null;     // detectChords() 결과 — 마디 첫 박 판정(phaseFromChords)에 쓴다
-// computeBarChords() 용 화성 스템 모노 — 마디 옮길 때(shiftTabBars) 다시 디코드하지
-// 않으려고 들고 있는다. 원본 오디오라 스템 경로별로 남기지 않고 통째로 하나만 든다.
+let _tabKey = null;        // estimateKey() 결과 — 음이름 표기(#/b)에 쓴다
+// detectChords() 결과 — 마디 첫 박 판정(phaseFromChords)에도, 마디별 코드 라벨
+// (computeBarChords)에도 이걸 그대로 쓴다. 마디 경계(_tabPhase)가 바뀌어도 이
+// 자체는 안 바뀐다(박마다 이미 다 구해 둔 값이라) — shiftTabBars() 에서 다시 안 만든다.
+let _tabChords = null;
+// detectChords() 입력 — 마디 옮길 때(shiftTabBars) 다시 디코드하지 않으려고 들고
+// 있는다. 원본 오디오라 스템 경로별로 남기지 않고 통째로 하나만 든다.
 let _tabHarmonyMono = null, _tabHarmonySr = 44100;
-let _tabBarChords = null;  // computeBarChords() 결과 — 오선보 마디 위 코드 표시
+let _tabBarChords = null;  // computeBarChords() 결과 — 코드 스트립에 표시
 let _libraryItemId = null; // 현재 곡의 라이브러리 id — 채보 결과를 여기 저장/복원한다(api.library.setTab)
 
 function updateTabBarButtons() {
@@ -1290,15 +1293,23 @@ function shiftTabBars(delta) {
   _tabPhase = ((base + delta) % 4 + 4) % 4;
   const score = buildScore(_tabNotes, _tabBeats, { phase: _tabPhase });
   _tabView.setScore(score);
-  _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr);
-  if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+  _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr, _tabChords);
+  if (_chordStrip) _chordStrip.render(score, _tabKey, _tabBarChords);
   persistTabToLibrary();
 }
 
-/** 채보 결과를 라이브러리 항목에 저장 — 다음에 이 곡을 열 때 재채보 없이 바로 보이게. */
+/**
+ * 채보 결과를 라이브러리 항목에 저장 — 다음에 이 곡을 열 때 재채보 없이 바로 보이게.
+ * barChords(마디별 코드 라벨)도 같이 저장한다 — 스튜디오는 라이브러리와 달리 이 탭
+ * 기능만을 위해 화성 스템을 fetch+decode 부터 다시 해야 해서(라이브러리는 플레이어가
+ * 이미 재생용으로 디코드해 둔 버퍼를 그대로 재사용한다), 그 결과 없이 매번 새로 열 때마다
+ * 몇 초~수십 초씩 코드가 "–"로 비어 보이다 뒤늦게 채워졌다(실사용 제보: 안 온 걸로 착각함).
+ * 캐시해 두면 다시 열 때 그 값을 즉시 보여주고, 정확한 값은 여전히 백그라운드에서
+ * recomputeTabChordsAsync() 로 다시 맞춰 넣는다(마디 옮기기 등에 화성 오디오가 필요해서).
+ */
 function persistTabToLibrary() {
   if (!_libraryItemId) return;
-  const tab = { notes: _tabNotes, tuning: _tabTuning, beats: _tabBeats, accent: _tabAccent, phase: _tabPhase, barPhase: _tabBarPhase };
+  const tab = { notes: _tabNotes, tuning: _tabTuning, beats: _tabBeats, accent: _tabAccent, phase: _tabPhase, barPhase: _tabBarPhase, barChords: _tabBarChords };
   Library.patchTab(_libraryItemId, tab);   // 같은 세션 안에서 바로 반영 — disk 저장과 별개
   api.library.setTab(_libraryItemId, tab).catch(() => {});
 }
@@ -1308,7 +1319,7 @@ function refreshTabPanel() {
   const bass = _stemPaths && _stemPaths.bass;
   if (_tabSongKey && _tabSongKey !== (_stemPaths && _stemPaths.bass)) {
     if (_tabView) _tabView.clear();
-    if (_staffView) _staffView.clear();
+    if (_chordStrip) _chordStrip.clear();
     _tabSongKey = null;
     _tabNotes = null; _tabTuning = '4'; _tabBeats = null; _tabAccent = null; _tabPhase = null; _tabBarPhase = null; _tabKey = null; _tabChords = null;
     _tabHarmonyMono = null; _tabBarChords = null;
@@ -1322,20 +1333,28 @@ function refreshTabPanel() {
   }
 }
 
-/** TAB/오선보 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 프로젝트 복원 때도 필요해 공용으로 뺐다. */
+/**
+ * TAB/코드 스트립이 다루는 노트·마디 시각은 항상 채보 당시(원본 베이스 스템, 배속 1x)
+ * 기준이다 — 배속(_speed)을 바꿔도 재채보하지 않고 원본 파일을 그대로 다시 늘리기
+ * 때문(applySpeed 는 엔진에 올릴 오디오만 새로 만들지 _stemPaths.bass 는 안 건드린다).
+ * 반면 엔진이 실제로 재생 중인 위치(sec)는 지금 로드된(배속 적용된) 오디오 기준이라
+ * syncVideo() 의 vt*_speed 변환과 정확히 같은 관계다: 원본시각 = 엔진시각 * _speed.
+ * 그래서 노트를 클릭해 되감을 때도 반대로 나눠 줘야 한다 — 안 그러면 배속이 걸린
+ * 채로 TAB 을 켰을 때 표시 위치와 실제 들리는 소리가 배속 배율만큼 어긋난다.
+ */
+function tabSeekTo(origSec) {
+  if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
+  const stretched = origSec / (_speed || 1);
+  const t = Math.max(0, Math.min(fullSec(), stretched));
+  api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
+}
+
+/** TAB/코드 스트립 뷰를 처음 쓸 때 만든다 — 채보 실행 때도, 프로젝트 복원 때도 필요해 공용으로 뺐다. */
 function ensureTabViews() {
   const view = $('st-tab-view');
-  if (view && !_tabView) _tabView = new TabView(view, { onSeek: (sec) => {
-    if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
-    const t = Math.max(0, Math.min(fullSec(), sec));
-    api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
-  } });
-  const staffEl = $('st-staff-view');
-  if (staffEl && !_staffView) _staffView = new StaffView(staffEl, { onSeek: (sec) => {
-    if (_recArmed) return;
-    const t = Math.max(0, Math.min(fullSec(), sec));
-    api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
-  } });
+  if (view && !_tabView) _tabView = new TabView(view, { onSeek: tabSeekTo });
+  const chordEl = $('st-chord-strip');
+  if (chordEl && !_chordStrip) _chordStrip = new ChordStripView(chordEl, { onSeek: tabSeekTo });
 }
 
 /**
@@ -1346,7 +1365,7 @@ function ensureTabViews() {
  */
 function restoreTabData(tab) {
   if (_tabView) _tabView.clear();
-  if (_staffView) _staffView.clear();
+  if (_chordStrip) _chordStrip.clear();
   _tabNotes = null; _tabTuning = '4'; _tabBeats = null; _tabAccent = null; _tabPhase = null;
   _tabBarPhase = null; _tabKey = null; _tabChords = null; _tabHarmonyMono = null; _tabBarChords = null;
   _tabSongKey = null;
@@ -1365,7 +1384,13 @@ function restoreTabData(tab) {
   _tabKey = key;
   const score = _tabBeats ? buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase }) : null;
   _tabView.setScore(score);
-  if (_staffView) _staffView.render(score, key, null);   // 코드 라벨은 아래서 비동기로 채운다
+  // 캐시돼 있으면(barChords) 오디오를 다시 디코드할 때까지 기다리지 않고 즉시 보여준다 —
+  // 화성 스템을 fetch+decode 하는 recomputeTabChordsAsync() 는 곡에 따라 몇 초~수십 초
+  // 걸려서, 캐시 없이 매번 "–"만 한참 보이면 사용자가 "복원이 안 된다"고 오해한다(실사용
+  // 제보). 정확한 값은 그래도 아래서 백그라운드로 다시 맞춰 둔다(마디 옮기기 등에
+  // 화성 오디오가 필요해서) — 같은 입력이면 같은 결과라 화면이 눈에 띄게 바뀌진 않는다.
+  _tabBarChords = Array.isArray(tab.barChords) && tab.barChords.length === (score ? score.bars.length : 0) ? tab.barChords : null;
+  if (_chordStrip) _chordStrip.render(score, key, _tabBarChords);
   updateTabBarButtons();
   const run = $('st-tab-run'); if (run) run.textContent = tr('tab.rerun');
   recomputeTabChordsAsync();
@@ -1375,7 +1400,7 @@ function restoreTabData(tab) {
  * 마디 위 코드 라벨만 다시 만든다 — 프로젝트 복원 직후 쓴다. 채보(notes)는 이미 저장돼
  * 있어 그대로 쓰고, 코드는 원본 오디오가 있어야만 나오니 화성 스템만 가볍게 디코드한다.
  * 화성 스템이 하나도 없으면(2-스템 분리 등) 조용히 포기한다 — 코드 라벨 없이도 TAB·
- * 오선보 자체는 이미 복원돼 있다.
+ * TAB·코드 스트립 자체는 이미 복원돼 있다.
  */
 async function recomputeTabChordsAsync() {
   if (!_stemPaths || !_tabBeats || !_tabNotes) return;
@@ -1387,7 +1412,7 @@ async function recomputeTabChordsAsync() {
     };
     const decoded = [];
     for (const [k, p] of Object.entries(_stemPaths)) {
-      if (!HARMONY_STEMS.has(k) || !p) continue;
+      if (NON_HARMONY_STEMS.has(k) || !p) continue;
       const a2 = await decode(p);
       const aL = a2.getChannelData(0);
       decoded.push({ L: aL, R: a2.numberOfChannels > 1 ? a2.getChannelData(1) : aL, sr: a2.sampleRate });
@@ -1397,9 +1422,11 @@ async function recomputeTabChordsAsync() {
     const mL = new Float32Array(n), mR = new Float32Array(n);
     for (const p of decoded) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
     _tabHarmonyMono = toMono(mL, mR); _tabHarmonySr = decoded[0].sr;
+    _tabChords = detectChords(_tabHarmonyMono, _tabHarmonySr, _tabBeats);
     const score = buildScore(_tabNotes, _tabBeats, { beatAccent: _tabAccent, barPhase: _tabBarPhase, phase: _tabPhase });
-    _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr);
-    if (_staffView) _staffView.render(score, _tabKey, _tabBarChords);
+    _tabBarChords = computeBarChords(score, _tabKey, _tabHarmonyMono, _tabHarmonySr, _tabChords);
+    if (_chordStrip) _chordStrip.render(score, _tabKey, _tabBarChords);
+    persistTabToLibrary();   // 이번에 처음 계산됐으면(캐시 없던 레거시 데이터) 다음엔 바로 뜨게 저장해 둔다
   } catch { /* 코드 라벨은 부가 정보다 — 실패해도 채보 자체는 이미 복원돼 있다 */ }
 }
 
@@ -1412,6 +1439,7 @@ async function runStudioTab() {
 
   _tabBusy = true;
   if (run) run.disabled = true;
+  const cancelBtn = $('st-tab-cancel'); if (cancelBtn) cancelBtn.hidden = false;
   if (status) { status.classList.remove('err'); status.textContent = tr('tab.working', { pct: 0 }); }
   try {
     ensureTabViews();
@@ -1443,7 +1471,8 @@ async function runStudioTab() {
         // 드럼만으로 템포가 안 잡히는 곡이 있다 — 스템을 합쳐 원본 믹스를 폴백으로 준다
         let mix = null, harmonyMix = null;
         try {
-          const decoded = [];
+          // 베이스는 이미 위에서 디코드해 뒀다(L/R) — 다시 fetch 안 하고 그대로 쓴다.
+          const decoded = [{ k: 'bass', L, R }];
           for (const [k, p] of Object.entries(_stemPaths)) {
             if (k === 'drums' || k === 'bass' || !p) continue;
             const a2 = await decode(p);
@@ -1457,17 +1486,17 @@ async function runStudioTab() {
             for (const p of list) for (let i = 0; i < n; i++) { mL[i] += p.L[i]; mR[i] += p.R[i]; }
             return [mL, mR];
           };
-          mix = sum([{ L, R }, { L: dL, R: dR }, ...decoded]);
-          // 코드는 화성을 가진 스템에서만 읽는다 — 드럼은 화성이 없는 잡음이고 베이스는
-          // (chromaAt 이 저역을 이미 빼긴 하지만) 애초에 한 번에 한 음이라 화성을 안 말해준다.
-          // 갈라진 화성 스템이 하나도 없으면(2-스템 분리 등) 원본 믹스로 내려간다.
-          harmonyMix = sum(decoded.filter(d => HARMONY_STEMS.has(d.k))) || mix;
+          mix = sum([{ L: dL, R: dR }, ...decoded]);
+          // 코드는 드럼만 빼고 나머지 전부(베이스 포함) 합쳐서 읽는다(사용자 지시).
+          // chromaAt() 자체가 110Hz 밑(베이스 기본파 대역)은 이미 걸러서 읽으니, 베이스를
+          // 섞어도 그 저음이 코드 판정을 한쪽으로 쏠리게 하진 않는다.
+          harmonyMix = sum(decoded.filter(d => !NON_HARMONY_STEMS.has(d.k))) || mix;
         } catch { /* 믹스를 못 만들면 드럼만으로 시도한다 */ }
 
         const b = await detectBeats(dL, dR, daudio.sampleRate, mix);
         if (b && Array.isArray(b.beats) && b.beats.length > 1) beats = b.beats;
         // 마디 첫 박은 화성이 바뀌는 자리로 잡는다 — 킥보다 훨씬 잘 갈린다.
-        // 코드열 자체도 오선보 마디 위 표시에 그대로 재활용한다.
+        // 코드열 자체도 코드 스트립 표시에 그대로 재활용한다.
         if (harmonyMix) {
           _tabHarmonyMono = toMono(harmonyMix[0], harmonyMix[1]);
           _tabHarmonySr = daudio.sampleRate;
@@ -1502,8 +1531,8 @@ async function runStudioTab() {
     _tabKey = key;
     const score = beats ? buildScore(r.notes, beats, { beatAccent: _tabAccent, barPhase: _tabBarPhase }) : null;
     _tabView.setScore(score);
-    _tabBarChords = computeBarChords(score, key, _tabHarmonyMono, _tabHarmonySr);
-    if (_staffView) _staffView.render(score, key, _tabBarChords);
+    _tabBarChords = computeBarChords(score, key, _tabHarmonyMono, _tabHarmonySr, _tabChords);
+    if (_chordStrip) _chordStrip.render(score, key, _tabBarChords);
     updateTabBarButtons();
     if (status) status.textContent = r.cross && r.cross.agreed != null
       ? tr('tab.doneCross', { n: r.notes.length, agreed: r.cross.agreed })
@@ -1513,17 +1542,22 @@ async function runStudioTab() {
     // 다음에 이 곡을 열 때 재채보 없이 바로 보이게 — CREPE 가 제일 오래 걸리는 부분이다.
     persistTabToLibrary();
   } catch (e) {
-    if (status) { status.textContent = tr('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+    if (status) {
+      if (e && e.cancelled) { status.classList.remove('err'); status.textContent = tr('tab.cancelled'); }
+      else { status.textContent = tr('tab.failed', { err: (e && e.message) || e }); status.classList.add('err'); }
+    }
   } finally {
     _tabBusy = false;
     if (run) run.disabled = !(_stemPaths && _stemPaths.bass);
+    if (cancelBtn) cancelBtn.hidden = true;
   }
 }
 
 function updatePlayhead(sec) {
   _lastSec = sec; _phEmitTs = performance.now(); _phEmitSec = sec;
-  if (_tabView) _tabView.setTime(sec);
-  if (_staffView) _staffView.setTime(sec);
+  const tabSec = sec * (_speed || 1);   // 엔진(배속 적용) 시각 → 채보(원본) 시각, tabSeekTo() 와 반대 방향
+  if (_tabView) _tabView.setTime(tabSec);
+  if (_chordStrip) _chordStrip.setTime(tabSec);
   const ph = $('daw-playhead');
   if (!ph) return;
   ph.hidden = _tracks.length === 0 && _recTracks.length === 0;
@@ -1544,8 +1578,9 @@ function _phTick(ts) {
     ph.style.transform = `translate3d(${x}px, 0, 0)`;
     const p = $('st-pos'); if (p) p.textContent = fmtTC(sec);
   }
-  if (_tabView) _tabView.setTime(sec);   // 엔진 pos 는 20Hz — 여기서 보간해야 부드럽다
-  if (_staffView) _staffView.setTime(sec);
+  const tabSec = sec * (_speed || 1);
+  if (_tabView) _tabView.setTime(tabSec);   // 엔진 pos 는 20Hz — 여기서 보간해야 부드럽다
+  if (_chordStrip) _chordStrip.setTime(tabSec);
   requestAnimationFrame(_phTick);
 }
 
@@ -2574,10 +2609,11 @@ function openModal(title, itemsHtml, onClick) {
 }
 
 function openSongPicker() {
-  const seen = new Set(); const items = [];
-  for (const it of (Library.getItems() || [])) {
-    const k = it.videoPath || it.id; if (seen.has(k)) continue; seen.add(k); items.push(it);
-  }
+  // 같은 영상을 여러 모델로 분리해 둔 중복은 라이브러리 사이드바와 똑같은 기준(가장
+  // 먼저 분리한 변형)으로 대표를 골라야 한다 — 예전엔 여기서 따로 만든 중복 제거가
+  // 순서상 우연히 걸리는 아무 변형이나 대표로 골라서, 채보를 해 둔 변형이 아니라 채보
+  // 안 된 다른 변형이 뜨는 사고가 났다(실사용 제보).
+  const items = Library.getRepresentativeItems();
   if (!items.length) { openModal(tr('studio.d.pickSong'), `<div class="daw-modal-empty">${tr('studio.x.libEmpty')}</div>`, () => {}); return; }
   const groups = [...new Set(items.map(it => it.group).filter(Boolean))];
   const chips = groups.length
@@ -4256,6 +4292,9 @@ function wire() {
     // 여기 딸려서 hidden 처리된다(스튜디오를 처음 열 때 selectTool(null) 이 모든 .daw-tool
     // 을 숨기면서 트레이닝 쪽 메트로놈/BPM 트레이너 카드까지 사라지던 버그의 원인).
     document.querySelectorAll('#daw-tools .daw-tool').forEach(el => { el.hidden = el.dataset.tool !== name; });
+    // #tool-tab(베이스 TAB 패널)은 영상 폭 그대로 쓰려고 #daw-tools 밖으로 뺀 자리라
+    // 위 스코프된 sweep 에 안 걸린다 — 따로 켜고 꺼야 한다.
+    const tabPanel = $('tool-tab'); if (tabPanel) tabPanel.hidden = name !== 'tab';
     const empty = $('tool-empty'); if (empty) empty.hidden = !!name;
     // 피치 검출은 무거우므로 튜너가 열려 있을 때만 돌린다
     api.engine.tuner(name === 'tuner');
@@ -4263,8 +4302,15 @@ function wire() {
   };
   const tabRun = $('st-tab-run');
   if (tabRun) tabRun.addEventListener('click', runStudioTab);
+  $('st-tab-cancel')?.addEventListener('click', cancelTranscribe);
   $('st-tab-bar-prev')?.addEventListener('click', () => shiftTabBars(-1));
   $('st-tab-bar-next')?.addEventListener('click', () => shiftTabBars(1));
+  // TAB(프렛보드) 뷰는 기본으로 꺼져 있다 — 코드 스트립만으로 부족할 때만 켠다.
+  $('st-tab-toggle')?.addEventListener('click', (e) => {
+    const view = $('st-tab-view'); if (!view) return;
+    view.hidden = !view.hidden;
+    e.currentTarget.classList.toggle('on', !view.hidden);
+  });
   document.querySelectorAll('.daw-tool-tab').forEach(b =>
     b.addEventListener('click', () => selectTool(b.classList.contains('on') ? null : b.dataset.tool)));   // 다시 누르면 닫기
   selectTool(null);   // 처음엔 아무 도구도 안 열림
