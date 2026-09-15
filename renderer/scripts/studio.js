@@ -1334,17 +1334,26 @@ function refreshTabPanel() {
 }
 
 /**
- * TAB/코드 스트립이 다루는 노트·마디 시각은 항상 채보 당시(원본 베이스 스템, 배속 1x)
- * 기준이다 — 배속(_speed)을 바꿔도 재채보하지 않고 원본 파일을 그대로 다시 늘리기
- * 때문(applySpeed 는 엔진에 올릴 오디오만 새로 만들지 _stemPaths.bass 는 안 건드린다).
- * 반면 엔진이 실제로 재생 중인 위치(sec)는 지금 로드된(배속 적용된) 오디오 기준이라
- * syncVideo() 의 vt*_speed 변환과 정확히 같은 관계다: 원본시각 = 엔진시각 * _speed.
- * 그래서 노트를 클릭해 되감을 때도 반대로 나눠 줘야 한다 — 안 그러면 배속이 걸린
- * 채로 TAB 을 켰을 때 표시 위치와 실제 들리는 소리가 배속 배율만큼 어긋난다.
+ * TAB/코드 스트립이 다루는 노트·마디 시각은 항상 채보 당시(원본 베이스 스템 파일 자체,
+ * 0초 = 파일 맨 앞, 배속 1x) 기준이다. 반면 엔진의 재생 위치(sec)는 타임라인 좌표라
+ * 어긋나는 원인이 둘이다:
+ *   1) 배속(_speed) — applySpeed() 는 엔진에 올릴 오디오만 새로 늘리지 _stemPaths.bass
+ *      원본은 안 건드린다. syncVideo() 의 vt*_speed 변환과 같은 관계: 원본시각 = 늘어난
+ *      시각 * _speed.
+ *   2) 스템 오프셋(_stemOffset) — 스템 블록을 타임라인 위에서 드래그해 옮기면(빈 트랙
+ *      영역 드래그) 그만큼 늦게 재생되기 시작한다. 원본 파일 시각으로 보려면 그 밀린
+ *      만큼을 먼저 빼야 한다.
+ * 합쳐서: 원본시각 = (엔진시각 − _stemOffset) * _speed. 노트를 클릭해 되감을 때는
+ * 반대 순서로 풀어야 한다 — 안 그러면 배속이나 스템 오프셋이 걸린 채로 TAB 을 보면
+ * 표시 위치와 실제 들리는 소리가 어긋난다(둘 다 실사용 제보로 발견).
  */
 function tabSeekTo(origSec) {
   if (_recArmed) return;                       // 녹음 중엔 재생 위치를 옮기지 않는다
-  const stretched = origSec / (_speed || 1);
+  // origSec 은 베이스 파일 자체의 시각(0초 = 파일 맨 앞) — 그런데 스템 블록을 타임라인
+  // 위에서 드래그해 옮겼으면(_stemOffset) 실제로 그 소리가 나는 엔진 시각은 그만큼
+  // 밀려 있다. 배속 변환과 순서가 겹치면 안 된다 — 늘리기 전 시각에 옮긴 만큼 더해야
+  // 타임라인 위치가 맞는다(_stemOffset 자체는 이미 타임라인 좌표라 배속 배율을 안 탄다).
+  const stretched = origSec / (_speed || 1) + _stemOffset;
   const t = Math.max(0, Math.min(fullSec(), stretched));
   api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
 }
@@ -1555,7 +1564,9 @@ async function runStudioTab() {
 
 function updatePlayhead(sec) {
   _lastSec = sec; _phEmitTs = performance.now(); _phEmitSec = sec;
-  const tabSec = sec * (_speed || 1);   // 엔진(배속 적용) 시각 → 채보(원본) 시각, tabSeekTo() 와 반대 방향
+  // 엔진(타임라인) 시각 → 채보(원본 베이스 파일) 시각, tabSeekTo() 와 반대 방향.
+  // 스템 블록을 드래그해 옮긴 만큼(_stemOffset) 먼저 빼야 파일 자체의 시각이 나온다.
+  const tabSec = (sec - _stemOffset) * (_speed || 1);
   if (_tabView) _tabView.setTime(tabSec);
   if (_chordStrip) _chordStrip.setTime(tabSec);
   const ph = $('daw-playhead');
@@ -1578,7 +1589,7 @@ function _phTick(ts) {
     ph.style.transform = `translate3d(${x}px, 0, 0)`;
     const p = $('st-pos'); if (p) p.textContent = fmtTC(sec);
   }
-  const tabSec = sec * (_speed || 1);
+  const tabSec = (sec - _stemOffset) * (_speed || 1);
   if (_tabView) _tabView.setTime(tabSec);   // 엔진 pos 는 20Hz — 여기서 보간해야 부드럽다
   if (_chordStrip) _chordStrip.setTime(tabSec);
   requestAnimationFrame(_phTick);
