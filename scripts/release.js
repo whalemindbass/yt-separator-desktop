@@ -225,12 +225,21 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   }
   if (!fs.existsSync(localLatest)) die('latest.yml 재생성 실패');
 
-  // 8) Assets 정합성 검사 — Setup.exe의 sha가 latest.yml과 다르면 교체
-  //    (electron-builder 크래시로 latest.yml 재생성 후에도 GitHub의 exe는 옛 sha일 수 있음)
-  const latestYml = fs.readFileSync(localLatest, 'utf-8');
-  const latestSize = parseInt((latestYml.match(/^\s*size:\s*(\d+)/m) || [])[1] || '0', 10);
-  // 이름은 package.json 의 build.nsis/portable artifactName 을 따른다.
-  // (여기가 실제 산출물과 어긋나면 정합성 검사가 통째로 스킵된다)
+  // 8) Assets 업로드 — Setup.exe 는 latest.yml 처럼 무조건 이번 빌드로 덮어쓴다.
+  //
+  //    예전엔 "GitHub 자산 크기가 latest.yml 과 같으면 스킵"이었는데, v1.9.15 에서 실제로
+  //    이 검사가 뚫렸다: 1차 빌드가 업로드까지 갔는데 electron-builder 가 (다른 원인으로)
+  //    비정상 종료해서 latest.yml 이 안 남았고, 그래서 NSIS 만 다시 빌드했다. 코드서명
+  //    (signtool)이 매번 타임스탬프 토큰을 새로 박아서 소스가 완전히 같아도 재서명하면
+  //    바이트가 달라지는데, 이번엔 바이트 수(파일 크기)가 우연히 정확히 같게 나왔다.
+  //    그래서 "크기 같음 = 같은 파일"로 보던 검사가 속아 GitHub 의 옛(1차 빌드) exe 를
+  //    그대로 두고, latest.yml 만 새(2차 빌드) sha512 로 갱신돼 버렸다 — 실제 배포 파일과
+  //    latest.yml 의 체크섬이 영영 어긋나(sha512 checksum mismatch) 사용자 자동 업데이트가
+  //    매번 실패했다. 크기가 아니라 sha512 로 비교하면 되지만, 애초에 latest.yml 자체가
+  //    "무조건 최신으로 덮어쓴다"인데 그 sha512 의 주인인 exe 만 조건부로 올리는 게
+  //    비대칭이었다 — 그래서 이제 둘 다 무조건 덮어쓴다(업로드 자체는 몇 초면 끝난다).
+  const localLatestYml = fs.readFileSync(localLatest, 'utf-8');
+  const latestSize = parseInt((localLatestYml.match(/^\s*size:\s*(\d+)/m) || [])[1] || '0', 10);
   const product          = pkg.build?.productName || pkg.name;
   const expectedSetup    = `${product}-Setup.exe`;
   const expectedBlockmap = `${expectedSetup}.blockmap`;
@@ -239,24 +248,16 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   const localBlockmap = path.join('dist', expectedBlockmap);
   const localPortable = path.join('dist', expectedPortable);
 
-  const assets = release.assets || [];
-  const findAsset = (name) => assets.find(a => a.name === name);
+  log(`${expectedSetup} 업로드(항상 이번 빌드로 덮어씀)...`);
+  await putAsset(release.id, expectedSetup, localSetup);
 
-  // Setup.exe — 없거나 latest.yml 과 크기가 다르면 올린다
-  const setupAsset = findAsset(expectedSetup);
-  if (!setupAsset) {
-    log(`${expectedSetup} 업로드...`);
-    await putAsset(release.id, expectedSetup, localSetup);
-  } else if (latestSize && setupAsset.size !== latestSize) {
-    warn(`Setup.exe 크기 불일치 (GitHub ${setupAsset.size} vs latest.yml ${latestSize}) — 교체`);
-    await putAsset(release.id, expectedSetup, localSetup);
-  }
+  // Blockmap (차등 다운로드용) — exe 를 무조건 새로 올리는데 이건 그 exe 의 블록 해시라
+  // 짝이 안 맞으면 차등 다운로드가 깨진다. 같은 이유로 이것도 무조건 새로 올린다.
+  await putAsset(release.id, expectedBlockmap, localBlockmap);
 
-  // Blockmap (차등 다운로드용)
-  if (!findAsset(expectedBlockmap)) await putAsset(release.id, expectedBlockmap, localBlockmap);
-
-  // Portable
-  if (!findAsset(expectedPortable)) await putAsset(release.id, expectedPortable, localPortable);
+  // Portable — 이것도 재서명하면 매번 바이트가 달라질 수 있어 exe/blockmap 과 같은 이유로
+  // 무조건 새로 올린다(예전엔 "없으면만" 올려서 재빌드 전 것이 남을 수 있었다).
+  await putAsset(release.id, expectedPortable, localPortable);
 
   // latest.yml — 항상 최신으로 덮어쓴다. 이게 자동 업데이트의 기준점이라 마지막에 올린다.
   await putAsset(release.id, 'latest.yml', localLatest);
