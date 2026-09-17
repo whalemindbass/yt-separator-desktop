@@ -5,7 +5,7 @@ import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
-         METER_BLOCKS, METER_FLOOR_DB, METER_GATE } from './studio/util.js';
+         METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -14,7 +14,7 @@ import { ChordStripView } from './chordstrip.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
 import { detectChords, phaseFromChords, NON_HARMONY_STEMS } from '../workers/tab-chord.js';
 import { getPresets, setPresets, upsertPreset } from './fx-presets.js';
-import { timeStretchStereo } from './pitch-shift.js';
+import { timeStretchStereo, pitchShiftStereo } from './pitch-shift.js';
 
 const api = window.yssApi;
 const $ = (id) => document.getElementById(id);
@@ -48,7 +48,13 @@ let _speed = 1, _speedBase = null, _speedBusy = false, _baseDur = 0, _speedCance
 // 마지막으로 실제로 늘인/줄인 스템 파일 경로(stemsDir 에 저장돼 계속 남는다) — 프로젝트에
 // 같이 저장해 두면, 다음에 열 때 다시 늘일 필요 없이 이 파일들을 그대로 다시 불러오기만
 // 하면 된다("불러오고 또 처리하느라 시간 걸린다" 신고 — 재처리 없이 즉시 복원하게 고침).
+// _speedStemPaths 는 속도뿐 아니라 키(피치)까지 같이 반영해 처리한 결과물 캐시다 — 둘 다
+// 항상 원본 _stemPaths 에서부터 함께 다시 만든다(applyTransform 하나로 합침).
 let _speedStemPaths = null;
+// 스템 일괄 키(피치) 조절 — 라이브러리 쪽 미리듣기 플레이어에는 이미 있던 기능(pitch-shift.js)을
+// 스튜디오에도 추가한 것. 길이는 안 바뀌므로(녹음된 클립 위치와 무관) 속도와 달리 take 가
+// 있어도 막지 않는다.
+let _keySemitones = 0;
 function recomputeDur() { _dur = _baseDur / (_speed || 1); }
 
 // 시간은 초로 들고 다니고, 엔진 경계에서만 샘플로 바꾼다.
@@ -1782,7 +1788,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-key-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1791,11 +1797,17 @@ function updateCloseSongBtn() {
   const el = $('st-close-song'); if (el) el.disabled = !(_started && _stemPaths);
   const sp = $('st-speed-btn');
   if (sp) { sp.hidden = !(_started && _stemPaths); updateSpeedBtnLabel(); }
+  const kp = $('st-key-btn');
+  if (kp) { kp.hidden = !(_started && _stemPaths); updateKeyBtnLabel(); }
 }
 function updateSpeedBtnLabel() {
   const sp = $('st-speed-btn'); if (!sp) return;
   const pct = Math.round((_speed || 1) * 100);
   sp.textContent = pct === 100 ? tr('studio.h.speedBtn') : tr('studio.h.speedBtnPct', { pct });
+}
+function updateKeyBtnLabel() {
+  const kp = $('st-key-btn'); if (!kp) return;
+  kp.textContent = _keySemitones === 0 ? tr('studio.h.keyBtn') : tr('studio.h.keyBtnSemi', { semi: (_keySemitones > 0 ? '+' : '') + _keySemitones });
 }
 
 // ── 파일 임포트 (내 파일로 편집 — DAW) ──────────────
@@ -1831,7 +1843,7 @@ async function pickImportAudio() {
 // 불러온 스템 곡 닫기(되돌리기) — 스템·영상 비움, 내 녹음/임포트 트랙은 유지
 function closeSong() {
   api.engine.loadStems([]);
-  _tracks = []; _stemOffset = 0; _dur = 0; _baseDur = 0; _speed = 1; _speedBase = null; _speedStemPaths = null; _songKey = null; _auto = new Map();
+  _tracks = []; _stemOffset = 0; _dur = 0; _baseDur = 0; _speed = 1; _speedBase = null; _speedStemPaths = null; _keySemitones = 0; _songKey = null; _auto = new Map();
   updateSpeedBtnLabel();
   resetStemGroupGain();
   _stemPaths = null; _videoPath = null; _stemBuffers = null; _waveZoomAt = 0; _modelKey = null; _libraryItemId = null;
@@ -1860,7 +1872,7 @@ async function loadSong(item, opts) {
   _modelKey = it.modelKey || '4stem';
   _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
   _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
-  _speed = 1; _speedBase = null; _speedStemPaths = null; _baseDur = 0;
+  _speed = 1; _speedBase = null; _speedStemPaths = null; _keySemitones = 0; _baseDur = 0;
   updateSpeedBtnLabel();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
   resetStemGroupGain();
@@ -1980,7 +1992,7 @@ async function detectSongBpm(stems, sampleRate) {
 // 다시 늘이지 않고 그대로 불러오기만 한다 — applySpeed() 의 "저장 이후" 부분만 떼어낸
 // 셈이지만, BPM/그리드/beats 는 applyProject() 가 이 함수를 부르기 전에 이미 저장된(그
 // 배속 기준으로 스케일된) 값 그대로 세팅해 놨으므로 여기서 따로 다시 계산하지 않는다.
-async function restoreSpeedFromCache(pathsObj, factor) {
+async function restoreSpeedFromCache(pathsObj, factor, semitones = 0) {
   try {
     const paths = _tracks.map(t => pathsObj[t.key]).filter(Boolean);
     if (paths.length !== _tracks.length) return false;   // 트랙 구성이 바뀌었으면(스템 종류 등) 그냥 재처리로
@@ -1990,21 +2002,37 @@ async function restoreSpeedFromCache(pathsObj, factor) {
     renderWaves(stems);
     _speedStemPaths = pathsObj;
     _speed = factor;
+    _keySemitones = semitones;
     recomputeDur();
     const v = $('daw-video'); if (v) v.playbackRate = _speed;
     layout();
     updateSpeedBtnLabel();
+    updateKeyBtnLabel();
     return true;
   } catch { return false; }
 }
+// 속도(타임스트레치)와 키(피치시프트)를 한 파이프라인으로 합쳐 처리한다 — 매번 원본
+// _stemPaths 에서부터 둘 다 다시 만든다(캐시 하나 _speedStemPaths 공유, 따로 두면 어느 쪽을
+// 마지막으로 바꿨는지에 따라 서로의 처리 결과가 덮어써지는 문제가 생긴다). applySpeed/
+// applyKeyShift 는 이 함수를 부르는 얇은 래퍼일 뿐이다.
+//
+// 드럼은 피치를 건드리지 않는다(타악기 피치시프트는 부자연스럽다 — 라이브러리 미리듣기
+// 플레이어의 기존 규칙과 동일, player.js 의 SKIP 참고). 보컬만 formant 보존을 켠다.
+//
+// 녹음된 클립(take)이 있으면 "속도"가 실제로 바뀔 때만 막는다 — take 의 시작/길이는 절대
+// 초 단위라 속도를 바꾸면 타임라인 전체가 늘거나 줄어 클립이 엉뚱한 자리에서 울린다. 키만
+// 바꿀 땐 길이가 그대로라 이 문제가 없어서 take 유무와 무관하게 허용한다.
+//
 // opts.onProgress(doneSteps, totalSteps, label) — 스템 하나 끝낼 때마다 호출(+ 저장 단계 1개
 // 더). opts.isCancelled() — 매 안전 지점(스템 시작 전/저장 직전)마다 확인해서, true 면 그
 // 순간까지 만든 결과를 전부 버리고 이전 상태 그대로 둔 채 'cancelled' 를 돌려준다(엔진/화면
 // 어느 것도 안 건드렸으니 취소해도 항상 처리 시작 전 상태 그대로). 반환값: 'ok'|'cancelled'|'error'.
-async function applySpeed(factor, opts = {}) {
+async function applyTransform(factor, semitones, opts = {}) {
   factor = Math.max(0.25, Math.min(2, factor || 1));
+  semitones = Math.max(-6, Math.min(6, Math.round(semitones || 0)));
   if (!_stemPaths) return 'error';
-  if (_takes.length && !opts.fromLoad) { flashTake(tr('studio.m.speedBlockedByTakes')); return 'error'; }
+  const speedChanging = factor !== _speed;
+  if (speedChanging && _takes.length && !opts.fromLoad) { flashTake(tr('studio.m.speedBlockedByTakes')); return 'error'; }
   if (_speedBusy) return 'error';
   _speedBusy = true;
   const isCancelled = opts.isCancelled || (() => false);
@@ -2017,31 +2045,39 @@ async function applySpeed(factor, opts = {}) {
     if (isCancelled()) return 'cancelled';
     const names = Object.keys(stems);
     const total = names.length + 1;   // +1 = 저장·엔진 재적용 단계
-    const stretched = {};
+    const processed = {};
     for (let i = 0; i < names.length; i++) {
       if (isCancelled()) return 'cancelled';
       const name = names[i];
       report(i, total, tr('studio.p.speedStretching', { name: stemLabel(name), i: i + 1, n: names.length }));
-      const ch = stems[name];
-      const r = await timeStretchStereo(ch[0], ch[1], sampleRate, factor);
-      stretched[name] = [r.L, r.R];
+      let [L, R] = stems[name];
+      if (semitones && name !== 'drums') {
+        const r = await pitchShiftStereo(L, R, sampleRate, semitones, { formantCompensation: name === 'vocals' });
+        L = r.L; R = r.R;
+      }
+      if (factor !== 1) {
+        const r2 = await timeStretchStereo(L, R, sampleRate, factor);
+        L = r2.L; R = r2.R;
+      }
+      processed[name] = [L, R];
     }
     if (isCancelled()) return 'cancelled';
     report(names.length, total, tr('studio.p.speedSaving'));
-    const save = await api.stem.saveStems(stretched, `speedtmp_${Date.now()}`, sampleRate);
+    const save = await api.stem.saveStems(processed, `speedtmp_${Date.now()}`, sampleRate);
     if (!save || !save.ok) throw new Error((save && save.error) || 'saveStems failed');
     if (isCancelled()) return 'cancelled';
-    // 이전에 늘여 둔 파일이 있으면 여기서 치운다 — 안 그러면 속도 바꿀 때마다 늘인 파일이
-    // stemsDir 에 계속 쌓인다(프로젝트에 저장해서 다음에 열 때 재사용하려고 남기는 거라
-    // 지울 수가 없었는데, "이번" 걸 새로 남기니 "저번" 건 이제 필요 없다).
+    // 이전에 처리해 둔 파일이 있으면 여기서 치운다 — 안 그러면 속도·키 바꿀 때마다 처리한
+    // 파일이 stemsDir 에 계속 쌓인다(프로젝트에 저장해서 다음에 열 때 재사용하려고 남기는
+    // 거라 지울 수가 없었는데, "이번" 걸 새로 남기니 "저번" 건 이제 필요 없다).
     if (_speedStemPaths) { for (const p of Object.values(_speedStemPaths)) api.library.deleteOrphan(p).catch(() => {}); }
     _speedStemPaths = save.stemPaths;
     const paths = _tracks.map(t => save.stemPaths[t.key]).filter(Boolean);
     api.engine.loadStems(paths);
     // loadStems 는 엔진 쪽 트랙을 기본값으로 되돌린다 — 볼륨/팬/뮤트/솔로/센드를 다시 밀어 넣는다.
     _tracks.forEach(t => api.engine.track(t.engineIndex, { gain: stemGainOut(t), pan: t.pan || 0, mute: !!t.mute, solo: !!t.solo, sends: t.sends || [0, 0] }));
-    renderWaves(stretched);
+    renderWaves(processed);
     _speed = factor;
+    _keySemitones = semitones;
     recomputeDur();
     _bpm = Math.max(20, Math.min(300, Math.round(_speedBase.bpm * factor)));
     _beatInterval = _speedBase.beatInterval > 0 ? _speedBase.beatInterval / factor : 0;
@@ -2053,14 +2089,20 @@ async function applySpeed(factor, opts = {}) {
     const v = $('daw-video'); if (v) v.playbackRate = _speed;
     layout();
     updateSpeedBtnLabel();
-    report(total, total, tr('studio.p.speedApplied', { pct: Math.round(factor * 100) }));
-    if (!opts.fromLoad) { markDirty(); flashTake(tr('studio.p.speedApplied', { pct: Math.round(factor * 100) })); }
+    updateKeyBtnLabel();
+    const doneMsg = speedChanging
+      ? tr('studio.p.speedApplied', { pct: Math.round(factor * 100) })
+      : tr('studio.p.keyApplied', { semi: (semitones > 0 ? '+' : '') + semitones });
+    report(total, total, doneMsg);
+    if (!opts.fromLoad) { markDirty(); flashTake(doneMsg); }
     return 'ok';
   } catch (e) {
     flashTake(tr('studio.m.speedFail', { err: (e && e.message) || e }));
     return 'error';
   } finally { _speedBusy = false; }
 }
+async function applySpeed(factor, opts = {}) { return applyTransform(factor, _keySemitones, opts); }
+async function applyKeyShift(semitones, opts = {}) { return applyTransform(_speed, semitones, opts); }
 // 단축키 버튼 왼쪽의 "스템 속도" 버튼 — 팝업(daw-modal, 전체를 덮어서 처리 중엔 다른 조작이
 // 안 되게 막는다)에서 속도를 먼저 정하고 "처리 시작"을 눌러야 실제로 돈다(숫자 스핀 화살표
 // 누를 때마다 매번 다시 늘이던 예전 방식은 원하지 않는 값에서도 무겁게 여러 번 돎).
@@ -2122,6 +2164,61 @@ function openSpeedModal() {
     _speedCancelRequested = true;
     $('stsp-cancel').disabled = true;
     $('stsp-status').textContent = tr('studio.p.speedCancelling');
+  });
+}
+// "스템 키" 버튼 — openSpeedModal 과 같은 패턴(daw-modal 팝업에서 값을 먼저 정하고
+// "처리 시작"을 눌러야 실제로 돈다). 라이브러리 미리듣기 플레이어에 이미 있던
+// 반음 단위 키 조절(pitch-shift.js)을 스튜디오 스템 전체에도 그대로 적용한 것 —
+// 비디오·원곡에는 영향 없이 스템 오디오에만 반영된다.
+function openKeyModal() {
+  if (!_stemPaths) return;
+  const host = $('daw-modal');
+  const semi0 = _keySemitones || 0;
+  host.innerHTML = `<div class="daw-modal-box daw-speed-modal">
+    <div class="daw-modal-h"><span>${tr('studio.h.keyBtn')}</span><button class="x" id="stky-close">✕</button></div>
+    <div class="daw-speed-body">
+      <div id="stky-setup">
+        <div class="daw-speed-row">
+          <span class="daw-speed-lab">${tr('studio.d.keyLabel')}</span>
+          <input type="number" id="stky-val" min="-6" max="6" step="1" value="${semi0}">
+          <span class="daw-speed-pct">${tr('studio.d.keyUnit')}</span>
+          <button id="stky-start" class="btn pri">${tr('studio.d.speedStart')}</button>
+        </div>
+        <div id="stky-err" class="daw-speed-err" hidden></div>
+      </div>
+      <div id="stky-progress" hidden>
+        <div class="daw-speed-barwrap"><div id="stky-bar" class="daw-speed-bar"></div></div>
+        <div id="stky-status" class="daw-speed-status"></div>
+        <button id="stky-cancel" class="btn">${tr('studio.d.speedCancel')}</button>
+      </div>
+    </div>
+  </div>`;
+  host.hidden = false;
+  const close = () => { host.hidden = true; };
+  $('stky-close').onclick = () => { if (!_speedBusy) close(); };
+  host.onclick = (e) => { if (e.target === host && !_speedBusy) close(); };
+  $('stky-start').addEventListener('click', async () => {
+    const v = Math.max(-6, Math.min(6, Math.round(Number($('stky-val').value) || 0)));
+    $('stky-val').value = v;
+    $('stky-setup').hidden = true;
+    $('stky-progress').hidden = false;
+    _speedCancelRequested = false;
+    setEnabled(false);
+    const ok = await applyKeyShift(v, {
+      onProgress: (done, total, label) => {
+        $('stky-bar').style.width = Math.round((done / total) * 100) + '%';
+        $('stky-status').textContent = label;
+      },
+      isCancelled: () => _speedCancelRequested,
+    });
+    setEnabled(_started);
+    if (ok === 'cancelled') $('stky-status').textContent = tr('studio.p.speedCancelled');
+    setTimeout(close, ok === 'cancelled' ? 500 : 400);
+  });
+  $('stky-cancel').addEventListener('click', () => {
+    _speedCancelRequested = true;
+    $('stky-cancel').disabled = true;
+    $('stky-status').textContent = tr('studio.p.speedCancelling');
   });
 }
 
@@ -2627,10 +2724,15 @@ function openSongPicker() {
   const items = Library.getRepresentativeItems();
   if (!items.length) { openModal(tr('studio.d.pickSong'), `<div class="daw-modal-empty">${tr('studio.x.libEmpty')}</div>`, () => {}); return; }
   const groups = [...new Set(items.map(it => it.group).filter(Boolean))];
-  const chips = groups.length
-    ? `<div class="daw-modal-tabs"><button class="daw-mtab on" data-g="__all">${tr('studio.x.all')}</button>${groups.map(g => `<button class="daw-mtab" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>`
+  const hasFav = items.some(it => it.favorite);
+  // 즐겨찾기는 라이브러리 사이드바와 같은 관례로(library.js) 진짜 그룹이 아니라
+  // "★ 즐겨찾기"라는 가상 그룹처럼 전체 다음에 얹는다.
+  const chips = (groups.length || hasFav)
+    ? `<div class="daw-modal-tabs"><button class="daw-mtab on" data-g="__all">${tr('studio.x.all')}</button>${
+        hasFav ? `<button class="daw-mtab" data-g="__fav">${tr('studio.x.favorites')}</button>` : ''
+      }${groups.map(g => `<button class="daw-mtab" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>`
     : '';
-  const row = (it, i) => `<div class="daw-modal-item" data-idx="${i}" data-g="${esc(it.group || '')}"><div class="mt"><div class="n">${esc(it.name)}</div>
+  const row = (it, i) => `<div class="daw-modal-item" data-idx="${i}" data-g="${esc(it.group || '')}" data-fav="${it.favorite ? '1' : '0'}"><div class="mt"><div class="n">${it.favorite ? '★ ' : ''}${esc(it.name)}</div>
       <div class="m">${tr('studio.p.stemCount', { n: Object.keys(it.stemPaths || {}).length })}${it.group ? ' · ' + esc(it.group) : ''}</div></div></div>`;
   const host = $('daw-modal');
   host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${tr('studio.d.pickSong')}</span><button class="x">✕</button></div>${chips}<div class="daw-modal-list">${items.map(row).join('')}</div></div>`;
@@ -2641,8 +2743,46 @@ function openSongPicker() {
   host.querySelectorAll('.daw-mtab').forEach(b => b.addEventListener('click', () => {
     host.querySelectorAll('.daw-mtab').forEach(x => x.classList.remove('on')); b.classList.add('on');
     const g = b.dataset.g;
-    host.querySelectorAll('.daw-modal-item').forEach(el => { el.style.display = (g === '__all' || el.dataset.g === g) ? '' : 'none'; });
+    host.querySelectorAll('.daw-modal-item').forEach(el => {
+      const show = g === '__all' || (g === '__fav' ? el.dataset.fav === '1' : el.dataset.g === g);
+      el.style.display = show ? '' : 'none';
+    });
   }));
+  // 칩이 넘칠 때(overflow-x:auto) 가로 스크롤바만 있고 세로 휠·드래그로는 안 움직이던 것
+  // — 세로 휠을 가로로 돌려주고, 빈 자리를 잡고 끌면 스크롤되게 한다(사용자 제보).
+  const tabsEl = host.querySelector('.daw-modal-tabs');
+  if (tabsEl) {
+    tabsEl.addEventListener('wheel', (e) => {
+      if (tabsEl.scrollWidth <= tabsEl.clientWidth) return;   // 넘칠 때만 가로채기 — 안 그러면 세로 스크롤이 필요한 다른 상황을 막는다
+      e.preventDefault();
+      tabsEl.scrollLeft += e.deltaY || e.deltaX;
+    }, { passive: false });
+    // pointerdown 에서 바로 setPointerCapture 를 잡으면(예전 버전) 칩을 그냥 클릭만
+    // 해도(움직임 없이) 캡처가 걸려 그 밑 버튼의 click 합성이 안 되는 경우가 있다
+    // (사용자 제보 — 그룹 칩이 눌러도 반응 없어짐). 그래서 실제로 문턱(4px)을 넘어
+    // "진짜 드래그"로 확정된 순간에만 캡처를 잡는다 — 제자리 클릭은 캡처 자체가
+    // 안 걸려서 버튼의 click 이 그대로 정상 발생한다.
+    let pid = null, dragging = false, startX = 0, startLeft = 0;
+    tabsEl.addEventListener('pointerdown', (e) => {
+      pid = e.pointerId; dragging = false; startX = e.clientX; startLeft = tabsEl.scrollLeft;
+    });
+    tabsEl.addEventListener('pointermove', (e) => {
+      if (pid == null || e.pointerId !== pid) return;
+      const dx = e.clientX - startX;
+      if (!dragging) {
+        if (Math.abs(dx) < 4) return;
+        dragging = true;
+        try { tabsEl.setPointerCapture(pid); } catch {}
+      }
+      tabsEl.scrollLeft = startLeft - dx;
+    });
+    const endDrag = (e) => {
+      if (dragging) { try { tabsEl.releasePointerCapture(e.pointerId); } catch {} }
+      pid = null; dragging = false;
+    };
+    tabsEl.addEventListener('pointerup', endDrag);
+    tabsEl.addEventListener('pointercancel', endDrag);
+  }
 }
 
 function openVstPicker() {
@@ -2847,7 +2987,7 @@ async function buildProjectObject(opts = {}) {
     : null;
   // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
   // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
-  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, master, buses, stems, tracks, takes, tab };
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, keySemitones: _keySemitones, master, buses, stems, tracks, takes, tab };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -2958,11 +3098,24 @@ function startAutosave() {
 // 예정된 일에 가깝다. 죽은 채로 두면 아무것도 안 되는 화면이 남고, 녹음 중이었다면
 // 디스크에 쓰다 만 파일이 남는데 앱은 그걸 모른다.
 let _crashRecovering = false;
+// 반복 크래시(루프) 감지용 — 고장난 VST·드라이버 충돌처럼 근본적으로 깨진 상황에서
+// 무조건 즉시 재시작을 반복하면 드라이버가 더 지치고 크래시 저널만 쌓인다.
+// 판정 로직 자체는 studio/util.js 의 noteCrashAndCheckLoop(순수 함수, 기기 없이 테스트됨).
+let _crashTimestamps = [];
+let _crashLoopClearTimer = null;
 
 async function handleEngineCrash(m) {
   if (_crashRecovering) return;
   _crashRecovering = true;
   try {
+    if (noteCrashAndCheckLoop(_crashTimestamps, Date.now())) {
+      // 자동 재시작을 멈춘다 — _engineTried 는 그대로 둔다(이미 true라 daw-boot-retry
+      // 수동 버튼의 startEngine(true) 흐름은 그대로 살아있다).
+      _crashTimestamps = [];
+      flashTake(tr('studio.crash.loop'));
+      return;
+    }
+
     // 엔진이 없으므로 이펙트 노브 값은 못 가져온다. 나머지 구조는 이쪽이 다 알고 있다.
     const snap = await buildProjectObject({ skipFx: true }).catch(() => null);
 
@@ -2970,6 +3123,12 @@ async function handleEngineCrash(m) {
     _engineTried = false;                     // 자동 시작 1회 제한을 푼다
     if (!await startEngine(true)) { flashTake(tr('studio.crash.failed')); return; }
     if (!await waitEngineReady(12000))       { flashTake(tr('studio.crash.failed')); return; }
+
+    // 안정적으로 다시 떴다 — 한참 뒤(60초)에도 안 죽어 있으면 이번 창을 잊는다.
+    // 그래야 한참 뒤에 벌어진 무관한 크래시가 예전 창에 누적돼 억울하게 반복-크래시로
+    // 오판되지 않는다.
+    clearTimeout(_crashLoopClearTimer);
+    _crashLoopClearTimer = setTimeout(() => { _crashTimestamps = []; }, 60000);
 
     if (snap) {
       await applyProject(snap);
@@ -3126,16 +3285,16 @@ async function applyProject(p) {
   // 속도가 1배가 아니었던 프로젝트 — 저장해 둔 기준(speedBase)에서 다시 늘려/줄여서
   // 스템을 재생성한다(생성된 파일 자체는 프로젝트에 안 남기고, 열 때마다 원본에서 다시 만든다 —
   // 관리해야 할 파일이 안 늘어난다). p.stems 가 없으면(스템 없는 프로젝트) 건너뛴다.
-  if (p.stems && p.speed && p.speed !== 1) {
+  if (p.stems && ((p.speed && p.speed !== 1) || p.keySemitones)) {
     if (p.speedBase) _speedBase = { bpm: p.speedBase.bpm, beatInterval: p.speedBase.beatInterval, gridOffset: p.speedBase.gridOffset, beats: Array.isArray(p.speedBase.beats) ? p.speedBase.beats.slice() : [] };
-    // 저장해 둔 늘인 파일이 아직 있으면(stemsDir 에 남겨 둔다) 그걸 그대로 다시 불러오기만
-    // 한다 — 처음 만들 때만 오래 걸리고, 그다음부터 프로젝트를 열 때마다 매번 다시 늘이지
+    // 저장해 둔 처리 파일이 아직 있으면(stemsDir 에 남겨 둔다) 그걸 그대로 다시 불러오기만
+    // 한다 — 처음 만들 때만 오래 걸리고, 그다음부터 프로젝트를 열 때마다 매번 다시 처리하지
     // 않는다("불러오고 또 처리하느라 시간 걸린다" 신고 반영). 파일이 없어졌을 때만(다른
-    // 컴퓨터로 옮겼다거나) 처음부터 다시 늘인다.
+    // 컴퓨터로 옮겼다거나) 처음부터 다시 만든다.
     const restored = p.speedStemPaths && typeof p.speedStemPaths === 'object'
-      ? await restoreSpeedFromCache(p.speedStemPaths, p.speed)
+      ? await restoreSpeedFromCache(p.speedStemPaths, p.speed || 1, p.keySemitones || 0)
       : false;
-    if (!restored) await applySpeed(p.speed, { fromLoad: true });
+    if (!restored) await applyTransform(p.speed || 1, p.keySemitones || 0, { fromLoad: true });
   }
   // 2) 녹음/오디오 트랙 레이아웃 + FX
   // recTracksReset 은 항상 부른다 — 예전엔 새 프로젝트에 트랙이 하나도 없으면 이 블록
@@ -3739,7 +3898,14 @@ function onEngineEvent(m) {
         }
       }
       if (_devOpen) { openDevModal(m); _devOpen = false; }
-      else if (!$('daw-modal').hidden) openDevModal(m);   // 열려있으면 갱신
+      // "열려있으면 갱신"은 열려있는 게 오디오 설정 모달 자신일 때만 해야 한다 — 부팅
+      // 직후 저장된 장치 재연결 체크도 listDevices() 를 부르는데(_devReconnectPhase),
+      // 그 응답이 하필 사용자가 방금 연 다른 모달(곡 고르기 등) 위로 도착하면 예전엔
+      // "뭐든 열려있으면" 조건이라 그 모달을 통째로 오디오 설정으로 덮어써 버렸다
+      // (실사용 제보: 스튜디오 로딩 끝나자마자 곡 불러오기를 누르면 가끔 오디오 설정
+      // 모달이 뜸). #dv-out 은 openDevModal() 이 그릴 때만 존재하는 요소라 지금 열려있는
+      // 게 오디오 설정 모달인지 정확히 가려낸다.
+      else if (!$('daw-modal').hidden && $('dv-out')) openDevModal(m);
       break;
     case 'pos': onPos(m.samples); break;
     case 'level':
@@ -3997,6 +4163,10 @@ function wire() {
   onLocaleChange(() => {
     _tracks.forEach(tk => { tk.label = stemLabel(tk.key); });   // tr 은 번역 함수라 가리면 안 됨
     renderTracks(); updateFxPanel(); updateTrackFader();
+    // renderTracks() 가 .daw-lane 을 통째로 새로 그려서 .daw-clip 도 빈 채로 새로 생긴다 —
+    // 파형은 줌 배율 바뀔 때(1249줄)처럼 캐시된 _stemBuffers 로 다시 그려 줘야 한다
+    // (안 그러면 언어 바꿀 때마다 스템 트랙 파형만 사라지는 버그 — 사용자 제보).
+    renderWaves();
     renderEngineStatus();   // 실시간 값이 들어가는 자리라 data-i18n 대상이 아니다 → 직접 다시 그림
   });
   loadInputConfig();   // 저장된 입력 구성 — device 이벤트에서 엔진에 반영된다
@@ -4120,6 +4290,7 @@ function wire() {
   $('st-bpm-half').addEventListener('click', () => adjustBpm(0.5));
   $('st-bpm-double').addEventListener('click', () => adjustBpm(2));
   $('st-speed-btn')?.addEventListener('click', openSpeedModal);
+  $('st-key-btn')?.addEventListener('click', openKeyModal);
   const tscroll = $('daw-tscroll');
   ['dragenter', 'dragover'].forEach(ev => tscroll.addEventListener(ev, (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; tscroll.classList.add('drop-hi'); }));
   tscroll.addEventListener('dragleave', (e) => { if (e.target === tscroll) tscroll.classList.remove('drop-hi'); });

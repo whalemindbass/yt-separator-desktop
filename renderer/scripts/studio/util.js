@@ -46,6 +46,26 @@ export function meterPct(v) {
   return Math.min(1, Math.floor(p * METER_BLOCKS) / METER_BLOCKS) * 100;
 }
 
+// ── 엔진 크래시 반복 감지 ──────────────────────────────────
+// 엔진이 죽으면 자동으로 다시 살리는데(handleEngineCrash), 무조건 매번 재시도하면
+// 고장난 VST·드라이버 충돌처럼 근본적으로 깨진 상황에서 즉시·계속 재시작을 반복한다
+// (오디오 드라이버 스래싱, 크래시 저널 스팸, 화면이 계속 깜빡이는 것처럼 보임).
+// 이 창(윈도) 안에 이만큼 죽으면 "반복 크래시"로 보고 자동 재시작을 멈춘다.
+export const CRASH_LOOP_MAX = 3;
+export const CRASH_LOOP_WINDOW_MS = 30000;
+
+/**
+ * 크래시 시각을 기록하고 "반복 크래시(루프)"인지 판정한다.
+ * @param {number[]} timestamps 지금까지의 크래시 시각(ms) — 이 함수가 in-place 로 오래된 것을 정리한다
+ * @param {number} now
+ * @returns {boolean} true 면 "루프로 판단, 자동 재시작 중단"
+ */
+export function noteCrashAndCheckLoop(timestamps, now) {
+  while (timestamps.length && now - timestamps[0] > CRASH_LOOP_WINDOW_MS) timestamps.shift();
+  timestamps.push(now);
+  return timestamps.length >= CRASH_LOOP_MAX;
+}
+
 // ── 파형 ────────────────────────────────────────────────
 /**
  * 스테레오 버퍼를 파형 SVG 로. peak 는 흐린 외곽, rms 는 본체.

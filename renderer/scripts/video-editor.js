@@ -3911,6 +3911,7 @@ async function runExport(format, res, fps, gpu) {
   });
   let result;
   try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps, gpu }); }
+  catch (e) { result = { ok: false, error: String((e && e.message) || e) }; }
   finally {
     off?.();
     _exporting = false;

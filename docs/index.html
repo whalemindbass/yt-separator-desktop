@@ -125,12 +125,18 @@
   .hero-lede{font-size:18px;line-height:1.7;color:var(--paper-dim);max-width:34ch}
   .ctas{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
   .cta-main{display:flex;flex-direction:column;align-items:center;gap:9px}
+  .cta-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center}
   .hero-portable{font:500 12.5px/1 var(--body);color:var(--paper-dim);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line-soft);transition:color .2s,text-decoration-color .2s}
   .hero-portable:hover{color:var(--paper);text-decoration-color:var(--mint-dim)}
   .btn-magnet{position:relative;display:inline-flex;align-items:center;gap:10px;font:600 15px/1 var(--body);
     padding:19px 30px;border-radius:99px;background:var(--mint);color:var(--ink);cursor:pointer;border:0;text-decoration:none;
     transition:transform .15s cubic-bezier(.2,.9,.3,1.3)}
   .win{width:14px;height:14px;flex:none}
+  /* MS 스토어 버튼 — .btn-magnet 이랑 같은 크기·모양(magnet 호버도 그대로 받게 클래스
+     둘 다 붙여 쓴다)에, 배경만 아웃라인으로 낮춰서 "메인(Setup.exe)"보다 한 단 아래
+     비중으로 보이게 한다 — 둘 다 꽉 찬 mint 필로 나란히 두면 뭐가 메인인지 헷갈린다. */
+  .btn-store{background:#fff;color:#111;border:0}
+  .btn-store:hover{background:#f0f0f0}
   .btn-ghost{font:600 15px/1 var(--body);color:var(--paper);text-decoration:none;display:inline-flex;align-items:center;gap:8px;
     padding-bottom:2px;border-bottom:1px solid var(--line-soft);transition:border-color .2s}
   .btn-ghost:hover{border-color:var(--mint)}
@@ -293,7 +299,10 @@
       <p class="hero-lede" data-i18n="hero.lede">어떤 곡이든 무료로 스템 분리하고, 원곡 영상을 보며 녹음·믹스한 뒤 영상까지 편집해 내보내는 데스크톱 스튜디오. 모든 처리는 내 PC 안에서 끝납니다.</p>
       <div class="ctas">
         <div class="cta-main">
-          <a class="btn-magnet" id="dlBtn1" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/underdaw-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaDownload">Windows용 다운로드</span></a>
+          <div class="cta-row">
+            <a class="btn-magnet" id="dlBtn1" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/underdaw-Setup.exe" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaDownload">Windows용 다운로드</span></a>
+            <a class="btn-magnet btn-store" id="dlBtnStore1" href="https://apps.microsoft.com/detail/9NHQ0W0DTLZX?hl=ko-kr&amp;gl=KR&amp;ocid=pdpshare" target="_blank" rel="noopener"><svg class="win" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.3 6.5 1.4v6.1H0zM7.4 1.3 16 0v7.5H7.4zM0 8.5h6.5v6.1L0 13.7zM7.4 8.5H16V16l-8.6-1.2z"/></svg><span data-i18n="hero.ctaStore">Microsoft Store</span></a>
+          </div>
           <a class="hero-portable" id="dlBtnPortable" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/underdaw.exe" target="_blank" rel="noopener" data-i18n="hero.ctaPortable">포터블 버전 다운로드</a>
         </div>
         <a class="btn-ghost" href="#how"><span data-i18n="hero.ctaHow">작동 방식 보기</span> <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h10M9 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
@@ -420,6 +429,7 @@
     <p class="close-sub" data-i18n="close.sub">원곡과 완성된 커버 사이의 모든 과정을 담은, 하나의 무료 데스크톱 스튜디오.</p>
     <div class="close-ctas">
       <a class="btn-magnet" id="dlBtn2" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/underdaw-Setup.exe" target="_blank" rel="noopener"><span data-i18n="get.ctaSetup">설치판 다운로드</span></a>
+      <a class="btn-magnet btn-store" id="dlBtnStore2" href="https://apps.microsoft.com/detail/9NHQ0W0DTLZX?hl=ko-kr&amp;gl=KR&amp;ocid=pdpshare" target="_blank" rel="noopener" data-i18n="get.ctaStore">Microsoft Store</a>
       <a class="btn-ghost2" href="https://github.com/whalemindbass/yt-separator-releases/releases/latest/download/underdaw.exe" target="_blank" rel="noopener" data-i18n="get.ctaPortable">포터블 버전</a>
     </div>
     <p class="trust" data-i18n="close.trust">무료 · WINDOWS 10 / 11 · 설치판 & 포터블</p>
@@ -444,7 +454,7 @@ window.I18N = {"ko": {
   "hero.kicker": "무료 · 로컬 처리 · WINDOWS",
   "hero.title": "<span>곡을 나누고,</span><span>내 연주를 더해,</span><span><span class=\"fx\">영상까지</span> 완성한다.</span>",
   "hero.lede": "어떤 곡이든 무료로 스템 분리하고, 원곡 영상을 보며 녹음·믹스한 뒤 영상까지 편집해 내보내는 데스크톱 스튜디오. 모든 처리는 내 PC 안에서 끝납니다.",
-  "hero.ctaDownload": "Windows용 다운로드", "hero.ctaHow": "작동 방식 보기", "hero.ctaPortable": "포터블 버전 다운로드",
+  "hero.ctaDownload": "Windows용 다운로드", "hero.ctaHow": "작동 방식 보기", "hero.ctaPortable": "포터블 버전 다운로드", "hero.ctaStore": "Microsoft Store",
   "hero.meta": "<span>무료</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>설치판</b>과 <b>포터블</b></span>",
   "mani.title": "전부, 내 PC 안에서 끝납니다.",
   "mani.sub": "업로드도, 회원가입도, 워터마크도 없습니다. 내 곡도 내 연주도, 여기서 시작해 여기서 끝납니다.",
@@ -470,7 +480,7 @@ window.I18N = {"ko": {
   "stem.vocals": "보컬", "stem.drums": "드럼", "stem.bass": "베이스", "stem.guitar": "기타", "stem.piano": "피아노", "stem.other": "그외",
   "close.title": "나누고, 노래하고,<br>자르고, <span class=\"accent\">완성한다.</span>",
   "close.sub": "원곡과 완성된 커버 사이의 모든 과정을 담은, 하나의 무료 데스크톱 스튜디오.",
-  "get.ctaSetup": "설치판 다운로드", "get.ctaPortable": "포터블 버전",
+  "get.ctaSetup": "설치판 다운로드", "get.ctaStore": "Microsoft Store", "get.ctaPortable": "포터블 버전",
   "close.trust": "무료 · WINDOWS 10 / 11 · 설치판 & 포터블",
   "dl.count": "이미 <b>%n</b>명이 다운로드했어요",
   "footer.privacy": "개인정보 처리방침", "footer.contact": "문의", "footer.note": "YT Separator 기반 · © 2026 Whale Mind"
@@ -480,7 +490,7 @@ window.I18N = {"ko": {
   "hero.kicker": "FREE · LOCAL · WINDOWS",
   "hero.title": "<span>SPLIT.</span><span>RECORD.<span class=\"fx\"> EDIT.</span></span><span>SHIP IT.</span>",
   "hero.lede": "A free desktop studio that splits any song into stems, lets you record and mix over the original video, then edits and exports the footage itself — nothing leaves your machine.",
-  "hero.ctaDownload": "Download for Windows", "hero.ctaHow": "Watch the workflow", "hero.ctaPortable": "Download portable version",
+  "hero.ctaDownload": "Download for Windows", "hero.ctaHow": "Watch the workflow", "hero.ctaPortable": "Download portable version", "hero.ctaStore": "Microsoft Store",
   "hero.meta": "<span>Free</span><span>·</span><span>Windows 10 / 11</span><span>·</span><span><b>Installer</b> &amp; <b>Portable</b></span>",
   "mani.title": "Nothing leaves your machine.",
   "mani.sub": "No uploads, no accounts, no watermark. Your song and your take start here — and end here too.",
@@ -506,7 +516,7 @@ window.I18N = {"ko": {
   "stem.vocals": "Vocals", "stem.drums": "Drums", "stem.bass": "Bass", "stem.guitar": "Guitar", "stem.piano": "Piano", "stem.other": "Other",
   "close.title": "Split it. Sing over it.<br>Cut it. <span class=\"accent\">Ship it.</span>",
   "close.sub": "One free desktop studio for everything between the original track and your finished cover.",
-  "get.ctaSetup": "Download installer", "get.ctaPortable": "Portable build",
+  "get.ctaSetup": "Download installer", "get.ctaStore": "Microsoft Store", "get.ctaPortable": "Portable build",
   "close.trust": "FREE · WINDOWS 10 / 11 · INSTALLER & PORTABLE",
   "dl.count": "<b>%n</b>+ downloads and counting",
   "footer.privacy": "Privacy", "footer.contact": "Contact", "footer.note": "Based on YT Separator · © 2026 Whale Mind"

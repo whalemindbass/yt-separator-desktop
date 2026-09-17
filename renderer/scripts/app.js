@@ -1292,7 +1292,9 @@ api.update.onEvent((d) => {
         ? `Up to date (v${d.version || ''})`
         : `최신 버전입니다 (v${d.version || ''})`;
     } else if (d.type === 'error') {
-      sUpdateStatus.textContent = (isEn ? 'Check failed: ' : '확인 실패: ') + (d.message || '');
+      sUpdateStatus.textContent = d.code === 'release-in-progress'
+        ? t('upd.releaseInProgress')
+        : (isEn ? 'Check failed: ' : '확인 실패: ') + (d.message || '');
     } else if (d.type === 'downloaded') {
       sUpdateStatus.textContent = isEn ? `v${d.version} ready to install` : `v${d.version} 설치 준비 완료`;
     }
@@ -1350,7 +1352,9 @@ api.update.onEvent((d) => {
     case 'error':
       console.error('[update]', d.message);
       if (updDialog.hidden === false) {
-        updBody.textContent = t('common.error') + ': ' + d.message;
+        updBody.textContent = d.code === 'release-in-progress'
+          ? t('upd.releaseInProgress')
+          : t('common.error') + ': ' + d.message;
       }
       break;
   }

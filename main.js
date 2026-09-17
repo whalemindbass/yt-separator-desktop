@@ -563,12 +563,26 @@ function sendUpdate(payload) {
   }
 }
 
+// 릴리즈 스크립트가 태그를 만든 직후~자산(특히 latest.yml) 업로드가 끝나기 전 그 짧은
+// 틈에 사용자가 하필 업데이트 확인을 누르면, GitHub 에는 태그만 있고 latest.yml 은
+// 아직 없어 electron-updater 가 "Cannot find latest.yml ... 404" 를 던진다. 실제로
+// 이렇게 제보가 들어왔다(v1.9.16 릴리즈 진행 중 타이밍). 코드가 잘못된 게 아니라
+// 정말 그 몇 초~몇 분 사이 창이라 사용자에게 그대로 원문 영어 에러를 보여줄 필요는
+// 없다 — 잠시 후 다시 시도하라고 안내한다.
+function isReleaseInProgressError(msg) {
+  const s = String(msg || '');
+  return /latest\.yml/i.test(s) && /404/.test(s);
+}
+
 autoUpdater.on('checking-for-update', () => sendUpdate({ type: 'checking' }));
 autoUpdater.on('update-available',    (info) => sendUpdate({ type: 'available', version: info.version, notes: info.releaseNotes || null }));
 autoUpdater.on('update-not-available',(info) => sendUpdate({ type: 'not-available', version: info?.version }));
 autoUpdater.on('download-progress',   (p)    => sendUpdate({ type: 'progress', percent: p.percent, speed: p.bytesPerSecond, transferred: p.transferred, total: p.total }));
 autoUpdater.on('update-downloaded',   (info) => sendUpdate({ type: 'downloaded', version: info.version }));
-autoUpdater.on('error',               (err)  => sendUpdate({ type: 'error', message: err?.message || String(err) }));
+autoUpdater.on('error',               (err)  => {
+  const message = err?.message || String(err);
+  sendUpdate({ type: 'error', message, code: isReleaseInProgressError(message) ? 'release-in-progress' : null });
+});
 
 function isPortableBuild() {
   // electron-builder Portable 타겟이 부여하는 env var. execPath는 임시폴더로 확장돼 부정확.
@@ -1379,6 +1393,16 @@ ipcMain.handle('video:export', async (event, payload) => {
   const { segments, outPath, format, res, fps, gpu } = payload || {};
   if (!Array.isArray(segments) || !segments.length) return { ok: false, error: '내보낼 구간이 없습니다' };
   if (typeof outPath !== 'string' || !outPath) return { ok: false, error: '저장 경로 없음' };
+  // drawtextDir/filterScriptDir 은 finally 에서 정리해야 해서 try 밖(함수 스코프)에 둔다 —
+  // try 안에 let 으로 선언하면 finally 블록에서는 안 보인다(블록 스코프가 다름).
+  let drawtextDir = null;
+  let filterScriptDir = null;   // 아래서 실제로 만들 때 대입
+  // 여기부터 끝까지(세그먼트 훑기·필터그래프 조립·ffmpeg 실행) 전부 try 안이어야 한다 —
+  // 예전엔 이 try 가 더 아래(drawtextDir 선언 이후)부터 시작했는데, 그 앞의 collectEffectLists()
+  // 같은 세그먼트 모양을 미리 훑는 코드가 이 try 밖에 있어서 거기서 던진 예외는 그냥
+  // 렌더러의 api.video.export 를 reject 시켜 버렸다(사용자는 "내보내기 실패" 메시지조차
+  // 못 보고 버튼만 조용히 원상복구, 실측으로 확인).
+  try {
   activeExportCancelled = false;   // 이 export 는 새로 시작 — 지난 export 의 취소 표시를 물려받지 않는다
   const fmt = ['mp4', 'webm'].includes(format) ? format : 'mp4';
   // CRF 는 고정값 — 이전 기본값(mp4=20/webm=32) 그대로. "화질" 은 이제 이 CRF 를 고르는 대신
@@ -1410,15 +1434,11 @@ ipcMain.handle('video:export', async (event, payload) => {
     return lists;
   }
   const hasLuts = collectEffectLists().some((list) => (list || []).some((e) => e.type === 'lut' && e.value && e.enabled !== false));
-  let drawtextDir = null;
-  let filterScriptDir = null;   // 아래서 실제로 만들 때 대입 — finally 에서 drawtextDir 와 함께 정리
-  // 이 아래(필터그래프 조립·ffmpeg 실행)에서 던지는 예외가 하나라도 있으면, try 밖에서
-  // 그냥 죽게 뒀을 때 drawtextDir/filterScriptDir 임시 폴더(복사된 폰트·LUT·캡션 파일·
-  // filter_complex 스크립트)가 영원히 안 지워지고 남는다 — 이 필터그래프 조립 코드는
-  // 과거에도 예상 못한 세그먼트 모양에 여러 번 실측으로 걸려 죽은 적이 있다(아래
-  // ENAMETOOLONG·"Cannot allocate memory" 주석들 참고). 성공이든 실패든 반드시
-  // 정리되도록 try/finally 로 감싼다.
-  try {
+  // 이 아래(필터그래프 조립·ffmpeg 실행)에서 던지는 예외는(성공이든 실패든 반드시
+  // drawtextDir/filterScriptDir 임시 폴더가 정리되도록, 그리고 렌더러가 조용히 reject
+  // 당하는 대신 { ok:false, error } 를 받도록) 맨 위 try 가 끝까지 감싼다 — 이 필터그래프
+  // 조립 코드는 과거에도 예상 못한 세그먼트 모양에 여러 번 실측으로 걸려 죽은 적이 있다
+  // (아래 ENAMETOOLONG·"Cannot allocate memory" 주석들 참고).
   const _copiedFonts = new Set();   // 실제로 쓰인 폰트만, 중복 복사 안 함
   function ensureFontCopied(key) {
     const src = resolveTextFont(key);
@@ -1944,6 +1964,13 @@ ipcMain.handle('video:export', async (event, payload) => {
     result = await runOnce(false);
   }
   return result;
+  } catch (e) {
+    // 위 주석대로(필터그래프 조립은 과거에도 예상 못한 세그먼트 모양에 걸려 던진 적이
+    // 있다) — catch 없이 finally 만 있으면 여기서 던진 예외가 렌더러의 api.video.export
+    // 호출을 그냥 reject 시켜 버린다. 렌더러 쪽 runExport() 는 이 결과의 ok/error 를 보고
+    // "내보내기 실패" 토스트를 띄우는데, reject 되면 그 코드까지 못 가서 사용자는 아무
+    // 메시지도 못 보고 버튼만 조용히 원상복구된다(성공했는지 실패했는지 알 길이 없음).
+    return { ok: false, error: String((e && e.message) || e) };
   } finally {
     if (drawtextDir) { try { fs.rmSync(drawtextDir, { recursive: true, force: true }); } catch {} }
     if (filterScriptDir && filterScriptDir !== drawtextDir) { try { fs.rmSync(filterScriptDir, { recursive: true, force: true }); } catch {} }

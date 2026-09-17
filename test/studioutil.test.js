@@ -70,6 +70,32 @@ const expect = (label, got, want) => {
   expect('N 커지면 좌표도 늚', ptsOf(fine) > ptsOf(coarse) * 5, true);
   expect('viewBox 도 N 따라감', fine.includes('viewBox="0 0 512 50"'), true);
 
+  console.log('7) noteCrashAndCheckLoop — 반복 크래시 판정');
+  {
+    let ts = [];
+    expect('1번째는 루프 아님', U.noteCrashAndCheckLoop(ts, 0), false);
+    expect('2번째도 루프 아님', U.noteCrashAndCheckLoop(ts, 1000), false);
+    expect('3번째(창 안)면 루프', U.noteCrashAndCheckLoop(ts, 2000), true);
+  }
+  {
+    // 3번인데 창(30초)을 넘겨서 듬성듬성 — 오래된 것부터 잘려나가 루프로 안 봐야 한다
+    let ts = [];
+    U.noteCrashAndCheckLoop(ts, 0);
+    U.noteCrashAndCheckLoop(ts, U.CRASH_LOOP_WINDOW_MS + 1000);   // 첫 번째가 이 시점엔 창 밖
+    const looped = U.noteCrashAndCheckLoop(ts, U.CRASH_LOOP_WINDOW_MS + 2000);
+    expect('창 넘겨 듬성듬성이면 루프 아님', looped, false);
+    expect('오래된 타임스탬프는 정리됨', ts.length, 2);
+  }
+  {
+    // 딱 창 끝(now - 첫 크래시 == CRASH_LOOP_WINDOW_MS)에 걸친 것도 아직 창 안(초과가 아니라
+    // 같음)이라 안 잘려나간다 — 그 경계에서 3번째가 나오면 루프로 잡혀야 한다
+    let ts = [];
+    U.noteCrashAndCheckLoop(ts, 0);
+    U.noteCrashAndCheckLoop(ts, U.CRASH_LOOP_WINDOW_MS / 2);
+    const looped = U.noteCrashAndCheckLoop(ts, U.CRASH_LOOP_WINDOW_MS);
+    expect('경계값 포함 3번째면 루프', looped, true);
+  }
+
   console.log(`\n통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });
