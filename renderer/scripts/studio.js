@@ -3113,6 +3113,7 @@ async function handleEngineCrash(m) {
       // 수동 버튼의 startEngine(true) 흐름은 그대로 살아있다).
       _crashTimestamps = [];
       flashTake(tr('studio.crash.loop'));
+      showBoot('crashloop');
       return;
     }
 
@@ -3122,7 +3123,12 @@ async function handleEngineCrash(m) {
     flashTake(tr('studio.crash.restarting'));
     _engineTried = false;                     // 자동 시작 1회 제한을 푼다
     if (!await startEngine(true)) { flashTake(tr('studio.crash.failed')); return; }
-    if (!await waitEngineReady(12000))       { flashTake(tr('studio.crash.failed')); return; }
+    // startEngine(true) 는 성공(스폰까지만) 이어도 showBoot('loading') 을 띄운 채로 반환한다
+    // — 실제로 'ready' 가 안 오면(장치가 안 열리거나 응답이 없는 경우) 여기서 12초 기다리다
+    // 포기하는데, 그때 daw-boot 를 그대로 두면 로딩 스피너가 영원히 멈춘 채 남고 재시도
+    // 버튼도 없어서(반복 크래시 감지 분기와 같은 문제) 사용자는 화면이 멈췄다고만 느낀다
+    // (실사용 제보: 오디오 설정·녹음트랙추가 눌러도 반응 없음 — 원인이 이거였다).
+    if (!await waitEngineReady(12000)) { flashTake(tr('studio.crash.failed')); showBoot('failed'); return; }
 
     // 안정적으로 다시 떴다 — 한참 뒤(60초)에도 안 죽어 있으면 이번 창을 잊는다.
     // 그래야 한참 뒤에 벌어진 무관한 크래시가 예전 창에 누적돼 억울하게 반복-크래시로
@@ -4070,11 +4076,16 @@ function renderEngineStatus() {
 function showBoot(state) {
   const box = $('daw-boot'); if (!box) return;
   if (state === 'hide') { box.hidden = true; return; }
-  const failed = state === 'failed';
+  // 'crashloop' — 반복 크래시로 자동 재시작을 포기했을 때. 이 시점엔 이미 최초 부팅을
+  // 지나 daw-boot 가 숨겨져 있던 상태라(실사용 중), 여기서 다시 띄워 주지 않으면
+  // setEnabled(false)로 잠긴 화면만 남고 왜 멈췄는지 · 어떻게 풀어야 하는지 보여줄 데가
+  // 없다(사용자 제보: 버튼 눌러도 반응 없음 — flashTake 토스트는 몇 초 뒤 사라져 버려서
+  // 원인·해결법이 화면에 안 남았다).
+  const failed = state === 'failed' || state === 'crashloop';
   box.hidden = false;
   $('daw-boot-spin').hidden = failed;
-  $('daw-boot-title').textContent = tr(failed ? 'studio.boot.failTitle' : 'studio.boot.title');
-  $('daw-boot-sub').textContent = tr(failed ? 'studio.boot.failSub' : 'studio.boot.sub');
+  $('daw-boot-title').textContent = tr(state === 'crashloop' ? 'studio.crash.loop.title' : (failed ? 'studio.boot.failTitle' : 'studio.boot.title'));
+  $('daw-boot-sub').textContent = tr(state === 'crashloop' ? 'studio.crash.loop' : (failed ? 'studio.boot.failSub' : 'studio.boot.sub'));
   $('daw-boot-retry').hidden = !failed;
 }
 
