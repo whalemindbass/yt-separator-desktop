@@ -5,7 +5,7 @@ import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
-         METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop } from './studio/util.js';
+         METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -3823,8 +3823,7 @@ function onEngineEvent(m) {
       // 이미 같은 값이면 보내지 않아 device 이벤트가 무한히 되돌아오는 것을 막는다.
       const want = _inCfg;
       const same = (m.inMode | 0) === want.mode && (m.inChL | 0) === want.chL && (m.inChR | 0) === want.chR;
-      const inRange = want.chL < Math.max(1, m.in || 1) && want.chR < Math.max(1, m.in || 1);
-      if (!same && inRange) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
+      if (!same && inputConfigInRange(want, m.in)) api.engine.inputConfig({ mode: want.mode, chL: want.chL, chR: want.chR });
       // 재연결 확인/전환이 끝나지 않았으면 이 device 이벤트는 아직 스쳐 지나가는 기본 장치다 —
       // 상태 표시는 그대로 "저장된 장치로 연결 중…" 에 고정해 둔다. 'switching' 중에 온
       // device 이벤트는 그 전환의 결과이므로 여기서 phase 를 끝낸다.

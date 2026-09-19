@@ -96,6 +96,19 @@ const expect = (label, got, want) => {
     expect('경계값 포함 3번째면 루프', looped, true);
   }
 
+  console.log('8) inputConfigInRange — 채널 많은 인터페이스에서 저장된 입력 복원');
+  {
+    // 모노: chR 은 안 쓰니까 범위 밖이어도 무시돼야 한다(버그였던 부분)
+    expect('모노, chR 이 커도 통과', U.inputConfigInRange({ mode: 0, chL: 0, chR: 9 }, 2), true);
+    expect('모노, chL 자체가 범위 밖이면 막힘', U.inputConfigInRange({ mode: 0, chL: 9, chR: 0 }, 2), false);
+    // 스테레오: chL·chR 둘 다 범위 안이어야 한다
+    expect('스테레오, 둘 다 범위 안', U.inputConfigInRange({ mode: 1, chL: 0, chR: 1 }, 12), true);
+    expect('스테레오, chR 만 범위 밖', U.inputConfigInRange({ mode: 1, chL: 0, chR: 9 }, 2), false);
+    expect('스테레오, chL 만 범위 밖', U.inputConfigInRange({ mode: 1, chL: 9, chR: 0 }, 2), false);
+    // 12채널 인터페이스에서 8/9번(인덱스 7/8) 스테레오로 쓰던 실사용 값
+    expect('12채널 인터페이스 실사용 값', U.inputConfigInRange({ mode: 1, chL: 7, chR: 8 }, 12), true);
+  }
+
   console.log(`\n통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

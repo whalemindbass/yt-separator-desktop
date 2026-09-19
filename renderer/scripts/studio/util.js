@@ -66,6 +66,20 @@ export function noteCrashAndCheckLoop(timestamps, now) {
   return timestamps.length >= CRASH_LOOP_MAX;
 }
 
+// ── 저장된 입력 채널 설정이 지금 장치에서 유효한지 ──────────────
+// 모노 모드일 땐 chR 을 안 쓴다. 그런데도 chR 까지 항상 범위 검사에 넣으면, 채널이 많은
+// 인터페이스(RME/Audient 등)에서 예전에 스테레오로 쓰다 chR 을 예컨대 9번으로 남겨 둔 채
+// 모노로 바꿨을 때 — chR=9 가 지금 장치가 보고한 입력 개수보다 커 보이는 상황(장치가 열리는
+// 도중 잠깐 더 적은 개수를 보고하는 경우 포함)마다, 정작 쓰는 chL 까지 통째로 안 밀어
+// 넣어진다. 2채널 장치는 chR 기본값(1)이 항상 범위 안이라 이 버그가 원천적으로 안 드러난다
+// — "채널 많은 인터페이스에서 저장한 입력 채널이 안 돌아온다" 제보가 유독 잦았던 이유.
+export function inputConfigInRange(want, deviceInCount) {
+  const n = Math.max(1, deviceInCount || 1);
+  const chLInRange = want.chL < n;
+  const chRInRange = want.mode !== 1 || want.chR < n;
+  return chLInRange && chRInRange;
+}
+
 // ── 파형 ────────────────────────────────────────────────
 /**
  * 스테레오 버퍼를 파형 SVG 로. peak 는 흐린 외곽, rms 는 본체.
