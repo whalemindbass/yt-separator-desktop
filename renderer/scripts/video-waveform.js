@@ -20,6 +20,15 @@ function audioCtx() {
   return _ctx || (_ctx = new (window.AudioContext || window.webkitAudioContext)());
 }
 
+// decode() 는 파일 전체를 fetch 로 렌더러 메모리에 올린 뒤 decodeAudioData 로 통째로
+// 비압축 PCM(Float32, 채널당 duration×sampleRate×4바이트)으로 풀어 둔다 — 몇 분짜리
+// 클립엔 문제없지만, 길거나 고비트레이트인 파일(예: 몇 시간짜리 4K 촬영본)은 이 PCM만
+// 으로도 수백MB~GB 급이라 원본 fetch 버퍼까지 겹치면 렌더러 프로세스가 통째로 OOM 으로
+// 죽는다(실사용 제보: 1.2GB 영상 임포트 직후 크래시, kind:renderer/oom). 파형은 "있으면
+// 좋은" 부가 정보일 뿐이라 — 너무 긴 파일은 디코드 자체를 건너뛴다(클립은 파형 없이
+// 정상 동작, 크래시보다 훨씬 낫다).
+const MAX_WAVE_DECODE_SEC = 20 * 60;   // 20분 — 48kHz 스테레오 기준 PCM 약 230MB
+
 const _cache = new Map();     // file → {chL, chR, sampleRate, duration} | Promise
 const _pending = new Set();
 const _queue = [];
@@ -47,6 +56,7 @@ async function decode(file, toUrl) {
  */
 export function getFileChannels(clip, toUrl, onReady) {
   if (clip.hasAudio === false) return null;
+  if ((clip.srcDur || 0) > MAX_WAVE_DECODE_SEC) return null;   // 너무 길면 파형 생략(OOM 방지)
   const key = clip.file;
   const cached = _cache.get(key);
   if (cached && !(cached instanceof Promise)) return cached;
