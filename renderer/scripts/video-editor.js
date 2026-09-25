@@ -3852,6 +3852,36 @@ async function getGpuInfo() {
 // GPU 정보는 IPC 왕복이 필요해 비동기다 — 모달 자체를 그거 끝날 때까지 늦추면 "내보내기"
 // 클릭 즉시 버튼이 뜨는 다른 흐름들(더블클릭으로 바로 여는 습관 등)이 깨진다. 그래서
 // 모달은 항상 동기로 먼저 뜨고, GPU 체크박스 줄만 나중에 도착하는 대로 끼워 넣는다.
+// 단축키 안내 — 스튜디오(openShortcutsModal)와 같은 모양. 여기 목록은 아래 document keydown
+// 처리기·클립 pointerdown·휠 처리기와 손으로 맞춘 것이라, 그쪽을 바꾸면 같이 고쳐야 한다.
+// 예전엔 단축키가 꽤 많은데(S·U·H·V·M·[·]·Shift+Delete·1~9) 볼 곳이 없었다.
+function openShortcutsModal() {
+  const rows = [
+    ['Space', 'video.sc.play'],
+    ['S', 'video.sc.split'],
+    ['Delete', 'video.sc.delete'],
+    ['Shift+Delete', 'video.sc.ripple'],
+    ['Ctrl+Z', 'video.sc.undo'],
+    ['Ctrl+Shift+Z', 'video.sc.redo'],
+    ['Ctrl+G', 'video.sc.group'],
+    ['U', 'video.sc.ungroup'],
+    ['H / V', 'video.sc.flip'],
+    ['M', 'video.sc.marker'],
+    ['[ / ]', 'video.sc.jumpMarker'],
+    ['1 ~ 9', 'video.sc.angle'],
+    [tr('video.sc.multiKey'), 'video.sc.multi'],
+    [tr('video.sc.rangeKey'), 'video.sc.rangeSel'],
+    [tr('video.sc.zoomKey'), 'video.sc.zoom'],
+    [tr('video.sc.noSnapKey'), 'video.sc.noSnap'],
+  ];
+  const host = $('ve-modal');
+  host.innerHTML = `<div class="daw-modal-box"><div class="daw-modal-h"><span>${esc(tr('video.sc.title'))}</span><button class="x">✕</button></div>
+    <div class="daw-modal-list">${rows.map(([key, descKey]) =>
+      `<div class="daw-modal-kv"><kbd>${esc(key)}</kbd><span>${esc(tr(descKey))}</span></div>`).join('')}</div></div>`;
+  host.hidden = false;
+  host.querySelector('.x').addEventListener('click', () => host.hidden = true);
+  host.addEventListener('click', (e) => { if (e.target === host) host.hidden = true; }, { once: true });
+}
 function openExportModal() {
   if (!_veClips.length) { flash(tr('video.needImport')); return; }
   const host = $('ve-modal');
@@ -4226,6 +4256,7 @@ function wire() {
     openExportModal();
   });
   $('ve-lyrics')?.addEventListener('click', () => toggleLyricsPanel());
+  $('ve-shortcuts')?.addEventListener('click', openShortcutsModal);
   $('ve-lyric-close')?.addEventListener('click', () => finishLyricTiming(true));
   // 눈금자(트랙 위 타임라인) 클릭·드래그로 재생선 이동 — 헤드 칸(172px) 밖에 있는
   // #ve-ruler 는 그 안에서의 x 좌표가 그대로 초 단위 위치와 대응한다(HEAD_W 보정 불필요).
