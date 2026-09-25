@@ -3293,7 +3293,6 @@ body { display: flex; flex-direction: column; }
 .dev-sep { height: 1px; background: var(--border); margin: 2px 0; }
 .dev-latency { align-items: flex-start; }
 .dev-latency > div { flex: 1; min-width: 0; font: 500 12px/1.5 var(--sans); color: var(--tx-1); }
-.dev-latency-hint { margin-top: 4px; font-size: 11.5px; color: var(--tx-3); }
 /* 입력 채널별 레벨 — 어느 단자에 신호가 들어오는지 눈으로 확인 */
 .dev-inmeters { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .dev-inm { display: flex; align-items: center; gap: 6px; }

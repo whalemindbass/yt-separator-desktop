@@ -151,7 +151,8 @@ const expect = (label, got, want) => {
     expect('드라이버 추가분      ', r1.driverMs.toFixed(2), '1.13');
     expect('보정 없으면 모니터=왕복', r1.monitorMs.toFixed(1), '11.8');
     const r2 = U.latencyBreakdown({ sr: 48000, block: 256, roundtripMs: 11.8, pdcMs: 42.7, pdcOn: true });
-    expect('PDC 켜짐 → 모니터에 더해짐', r2.monitorMs.toFixed(1), '54.5');
+    // 엔진이 재생 소스를 미리 읽으므로 라이브 모니터링엔 PDC 가 더해지지 않는다(루프백 실측 확인)
+    expect('PDC 켜져도 모니터는 왕복만', `${r2.pdcMs}/${r2.monitorMs.toFixed(1)}`, '42.7/11.8');
     const r3 = U.latencyBreakdown({ sr: 48000, block: 256, roundtripMs: 11.8, pdcMs: 42.7, pdcOn: false });
     expect('PDC 꺼짐 → 안 더해짐 ', `${r3.pdcMs}/${r3.monitorMs.toFixed(1)}`, '0/11.8');
     // 드라이버가 버퍼보다 작게 보고하는 이상한 경우 — 음수로 안 내려간다

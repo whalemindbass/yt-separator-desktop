@@ -3776,7 +3776,6 @@ async function openDevModal(d) {
         if (!lat) return '';
         return `<div class="dev-field dev-latency"><span>${tr('studio.x.latency')}</span><div>
           <div>${esc(tr('studio.x.latencyDetail', lat))}</div>
-          ${lat.hasPdc ? `<div class="dev-latency-hint">${esc(tr('studio.x.latencyPdcHint', lat))}</div>` : ''}
         </div></div>`;
       })()}
       <div class="dev-sep"></div>
@@ -4199,8 +4198,7 @@ function latencyText() {
   if (!d || !(d.sr > 0)) return null;
   const b = latencyBreakdown({ sr: d.sr, block: d.block, roundtripMs: d.roundtripMs, pdcMs: _pdcMs, pdcOn: _pdcOn });
   const f = (v) => v.toFixed(1);
-  // 1~2ms 수준의 보정은 체감이 안 되는데 경고를 띄우면 소음이다 — 2ms 이상일 때만 안내
-  return { total: f(b.monitorMs), buf: f(b.bufferMs), drv: f(b.driverMs), pdc: f(b.pdcMs), hasPdc: b.pdcMs >= 2 };
+  return { total: f(b.monitorMs), buf: f(b.bufferMs), drv: f(b.driverMs), pdc: f(b.pdcMs) };
 }
 
 // ── 오디오 엔진 시작 ───────────────────────────────

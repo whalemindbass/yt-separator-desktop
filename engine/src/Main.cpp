@@ -201,6 +201,7 @@ struct RecSession
     std::atomic<AudioFormatWriter::ThreadedWriter*> active { nullptr };
     std::atomic<int64> recordedStart { -1 };
     std::atomic<int> recDropBlocks { 0 };   // 쓰기 실패(FIFO 오버런) 블록 수 — 트랙별
+    int64 skipLeft = 0;                      // 파일에 안 쓰고 버릴 앞부분(샘플) — 오디오 스레드만 만진다
     File outFile;
     int writerChans = 1;
 };
@@ -1045,6 +1046,11 @@ public:
         }
         size_t i = 0;
         for (auto& s : stems) { s->pdcDelay.store (on ? jmax (0, maxLat - stemLat[i]) : 0); ++i; }
+        // 재생 소스(스템·테이크)는 maxLat 만큼 미리 읽는다 — 보정 지연을 다 거친 출력이
+        // 정확히 재생 위치(phStart)에 맞는다. 예전엔 미리 읽지 않고 뒤로만 늦춰서, 반주 전체가
+        // maxLat 만큼 늦게 들렸다 → 거기 맞춰 친 녹음이 그만큼 늦게 박히고(루프백 실측 +86샘플),
+        // 보정을 안 거치는 메트로놈은 반주보다 앞서 울렸다.
+        pdcAhead.store (on ? maxLat : 0);
         if (announce && (maxLat != pdcMaxReported || on != pdcOnReported))
         { pdcMaxReported = maxLat; pdcOnReported = on; emitPdc (maxLat); }
     }
@@ -1918,12 +1924,15 @@ public:
         for (auto& b : buses) { b.buf.setSize (2, numSamples, false, false, true); b.buf.clear(); }
 
         const int64 phStart = playhead.load();
+        // 재생 소스를 읽는 위치 — PDC 가 켜져 있으면 최대 플러그인 지연만큼 앞선다(recomputePdc 설명).
+        // 재생 위치 표시·메트로놈·자동화·녹음 위치는 그대로 phStart 기준이다.
+        const int64 phRead = phStart + (int64) pdcAhead.load();
 
         // 스템 믹스 (재생 중) — solo 있으면 solo 만, 아니면 mute 제외
         const bool anySolo = anyStemSolo.load() || anyRecSolo.load();
         if (playing.load())
         {
-            const int64 stemPos = jmax<int64> (0, phStart - stemOffset.load());
+            const int64 stemPos = jmax<int64> (0, phRead - stemOffset.load());
             for (auto& s : stems)
             {
                 scratch.setSize (2, numSamples, false, false, true);
@@ -2039,7 +2048,7 @@ public:
                         for (auto& t : takesPlay)
                         {
                             if (t->trackId != rt->id) continue;
-                            const int64 pos = phStart - t->start;
+                            const int64 pos = phRead - t->start;   // 스템과 같이 미리 읽는다
                             if (pos < 0 || pos >= t->len) continue;
                             const int n2 = (int) jmin<int64> ((int64) numSamples, t->len - pos);
                             if (t->fadeIn <= 0 && t->fadeOut <= 0)   // 페이드 없음 — 직접 add
@@ -2055,6 +2064,16 @@ public:
                                     fxBuf.addFrom (c, 0, clipTmp, c, 0, n2);
                             }
                         }
+
+                    // PDC — 테이크(재생분)에만 건다. 라이브 입력이 합쳐지기 전, FX 앞에서 늦춘다.
+                    // 지연은 FX 와 순서를 바꿔도 결과가 같아서(시불변) 테이크 쪽 정렬은 그대로다.
+                    // 예전엔 FX 뒤에서 트랙 전체(라이브 입력 포함)를 늦춰, 다른 트랙에 지연 있는
+                    // 플러그인만 있어도 지금 치는 소리 모니터링이 그만큼 늦게 들렸다.
+                    {
+                        const int want = rt->pdcDelay.load();
+                        if (want != rt->pdcActive) { rt->pdcBuf.clear(); rt->pdcWrite = 0; rt->pdcActive = want; }
+                        applyDelayLine (fxBuf, numSamples, rt->pdcBuf, rt->pdcWrite, rt->pdcActive);
+                    }
 
                     if (rt->armed.load() && monOn && numIn > 0)   // armed 트랙만, 각자 자기 채널로 라이브 입력 모니터
                     {
@@ -2076,12 +2095,6 @@ public:
                                     if (s->wideOut > 0) runWide (*s->plugin, s->wideIn, s->wideOut, s->wideBuf, fxBuf, numSamples);
                                     else { MidiBuffer mm; s->plugin->processBlock (fxBuf, mm); }
                                 }
-                    }
-
-                    {   // PDC
-                        const int want = rt->pdcDelay.load();
-                        if (want != rt->pdcActive) { rt->pdcBuf.clear(); rt->pdcWrite = 0; rt->pdcActive = want; }
-                        applyDelayLine (fxBuf, numSamples, rt->pdcBuf, rt->pdcWrite, rt->pdcActive);
                     }
                     // post-FX 페이더 + 팬(L/R 결합 램프) + peak
                     const float* rtL = fxBuf.getReadPointer (0);
@@ -2232,7 +2245,14 @@ public:
                     auto* sess = rt->rec.get();
                     if (sess == nullptr) continue;
                     if (sess->recordedStart.load() < 0 && playing.load())
+                    {
                         sess->recordedStart = phStart;   // 이 블록 입력에 대응하는 위치(증분 전 phStart)
+                        // 테이크는 끝날 때 왕복 지연(comp)만큼 앞당겨 놓는데, 타임라인 0 보다 앞으로는
+                        // 못 가서 0 에 붙어 버렸다 — 곡 맨 처음부터 녹음하면 클립 전체가 comp 만큼
+                        // 늦게 박혔다(루프백 실측 +520샘플). 앞당길 수 없는 만큼은 애초에 파일에
+                        // 안 쓰면, 파일 첫 샘플이 정확히 타임라인 0 에 맞는다.
+                        sess->skipLeft = jmax<int64> (0, (inLatSamp + outLatSamp) - phStart);
+                    }
 
                     // 장치 입력을 통째로 넘기지 않고 이 트랙이 고른 채널만 기록한다.
                     // (예전엔 2in 인터페이스에서 안 쓰는 2번 채널까지 들어가 한쪽이 무음인 파일이 나왔다)
@@ -2240,6 +2260,11 @@ public:
                         if (auto* w = sess->active.load())
                         {
                             const float *iL, *iR; pickInputsFor (*rt, inputs, numIn, iL, iR);
+                            // 앞부분 버리기(위 skipLeft) — 이번 블록에서 버릴 만큼 건너뛰고 나머지만 쓴다
+                            const int skip = (int) jmin<int64> (sess->skipLeft, (int64) numSamples);
+                            sess->skipLeft -= skip;
+                            const int nw = numSamples - skip;
+                            if (nw <= 0) continue;
                             if (bakeMetroThisBlock && iL != nullptr)
                             {
                                 // metroRecBuf 엔 이번 블록 클릭 값만 들어 있다(위 메트로놈 블록,
@@ -2257,14 +2282,14 @@ public:
                                 FloatVectorOperations::min (bL, bL,  1.0f, numSamples);
                                 FloatVectorOperations::max (bR, bR, -1.0f, numSamples);
                                 FloatVectorOperations::min (bR, bR,  1.0f, numSamples);
-                                const float* chans[2] = { bL, bR };
-                                if (! w->write (chans, numSamples))
+                                const float* chans[2] = { bL + skip, bR + skip };
+                                if (! w->write (chans, nw))
                                     ++sess->recDropBlocks;
                             }
                             else
                             {
-                                const float* chans[2] = { iL, iR };
-                                if (iL != nullptr && ! w->write (chans, numSamples))
+                                const float* chans[2] = { iL != nullptr ? iL + skip : nullptr, iR != nullptr ? iR + skip : nullptr };
+                                if (iL != nullptr && ! w->write (chans, nw))
                                     ++sess->recDropBlocks;   // FIFO 가 밀림 = 녹음에 끊김이 생긴 지점
                             }
                         }
@@ -2360,6 +2385,7 @@ private:
     // ── 디클릭 — 시크·재생/정지 시 파형 불연속 제거 ──
     // 다음 블록 첫 샘플이 직전 출력 마지막 샘플과 이어지도록 오프셋을 넣고 서서히 없앤다.
     std::atomic<bool> pdcEnabled { true };   // 녹음 중 모니터 지연이 싫으면 끌 수 있음
+    std::atomic<int>  pdcAhead { 0 };        // 재생 소스 미리 읽기량(샘플) = 켜져 있으면 최대 플러그인 지연
     int pdcCapacity = 0;                     // 링버퍼 용량(샘플) — aboutToStart 에서 할당
     int pdcMaxReported = -1;                 // 마지막으로 통지한 최대 지연
     bool pdcOnReported = true;               // 마지막으로 통지한 on/off

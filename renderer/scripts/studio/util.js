@@ -78,15 +78,16 @@ export function noteCrashAndCheckLoop(timestamps, now) {
 // 알 수가 없다(제보: 같은 버퍼인데 다른 DAW보다 늦게 들린다). 엔진이 이미 보내는 값으로 나눈다.
 //  · 버퍼   = 입력·출력 버퍼 한 번씩(2 × block / sr)
 //  · 드라이버 = 드라이버가 보고한 왕복 지연 중 버퍼를 뺀 나머지(인터페이스 내부 DSP·안전 버퍼)
-//  · 플러그인 보정 = PDC 가 켜져 있으면 녹음 트랙의 라이브 입력 모니터링에도 이만큼이 더해진다
-//    (엔진이 입력을 FX 버퍼에 섞은 뒤 그 트랙 전체에 보정 지연선을 걸기 때문 — Main.cpp 녹음 버스)
+//  · 재생 정렬(PDC) = 켜져 있으면 엔진이 재생 소스를 이만큼 미리 읽어 플러그인 지연을 맞춘다.
+//    라이브 입력 모니터링엔 더해지지 않는다(v1.9.22 엔진부터 — 예전엔 녹음 트랙 전체에 보정
+//    지연선을 걸어 모니터링까지 늦어졌다). 그래서 모니터링 합계에는 넣지 않는다.
 // 반환은 전부 ms. 값이 없으면 0.
 export function latencyBreakdown({ sr, block, roundtripMs, pdcMs, pdcOn }) {
   const bufferMs = sr > 0 && block > 0 ? (2 * block / sr) * 1000 : 0;
   const rt = roundtripMs > 0 ? roundtripMs : 0;
   const driverMs = Math.max(0, rt - bufferMs);
   const plugin = pdcOn && pdcMs > 0 ? pdcMs : 0;
-  return { bufferMs, driverMs, pdcMs: plugin, monitorMs: rt + plugin };
+  return { bufferMs, driverMs, pdcMs: plugin, monitorMs: rt };
 }
 
 // ── FX 상태(노브값) 캐시 병합 ────────────────────────────────────
