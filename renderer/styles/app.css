@@ -4786,3 +4786,43 @@ body { background: var(--bg) !important; }
   position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--accent);
   z-index: 1; pointer-events: none; box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .3);
 }
+
+/* ── 블록 레이아웃(VS Code 풍) ─────────────────────────────────────────
+   영역(사이드바·영상·트랙·효과 패널)을 선 하나로 나누던 걸, 둥근 블록으로 띄우고 사이에
+   틈(--gap-block)을 줘서 공간감을 만든다. 상단 탭바·툴바·하단 트랜스포트 바는 VS Code 의
+   타이틀바/상태바처럼 가장자리까지 평평하게 그대로 둔다 — 블록은 그 사이에만 뜬다.
+   틈 색(--gutter)은 블록보다 한 단계 어둡게, 블록 테두리는 그 경계만 살짝 잡아 준다. */
+:root, :root[data-theme="dark"] { --gutter: #07090c; --gap-block: 6px; --r-block: 8px; --block-border: rgba(255,255,255,.06); }
+:root[data-theme="light"] { --gutter: #dce2e7; --block-border: rgba(15,20,30,.09); }
+
+/* 스튜디오 */
+.daw-midrow { gap: var(--gap-block); padding: var(--gap-block); background: var(--gutter); }
+.daw-left { border: 1px solid var(--block-border); border-right: 1px solid var(--block-border); border-radius: var(--r-block); }
+.daw-content { gap: var(--gap-block); }
+.daw-hero, .daw-tracks, .tab-panel-below {
+  border: 1px solid var(--block-border); border-radius: var(--r-block); overflow: hidden;
+}
+.daw-tracks { background: var(--timeline); }
+/* 영상 높이 손잡이 = 영상과 트랙 사이 틈 그 자체. 앞뒤 gap 을 음수 margin 으로 먹어서
+   틈은 하나(6px)만 남고 그 틈 전체가 잡히는 자리가 된다. */
+.daw-hero-resize { height: var(--gap-block); margin: calc(-1 * var(--gap-block)) 0; border-radius: 3px; }
+.daw-hero-resize::after { margin-top: calc(var(--gap-block) / 2 - .5px); }
+
+/* 영상 편집 */
+.video-body { background: var(--gutter); }
+.ve-preview-row { gap: var(--gap-block); padding: var(--gap-block) var(--gap-block) 0; border-bottom: 0; box-sizing: content-box; }
+.ve-fx-panel, .ve-preview-wrap {
+  border: 1px solid var(--block-border); border-radius: var(--r-block); overflow: hidden;
+}
+.ve-lyric-panel { border: 1px solid var(--block-border); }
+.ve-tscroll { margin: var(--gap-block); border: 1px solid var(--block-border); border-radius: var(--r-block); }
+
+/* 라이브러리 */
+.library-body { gap: var(--gap-block); padding: var(--gap-block); background: var(--gutter); }
+.lib-side, .lib-center, .lib-right { border: 1px solid var(--block-border) !important; border-radius: var(--r-block); overflow: hidden; }
+.lib-right { overflow-y: auto; }
+
+/* 트레이닝 */
+.training-body { gap: var(--gap-block); padding: var(--gap-block); background: var(--gutter); }
+.training-nav, .training-main { border: 1px solid var(--block-border); border-radius: var(--r-block); }
+.training-main { background: var(--bg); }
