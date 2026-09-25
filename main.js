@@ -1245,8 +1245,10 @@ function nextTakeNumber(dir) {
 // 옛 호출부(recordArm(projectKey, who) — 트랙 지정 없이 "지금 armed 된 트랙 하나" 였던
 // 시절, training.js·test/crash.test.js 가 아직 이 모양으로 부른다) 도 그대로 받는다:
 // 두 번째 인자가 배열이 아니라 문자열/undefined 면 트랙 지정이 없던 걸로 보고 who 로 민다.
-ipcMain.handle('engine:recordArm', (_ev, projectKey, trackIds, who) => {
+// midiIds = 악기 트랙(type 2) — 파일 없이 엔진이 노트만 모아 midiTake 로 돌려준다.
+ipcMain.handle('engine:recordArm', (_ev, projectKey, trackIds, who, midiIds) => {
   if (!Array.isArray(trackIds)) { who = trackIds; trackIds = null; }
+  const midiTracks = Array.isArray(midiIds) ? midiIds.filter((x) => Number.isInteger(x)) : [];
   const dir = mediaDirFor(projectKey);
   let n = nextTakeNumber(dir);
   if (!trackIds) {
@@ -1256,10 +1258,10 @@ ipcMain.handle('engine:recordArm', (_ev, projectKey, trackIds, who) => {
     lastRecordFiles = [file];
     return { ok: getEngine().send({ cmd: 'recordArm', file }), file };
   }
-  if (!trackIds.length) return { ok: false, error: 'armed 트랙 없음' };
+  if (!trackIds.length && !midiTracks.length) return { ok: false, error: 'armed 트랙 없음' };
   const files = trackIds.map((trackId) => ({ trackId, file: path.join(dir, `take-${n++}.wav`) }));
   lastRecordFiles = files.map((f) => f.file);   // 엔진이 죽으면 이 파일들을 되살려야 한다
-  return { ok: getEngine().send({ cmd: 'recordArm', files }), files };
+  return { ok: getEngine().send({ cmd: 'recordArm', files, midiTracks }), files };
 });
 // 저장 안 한 채 녹음부터 한 take 는 이번 실행 한정 폴더(_미저장-...)에 있다 — 프로젝트를
 // 처음 저장하는 순간(또는 그 뒤 어느 저장이든) 그 프로젝트의 media/ 로 옮겨준다. 이미 제

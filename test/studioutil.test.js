@@ -174,6 +174,38 @@ const expect = (label, got, want) => {
     expect('fmtEta 3725          ', U.fmtEta(3725), '1:02:05');
   }
 
+  console.log('11c) 타이핑 키보드 · 퀀타이즈 · MIDI 녹음 변환');
+  {
+    expect('Z = C3(48)           ', U.kbNoteFor('KeyZ'), 48);
+    expect('S = C#3              ', U.kbNoteFor('KeyS'), 49);
+    expect('Q = C4(60)           ', U.kbNoteFor('KeyQ'), 60);
+    expect('2 = C#4              ', U.kbNoteFor('Digit2'), 61);
+    expect(', = C4 (아랫줄 연장) ', U.kbNoteFor('Comma'), 60);
+    expect('옥타브 +1 → Z = C4   ', U.kbNoteFor('KeyZ', 1), 60);
+    expect('건반 아닌 키 → null  ', U.kbNoteFor('KeyA'), null);
+    expect('범위 밖 → null       ', U.kbNoteFor('BracketRight', 7), null);
+    expect('noteName 60/61       ', U.noteName(60) + '/' + U.noteName(61), 'C4/C#4');
+    // 120BPM(박 0.5초), 1/16 = 0.125초 격자, 기준점 0.1초
+    const step = U.quantStepSec('1/16', 0.5);
+    expect('1/16 격자 = 0.125s   ', step, 0.125);
+    expect('1/8T = 박/3          ', U.quantStepSec('1/8T', 0.6).toFixed(3), '0.200');
+    const q = U.quantizeNotes([{ t: 0.14, d: 0.2, p: 60, v: 1 }, { t: 0.04, d: 0.1, p: 62, v: 1 }], 1.0, 0.1, step, 1);
+    // 절대 1.14 → 1.1(0.1+8*0.125) → t .10 / 절대 1.04 → 1.1 → t .10 (같은 시각은 원래 순서 유지)
+    expect('격자로 당김          ', q.map(n => n.t.toFixed(3) + ':' + n.p).join(' '), '0.100:60 0.100:62');
+    expect('길이 보존            ', q.find(n => n.p === 60).d, 0.2);
+    const half = U.quantizeNotes([{ t: 0.14, d: 0.2, p: 60, v: 1 }], 1.0, 0.1, step, 0.5);
+    expect('세기 50% → 절반만    ', half[0].t.toFixed(3), '0.120');
+    const pre = U.quantizeNotes([{ t: 0.05, d: 0.1, p: 60, v: 1 }], 1.0, 0.2, 2, 1);   // 절대 1.05 → 가장 가까운 격자 0.2 = 클립 앞
+    expect('클립 앞으론 못 나감  ', pre[0].t, 0);
+    const clip = U.clipFromMidiTake({ start: 48000, end: 96000, notes: [[60000, 12000, 72, 0.7], [50000, 6000, 70, 0.5]] }, 48000);
+    expect('클립 시작 = 녹음 시작', clip.start, 1);
+    expect('클립 길이 = 녹음 구간', clip.dur, 1);
+    expect('노트 시간순·상대시각', clip.notes.map(n => n.t.toFixed(3) + ':' + n.p).join(' '), '0.042:70 0.250:72');
+    expect('음 없으면 null       ', U.clipFromMidiTake({ start: 0, end: 10, notes: [] }, 48000), null);
+    const eng = U.midiClipForEngine({ id: 7, trackId: 3, start: 1, dur: 2, notes: [{ t: 0.5, d: 0.25, p: 60, v: 0.8 }] }, 48000);
+    expect('엔진 형식(샘플)      ', JSON.stringify(eng), '{"id":7,"trackId":3,"start":48000,"len":96000,"notes":[[24000,12000,60,0.8]]}');
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷

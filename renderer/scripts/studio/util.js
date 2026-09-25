@@ -207,3 +207,64 @@ function wavePolySvg(peaks, rms, mx, N, color) {
     + `<polygon points="${poly(rms, 1)}" fill="${color}" fill-opacity=".7"/>`
     + `<line x1="0" y1="25" x2="${N}" y2="25" stroke="${color}" stroke-opacity=".45" stroke-width=".6"/></svg>`;
 }
+
+// ── 악기 트랙 · 타이핑 키보드 · 퀀타이즈 ─────────────────────────────
+// FL Studio 배열 — 아랫줄 Z~M(+ , . /)이 한 옥타브, 윗줄 Q~U(+ I O P [ ])가 그 위 옥타브.
+// 숫자·S/D/G 등 사이 줄은 검은건반. e.key 가 아니라 e.code(물리 키)를 쓴다 — 한글 입력
+// 상태에서도 같은 자리를 누르면 같은 음이 나야 한다.
+export const KB_LOWER = { KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7, KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11,
+  Comma: 12, KeyL: 13, Period: 14, Semicolon: 15, Slash: 16 };
+export const KB_UPPER = { KeyQ: 0, Digit2: 1, KeyW: 2, Digit3: 3, KeyE: 4, KeyR: 5, Digit5: 6, KeyT: 7, Digit6: 8, KeyY: 9, Digit7: 10, KeyU: 11,
+  KeyI: 12, Digit9: 13, KeyO: 14, Digit0: 15, KeyP: 16, BracketLeft: 17, Equal: 18, BracketRight: 19 };
+export const KB_BASE = 48;   // 옥타브 0 일 때 아랫줄 Z = C3(48), 윗줄 Q = C4(60)
+/** 물리 키 코드 → MIDI 음 번호(0~127). 건반이 아닌 키거나 범위를 벗어나면 null */
+export function kbNoteFor(code, octave = 0) {
+  let off = null;
+  if (code in KB_LOWER) off = KB_LOWER[code];
+  else if (code in KB_UPPER) off = 12 + KB_UPPER[code];
+  if (off == null) return null;
+  const n = KB_BASE + (octave | 0) * 12 + off;
+  return n >= 0 && n <= 127 ? n : null;
+}
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+/** 60 → "C4" */
+export const noteName = (n) => NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
+
+// 퀀타이즈 격자 — 박(4분음표) 대비 길이. T = 셋잇단.
+export const QUANT_DIVS = { '1/4': 1, '1/8': 1 / 2, '1/16': 1 / 4, '1/32': 1 / 8, '1/8T': 1 / 3, '1/16T': 1 / 6 };
+export const quantStepSec = (div, secPerBeat) => (QUANT_DIVS[div] || QUANT_DIVS['1/16']) * secPerBeat;
+/**
+ * 노트 시작을 격자로 당긴다. notes: [{t,d,p,v}] — t 는 클립 시작 기준(초).
+ * 격자 기준점(origin)은 곡의 마디 위상(_gridOffset) — 클립 위치와 무관하게 곡의 박에 맞는다.
+ * strength 0~1(1 = 정확히 격자). 길이는 그대로, 클립 앞으로는 못 나간다. 새 배열을 돌려준다.
+ */
+export function quantizeNotes(notes, clipStart, origin, step, strength = 1) {
+  if (!(step > 0)) return notes.map(n => ({ ...n }));
+  const k = Math.max(0, Math.min(1, strength));
+  return notes.map(n => {
+    const a = clipStart + n.t;
+    const q = origin + Math.round((a - origin) / step) * step;
+    return { ...n, t: Math.max(0, a + (q - a) * k - clipStart) };
+  }).sort((x, y) => x.t - y.t);
+}
+/**
+ * 엔진 midiTake → 클립. notes: [[on(절대 샘플), len, pitch, vel]], start/end: 녹음 구간(샘플).
+ * start 가 없으면(-1) 첫 음에서 시작. 반환: { start, dur, notes:[{t,d,p,v}] } (초) 또는 음이 없으면 null.
+ */
+export function clipFromMidiTake(take, sr) {
+  const list = Array.isArray(take && take.notes) ? take.notes : [];
+  if (!list.length || !(sr > 0)) return null;
+  const firstOn = Math.min(...list.map(n => n[0]));
+  const startS = take.start >= 0 ? Math.min(take.start, firstOn) : firstOn;
+  const lastOff = Math.max(...list.map(n => n[0] + n[1]));
+  const endS = Math.max(take.end > 0 ? take.end : 0, lastOff);
+  const notes = list.map(n => ({ t: (n[0] - startS) / sr, d: Math.max(1, n[1]) / sr, p: n[2] | 0, v: n[3] > 0 ? n[3] : 0.8 }))
+    .sort((a, b) => a.t - b.t);
+  return { start: Math.max(0, startS / sr), dur: Math.max(0.05, (endS - startS) / sr), notes };
+}
+/** 렌더러 클립(초) → 엔진 midiClip 명령 인자(샘플) */
+export function midiClipForEngine(c, sr) {
+  const S = (x) => Math.round(x * sr);
+  return { id: c.id, trackId: c.trackId, start: S(c.start), len: Math.max(1, S(c.dur)),
+    notes: c.notes.map(n => [S(n.t), Math.max(1, S(n.d)), n.p, n.v]) };
+}

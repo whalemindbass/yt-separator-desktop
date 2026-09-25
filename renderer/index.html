@@ -936,6 +936,7 @@
         <div id="daw-ruler-wrap" class="daw-ruler-wrap">
           <div class="daw-ruler-ctrl">
             <button id="st-add-rec" class="daw-rtog" disabled title="녹음 트랙 추가" data-i18n-title="studio.lbl.addRecTrack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+            <button id="st-add-instr" class="daw-rtog" disabled title="악기 트랙 추가 (MIDI)" data-i18n-title="studio.h.addInstr"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3.5" width="12" height="9" rx="1.2"/><path d="M5.5 3.5v5.5M8 3.5v9M10.5 3.5v5.5"/></svg></button>
             <button id="st-range-mode" class="daw-rtog" disabled title="영역 선택 모드 — 룰러를 드래그해 내보내기 구간 지정" data-i18n-title="studio.h.rangeModeTitle" aria-pressed="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2h4L2 8z"/><path d="M14 2h-4L14 8z"/></svg></button>
             <button id="st-magnet" class="daw-rtog on" disabled title="자석 스냅 — 그리드·다른 클립 경계에 붙기 (Alt = 순간 반대로)" data-i18n-title="studio.h.magnetTitle" aria-pressed="true"><span class="ico-magnet" aria-hidden="true"></span></button>
             <button id="st-marquee" class="daw-rtog" disabled title="영역 드래그로 클립 다중선택" data-i18n-title="studio.h.marqueeTitle" aria-pressed="false"><span class="ico-marquee" aria-hidden="true"></span></button>
@@ -989,6 +990,9 @@
         </div>
         <button id="st-metro" class="btn icon" disabled title="메트로놈 on/off" data-i18n-title="studio.h.metronome" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14 8 2 12 14z"/><path d="M8 4.5 10.2 12"/><circle cx="10.2" cy="10.2" r="1" fill="currentColor" stroke="none"/></svg></button>
         <button id="st-metro-cfg" class="btn icon st-metro-cfg" disabled title="메트로놈 설정" data-i18n-title="studio.h.metroCfg"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14 8 2 12 14z"/><path d="M8 4.5 10.2 12"/><circle cx="10.2" cy="10.2" r="1" fill="currentColor" stroke="none"/></svg><span class="st-metro-cfg-lbl">SET</span></button>
+        <span class="tp-div"></span>
+        <button id="st-kb" class="btn icon st-kb" disabled title="키보드로 연주 (타이핑 키보드 → MIDI)" data-i18n-title="studio.h.kb" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1.5"/><path d="M4 6.8h.01M6.3 6.8h.01M8.6 6.8h.01M10.9 6.8h.01M5 10h6"/></svg></button>
+        <button id="st-kb-cfg" class="btn icon st-metro-cfg" disabled title="퀀타이즈 설정" data-i18n-title="studio.h.kbCfg"><span class="st-metro-cfg-lbl">Q</span></button>
         <span class="tp-div"></span>
         <span class="daw-zoom">
           <button id="st-zoom-out" class="btn icon" disabled title="축소" data-i18n-title="studio.h.zoomOut"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg></button>

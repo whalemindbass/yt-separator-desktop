@@ -6,7 +6,8 @@ import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
          METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange,
-         pickInputConfig, mergeFxCache, latencyBreakdown } from './studio/util.js';
+         pickInputConfig, mergeFxCache, latencyBreakdown,
+         kbNoteFor, noteName, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -280,11 +281,14 @@ let _recTracksGen = 0, _recTracksGenReq = 0;   // 트랙 재구성 동기화 토
 let _recTracksWaiters = [];   // waitRecTracks() 대기자 — recTracks 이벤트가 오면 폴링 없이 바로 깨운다
 let _exporting = false, _exportMp3 = null, _exportTmp = null;   // export 진행 상태
 // 녹음 대상 = 녹음(type 0) 트랙만
-const armedRecId = () => (_recTracks.find(r => r.armed && r.type !== 1) || _recTracks.find(r => r.type !== 1) || {}).id;
+// 악기 트랙(type 2)은 오디오 녹음·임포트 대상이 아니다 — 파일이 아니라 노트를 녹음한다(armedMidiIds).
+const isAudioRecTrack = (r) => (r.type || 0) === 0;
+const armedRecId = () => (_recTracks.find(r => r.armed && isAudioRecTrack(r)) || _recTracks.find(isAudioRecTrack) || {}).id;
 // 실제 녹음 시작 시 "어느 트랙들에 파일을 열지" 결정할 때만 쓴다(복수) — 임포트 대상 트랙
 // 고르기 등 "대표 트랙 하나"가 필요한 나머지 자리는 전부 armedRecId() 그대로 쓴다(여러 곳에서
 // 이미 그 의미로 쓰이고 있어 반환 타입을 바꾸면 다 깨진다 — 그래서 별도 헬퍼로 뺐다).
-const armedRecIds = () => _recTracks.filter(r => r.armed && r.type !== 1).map(r => r.id);
+const armedRecIds = () => _recTracks.filter(r => r.armed && isAudioRecTrack(r)).map(r => r.id);
+const armedMidiIds = () => _recTracks.filter(r => r.armed && r.type === 2).map(r => r.id);
 // 클립 가로 드래그 유틸 — onDelta(초), onEnd
 function dragClip(e, onDelta, onEnd) {
   e.preventDefault(); e.stopPropagation();
@@ -435,26 +439,30 @@ function renderRecLanes() {
     const id = Number(el.dataset.autoid);
     if (!isStemId(id)) el.remove();
   });
-  let recN = 0, audN = 0;
+  let recN = 0, audN = 0, insN = 0;
   _recTracks.forEach((rt, idx) => {
     const isAudio = rt.type === 1;
-    const autoLabel = isAudio ? tr('studio.p.audioN', { n: ++audN }) : tr('studio.p.recN', { n: ++recN });
+    const isInstr = rt.type === 2;
+    const autoLabel = isAudio ? tr('studio.p.audioN', { n: ++audN }) : isInstr ? tr('studio.midi.instrN', { n: ++insN }) : tr('studio.p.recN', { n: ++recN });
     const label = rt.name || autoLabel;
     const defColor = isAudio ? 'var(--stem-bass)' : 'var(--accent)';
     const lane = document.createElement('div');
-    lane.className = 'daw-lane daw-lane-rec' + (isAudio ? ' daw-lane-audio' : '');
+    lane.className = 'daw-lane daw-lane-rec' + (isAudio ? ' daw-lane-audio' : '') + (isInstr ? ' daw-lane-instr' : '');
     lane.style.setProperty('--c', rt.color || defColor);
     if (rt.height) lane.style.height = rt.height + 'px';
     lane.dataset.key = 'rec-' + rt.id;
     lane.dataset.recid = rt.id;
     lane.dataset.selid = rt.id;
-    lane.dataset.type = isAudio ? 'audio' : 'rec';
+    lane.dataset.type = isAudio ? 'audio' : isInstr ? 'instr' : 'rec';
     const rBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-arm${rt.armed ? ' armed' : ''}" data-m="arm" title="${tr('studio.t.arm')}" aria-pressed="${!!rt.armed}">R</button>`;
     // 이 트랙의 입력 채널 배지 — 여러 트랙을 동시에 arm 해서 각자 다른 인풋으로 녹음할 때
     // (실사용 문의: 인풋1/인풋2 동시 녹음) 트랙마다 따로 지정할 수 있게. 오디오(임포트) 트랙은
     // 녹음 대상이 아니라 입력 채널 자체가 의미 없다.
     const inLabel = rt.inMode === 1 ? `${(rt.inChL ?? 0) + 1}/${(rt.inChR ?? 1) + 1}` : `${(rt.inChL ?? 0) + 1}`;
-    const inBtnHtml = isAudio ? '' : `<button class="daw-ms daw-rec-in" data-m="in" title="${tr('studio.lbl.inputChannel')}">IN ${inLabel}</button>`;
+    // 악기 트랙은 입력 채널 대신 "키보드로 연주" 토글 — 켜면 타이핑 키보드가 이 트랙의 건반이 된다
+    const inBtnHtml = isAudio ? '' : isInstr
+      ? `<button class="daw-ms daw-kb-btn${_kbOn && kbTargetTrack()?.id === rt.id ? ' on' : ''}" data-m="kb" title="${tr('studio.midi.kbTitle')}" aria-pressed="${_kbOn && kbTargetTrack()?.id === rt.id}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1.5"/><path d="M4 6.8h.01M6.3 6.8h.01M8.6 6.8h.01M10.9 6.8h.01M5 10h6"/></svg></button>`
+      : `<button class="daw-ms daw-rec-in" data-m="in" title="${tr('studio.lbl.inputChannel')}">IN ${inLabel}</button>`;
     const rp100 = Math.round((rt.pan != null ? rt.pan : 0) * 100);
     lane.innerHTML = `
       <div class="daw-head" title="${tr('studio.t.editTrackFx')}">
@@ -495,6 +503,13 @@ function renderRecLanes() {
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
     });
+    const kbBtn = lane.querySelector('[data-m="kb"]');
+    if (kbBtn) kbBtn.addEventListener('click', (e) => {   // ⌨ = 이 악기 트랙을 타이핑 키보드로 연주
+      e.stopPropagation();
+      const already = _kbOn && kbTargetTrack()?.id === rt.id;
+      selectTrack(rt.id);
+      setKbMode(!already);
+    });
     if (inBtn) inBtn.addEventListener('click', (e) => {   // IN = 이 트랙만의 입력 채널(모노/스테레오+번호) 지정
       e.stopPropagation();
       selectTrack(rt.id);
@@ -517,7 +532,7 @@ function renderRecLanes() {
     // 삭제: 녹음이 있는 트랙은 2단계 확인 (실수 방지)
     del.addEventListener('click', (e) => {
       e.stopPropagation();
-      const takesN = _takes.filter(t => t.trackId === rt.id).length;
+      const takesN = _takes.filter(t => t.trackId === rt.id).length + _midiClips.filter(c => c.trackId === rt.id).length;
       if (del.dataset.confirm || takesN === 0) { clearTimeout(del._t); api.engine.recTrackRemove(rt.id); return; }
       del.dataset.confirm = '1'; del.textContent = '‼'; del.classList.add('confirm');
       flashTake(tr('studio.p.delTrackWithTakes', { n: takesN }));
@@ -533,6 +548,7 @@ function renderRecLanes() {
         { label: tr('studio.lbl.rename'), fn: () => startRenameTrack(rt.id) },
         { label: tr('studio.lbl.changeColor'), fn: () => lane.querySelector('.nm i').click() },
         { label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd(0, 'studio') },
+        { label: tr('studio.midi.addInstr'), fn: () => api.engine.recTrackAdd(2, 'studio') },
         { label: tr('studio.lbl.deleteTrack'), fn: () => del.click() },
       ]);
     });
@@ -1181,6 +1197,7 @@ function fullSec() {
   const vw = sc ? sc.clientWidth - HEAD_W : 1000;
   let content = _dur + _stemOffset;   // 오프셋된 스템 끝
   for (const t of _takes) content = Math.max(content, t.start + t.dur);   // 녹음 테이크 끝
+  for (const c of _midiClips) content = Math.max(content, c.start + c.dur);   // MIDI 클립 끝
   const base = Math.max(content, vw / _pxPerSec) + 8;   // 콘텐츠보다 조금 더 길게
   return Math.ceil(base / secPerBar()) * secPerBar();
 }
@@ -1627,8 +1644,8 @@ function stopStudio() {
   }
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
-  if (!armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
-  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, armedRecIds(), 'studio'); }
+  if (!armedRecIds().length && !armedMidiIds().length && !armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); }
   if (!_playing) playStudio();
   // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
@@ -1672,6 +1689,7 @@ function buildLiveWaveSvg(cols, widthPx, color) {
   return `${head}<polygon points="${a}${b}" fill="${color}" fill-opacity=".85"/></svg>`;
 }
 function updateRecLive(t) {
+  if (!recLiveHasAudio()) return;   // 악기 트랙만 녹음 중이면 오디오 파형 미리보기가 없다(노트는 멈추면 클립으로 뜬다)
   const lane = document.querySelector(`.daw-lane-rec[data-recid="${armedRecId()}"]`) || document.querySelector('.daw-lane-rec');
   const area = lane && lane.querySelector('.daw-area');
   if (!area) return;
@@ -1684,6 +1702,7 @@ function updateRecLive(t) {
   const armedRt = _recTracks.find(r => r.id === armedRecId()) || {};
   el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor(armedRt.color || 'var(--danger)'));
 }
+function recLiveHasAudio() { return armedRecIds().length > 0; }
 function clearRecLive() { _recStartSec = null; _recLiveCols = []; document.querySelector('.daw-rec-live')?.remove(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
@@ -1789,7 +1808,7 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-key-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-key-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-add-instr', 'st-kb', 'st-kb-cfg', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
@@ -1872,7 +1891,7 @@ async function loadSong(item, opts) {
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
   _modelKey = it.modelKey || '4stem';
   _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
-  _takes = []; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
+  _takes = []; _midiClips = []; _selMidi = null; api.engine.midiClear?.(); _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
   _speed = 1; _speedBase = null; _speedStemPaths = null; _keySemitones = 0; _baseDur = 0;
   updateSpeedBtnLabel();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
@@ -2250,6 +2269,247 @@ function flashTake(msg) {   // 하단 로그 대신 잠깐 뜨는 토스트
 }
 
 let _takes = [];   // [{ id, file, start(sec), dur(sec), svg }]
+
+// ── 악기 트랙 · MIDI 클립 · 타이핑 키보드 ─────────────────────────────
+// 클립·노트 시간은 초 단위로 들고 있다가 엔진엔 샘플로 바꿔 보낸다(midiClipForEngine). 노트 t 는
+// 클립 시작 기준. 편집은 클립 통째로(이동·복제·삭제·퀀타이즈) — 노트 하나하나는 2차(피아노롤).
+let _midiClips = [];   // [{ id, trackId, start, dur, notes:[{t,d,p,v}] }]
+let _selMidi = null;   // 선택된 MIDI 클립 id(오디오 클립 선택과는 따로 — 둘 중 하나만)
+const QUANT_KEY = 'yss:midiQuant';
+let _quant = (() => {
+  const def = { div: '1/16', strength: 1, onRec: false };
+  try { const v = JSON.parse(localStorage.getItem(QUANT_KEY) || '{}'); return { ...def, ...v, div: QUANT_DIVS[v.div] ? v.div : def.div }; } catch { return def; }
+})();
+function saveQuant() { try { localStorage.setItem(QUANT_KEY, JSON.stringify(_quant)); } catch {} }
+const midiSnapshot = (c) => ({ ...c, notes: c.notes.map(n => ({ ...n })) });
+function pushMidiClip(c) { api.engine.midiClip(midiClipForEngine(c, deviceSr())); }
+function addMidiClip(c, id) {
+  const clip = { trackId: c.trackId, start: Math.max(0, c.start), dur: Math.max(0.05, c.dur), notes: c.notes.map(n => ({ ...n })), id: id != null ? id : nextClipId() };
+  _midiClips.push(clip); pushMidiClip(clip);
+  return clip;
+}
+function removeMidiClip(id) {
+  _midiClips = _midiClips.filter(c => c.id !== id);
+  api.engine.midiClipRemove(id);
+  if (_selMidi === id) _selMidi = null;
+}
+// 실행취소용 — 스냅샷 그대로 되돌린다(없으면 다시 만든다)
+function setMidiClipState(snap) {
+  const v = midiSnapshot(snap);
+  const i = _midiClips.findIndex(c => c.id === v.id);
+  if (i >= 0) _midiClips[i] = v; else _midiClips.push(v);
+  pushMidiClip(v); renderTakes(); layout(); markDirty();
+}
+function selectMidiClip(id) {
+  if (_selClips.size) { _selClips = new Set(); _selClipId = null; }
+  _selMidi = id;
+  document.querySelectorAll('.daw-take-clip.sel').forEach(x => x.classList.remove('sel'));
+  document.querySelector(`.daw-midi-clip[data-midi-id="${id}"]`)?.classList.add('sel');
+}
+function renderMidiClips(areas) {
+  for (const c of _midiClips) {
+    const area = areas[c.trackId]; if (!area) continue;
+    const el = document.createElement('div');
+    el.className = 'daw-take-clip daw-midi-clip' + (_selMidi === c.id ? ' sel' : '');
+    el.dataset.midiId = String(c.id);
+    el.style.left = (c.start * _pxPerSec) + 'px';
+    el.style.width = Math.max(3, c.dur * _pxPerSec) + 'px';
+    const nameBar = document.createElement('div');
+    nameBar.className = 'daw-clip-namebar';
+    const nameLbl = document.createElement('div');
+    nameLbl.className = 'daw-clip-name';
+    nameLbl.textContent = tr('studio.midi.clipName', { n: c.notes.length });
+    nameBar.appendChild(nameLbl);
+    el.appendChild(nameBar);
+    // 노트 미리보기 — 클립 안에서 가장 낮은 음~높은 음을 세로로 펼친다(최소 1옥타브 폭)
+    const box = document.createElement('div');
+    box.className = 'daw-midi-notes';
+    if (c.notes.length) {
+      let lo = 127, hi = 0;
+      for (const n of c.notes) { if (n.p < lo) lo = n.p; if (n.p > hi) hi = n.p; }
+      const span = Math.max(12, hi - lo + 1);
+      const top = hi + Math.floor((span - (hi - lo + 1)) / 2);
+      const hPct = 100 / span;
+      let html = '';
+      for (const n of c.notes) {
+        if (n.t >= c.dur) continue;
+        const w = Math.max(2, Math.min(n.d, c.dur - n.t) * _pxPerSec);
+        html += `<i style="left:${(n.t * _pxPerSec).toFixed(1)}px;width:${w.toFixed(1)}px;top:${((top - n.p) * hPct).toFixed(2)}%;height:max(2px,${hPct.toFixed(2)}%)"></i>`;
+      }
+      box.innerHTML = html;
+    }
+    el.appendChild(box);
+    el.title = tr('studio.midi.clipTitle');
+    el.addEventListener('click', (e) => e.stopPropagation());
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); selectMidiClip(c.id); showMidiMenu(e.clientX, e.clientY, c.id); });
+    el.addEventListener('dblclick', (e) => { e.stopPropagation(); flashTake(tr('studio.midi.pianoRollSoon')); });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      selectMidiClip(c.id); selectTrack(c.trackId);
+      const startX = e.clientX, base = c.start, before = midiSnapshot(c);
+      let dragging = false;
+      const move = (ev) => {
+        if (!dragging && Math.abs(ev.clientX - startX) < 4) return;
+        dragging = true;
+        c.start = snapSec(base + (ev.clientX - startX) / _pxPerSec, !magnetActiveFor(ev));
+        el.style.left = (c.start * _pxPerSec) + 'px';
+        showDragBadge(c.start - base, ev.clientX, ev.clientY);
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        hideDragBadge();
+        if (!dragging) { if (!_recArmed) seekToClientX(startX); return; }
+        if (c.start === base) return;
+        pushMidiClip(c); layout();
+        const after = midiSnapshot(c);
+        pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.u.clipMove'));
+        markDirty();
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    });
+    area.appendChild(el);
+  }
+}
+function showMidiMenu(x, y, id) {
+  openDropdownAt(x, y, [
+    { label: tr('studio.midi.quantizeNow', { div: _quant.div }), fn: () => quantizeMidiClip(id) },
+    { label: tr('studio.midi.quantSettings'), fn: () => openQuantPopoverAt(x, y) },
+    { label: tr('studio.midi.duplicate'), fn: () => duplicateMidiClip(id) },
+    { label: tr('studio.midi.delete'), fn: () => { _selMidi = id; deleteSelectedMidi(); } },
+  ]);
+}
+function quantizeMidiClip(id) {
+  const c = _midiClips.find(x => x.id === id); if (!c || !c.notes.length) return;
+  const before = midiSnapshot(c);
+  c.notes = quantizeNotes(c.notes, c.start, _gridOffset, quantStepSec(_quant.div, secPerBeat()), _quant.strength);
+  pushMidiClip(c); renderTakes();
+  const after = midiSnapshot(c);
+  pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.midi.quantize'));
+  markDirty();
+  flashTake(tr('studio.midi.quantized', { div: _quant.div }));
+}
+function duplicateMidiClip(id) {
+  const c = _midiClips.find(x => x.id === id); if (!c) return;
+  const nc = addMidiClip({ ...c, start: c.start + c.dur });
+  selectMidiClip(nc.id); renderTakes(); layout();
+  const snap = midiSnapshot(nc);
+  pushUndo(() => { removeMidiClip(snap.id); renderTakes(); }, () => setMidiClipState(snap), tr('studio.midi.duplicate'));
+  markDirty();
+}
+function deleteSelectedMidi() {
+  const c = _midiClips.find(x => x.id === _selMidi); if (!c) return false;
+  const snap = midiSnapshot(c);
+  removeMidiClip(c.id); renderTakes(); layout();
+  pushUndo(() => setMidiClipState(snap), () => { removeMidiClip(snap.id); renderTakes(); }, tr('studio.u.clipDelete'));
+  markDirty();
+  return true;
+}
+// 엔진이 모은 녹음 노트 → 클립 하나. 음을 하나도 안 쳤으면 클립을 만들지 않는다.
+function onMidiTake(m) {
+  const clip = clipFromMidiTake(m, deviceSr());
+  if (!clip || !_recTracks.some(r => r.id === m.trackId)) return;
+  if (_quant.onRec) clip.notes = quantizeNotes(clip.notes, clip.start, _gridOffset, quantStepSec(_quant.div, secPerBeat()), _quant.strength);
+  const c = addMidiClip({ trackId: m.trackId, ...clip });
+  renderTakes(); layout();
+  const snap = midiSnapshot(c);
+  pushUndo(() => { removeMidiClip(snap.id); renderTakes(); layout(); }, () => setMidiClipState(snap), tr('studio.lbl.record'));
+  markDirty();
+}
+function openQuantPopoverAt(x, y) {
+  document.querySelector('.daw-ctx')?.remove();
+  const divOpts = Object.keys(QUANT_DIVS).map(d => `<option value="${d}" ${d === _quant.div ? 'selected' : ''}>${d.replace('T', ' ' + tr('studio.midi.triplet'))}</option>`).join('');
+  const pop = document.createElement('div');
+  pop.className = 'daw-ctx daw-in-pop';
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+  pop.innerHTML = `
+    <div class="daw-op-row"><span class="lbl">${tr('studio.midi.grid')}</span><select class="q-div">${divOpts}</select></div>
+    <div class="daw-op-row"><span class="lbl">${tr('studio.midi.strength')}</span><input class="q-str" type="range" min="10" max="100" step="10" value="${Math.round(_quant.strength * 100)}"><span class="q-str-v">${Math.round(_quant.strength * 100)}%</span></div>
+    <div class="daw-op-row"><label><input type="checkbox" class="q-rec" ${_quant.onRec ? 'checked' : ''}> ${tr('studio.midi.quantOnRec')}</label></div>`;
+  document.body.appendChild(pop);
+  const r = pop.getBoundingClientRect(), m = 8;
+  if (r.right > innerWidth - m) pop.style.left = Math.max(m, innerWidth - r.width - m) + 'px';
+  if (r.bottom > innerHeight - m) pop.style.top = Math.max(m, y - r.height) + 'px';
+  pop.querySelector('.q-div').addEventListener('change', (e) => { _quant.div = e.target.value; saveQuant(); });
+  pop.querySelector('.q-str').addEventListener('input', (e) => { _quant.strength = Number(e.target.value) / 100; pop.querySelector('.q-str-v').textContent = e.target.value + '%'; saveQuant(); });
+  pop.querySelector('.q-rec').addEventListener('change', (e) => { _quant.onRec = e.target.checked; saveQuant(); });
+  const close = (ev) => { if (pop.contains(ev.target)) return; pop.remove(); document.removeEventListener('mousedown', close); };
+  setTimeout(() => document.addEventListener('mousedown', close), 0);
+}
+
+// 타이핑 키보드 연주 — 켜져 있는 동안 건반 키는 스튜디오 단축키(S 분할·R 녹음 등)보다 먼저 가로챈다.
+// Space(재생)·Delete·Ctrl 조합(실행취소·저장)은 그대로 둔다. ←/→ 옥타브, Esc 끄기.
+let _kbOn = false, _kbOct = 0;
+const _kbHeld = new Map();   // code → { track, pitch } — 뗄 때 같은 음을 끄려고(옥타브를 바꿔도)
+function kbTargetTrack() {
+  return _recTracks.find(r => r.id === _selTrack && r.type === 2)
+    || _recTracks.find(r => r.type === 2 && r.armed) || _recTracks.find(r => r.type === 2) || null;
+}
+function kbReleaseAll() { for (const h of _kbHeld.values()) api.engine.noteOff(h.track, h.pitch); _kbHeld.clear(); }
+async function setKbMode(on) {
+  if (on && !kbTargetTrack()) {   // 악기 트랙이 없으면 하나 만든다 — 켜자마자 소리가 나야 한다
+    api.engine.recTrackAdd(2, 'studio');
+    for (let i = 0; i < 30 && !kbTargetTrack(); i++) await new Promise(r => setTimeout(r, 100));
+    const t = kbTargetTrack();
+    if (!t) { flashTake(tr('studio.midi.noInstr')); return; }
+    selectTrack(t.id);
+  }
+  _kbOn = !!on;
+  if (!_kbOn) kbReleaseAll();
+  const b = $('st-kb'); if (b) { b.classList.toggle('on', _kbOn); b.setAttribute('aria-pressed', String(_kbOn)); }
+  renderRecLanes(); renderTakes();
+  renderKbHud();
+  if (_kbOn) try { document.activeElement?.blur?.(); } catch {}   // 슬라이더에 포커스가 남아 있으면 화살표가 거기로 간다
+}
+function renderKbHud() {
+  let hud = $('daw-kb-hud');
+  if (!_kbOn) { hud?.remove(); return; }
+  if (!hud) { hud = document.createElement('div'); hud.id = 'daw-kb-hud'; hud.className = 'daw-kb-hud'; document.querySelector('.daw-tracks')?.appendChild(hud); }
+  const t = kbTargetTrack();
+  const lo = kbNoteFor('KeyZ', _kbOct), hi = kbNoteFor('BracketRight', _kbOct);
+  hud.innerHTML = `<b>⌨ ${esc(t ? selTrackLabel(t.id) : '')}</b><span>${lo != null ? noteName(lo) : ''}–${hi != null ? noteName(hi) : 'G9'}</span>`
+    + `<span class="k">Z–M · Q–U</span><span class="k">←/→ ${tr('studio.midi.octave')}</span><span class="k">Esc ${tr('studio.midi.off')}</span>`;
+}
+function kbStudioActive() { const main = document.querySelector('main[data-view="studio"]'); return !!(main && !main.hidden && _started); }
+const KB_SWALLOW = /^(Key|Digit|Comma|Period|Slash|Semicolon|Quote|Bracket|Minus|Equal|Backslash|Backquote)/;
+function wireKeyboardPlay() {
+  document.addEventListener('keydown', (e) => {
+    if (!kbStudioActive()) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!_kbOn) {   // 연주 모드가 아닐 땐 Q = 선택한 MIDI 클립 퀀타이즈만
+      if (e.code === 'KeyQ' && _selMidi != null && !e.repeat) { e.preventDefault(); quantizeMidiClip(_selMidi); }
+      return;
+    }
+    const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+    if (e.code === 'Escape') { stop(); setKbMode(false); return; }
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      stop(); if (e.repeat) return;
+      kbReleaseAll();
+      _kbOct = Math.max(-3, Math.min(3, _kbOct + (e.code === 'ArrowRight' ? 1 : -1)));
+      renderKbHud(); return;
+    }
+    const pitch = kbNoteFor(e.code, _kbOct);
+    if (pitch == null) { if (KB_SWALLOW.test(e.code)) stop(); return; }
+    stop();
+    if (e.repeat || _kbHeld.has(e.code)) return;
+    const tt = kbTargetTrack(); if (!tt) return;
+    _kbHeld.set(e.code, { track: tt.id, pitch });
+    api.engine.noteOn(tt.id, pitch, 0.8);
+  }, true);
+  document.addEventListener('keyup', (e) => {
+    const h = _kbHeld.get(e.code); if (!h) return;
+    _kbHeld.delete(e.code);
+    api.engine.noteOff(h.track, h.pitch);
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+  window.addEventListener('blur', () => { if (_kbHeld.size) kbReleaseAll(); });
+}
 async function renderTake(file, startSamples, engineId, trackId) {
   try {
     // 길이는 디코드한 버퍼가 실제로 몇 Hz 인지로 나눠야 한다. 그 레이트는 AudioContext 가 정하는 것이라
@@ -2417,6 +2677,7 @@ function renderTakes() {
     });
     area.appendChild(el);
   }
+  renderMidiClips(areas);
 }
 const MIN_CLIP = 0.02;   // 최소 클립 길이(초)
 // 트림 핸들: dir -1=좌, +1=우. 드래그로 inOff/dur 갱신, up 시 엔진 커밋
@@ -2708,6 +2969,8 @@ function openShortcutsModal() {
     ['Space', 'studio.sc.play'],
     ['R', 'studio.sc.record'],
     ['S', 'studio.sc.split'],
+    ['⌨', 'studio.sc.kbPlay'],
+    ['Q', 'studio.sc.quantize'],
     ['Delete', 'studio.sc.delete'],
     ['Ctrl+Z', 'studio.sc.undo'],
     ['Ctrl+Shift+Z', 'studio.sc.redo'],   // Ctrl+Y 도 그대로 먹지만(위 keydown 처리기), 더 널리 쓰는 쪽을 적는다
@@ -2808,9 +3071,14 @@ function openSongPicker() {
 function openVstPicker() {
   if (_selTrack == null) { flashTake(tr('studio.m.selectRecTrack')); return; }
   if (!_plugins.length) { openModal(tr('studio.d.addVst'), `<div class="daw-modal-empty">${tr('studio.x.noVstFound')}</div>`, () => {}); return; }
-  const html = _plugins.map(p =>
+  // 악기 VST 는 악기 트랙에서만 — 오디오 트랙에 넣으면 입력 소리를 지워 버린다. 악기 트랙에선 악기를 먼저 보여 준다.
+  const selRt = _recTracks.find(r => r.id === _selTrack);
+  const instrTrack = !!(selRt && selRt.type === 2);
+  const list = instrTrack ? [..._plugins.filter(p => p.instrument), ..._plugins.filter(p => !p.instrument)] : _plugins.filter(p => !p.instrument);
+  if (!list.length) { openModal(tr('studio.d.addVst'), `<div class="daw-modal-empty">${tr('studio.x.noVstFound')}</div>`, () => {}); return; }
+  const html = list.map(p =>
     `<div class="daw-modal-item" data-idx="${p.index}"><div class="mt"><div class="n">${esc(p.name)}</div>
-      <div class="m">${esc(p.manufacturer)}</div></div></div>`).join('');
+      <div class="m">${p.instrument ? tr('studio.midi.instrTag') + ' · ' : ''}${esc(p.manufacturer)}</div></div></div>`).join('');
   openModal(tr('studio.d.addVst'), html, (idx) => api.engine.fxAdd(_selTrack, Number(idx)));   // 선택 트랙에 추가
 }
 
@@ -3048,6 +3316,8 @@ async function buildProjectObject(opts = {}) {
     file: t.file, start: Math.round(t.start * sr), inOff: t.inOff || 0, dur: t.dur,
     srcDur: t.srcDur || t.dur, fadeIn: t.fadeIn || 0, fadeOut: t.fadeOut || 0, trackId: t.trackId,
   }));
+  // MIDI 클립은 초 단위 그대로 — 샘플레이트와 무관하다
+  const midiClips = _midiClips.map(c => ({ trackId: c.trackId, start: c.start, dur: c.dur, notes: c.notes.map(n => [n.t, n.d, n.p, n.v]) }));
   // 스템 트랙 믹스(볼륨·뮤트·솔로 + FX)까지 기록
   const stemMix = _tracks.map(t => {
     const sid = stemIdOf(t.engineIndex);
@@ -3064,7 +3334,7 @@ async function buildProjectObject(opts = {}) {
     : null;
   // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
   // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
-  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, keySemitones: _keySemitones, master, buses, stems, tracks, takes, tab };
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, keySemitones: _keySemitones, master, buses, stems, tracks, takes, midiClips, tab };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -3092,7 +3362,7 @@ function updateProjectLabel() {
 // 스템도 클립도 녹음 트랙도 없으면 저장할 것이 없다 — 저장 가드와 충돌 복구가 같이 쓴다.
 // 이게 갈라져 있던 탓에, 빈 상태로 엔진이 재시작하면 복구는 dirty 를 켰는데
 // 저장은 "저장할 게 없다"며 끄지 않아 사용자가 저장 안내에 갇혔다.
-const hasSaveableContent = () => !!(_stemPaths || _takes.length || _recTracks.length);
+const hasSaveableContent = () => !!(_stemPaths || _takes.length || _midiClips.length || _recTracks.length);
 
 // 저장 전엔 take 가 "저장 안 한 프로젝트" 임시 세션 폴더에 있었을 수 있다(녹음부터 하고
 // 나중에 저장하는 흔한 순서) — 저장 경로가 정해지면 그 프로젝트의 media/ 로 옮기고,
@@ -3325,7 +3595,7 @@ async function applyProject(p) {
   const savedSr = p.sampleRate > 0 ? p.sampleRate : 44100;
   const toNow = (samples) => Math.round(((samples || 0) / savedSr) * sr);
   _suppressDirty = true;
-  api.engine.takeClear(); _takes = []; renderTakes();
+  api.engine.takeClear(); _takes = []; _midiClips = []; _selMidi = null; api.engine.midiClear?.(); renderTakes();
   // 1) 스템 (있으면 로드, 없으면 스템 트랙 비움)
   if (p.stems && p.stems.paths && Object.keys(p.stems.paths).length) {
     await loadSong({ stemPaths: p.stems.paths, videoPath: p.stems.videoPath, name: p.name, id: p.name }, { autoBpm: false });
@@ -3432,6 +3702,14 @@ async function applyProject(p) {
       if (t.fadeIn || t.fadeOut) { tk.fadeIn = t.fadeIn || 0; tk.fadeOut = t.fadeOut || 0; commitFade(tk); }
     }
   }
+  // 3-1) MIDI 클립
+  for (const c of (Array.isArray(p.midiClips) ? p.midiClips : [])) {
+    let tid = c.trackId;
+    if (idMap && idMap[c.trackId] != null) tid = idMap[c.trackId];
+    if (!_recTracks.some(r => r.id === tid && r.type === 2)) continue;   // 악기 트랙이 없으면 버린다
+    addMidiClip({ trackId: tid, start: c.start || 0, dur: c.dur || 1,
+      notes: (c.notes || []).map(n => ({ t: n[0], d: n[1], p: n[2], v: n[3] })) });
+  }
   renderTakes();
   // 4) 마스터
   if (p.master != null) {
@@ -3495,6 +3773,7 @@ function repushForSampleRate() {
       api.engine.takeFade(tk.id, Math.round((tk.fadeIn || 0) * sr), Math.round((tk.fadeOut || 0) * sr));
     }
   }
+  for (const c of _midiClips) pushMidiClip(c);   // MIDI 클립도 샘플 단위로 보냈으니 새 레이트로 다시
   api.engine.seek(Math.round((_lastSec || 0) * sr));   // 재생 위치도 시간 기준으로 다시
 }
 
@@ -3596,7 +3875,11 @@ function startMarquee(e) {
 }
 // ── 다중선택 클립보드 (복사/잘라내기/붙여넣기/삭제) ──
 function selectedTakes() { return _takes.filter(t => _selClips.has(t.id)); }
-function clearClipSelection() { if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); } }
+function clearClipSelection() {
+  // MIDI 클립 선택도 같이 푼다 — 안 그러면 빈 곳을 눌러 선택이 풀린 것처럼 보여도 Delete 가 그 클립을 지운다
+  if (_selMidi != null) { _selMidi = null; document.querySelectorAll('.daw-midi-clip.sel').forEach(x => x.classList.remove('sel')); }
+  if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); }
+}
 function copyClips() {
   const sel = selectedTakes(); if (!sel.length) return false;
   const minStart = Math.min(...sel.map(t => t.start));
@@ -3631,6 +3914,7 @@ function pasteClips() {
   flashTake(tr('studio.p.pasted', { n: made.length }));
 }
 function deleteSelectedClips() {
+  if (_selMidi != null && deleteSelectedMidi()) return;
   const sel = selectedTakes(); if (!sel.length) return;
   const removed = sel.map(t => ({ ...t }));
   removed.forEach(t => removeClipById(t.id));
@@ -4070,6 +4354,7 @@ function onEngineEvent(m) {
         _recTracksWaiters.filter(w => w.gen === m.gen).forEach(w => w.resolve(true));
       }
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
+      _midiClips = _midiClips.filter(c => _recTracks.some(r => r.id === c.trackId));
       renderRecLanes(); updateSoloDim();
       if (!selValid(_selTrack)) {   // 스템 선택은 유지
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙
@@ -4097,6 +4382,7 @@ function onEngineEvent(m) {
         markDirty();
       })();
       break;
+    case 'midiTake': onMidiTake(m); break;
     case 'exit':
       // handleEngineCrash 의 복구 스냅샷(buildProjectObject({skipFx:true}), await 없이
       // 동기 실행됨)은 반드시 아래 _recTracks 등을 비우기 전에 먼저 시작해야 한다 —
@@ -4134,6 +4420,14 @@ function renderFxSlots() {
   if (pb) { pb.classList.toggle('active', _chain.length > 0 && _chain.some(s => !s.bypass)); }
   const box = $('st-fx-slots'); if (!box) return;
   box.innerHTML = '';
+  // 악기 트랙인데 맨 앞이 악기 VST 가 아니면 엔진의 내장 신스가 소리를 낸다 — 목록에 보이게
+  const selRt = _recTracks.find(r => r.id === _selTrack);
+  if (selRt && selRt.type === 2 && !(_chain[0] && _chain[0].instrument)) {
+    const b = document.createElement('div');
+    b.className = 'daw-fx-slot daw-fx-builtin';
+    b.innerHTML = `<span class="pw on"></span><div class="info"><div class="n">${tr('studio.midi.builtin')}</div><div class="m">${tr('studio.midi.builtinHint')}</div></div>`;
+    box.appendChild(b);
+  }
   _chain.forEach((s) => {
     const row = document.createElement('div');
     row.className = 'daw-fx-slot' + (s.bypass ? ' bypassed' : '');
@@ -4302,7 +4596,7 @@ function wire() {
     else if (isDel) deleteSelectedClips();
     else if (e.code === 'Space') { if (_playing) stopAll(); else play(); }
     else if (e.code === 'KeyS') splitSelectedAtPlayhead();   // S = 재생선에서 분할
-    else { if (_recArmed) stopAll(); else { if (!armedRecIds().length) { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); } armRecPlay(); } }
+    else { if (_recArmed) stopAll(); else { if (!armedRecIds().length && !armedMidiIds().length) { const id = _selTrack != null ? _selTrack : armedRecId(); if (id != null) api.engine.recArm(id); } armRecPlay(); } }
   });
   // 언어를 바꾸면 이미 그려둔 스템 라벨·패널 문구가 옛 언어로 남는다 → 다시 그린다
   onLocaleChange(() => {
@@ -4385,11 +4679,11 @@ function wire() {
     const sc = $('daw-tscroll'); if (sc) sc.scrollLeft = 0;
   });
   $('st-rec').addEventListener('click', () => {
-    if (!_recArmed && !armedRecIds().length) { flashTake(tr('studio.m.addRecTrackAndArm')); return; }
+    if (!_recArmed && !armedRecIds().length && !armedMidiIds().length) { flashTake(tr('studio.m.addRecTrackAndArm')); return; }
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
-    if (_recArmed) api.engine.recordArm(_projectPath, armedRecIds(), 'studio'); else { api.engine.recordStop(); clearRecLive(); }
+    if (_recArmed) api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });
@@ -4514,6 +4808,10 @@ function wire() {
     flashTake(_rangeMode ? tr('studio.m.rangeModeOn') : tr('studio.m.rangeModeOff'));
   });
   $('st-add-rec').addEventListener('click', () => api.engine.recTrackAdd(0, 'studio'));   // 코너 ＋ = 녹음 트랙 추가
+  $('st-add-instr')?.addEventListener('click', () => api.engine.recTrackAdd(2, 'studio'));   // 🎹 = 악기(MIDI) 트랙 추가
+  $('st-kb')?.addEventListener('click', () => setKbMode(!_kbOn));
+  $('st-kb-cfg')?.addEventListener('click', (e) => { e.stopPropagation(); openQuantPopoverAt(e.clientX, e.clientY); });
+  wireKeyboardPlay();
   // 빈 화면의 행동 버튼 — 기존 메뉴와 같은 동작을 그대로 부른다(동작이 갈라지지 않게)
   $('empty-load-song')?.addEventListener('click', openSongPicker);
   $('empty-open-proj')?.addEventListener('click', () => openProject());
@@ -4524,7 +4822,8 @@ function wire() {
     if (e.target.closest('.daw-lane-rec, .daw-take-clip, .daw-clip')) return;   // 트랙/클립 위는 각자 메뉴
     if (!_started) return;
     e.preventDefault();
-    openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd(0, 'studio') }]);
+    openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.lbl.addRecTrack'), fn: () => api.engine.recTrackAdd(0, 'studio') },
+      { label: tr('studio.midi.addInstr'), fn: () => api.engine.recTrackAdd(2, 'studio') }]);
   });
   $('st-engine-stop').addEventListener('click', () => { api.engine.quit(); });
   $('st-audio-settings').addEventListener('click', () => { _devOpen = true; api.engine.listDevices(); });
