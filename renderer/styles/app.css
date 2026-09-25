@@ -4486,6 +4486,12 @@ body { background: var(--bg) !important; }
 
 .ve-tscroll { flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .ve-ruler-wrap { display: flex; position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--border); }
+/* 눈금자(.ve-ruler)는 타임라인 길이만큼 길어지는데 이 줄은 블록이라 화면 폭까지만 배경이 칠해졌다 —
+   오른쪽으로 스크롤하면 그 뒤로 배경이 끊겨 보였다(제보). 줄 자체를 내용 폭만큼 늘린다. */
+.ve-ruler-wrap { width: max-content; min-width: 100%; }
+/* 눈금자의 min-width:100%(줄 폭 기준)는 앞의 172px 버튼 칸 위에 또 얹혀 그만큼 줄 밖으로 삐져나갔다 —
+   그 삐져나간 부분엔 배경이 없어서 끝부분이 끊겨 보였다. 짧을 땐 flex-grow 가 채운다. */
+.ve-ruler { min-width: 0; }
 .ve-ruler-ctrl {
   /* .ve-head(트랙 컨트롤, sticky left:0)처럼 가로 스크롤에도 안 밀려야 한다 — 안 그러면
      스크롤할 때마다 이 버튼들만 화면 밖으로 사라지고, 그 자리에 눈금자 내용이 그대로
