@@ -4058,6 +4058,7 @@ async function importVideoFiles(paths, trackId) {
   if (importedFileCount) flash(tr('video.importing', { n: importedFileCount }));
   else flash(tr('video.needImport'));
   ensureProxiesFor(added);   // 프록시 모드가 켜져 있으면 지금 임포트한 고해상도 클립도 바로 대상에 넣는다
+  suggestProxyFor(added);
 }
 async function pickImportVideo() {
   const r = await api.dialog.pickVideoFiles('video');
@@ -4172,6 +4173,38 @@ async function importAudioFiles(paths) {
   if (added.length) flash(tr('video.importing', { n: added.length })); else flash(tr('video.needImport'));
 }
 
+// "원본 보기"인데 2K/4K 원본을 넣으면 — 미리보기가 끊긴다는 제보 대부분이 이 경우라,
+// 미리보기 해상도를 낮추라고 한 번 제안한다. "다시 보지 않기"는 설정에 남긴다.
+// 내보내기 화질과는 무관(항상 원본)하다는 걸 문구에 같이 적는다.
+let _proxyHintShown = false;
+async function suggestProxyFor(clips) {
+  if (_proxyHintShown || _previewHeight > 0) return;
+  const big = (clips || []).find(c => !c.isImage && !c.isAudioOnly && !c.isText && c.h >= 1440);
+  if (!big) return;
+  try { if ((await api.settings.get())?.videoProxyHintOff) return; } catch {}
+  _proxyHintShown = true;
+  document.getElementById('ve-proxy-hint')?.remove();
+  const el = document.createElement('div');
+  el.id = 've-proxy-hint'; el.className = 'daw-toast show ve-proxy-hint';
+  el.innerHTML = `<span>${esc(tr('video.proxyHint', { h: big.h }))}</span>
+    <button class="btn btn-sm primary" type="button" data-act="on">${esc(tr('video.proxyHintOn'))}</button>
+    <button class="btn btn-sm" type="button" data-act="never">${esc(tr('video.proxyHintNever'))}</button>
+    <button class="icon-btn x" type="button" data-act="close" aria-label="close">✕</button>`;
+  (document.querySelector('.video-body') || document.body).appendChild(el);
+  const close = () => { clearTimeout(el._h); el.remove(); };
+  el._h = setTimeout(close, 15000);
+  el.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (!act) return;
+    close();
+    if (act === 'on') {
+      const sel = $('ve-preview-res');
+      if (sel) { sel.value = '540'; sel.dispatchEvent(new Event('change')); }
+    } else if (act === 'never') {
+      try { await api.settings.set({ videoProxyHintOff: true }); } catch {}
+    }
+  });
+}
 function flash(msg) {
   let el = document.getElementById('ve-toast');
   if (!el) {
