@@ -1704,7 +1704,7 @@ function updateRecLive(t) {
   el.innerHTML = buildLiveWaveSvg(_recLiveCols, wPx, resolveColor(armedRt.color || 'var(--danger)'));
 }
 function recLiveHasAudio() { return armedRecIds().length > 0; }
-function clearRecLive() { _recStartSec = null; _recLiveCols = []; document.querySelector('.daw-rec-live')?.remove(); }
+function clearRecLive() { _recStartSec = null; _recLiveCols = []; document.querySelector('.daw-rec-live')?.remove(); clearMidiLive(); }
 
 // 영상 동기 — 스템 오프셋 반영. 영상시간 = 재생위치 - 스템오프셋 (스템이 시작되면 영상 재생)
 function syncVideo(t) {
@@ -1723,7 +1723,7 @@ function syncVideo(t) {
 function onPos(samples) {
   const t = samplesToSec(samples || 0);
   updatePlayhead(t);
-  if (_recArmed && _playing) updateRecLive(t);
+  if (_recArmed && _playing) { updateRecLive(t); updateMidiLive(t); }
   const vdur = _dur > 0 ? _dur + _stemOffset : 0;
   if (vdur > 0) $('daw-vbar-fill').style.width = Math.min(100, Math.max(0, ((t - _stemOffset) / _dur) * 100)) + '%';
   syncVideo(t);
@@ -2413,6 +2413,7 @@ function deleteSelectedMidi() {
 }
 // 엔진이 모은 녹음 노트 → 클립 하나. 음을 하나도 안 쳤으면 클립을 만들지 않는다.
 function onMidiTake(m) {
+  clearMidiLive();
   const clip = clipFromMidiTake(m, deviceSr());
   if (!clip || !_recTracks.some(r => r.id === m.trackId)) return;
   if (_quant.onRec) clip.notes = quantizeNotes(clip.notes, clip.start, _gridOffset, quantStepSec(_quant.div, secPerBeat()), _quant.strength);
@@ -2468,6 +2469,51 @@ function syncKbButtons() {
 // 악기 트랙을 골라 두고 녹음을 켰을 때 — 연주 모드가 꺼져 있으면 쳐도 아무것도 안 들어가고,
 // R 을 꺼 뒀으면(새 악기 트랙은 켜진 채 시작해서, "녹음 켜기"로 눌렀다가 오히려 끄기 쉽다)
 // 그 트랙엔 기록이 안 된다. 둘 다 "녹음이 가끔 안 된다"로 보였던 경우라 여기서 잡아 준다.
+// ── MIDI 녹음 실시간 미리보기 ──
+// 엔진은 녹음을 멈춰야 노트를 넘겨준다(midiTake). 그 전까지는 치는 대로 여기서 그려 둔다 —
+// 오디오 녹음의 실시간 파형(updateRecLive)과 같은 역할. 멈추면 진짜 클립으로 갈아끼운다.
+let _midiLive = null;   // { trackId, start, now, at, notes:[{p,t0,t1}] } — 초
+let _midiLiveRaf = 0;
+function midiLiveTrack() { const t = kbTargetTrack(); return t && t.armed ? t : null; }
+function midiLiveNow() { const L = _midiLive; return L ? L.now + (_playing ? (performance.now() - L.at) / 1000 : 0) : 0; }
+function updateMidiLive(t) {
+  const lt = midiLiveTrack(); if (!lt) return;
+  if (!_midiLive || _midiLive.trackId !== lt.id) _midiLive = { trackId: lt.id, start: t, now: t, at: performance.now(), notes: [] };
+  _midiLive.now = t; _midiLive.at = performance.now();
+  drawMidiLive();   // 창이 가려져 rAF 가 멈춰도 재생 위치(20Hz)마다는 그린다
+  if (!_midiLiveRaf) {   // 재생 위치는 20Hz 로 오지만 막대는 매 프레임 늘려야 매끄럽다
+    const tick = () => { if (!_midiLive || !_recArmed || !_playing) { _midiLiveRaf = 0; return; } drawMidiLive(); _midiLiveRaf = requestAnimationFrame(tick); };
+    _midiLiveRaf = requestAnimationFrame(tick);
+  }
+}
+function drawMidiLive() {
+  const L = _midiLive; if (!L) return;
+  const area = document.querySelector(`.daw-lane-rec[data-recid="${L.trackId}"] .daw-area`); if (!area) return;
+  let el = area.querySelector('.daw-midi-live');
+  if (!el) { el = document.createElement('div'); el.className = 'daw-take-clip daw-midi-clip daw-midi-live'; el.innerHTML = '<div class="daw-midi-notes"></div>'; area.appendChild(el); }
+  const now = midiLiveNow();
+  el.style.left = (L.start * _pxPerSec) + 'px';
+  el.style.width = Math.max(3, (now - L.start) * _pxPerSec) + 'px';
+  const box = el.firstChild;
+  if (!L.notes.length) { box.innerHTML = ''; return; }
+  let lo = 127, hi = 0;
+  for (const n of L.notes) { if (n.p < lo) lo = n.p; if (n.p > hi) hi = n.p; }
+  const span = Math.max(12, hi - lo + 1), top = hi + Math.floor((span - (hi - lo + 1)) / 2), hPct = 100 / span;
+  box.innerHTML = L.notes.map(n => {
+    const x0 = (n.t0 - L.start) * _pxPerSec, w = Math.max(2, ((n.t1 != null ? n.t1 : now) - n.t0) * _pxPerSec);
+    return `<i style="left:${x0.toFixed(1)}px;width:${w.toFixed(1)}px;top:${((top - n.p) * hPct).toFixed(2)}%;height:max(2px,${hPct.toFixed(2)}%)"></i>`;
+  }).join('');
+}
+function midiLiveNote(pitch, on) {
+  if (!_recArmed || !_playing) return;
+  if (!_midiLive) updateMidiLive(_lastSec || 0);
+  if (!_midiLive) return;
+  const now = midiLiveNow();
+  if (on) _midiLive.notes.push({ p: pitch, t0: now, t1: null });
+  else { for (let i = _midiLive.notes.length - 1; i >= 0; i--) { const n = _midiLive.notes[i]; if (n.p === pitch && n.t1 == null) { n.t1 = now; break; } } }
+  drawMidiLive();
+}
+function clearMidiLive() { _midiLive = null; document.querySelectorAll('.daw-midi-live').forEach(e => e.remove()); }
 function midiRecAssist() {
   const sel = _recTracks.find(r => r.id === _selTrack && r.type === 2);
   if (!sel) return;
@@ -2539,12 +2585,14 @@ function wireKeyboardPlay() {
     _kbHeld.set(e.code, { track: tt.id, pitch });
     api.engine.noteOn(tt.id, pitch, 0.8);
     markKbKey(e.code, true);
+    midiLiveNote(pitch, true);
   }, true);
   document.addEventListener('keyup', (e) => {
     const h = _kbHeld.get(e.code); if (!h) return;
     _kbHeld.delete(e.code);
     api.engine.noteOff(h.track, h.pitch);
     markKbKey(e.code, false);
+    midiLiveNote(h.pitch, false);
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
   window.addEventListener('blur', () => { if (_kbHeld.size) kbReleaseAll(); });

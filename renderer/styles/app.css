@@ -4905,3 +4905,5 @@ body { background: var(--bg) !important; }
 .kbk.down b, .kbk.down i { color: var(--accent-fg) !important; }
 .daw-fx-builtin { cursor: default; opacity: .9; }
 .daw-fx-builtin .m { font-size: 10.5px; color: var(--tx-3); margin-top: 2px; }
+/* 녹음 중 MIDI 미리보기 — 아직 확정 전이라 점선 테두리, 클릭은 통과 */
+.daw-midi-live { pointer-events: none; border-style: dashed !important; background: color-mix(in srgb, var(--danger) 10%, var(--timeline)); }
