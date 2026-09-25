@@ -4378,7 +4378,12 @@ function wire() {
     });
     $(`mx-send-${key}`)?.addEventListener('dblclick', (e) => { e.target.value = 0; e.target.dispatchEvent(new Event('input')); });
   }
-  $('st-seek0').addEventListener('click', () => { if (_recArmed) return; api.engine.seek(0); syncVideo(0); updatePlayhead(0); });
+  $('st-seek0').addEventListener('click', () => {
+    if (_recArmed) return;
+    api.engine.seek(0); syncVideo(0); updatePlayhead(0);
+    // 재생선만 옮기고 화면은 그대로라, 멈춘 상태에선 재생선이 안 보였다(요청) — 타임라인도 맨 앞으로
+    const sc = $('daw-tscroll'); if (sc) sc.scrollLeft = 0;
+  });
   $('st-rec').addEventListener('click', () => {
     if (!_recArmed && !armedRecIds().length) { flashTake(tr('studio.m.addRecTrackAndArm')); return; }
     _recArmed = !_recArmed;

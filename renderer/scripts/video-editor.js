@@ -4213,7 +4213,11 @@ function wire() {
       if (btn.dataset.kind === 'audio') pickImportAudioTrack(); else pickImportVideo();
     });
   });
-  $('ve-seek0')?.addEventListener('click', () => seekTo(0));
+  $('ve-seek0')?.addEventListener('click', () => {
+    seekTo(0);
+    // 재생선만 옮기고 화면은 그대로라, 멀리 스크롤해 둔 상태에선 재생선이 안 보였다(요청) — 타임라인도 맨 앞으로
+    const sc = $('ve-tscroll'); if (sc) sc.scrollLeft = 0;
+  });
   $('ve-play')?.addEventListener('click', () => setPlaying(!_playing));
   $('ve-zoom-in')?.addEventListener('click', () => { _pxPerSec = Math.min(400, _pxPerSec * 1.3); layout(); });
   $('ve-zoom-out')?.addEventListener('click', () => { _pxPerSec = Math.max(4, _pxPerSec / 1.3); layout(); });

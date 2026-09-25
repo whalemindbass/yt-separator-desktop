@@ -798,9 +798,13 @@ export class Player {
     const lookAhead = 0.25;
     const downbeat = this._metroDownbeat;
     const interval = this._metroInterval;
-    // 균일 그리드 기준 다음 박자 index 계산 (downbeat 이전은 음수 → 스킵)
+    // 균일 그리드 기준 다음 박자 index 계산. downbeat(감지된 첫 박 — 대개 베이스가 들어오는
+    // 지점) 이전도 같은 간격으로 거꾸로 이어서 곡 시작(0초)부터 클릭한다(요청 — 예전엔 음수
+    // index 를 건너뛰어 앞부분 인트로에선 클릭이 없었다). 음수 박 번호도 _isAccentBeat 가
+    // 마디 안 위치를 제대로 계산하므로 강박 패턴이 첫 박과 어긋나지 않는다.
+    const nMin = Math.ceil(-downbeat / interval);   // 0초 이후 첫 박
     let n = Math.ceil((songNow - downbeat) / interval);
-    if (n < 0) n = 0;
+    if (n < nMin) n = nMin;
     if (n <= this._metroLastScheduledN) n = this._metroLastScheduledN + 1;
     let nextT = downbeat + n * interval;
     while (nextT <= songNow + lookAhead * rate) {
