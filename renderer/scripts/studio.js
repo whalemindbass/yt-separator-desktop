@@ -663,6 +663,7 @@ function selectTrack(id) {
   syncSelection();
   renderFxSlots();
   updateFxPanel();
+  updateKbButtons();
 }
 function syncSelection() {   // 재렌더 후 선택 하이라이트 재적용 (data-selid: 녹음=id, 스템=stemId)
   if (!selValid(_selTrack)) _selTrack = null;
@@ -1808,8 +1809,9 @@ function setEnabled(on) {
   // 루프에 빠지는데, 이 목록에 껴 있으면 그때마다 오디오 설정도 같이 잠겨서 방금 넣은
   // 그 폴더를 빼러 들어갈 방법이 없어진다(실제 제보). VST 폴더 관리(api.settings.vstDirs*)
   // 는 엔진과 무관한 설정 파일 조작이라 엔진이 죽어 있어도 안전하게 쓸 수 있다.
-  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-key-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-add-instr', 'st-kb', 'st-kb-cfg', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
+  ['st-load-song', 'st-file-menu', 'st-proj-name', 'st-bpm', 'st-bpm-half', 'st-bpm-double', 'st-speed-btn', 'st-key-btn', 'st-metro', 'st-metro-cfg', 'st-seek0', 'st-play', 'st-stop', 'st-rec', 'st-return', 'st-range-mode', 'st-magnet', 'st-marquee', 'st-clip-opacity', 'st-add-rec', 'st-add-instr', 'st-zoom-in', 'st-zoom-out', 'st-tools-toggle', 'st-export', 'mx-master', 'mx-stem-group', 'st-fx-add', 'st-fx-save', 'st-fx-saveas', 'st-fx-load', 'st-fx-bypassall', 'st-monitor']
     .forEach(id => { const el = $(id); if (el) el.disabled = !on; });
+  updateKbButtons();
   updateCloseSongBtn();   // 곡 닫기는 스템 곡 로드 시에만
 }
 // 곡 닫기 버튼 — 라이브러리 스템 곡을 불러온 경우에만 활성화
@@ -2445,23 +2447,30 @@ function openQuantPopoverAt(x, y) {
 // Space(재생)·Delete·Ctrl 조합(실행취소·저장)은 그대로 둔다. ←/→ 옥타브, Esc 끄기.
 let _kbOn = false, _kbOct = 0;
 const _kbHeld = new Map();   // code → { track, pitch } — 뗄 때 같은 음을 끄려고(옥타브를 바꿔도)
-function kbTargetTrack() {
-  return _recTracks.find(r => r.id === _selTrack && r.type === 2)
-    || _recTracks.find(r => r.type === 2 && r.armed) || _recTracks.find(r => r.type === 2) || null;
+// 연주 대상 = 지금 선택한 악기 트랙. 다른(녹음·오디오·스템) 트랙을 고르면 연주 모드도 꺼진다.
+function kbTargetTrack() { return _recTracks.find(r => r.id === _selTrack && r.type === 2) || null; }
+// 하단바 ⌨·Q 버튼 — 악기 트랙을 선택했을 때만 켠다(일반 녹음 트랙엔 의미가 없다)
+function updateKbButtons() {
+  const ok = !!(_started && kbTargetTrack());
+  for (const id of ['st-kb', 'st-kb-cfg']) { const el = $(id); if (el) el.disabled = !ok; }
+  if (!ok && _kbOn) { setKbMode(false); return; }
+  syncKbButtons(); renderKbHud();   // 다른 악기 트랙을 고르면 켜짐 표시·HUD 도 그 트랙으로
+}
+// 켜짐 표시만 갈아끼운다 — 레인을 다시 그리면 헤드를 누르는 도중(선택→여기) 버튼 클릭이 씹힌다
+function syncKbButtons() {
+  const tid = _kbOn ? kbTargetTrack()?.id : null;
+  const b = $('st-kb'); if (b) { b.classList.toggle('on', _kbOn); b.setAttribute('aria-pressed', String(_kbOn)); }
+  document.querySelectorAll('.daw-lane-instr [data-m="kb"]').forEach(btn => {
+    const on = tid != null && Number(btn.closest('.daw-lane')?.dataset.recid) === tid;
+    btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on));
+  });
 }
 function kbReleaseAll() { for (const h of _kbHeld.values()) api.engine.noteOff(h.track, h.pitch); _kbHeld.clear(); }
 async function setKbMode(on) {
-  if (on && !kbTargetTrack()) {   // 악기 트랙이 없으면 하나 만든다 — 켜자마자 소리가 나야 한다
-    api.engine.recTrackAdd(2, 'studio');
-    for (let i = 0; i < 30 && !kbTargetTrack(); i++) await new Promise(r => setTimeout(r, 100));
-    const t = kbTargetTrack();
-    if (!t) { flashTake(tr('studio.midi.noInstr')); return; }
-    selectTrack(t.id);
-  }
+  if (on && !kbTargetTrack()) return;   // 악기 트랙을 선택했을 때만(버튼도 그때만 켜진다)
   _kbOn = !!on;
   if (!_kbOn) kbReleaseAll();
-  const b = $('st-kb'); if (b) { b.classList.toggle('on', _kbOn); b.setAttribute('aria-pressed', String(_kbOn)); }
-  renderRecLanes(); renderTakes();
+  syncKbButtons();
   renderKbHud();
   if (_kbOn) try { document.activeElement?.blur?.(); } catch {}   // 슬라이더에 포커스가 남아 있으면 화살표가 거기로 간다
 }
@@ -4355,6 +4364,7 @@ function onEngineEvent(m) {
       }
       _takes = _takes.filter(t => _recTracks.some(r => r.id === t.trackId));   // 삭제된 트랙의 테이크 정리(고아 방지)
       _midiClips = _midiClips.filter(c => _recTracks.some(r => r.id === c.trackId));
+      updateKbButtons();
       renderRecLanes(); updateSoloDim();
       if (!selValid(_selTrack)) {   // 스템 선택은 유지
         const a = armedRecId() != null ? armedRecId() : (_recTracks[0] && _recTracks[0].id);   // 녹음 대상 우선, 없으면 아무 트랙

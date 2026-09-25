@@ -37,11 +37,22 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   expect('⌨ 버튼 있음(IN 대신)', await js(`!!document.querySelector('.daw-lane-instr [data-m="kb"]') && !document.querySelector('.daw-lane-instr [data-m="in"]')`), true);
   expect('R(녹음 대상) 켜진 채 생성', await js(`document.querySelector('.daw-lane-instr [data-m="arm"]')?.classList.contains('armed')`), true);
 
+  expect('악기 트랙 선택 → 하단 ⌨·Q 켜짐', await js(`!document.getElementById('st-kb').disabled && !document.getElementById('st-kb-cfg').disabled`), true);
+  // 일반 녹음 트랙을 고르면 하단 ⌨·Q 가 꺼진다
+  await js(`document.getElementById('st-add-rec').click(); true`);
+  for (let i = 0; i < 20 && !(await js(`!!document.querySelector('.daw-lane-rec:not(.daw-lane-instr)')`)); i++) await wait(150);
+  await js(`document.querySelector('.daw-lane-rec:not(.daw-lane-instr) .daw-head').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); true`);
+  await wait(150);
+  expect('녹음 트랙 선택 → 하단 ⌨·Q 꺼짐', await js(`document.getElementById('st-kb').disabled && document.getElementById('st-kb-cfg').disabled`), true);
+  await js(`document.querySelector('.daw-lane-instr .daw-head').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); true`);
+  await wait(150);
+
   section('2) 키보드 연주 모드 — 진짜 키 입력');
   await js(`document.querySelector('.daw-lane-instr [data-m="kb"]').click(); true`);
   await wait(300);
   expect('HUD 표시', await js(`!!document.getElementById('daw-kb-hud')`), true);
   expect('하단 ⌨ 버튼 켜짐', await js(`document.getElementById('st-kb').classList.contains('on')`), true);
+  expect('레인 ⌨ 배경 = 강조색(초록)', await js(`(() => { const b = document.querySelector('.daw-lane-instr [data-m="kb"]'); const a = document.createElement('i'); a.style.color = 'var(--accent)'; document.body.appendChild(a); const acc = getComputedStyle(a).color; a.remove(); return getComputedStyle(b).backgroundColor === acc; })()`), true);
   sent.length = 0;
   await tap('Z'); await tap('Q'); await tap('S');
   const ons = cmds('noteOn').map(c => c.pitch), offs = cmds('noteOff').map(c => c.pitch);
@@ -53,6 +64,16 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   await tap('Z');
   expect('→ 옥타브 올림: Z→60', cmds('noteOn').map(c => c.pitch).join(','), '60');
   await key(null, 'Left', 'keyDown'); await key(null, 'Left', 'keyUp');
+
+  // 연주 중 녹음 트랙을 고르면 연주 모드가 꺼진다(그 트랙엔 건반이 없다)
+  await js(`document.querySelector('.daw-lane-rec:not(.daw-lane-instr) .daw-head').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); true`);
+  await wait(150);
+  expect('녹음 트랙 선택 → 연주 모드 꺼짐', await js(`!document.getElementById('daw-kb-hud') && !document.getElementById('st-kb').classList.contains('on')`), true);
+  await js(`document.querySelector('.daw-lane-rec:not(.daw-lane-instr) [data-m="del"]').click(); true`);
+  await wait(400);
+  await js(`document.querySelector('.daw-lane-instr [data-m="kb"]').click(); true`);
+  await wait(200);
+  expect('레인 ⌨ 로 다시 켜짐', await js(`document.getElementById('st-kb').classList.contains('on')`), true);
 
   section('3) MIDI 녹음 → 클립');
   sent.length = 0;
