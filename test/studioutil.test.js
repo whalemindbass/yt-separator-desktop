@@ -206,6 +206,19 @@ const expect = (label, got, want) => {
     expect('엔진 형식(샘플)      ', JSON.stringify(eng), '{"id":7,"trackId":3,"start":48000,"len":96000,"notes":[[24000,12000,60,0.8]]}');
   }
 
+  console.log('11d) isTypingTarget — 단축키를 양보할 대상');
+  {
+    expect('range 슬라이더 아님   ', U.isTypingTarget({ tagName: 'INPUT', type: 'range' }), false);
+    expect('checkbox 아님         ', U.isTypingTarget({ tagName: 'INPUT', type: 'checkbox' }), false);
+    expect('button 아님           ', U.isTypingTarget({ tagName: 'BUTTON' }), false);
+    expect('text 입력             ', U.isTypingTarget({ tagName: 'INPUT', type: 'text' }), true);
+    expect('number(BPM) 입력      ', U.isTypingTarget({ tagName: 'INPUT', type: 'number' }), true);
+    expect('textarea              ', U.isTypingTarget({ tagName: 'TEXTAREA' }), true);
+    expect('select                ', U.isTypingTarget({ tagName: 'SELECT' }), true);
+    expect('contentEditable       ', U.isTypingTarget({ tagName: 'DIV', isContentEditable: true }), true);
+    expect('null                  ', U.isTypingTarget(null), false);
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷

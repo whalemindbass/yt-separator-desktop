@@ -7,7 +7,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
          METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange,
          pickInputConfig, mergeFxCache, latencyBreakdown,
-         kbNoteFor, noteName, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
+         kbNoteFor, noteName, isTypingTarget, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -1646,7 +1646,7 @@ function stopStudio() {
 }
 function armRecPlay() {   // R: 즉시 녹음 준비 + 재생 시작
   if (!armedRecIds().length && !armedMidiIds().length && !armedRecId()) { flashTake(tr('studio.m.addRecTrackFirst')); return; }
-  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); }
+  if (!_recArmed) { _recArmed = true; $('st-rec').classList.add('armed'); $('st-rec').setAttribute('aria-pressed', 'true'); api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); midiRecAssist(); }
   if (!_playing) playStudio();
   // 녹음 버튼이 켜지고 재생이 시작되는 것으로 이미 보인다 — 알림은 겹칠 뿐이다
 }
@@ -2465,6 +2465,15 @@ function syncKbButtons() {
     btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on));
   });
 }
+// 악기 트랙을 골라 두고 녹음을 켰을 때 — 연주 모드가 꺼져 있으면 쳐도 아무것도 안 들어가고,
+// R 을 꺼 뒀으면(새 악기 트랙은 켜진 채 시작해서, "녹음 켜기"로 눌렀다가 오히려 끄기 쉽다)
+// 그 트랙엔 기록이 안 된다. 둘 다 "녹음이 가끔 안 된다"로 보였던 경우라 여기서 잡아 준다.
+function midiRecAssist() {
+  const sel = _recTracks.find(r => r.id === _selTrack && r.type === 2);
+  if (!sel) return;
+  if (!sel.armed) { flashTake(tr('studio.midi.recNotArmed')); return; }
+  if (!_kbOn) setKbMode(true);
+}
 function kbReleaseAll() { for (const [code, h] of _kbHeld) { api.engine.noteOff(h.track, h.pitch); markKbKey(code, false); } _kbHeld.clear(); }
 async function setKbMode(on) {
   if (on && !kbTargetTrack()) return;   // 악기 트랙을 선택했을 때만(버튼도 그때만 켜진다)
@@ -2508,7 +2517,7 @@ function wireKeyboardPlay() {
   document.addEventListener('keydown', (e) => {
     if (!kbStudioActive()) return;
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (isTypingTarget(t)) return;   // 슬라이더에 포커스가 남아 있어도 단축키·연주는 된다
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!_kbOn) {   // 연주 모드가 아닐 땐 Q = 선택한 MIDI 클립 퀀타이즈만
       if (e.code === 'KeyQ' && _selMidi != null && !e.repeat) { e.preventDefault(); quantizeMidiClip(_selMidi); }
@@ -4616,7 +4625,7 @@ function wire() {
     const main = document.querySelector('main[data-view="studio"]');
     if (!main || main.hidden || !_started) return;
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (isTypingTarget(t)) return;   // 슬라이더에 포커스가 남아 있어도 단축키·연주는 된다
     e.preventDefault();
     if (isSaveKey) saveProjectSmart();
     else if (isRedoKey) doRedo();
@@ -4714,7 +4723,7 @@ function wire() {
     _recArmed = !_recArmed;
     $('st-rec').classList.toggle('armed', _recArmed);
     $('st-rec').setAttribute('aria-pressed', String(_recArmed));
-    if (_recArmed) api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); else { api.engine.recordStop(); clearRecLive(); }
+    if (_recArmed) { api.engine.recordArm(_projectPath, armedRecIds(), 'studio', armedMidiIds()); midiRecAssist(); } else { api.engine.recordStop(); clearRecLive(); }
   });
 
   $('st-zoom-in').addEventListener('click', () => { _pxPerSec = Math.min(200, _pxPerSec * 1.4); layout(); });

@@ -268,3 +268,16 @@ export function midiClipForEngine(c, sr) {
   return { id: c.id, trackId: c.trackId, start: S(c.start), len: Math.max(1, S(c.dur)),
     notes: c.notes.map(n => [S(n.t), Math.max(1, S(n.d)), n.p, n.v]) };
 }
+
+// 단축키를 양보해야 하는 "글자 입력" 대상인가 — 슬라이더(range)·체크박스·버튼은 아니다.
+// 예전엔 INPUT 이면 전부 막아서, 트랙 볼륨/팬 슬라이더를 만진 뒤엔 포커스가 거기 남아
+// Space(재생)도 타이핑 키보드 연주도 안 먹었다(제보: MIDI 녹음이 가끔 안 됨).
+const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'number', 'email', 'password', 'url', 'tel', 'date', 'time', 'datetime-local', 'month', 'week']);
+export function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag === 'INPUT') return TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase());
+  return false;
+}

@@ -102,6 +102,38 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   const clipCmd = cmds('midiClip').pop();
   expect('엔진에 클립 전송(노트 48,52,55)', clipCmd && clipCmd.notes.map(n => n[2]).join(','), '48,52,55');
 
+  section('3b) 볼륨 슬라이더를 만진 뒤에도 Space·연주가 먹는다(제보: 가끔 녹음 안 됨)');
+  {
+    const r = await js(`(() => { const b = document.querySelector('.daw-lane-instr .daw-vol').getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) }; })()`);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 }); await wait(40);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 }); await wait(150);
+    expect('포커스가 슬라이더에 있음', await js(`document.activeElement?.classList.contains('daw-vol')`), true);
+    if (!(await js(`!!document.getElementById('daw-kb-hud')`))) await js(`document.querySelector('.daw-lane-instr [data-m="kb"]').click(); true`);
+    const clipsBefore = await js(`document.querySelectorAll('.daw-midi-clip').length`);
+    await js(`document.getElementById('st-rec').click(); true`);
+    await js(`document.querySelector('.daw-lane-instr .daw-vol').focus(); true`);
+    sent.length = 0;
+    await key(null, 'Space', 'keyDown'); await key(null, 'Space', 'keyUp'); await wait(300);
+    expect('Space → 재생 시작', cmds('play').length, 1);
+    await tap('X', 150); await wait(150);
+    await key(null, 'Space', 'keyDown'); await key(null, 'Space', 'keyUp');
+    for (let i = 0; i < 30 && (await js(`document.querySelectorAll('.daw-midi-clip').length`)) === clipsBefore; i++) await wait(150);
+    expect('클립 하나 더 생김', await js(`document.querySelectorAll('.daw-midi-clip').length`), clipsBefore + 1);
+    // 방금 만든 클립은 되돌려 뒤 단계(퀀타이즈 대상 = 첫 클립) 조건을 그대로 둔다
+    await js(`document.querySelectorAll('.daw-midi-clip')[${clipsBefore}]?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 5, clientY: 5 })); document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); true`);
+    await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp');
+    await tap('Delete', 40); await wait(200);
+    expect('정리(삭제)', await js(`document.querySelectorAll('.daw-midi-clip').length`), clipsBefore);
+  }
+  section('3c) 연주 모드 꺼진 채 ● → 자동으로 켜짐');
+  {
+    expect('연주 모드 꺼져 있음', await js(`!document.getElementById('daw-kb-hud')`), true);
+    await js(`document.getElementById('st-rec').click(); true`); await wait(200);
+    expect('● → 연주 모드 켜짐', await js(`!!document.getElementById('daw-kb-hud')`), true);
+    await js(`document.getElementById('st-rec').click(); true`); await wait(300);   // 녹음 해제(아무것도 안 침)
+    await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp');
+  }
+
   section('4) 퀀타이즈 · 실행취소');
   await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp');
   expect('Esc → 연주 모드 꺼짐', await js(`!document.getElementById('daw-kb-hud')`), true);
