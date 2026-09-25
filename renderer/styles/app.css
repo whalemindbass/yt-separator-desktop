@@ -2376,7 +2376,6 @@ body { display: flex; flex-direction: column; }
 .daw-left { position: relative; flex: none; width: 230px; border-right: 1px solid var(--border); background: var(--surface); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 /* 믹서·센드만 사이드바 가장자리까지. 자식마다 패딩을 주는 방식은 안 된다 —
    테두리나 배경이 있는 요소(＋VST 추가 버튼 등)는 박스 자체가 끝까지 가버린다. */
-.daw-left > .daw-mixer, .daw-left > .mx-sends { margin-left: -12px; margin-right: -12px; }
 .daw-left-h { font-size: 12px; font-weight: 700; color: var(--tx-2);
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .daw-left-h b { color: var(--accent); }
@@ -4809,7 +4808,15 @@ body { background: var(--bg) !important; }
 
 /* 스튜디오 */
 .daw-midrow { gap: var(--gap-block); padding: var(--gap-block); background: var(--gutter); }
-.daw-left { border: 1px solid var(--block-border); border-right: 1px solid var(--block-border); border-radius: var(--r-block); }
+/* 좌측 칸 = 이펙트 블록 + 믹서 블록 두 개. 이펙트 블록만 남는 높이를 쓰고(목록은 그 안에서 스크롤),
+   믹서 블록은 내용 높이 그대로 바닥에 붙는다. 여백은 각 블록이 따로 가진다. */
+.daw-leftcol { flex: none; width: 230px; min-height: 0; display: flex; flex-direction: column; gap: var(--gap-block); }
+.daw-left { width: auto; flex: 1 1 auto; min-height: 0; border: 1px solid var(--block-border); border-radius: var(--r-block); }
+/* 이펙트 블록 여백 — 여기 한 줄만 고치면 된다(믹서는 이제 별도 블록이라 영향 없음) */
+.daw-left { padding: 10px; gap: 6px; }
+.daw-mixblock { flex: none; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--block-border); border-radius: var(--r-block); overflow: hidden; padding-bottom: 8px; }
+.daw-mixblock > .daw-mixer { margin: 0; border: 0; border-bottom: 1px solid var(--border); }
+.daw-mixblock > .mx-sends { margin-top: 8px; }
 .daw-content { gap: var(--gap-block); }
 .daw-hero, .daw-tracks, .tab-panel-below {
   border: 1px solid var(--block-border); border-radius: var(--r-block); overflow: hidden;
