@@ -22,6 +22,18 @@ export const fmtDelta = (sec) => {
   return `${sec >= 0 ? '+' : '−'}${m}:${s.toFixed(2).padStart(5, '0')}`;
 };
 
+/** 진행률로 남은 시간(초) 추정 — 초반엔 인코더 워밍업 탓에 튀므로 3%·3초가 지나기 전엔 0(표시 안 함) */
+export function progressEta(elapsedMs, frac) {
+  if (!(frac >= 0.03) || !(elapsedMs >= 3000) || frac >= 1) return 0;
+  return Math.max(1, Math.round(elapsedMs * (1 - frac) / frac / 1000));
+}
+/** 남은 시간 표기 — 59 → "0:59", 3725 → "1:02:05" */
+export function fmtEta(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = String(sec % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
 /** "rgb(r,g,b)" 또는 "#rgb"/"#rrggbb" → "#rrggbb" (색상 input 의 기본값은 이 꼴만 받는다) */
 export function rgbToHex(c) {
   c = String(c).trim();

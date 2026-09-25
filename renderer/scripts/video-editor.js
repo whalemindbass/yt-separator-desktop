@@ -4,7 +4,7 @@
 //   - 트랙/클립 상태는 이 모듈 로컬에만 있다(엔진에 동기화할 대상이 없다).
 //   - 시간은 전부 초 단위로만 다룬다 — 엔진 경계가 없으니 샘플 변환도 없다.
 import { t as tr } from './i18n.js';
-import { esc, fmtDelta } from './studio/util.js';
+import { esc, fmtDelta, progressEta, fmtEta } from './studio/util.js';
 import { toYtsepUrl } from './player.js';
 import { getClipThumb } from './video-thumbs.js';
 import { getFileChannels, renderWaveSvg } from './video-waveform.js';
@@ -3936,8 +3936,15 @@ async function runExport(format, res, fps, gpu) {
   // (클릭 핸들러가 _exporting 을 보고 분기, 아래).
   if (btn) { btn.classList.add('exporting'); btn.textContent = '0%'; btn.title = tr('video.exportCancelHint'); }
   const totalSec = segs.reduce((s, x) => s + (x.dur != null ? x.dur : (x.end - x.start)), 0) || 1;
+  const t0 = performance.now();
   const off = api.video.onExportProgress(({ outTimeMs }) => {
-    if (btn) btn.textContent = Math.max(0, Math.min(99, Math.round((outTimeMs / 1e6) / totalSec * 100))) + '%';
+    if (!btn) return;
+    const frac = Math.max(0, Math.min(0.99, (outTimeMs / 1e6) / totalSec));
+    const eta = progressEta(performance.now() - t0, frac);
+    // 남은 시간은 버튼에 같이 — 긴 영상은 %만으론 "언제 끝나나"를 알 수 없다는 제보
+    btn.textContent = (eta ? `${fmtEta(eta)} · ` : '') + Math.round(frac * 100) + '%';   // 끝이 % — 진행 중 판별(테스트)이 이걸 본다
+    btn.title = eta ? `${tr('video.exportEta', { t: fmtEta(eta) })}
+${tr('video.exportCancelHint')}` : tr('video.exportCancelHint');
   });
   let result;
   try { result = await api.video.export({ segments: segs, outPath: r.filePath, format, res, fps, gpu }); }

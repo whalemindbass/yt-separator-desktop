@@ -162,6 +162,18 @@ const expect = (label, got, want) => {
     expect('값 없으면 0          ', `${r5.bufferMs}/${r5.monitorMs}`, '0/0');
   }
 
+  console.log('11b) progressEta / fmtEta — 내보내기 남은 시간');
+  {
+    expect('초반(2%)엔 표시 안 함 ', U.progressEta(10000, 0.02), 0);
+    expect('3초 전엔 표시 안 함   ', U.progressEta(2000, 0.5), 0);
+    expect('10초에 25% → 30초     ', U.progressEta(10000, 0.25), 30);
+    expect('끝났으면 0            ', U.progressEta(10000, 1), 0);
+    expect('NaN 방어              ', U.progressEta(NaN, NaN), 0);
+    expect('fmtEta 59            ', U.fmtEta(59), '0:59');
+    expect('fmtEta 125           ', U.fmtEta(125), '2:05');
+    expect('fmtEta 3725          ', U.fmtEta(3725), '1:02:05');
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷
