@@ -4660,7 +4660,7 @@ function wireHScroll() {
     const over = sc.scrollWidth - sc.clientWidth;
     bar.hidden = over <= 1;
     if (bar.hidden) return;
-    bar.style.marginRight = (sc.offsetWidth - sc.clientWidth) + 'px';   // 세로 스크롤바 폭만큼 비켜서 끝을 맞춘다
+    bar.style.right = (sc.offsetWidth - sc.clientWidth) + 'px';   // 세로 스크롤바 폭만큼 비켜서 끝을 맞춘다
     inner.style.width = (sc.scrollWidth - HEAD_W) + 'px';
     if (bar.scrollLeft !== sc.scrollLeft) bar.scrollLeft = sc.scrollLeft;
   };
