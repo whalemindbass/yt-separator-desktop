@@ -109,6 +109,58 @@ const expect = (label, got, want) => {
     expect('12채널 인터페이스 실사용 값', U.inputConfigInRange({ mode: 1, chL: 7, chR: 8 }, 12), true);
   }
 
+  console.log('9) pickInputConfig — 장치별 입력 채널 저장');
+  {
+    const map = { 'ASIO Fireface USB': { mode: 1, chL: 7, chR: 8 }, 'Focusrite USB ASIO': { mode: 0, chL: 1, chR: 1 } };
+    const a = U.pickInputConfig(map, null, 'ASIO Fireface USB');
+    expect('자기 장치 값을 씀      ', `${a.source}:${a.cfg.mode}/${a.cfg.chL}/${a.cfg.chR}`, 'device:1/7/8');
+    const b = U.pickInputConfig(map, null, 'Focusrite USB ASIO');
+    expect('다른 장치는 자기 값    ', `${b.source}:${b.cfg.chL}`, 'device:1');
+    // 기록이 있는 상태에서 처음 보는 장치 — 다른 장치 채널(7/8)을 끌어오면 안 된다
+    const c = U.pickInputConfig(map, { mode: 1, chL: 7, chR: 8 }, 'Realtek');
+    expect('처음 보는 장치는 기본값', `${c.source}:${c.cfg.mode}/${c.cfg.chL}/${c.cfg.chR}`, 'default:0/0/1');
+    // 업데이트 직후 — 장치별 기록이 아직 없으면 예전 값 하나를 이어받는다
+    const d = U.pickInputConfig({}, { mode: 0, chL: 3, chR: 9 }, 'ASIO Fireface USB');
+    expect('예전 형식 이어받기     ', `${d.source}:${d.cfg.chL}/${d.cfg.chR}`, 'legacy:3/9');
+    const e = U.pickInputConfig(null, null, 'X');
+    expect('아무것도 없으면 기본값 ', e.source, 'default');
+    const f = U.pickInputConfig(map, null, '');
+    expect('장치 이름 없으면 기본값', f.source, 'default');
+    // 반환값을 고쳐도 기본값 상수가 오염되면 안 된다
+    f.cfg.chL = 5;
+    expect('기본값 상수 불변       ', U.INPUT_CFG_DEFAULT.chL, 0);
+  }
+
+  console.log('10) mergeFxCache — 크래시 복구용 FX 노브값 캐시');
+  {
+    const prev = { 1: 'A-old', 2: 'B-old', 9: 'gone' };
+    const m = U.mergeFxCache(prev, [1, 2, 3], { 1: 'A-new', 3: 'C-new' });
+    expect('새 값 우선            ', m[1], 'A-new');
+    expect('응답 없던 슬롯은 유지 ', m[2], 'B-old');
+    expect('새로 생긴 슬롯 추가   ', m[3], 'C-new');
+    expect('지운 슬롯은 버림      ', 9 in m, false);
+    const empty = U.mergeFxCache(prev, [1, 2], {});
+    expect('전부 타임아웃이어도 유지', `${empty[1]}/${empty[2]}`, 'A-old/B-old');
+    expect('둘 다 없으면 키 없음  ', Object.keys(U.mergeFxCache(null, [5], null)).length, 0);
+  }
+
+  console.log('11) latencyBreakdown — 지연 내역');
+  {
+    const r1 = U.latencyBreakdown({ sr: 48000, block: 256, roundtripMs: 11.8, pdcMs: 0, pdcOn: true });
+    expect('버퍼 2×256/48k       ', r1.bufferMs.toFixed(2), '10.67');
+    expect('드라이버 추가분      ', r1.driverMs.toFixed(2), '1.13');
+    expect('보정 없으면 모니터=왕복', r1.monitorMs.toFixed(1), '11.8');
+    const r2 = U.latencyBreakdown({ sr: 48000, block: 256, roundtripMs: 11.8, pdcMs: 42.7, pdcOn: true });
+    expect('PDC 켜짐 → 모니터에 더해짐', r2.monitorMs.toFixed(1), '54.5');
+    const r3 = U.latencyBreakdown({ sr: 48000, block: 256, roundtripMs: 11.8, pdcMs: 42.7, pdcOn: false });
+    expect('PDC 꺼짐 → 안 더해짐 ', `${r3.pdcMs}/${r3.monitorMs.toFixed(1)}`, '0/11.8');
+    // 드라이버가 버퍼보다 작게 보고하는 이상한 경우 — 음수로 안 내려간다
+    const r4 = U.latencyBreakdown({ sr: 48000, block: 512, roundtripMs: 5, pdcMs: 0, pdcOn: false });
+    expect('드라이버분 음수 없음 ', r4.driverMs, 0);
+    const r5 = U.latencyBreakdown({});
+    expect('값 없으면 0          ', `${r5.bufferMs}/${r5.monitorMs}`, '0/0');
+  }
+
   console.log(`\n통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

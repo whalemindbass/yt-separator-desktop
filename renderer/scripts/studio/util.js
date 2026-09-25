@@ -73,6 +73,53 @@ export function noteCrashAndCheckLoop(timestamps, now) {
 // 도중 잠깐 더 적은 개수를 보고하는 경우 포함)마다, 정작 쓰는 chL 까지 통째로 안 밀어
 // 넣어진다. 2채널 장치는 chR 기본값(1)이 항상 범위 안이라 이 버그가 원천적으로 안 드러난다
 // — "채널 많은 인터페이스에서 저장한 입력 채널이 안 돌아온다" 제보가 유독 잦았던 이유.
+// ── 지연 내역 ────────────────────────────────────────────────────
+// 왕복 지연 하나만 보여 주면 "버퍼 탓인지, 인터페이스 드라이버 탓인지, 플러그인 탓인지"를
+// 알 수가 없다(제보: 같은 버퍼인데 다른 DAW보다 늦게 들린다). 엔진이 이미 보내는 값으로 나눈다.
+//  · 버퍼   = 입력·출력 버퍼 한 번씩(2 × block / sr)
+//  · 드라이버 = 드라이버가 보고한 왕복 지연 중 버퍼를 뺀 나머지(인터페이스 내부 DSP·안전 버퍼)
+//  · 플러그인 보정 = PDC 가 켜져 있으면 녹음 트랙의 라이브 입력 모니터링에도 이만큼이 더해진다
+//    (엔진이 입력을 FX 버퍼에 섞은 뒤 그 트랙 전체에 보정 지연선을 걸기 때문 — Main.cpp 녹음 버스)
+// 반환은 전부 ms. 값이 없으면 0.
+export function latencyBreakdown({ sr, block, roundtripMs, pdcMs, pdcOn }) {
+  const bufferMs = sr > 0 && block > 0 ? (2 * block / sr) * 1000 : 0;
+  const rt = roundtripMs > 0 ? roundtripMs : 0;
+  const driverMs = Math.max(0, rt - bufferMs);
+  const plugin = pdcOn && pdcMs > 0 ? pdcMs : 0;
+  return { bufferMs, driverMs, pdcMs: plugin, monitorMs: rt + plugin };
+}
+
+// ── FX 상태(노브값) 캐시 병합 ────────────────────────────────────
+// 엔진이 죽으면 플러그인 노브값은 엔진만 알고 있어서 같이 사라진다. 살아 있는 동안 주기적으로
+// 받아 둔 값(캐시)으로 복구한다. 새로 받은 값(fresh)이 있으면 그걸, 이번에 응답이 늦어 못 받은
+// 슬롯은 예전 캐시 값을 유지한다(부분 응답 때문에 멀쩡한 값이 지워지지 않게). 지금 체인에
+// 없는 슬롯(지운 플러그인)은 버린다 — 캐시가 세션 내내 끝없이 불어나지 않게.
+// prev·fresh: { slotId: base64 } · currentIds: 지금 존재하는 슬롯 id 목록
+export function mergeFxCache(prev, currentIds, fresh) {
+  const out = {};
+  for (const id of currentIds || []) {
+    const v = fresh && fresh[id] != null ? fresh[id] : (prev && prev[id] != null ? prev[id] : undefined);
+    if (v != null) out[id] = v;
+  }
+  return out;
+}
+
+// ── 장치별 저장된 입력 채널 고르기 ─────────────────────────────
+// 예전엔 입력 채널(모노/스테레오·채널 번호)을 장치 구분 없이 하나만 저장해서, 인터페이스를
+// 두 개 번갈아 쓰면(집 2ch · 작업실 12ch 등) 서로의 채널 번호를 덮어썼다. 이제 장치 이름별로
+// 저장한다(byDevice). 예전 형식(legacy, 장치 구분 없는 값 하나)은 장치별 기록이 아직
+// 하나도 없을 때만 이어받는다 — 이미 장치별 기록이 있는데 처음 보는 장치라면, 다른
+// 장치의 채널 번호를 끌어오지 않고 기본값으로 시작한다.
+// 반환: { cfg, source } — source 는 'device' | 'legacy' | 'default'
+export const INPUT_CFG_DEFAULT = { mode: 0, chL: 0, chR: 1 };
+export function pickInputConfig(byDevice, legacy, deviceName) {
+  const map = byDevice && typeof byDevice === 'object' ? byDevice : {};
+  const norm = (s) => ({ mode: s.mode | 0, chL: s.chL | 0, chR: s.chR | 0 });
+  if (deviceName && map[deviceName] && typeof map[deviceName] === 'object') return { cfg: norm(map[deviceName]), source: 'device' };
+  if (!Object.keys(map).length && legacy && typeof legacy === 'object') return { cfg: norm(legacy), source: 'legacy' };
+  return { cfg: { ...INPUT_CFG_DEFAULT }, source: 'default' };
+}
+
 export function inputConfigInRange(want, deviceInCount) {
   const n = Math.max(1, deviceInCount || 1);
   const chLInRange = want.chL < n;

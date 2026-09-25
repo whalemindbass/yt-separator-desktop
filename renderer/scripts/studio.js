@@ -5,7 +5,8 @@ import { toYtsepUrl, loadStemFilesToBuffers } from './player.js';
 import { detectBeats } from './beat-detect.js';
 import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './fader.js';
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
-         METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange } from './studio/util.js';
+         METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange,
+         pickInputConfig, mergeFxCache, latencyBreakdown } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -2045,11 +2046,19 @@ async function applyTransform(factor, semitones, opts = {}) {
     if (isCancelled()) return 'cancelled';
     const names = Object.keys(stems);
     const total = names.length + 1;   // +1 = 저장·엔진 재적용 단계
-    const processed = {};
-    for (let i = 0; i < names.length; i++) {
+    // 원래대로(100% · 키 0)로 되돌리는 경우 — 처리할 게 없다. 예전엔 이때도 모든 스템을 다시
+    // 돌리고(실제론 그대로 통과) 원본과 똑같은 사본을 또 저장했다. 원본 파일을 그대로 다시 물린다.
+    const identity = factor === 1 && semitones === 0;
+    const processed = identity ? stems : {};
+    const t0 = performance.now();
+    for (let i = 0; !identity && i < names.length; i++) {
       if (isCancelled()) return 'cancelled';
       const name = names[i];
-      report(i, total, tr('studio.p.speedStretching', { name: stemLabel(name), i: i + 1, n: names.length }));
+      // 남은 시간 — 첫 스템이 끝나야 한 개당 걸리는 시간을 알 수 있다(스템 길이는 모두 같다)
+      const perStem = i > 0 ? (performance.now() - t0) / i : 0;
+      const eta = perStem > 0 ? Math.max(1, Math.round(perStem * (names.length - i) / 1000)) : 0;
+      const label = tr('studio.p.speedStretching', { name: stemLabel(name), i: i + 1, n: names.length });
+      report(i, total, eta ? `${label} · ${tr('studio.p.speedEta', { s: eta })}` : label);
       let [L, R] = stems[name];
       if (semitones && name !== 'drums') {
         const r = await pitchShiftStereo(L, R, sampleRate, semitones, { formantCompensation: name === 'vocals' });
@@ -2063,15 +2072,26 @@ async function applyTransform(factor, semitones, opts = {}) {
     }
     if (isCancelled()) return 'cancelled';
     report(names.length, total, tr('studio.p.speedSaving'));
-    const save = await api.stem.saveStems(processed, `speedtmp_${Date.now()}`, sampleRate);
-    if (!save || !save.ok) throw new Error((save && save.error) || 'saveStems failed');
-    if (isCancelled()) return 'cancelled';
+    let newPaths;
+    if (identity) {
+      newPaths = null;   // 원본을 그대로 쓴다 — 처리본 없음
+    } else {
+      const save = await api.stem.saveStems(processed, `speedtmp_${Date.now()}`, sampleRate);
+      if (!save || !save.ok) throw new Error((save && save.error) || 'saveStems failed');
+      newPaths = save.stemPaths;
+    }
+    if (isCancelled()) {
+      // 방금 저장한 처리본은 아무도 안 쓴다 — 남겨 두면 stemsDir 에 고아 파일로 쌓인다
+      if (newPaths) for (const p of Object.values(newPaths)) api.library.deleteOrphan(p).catch(() => {});
+      return 'cancelled';
+    }
     // 이전에 처리해 둔 파일이 있으면 여기서 치운다 — 안 그러면 속도·키 바꿀 때마다 처리한
     // 파일이 stemsDir 에 계속 쌓인다(프로젝트에 저장해서 다음에 열 때 재사용하려고 남기는
     // 거라 지울 수가 없었는데, "이번" 걸 새로 남기니 "저번" 건 이제 필요 없다).
     if (_speedStemPaths) { for (const p of Object.values(_speedStemPaths)) api.library.deleteOrphan(p).catch(() => {}); }
-    _speedStemPaths = save.stemPaths;
-    const paths = _tracks.map(t => save.stemPaths[t.key]).filter(Boolean);
+    _speedStemPaths = newPaths;
+    const src = newPaths || _stemPaths;
+    const paths = _tracks.map(t => src[t.key]).filter(Boolean);
     api.engine.loadStems(paths);
     // loadStems 는 엔진 쪽 트랙을 기본값으로 되돌린다 — 볼륨/팬/뮤트/솔로/센드를 다시 밀어 넣는다.
     _tracks.forEach(t => api.engine.track(t.engineIndex, { gain: stemGainOut(t), pan: t.pan || 0, mute: !!t.mute, solo: !!t.solo, sends: t.sends || [0, 0] }));
@@ -2914,23 +2934,69 @@ async function loadTakeSet(ts) {
 // ── 프로젝트(.yssproj) 저장/열기 — 라이브러리 탈종속 ──
 let _fxGather = null;
 let _chainGather = null;
+// _chainGather/_fxGather 는 전역 한 자리라 두 수집이 겹치면(수동 저장 중에 자동 저장 등)
+// 뒤에 온 것이 앞의 것을 덮어쓴다. 예전엔 그때 앞의 것의 타임아웃이 "지금 자리에 있는"
+// 뒤의 것을 반만 채운 채 끝내 버리고, 앞의 promise 는 영원히 안 끝났다 — 자동 저장이면
+// _autosaving 이 true 로 굳어 그 뒤로 자동 저장이 영영 멈췄다. 수집은 이 락으로 한 번에
+// 하나씩만 돌리고, 타임아웃은 자기 객체만 건드리게 한다.
+let _fxLock = Promise.resolve();
+function withFxLock(fn) {
+  const run = _fxLock.then(fn, fn);
+  _fxLock = run.catch(() => {});
+  return run;
+}
 // 모든 트랙의 FX 체인 목록을 엔진에서 받아와 _chainByTrack 채움(선택 안 된 트랙도).
 // 저장 시 FX 누락 방지 — 이전엔 선택 트랙 체인만 알고 있었음.
 function gatherChains(ids) {
   return new Promise((res) => {
     if (!ids.length) return res();
-    _chainGather = { need: new Set(ids), res };
+    const g = { need: new Set(ids), res };
+    _chainGather = g;
     ids.forEach(id => api.engine.fxChainReq(id));
-    _chainGather._t = setTimeout(() => { const g = _chainGather; _chainGather = null; g.res(); }, 1500);
+    g._t = setTimeout(() => { if (_chainGather === g) _chainGather = null; g.res(); }, 1500);
   });
 }
 function gatherFx(pairs) {   // pairs:[{track,id}] → Promise<{id:data}>
   return new Promise((res) => {
     if (!pairs.length) return res({});
-    _fxGather = { need: pairs.map(p => p.id), states: {}, res };
+    const g = { need: pairs.map(p => p.id), states: {}, res };
+    _fxGather = g;
     pairs.forEach(p => api.engine.fxSaveState(p.track, p.id));
-    _fxGather._t = setTimeout(() => { const g = _fxGather; _fxGather = null; g.res(g.states); }, 2000);
+    g._t = setTimeout(() => { if (_fxGather === g) _fxGather = null; g.res(g.states); }, 2000);
   });
+}
+// ── 크래시 복구용 FX 노브값 캐시 ───────────────────────────────
+// 엔진이 죽으면 노브값은 엔진만 알고 있어 같이 사라진다(예전엔 복구하면 플러그인은 다시
+// 올라오지만 전부 기본값이었다). 살아 있는 동안 주기적으로 받아 둔다(디스크에 쓰지 않음).
+// 슬롯 id 는 엔진 프로세스가 매기는 번호라 엔진이 다시 뜨면 같은 번호가 다른 플러그인을
+// 가리킬 수 있다 — 그래서 캐시는 엔진 프로세스 하나 동안만 유효하고, 'exit' 에서 비운다.
+let _fxStateCache = {};
+let _engineGen = 0;   // 엔진 프로세스 세대 — 'exit' 마다 올린다(캐시가 어느 프로세스 것인지 구분)
+const FX_SNAPSHOT_MS = 30000;
+let _fxSnapshotTimer = null;
+function allFxPairs() {
+  const pairs = [];
+  const ids = [..._recTracks.map(r => r.id), ..._tracks.map(t => stemIdOf(t.engineIndex)), ...BUS_NAMES.map((_, i) => BUS_ID_BASE + i)];
+  ids.forEach(tid => (_chainByTrack[tid] || []).forEach(s => pairs.push({ track: tid, id: s.id })));
+  return pairs;
+}
+async function snapshotFxStates() {
+  if (!_started || _crashRecovering || (_recArmed && _playing)) return;   // 녹음 중엔 비켜 준다
+  if (!allFxPairs().length) return;
+  await withFxLock(async () => {
+    const gen = _engineGen;
+    const ids = [..._recTracks.map(r => r.id), ..._tracks.map(t => stemIdOf(t.engineIndex)), ...BUS_NAMES.map((_, i) => BUS_ID_BASE + i)];
+    await gatherChains(ids);
+    if (gen !== _engineGen || !_started) return;   // 수집 도중 엔진이 죽었다 — 캐시를 건드리지 않는다
+    const pairs = allFxPairs();
+    const states = await gatherFx(pairs);
+    if (gen !== _engineGen || !_started) return;
+    _fxStateCache = mergeFxCache(_fxStateCache, pairs.map(p => p.id), states);
+  });
+}
+function startFxSnapshots() {
+  if (_fxSnapshotTimer) return;
+  _fxSnapshotTimer = setInterval(() => { snapshotFxStates().catch(() => {}); }, FX_SNAPSHOT_MS);
 }
 const baseName = (p) => String(p || '').replace(/\\/g, '/').split('/').pop().replace(/\.[^.]+$/, '');
 function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높이를 현재 트랙에 입힘
@@ -2942,19 +3008,30 @@ function applyTrackMeta(savedTracks) {   // 저장 순서대로 이름·색·높
   });
   renderRecLanes();   // 이벤트 렌더는 메타 전이라 여기서 재렌더
 }
-// opts.skipFx — 엔진에 묻지 않고 지금 알고 있는 것만으로 만든다.
-// 엔진이 죽은 뒤 구조를 뜰 때 쓴다. 이펙트 노브 값은 엔진만 알고 있어 빠진다.
+// opts.skipFx — 엔진에 묻지 않고 지금 알고 있는 것만으로 만든다(동기적으로 끝난다 — 엔진
+// 'exit' 처리에서 트랙 목록을 비우기 전에 떠야 해서 await 가 한 번도 걸리면 안 된다).
+// 엔진이 죽은 뒤 구조를 뜰 때 쓰고, 노브값은 살아 있을 때 받아 둔 캐시(_fxStateCache)로 채운다.
 async function buildProjectObject(opts = {}) {
   const sr = deviceSr();
   const master = faderToGain($('mx-master')?.value ?? FADER_UNITY_POS);
   const stemIds = _tracks.map(t => stemIdOf(t.engineIndex));
   const busIds = BUS_NAMES.map((_, i) => BUS_ID_BASE + i);
-  if (!opts.skipFx) await gatherChains([..._recTracks.map(r => r.id), ...stemIds, ...busIds]);
-  const pairs = [];
-  _recTracks.forEach(r => (_chainByTrack[r.id] || []).forEach(s => pairs.push({ track: r.id, id: s.id })));
-  stemIds.forEach(sid => (_chainByTrack[sid] || []).forEach(s => pairs.push({ track: sid, id: s.id })));
-  busIds.forEach(bid => (_chainByTrack[bid] || []).forEach(s => pairs.push({ track: bid, id: s.id })));
-  const states = opts.skipFx ? {} : await gatherFx(pairs);
+  let states;
+  if (opts.skipFx) {
+    states = _fxStateCache;
+  } else {
+    states = await withFxLock(async () => {
+      const gen = _engineGen;
+      await gatherChains([..._recTracks.map(r => r.id), ...stemIds, ...busIds]);
+      const p = allFxPairs();
+      const fresh = await gatherFx(p);
+      // 응답이 늦은 슬롯은 캐시 값으로 채운다 — 예전엔 그 플러그인만 노브값 없이 저장됐다.
+      const merged = mergeFxCache(_fxStateCache, p.map(x => x.id), fresh);
+      // 수집 도중 엔진이 죽었다 살아났으면 이 id 들은 이미 죽은 프로세스의 것 — 캐시엔 안 넣는다.
+      if (gen === _engineGen) _fxStateCache = merged;
+      return merged;
+    });
+  }
   const autoOut = (id) => { const a = _auto.get(id); return a && (a.pts.length || a.on)
     ? { on: !!a.on, open: !!a.open, pts: a.pts.map(p => ({ t: p.t, v: p.v })) } : null; };
   const tracks = _recTracks.map(r => ({
@@ -3138,6 +3215,8 @@ async function handleEngineCrash(m) {
 
     if (snap) {
       await applyProject(snap);
+      // 캐시는 방금 비워졌다 — 30초 주기를 기다리지 말고 곧 한 번 받아 둔다(복구 직후 또 죽는 경우 대비).
+      setTimeout(() => { snapshotFxStates().catch(() => {}); }, 5000);
       // 곡을 열기도 전에 엔진이 죽었다 살아난 경우(예: 드라이버 충돌) 는 되살릴 것이 없다.
       // 그때도 무조건 dirty 를 켜면, 저장 버튼은 "저장할 게 없다"며 아무 일도 안 하는데
       // 종료할 때는 계속 저장하라고 붙잡는 모순이 생긴다.
@@ -3691,6 +3770,15 @@ async function openDevModal(d) {
       <label class="dev-field"><span>${tr('studio.x.inDevice')}</span><select id="dv-in">${opts(curType.inputs, d.input)}</select></label>
       <label class="dev-field"><span>${tr('studio.x.sampleRate')}</span><select id="dv-sr">${opts(rates, Math.round(d.sampleRate))}</select></label>
       <label class="dev-field"><span>${tr('studio.x.bufferSize')}</span><select id="dv-buf">${opts(d.buffers && d.buffers.length ? d.buffers : [128, 256, 512], d.bufferSize)}</select></label>
+      ${(() => {
+        // 지금 열린 장치 기준(버퍼를 위에서 바꿨다면 적용 뒤에 다시 계산된다)
+        const lat = latencyText();
+        if (!lat) return '';
+        return `<div class="dev-field dev-latency"><span>${tr('studio.x.latency')}</span><div>
+          <div>${esc(tr('studio.x.latencyDetail', lat))}</div>
+          ${lat.hasPdc ? `<div class="dev-latency-hint">${esc(tr('studio.x.latencyPdcHint', lat))}</div>` : ''}
+        </div></div>`;
+      })()}
       <div class="dev-sep"></div>
       <label class="dev-field"><span>${tr('studio.x.inputMode')}</span><select id="dv-inmode">
         <option value="0" ${_inCfg.mode === 1 ? '' : 'selected'}>${tr('studio.x.modeMono')}</option>
@@ -3753,24 +3841,47 @@ async function openDevModal(d) {
       type: $('dv-type').value, output: $('dv-out').value, input: $('dv-in').value,
       sampleRate: Number($('dv-sr').value), bufferSize: Number($('dv-buf').value),
     };
-    api.engine.setDevice(cfg);
-    saveDevConfig(cfg);   // 다음에 켤 때 이 장치로 다시 붙는다
-    applyInputConfig({
+    const inCfg = {
       mode: Number($('dv-inmode').value),
       chL: Number($('dv-chl').value),
       chR: Number($('dv-chr').value),
-    });
+    };
+    // 장치를 바꾸는 중이면 지금 고른 채널은 "새 장치" 몫이다 — 아직 열려 있는 이전 장치
+    // 이름으로 저장하면 이전 장치의 채널 설정을 덮어쓴다. 새 장치가 실제로 열린 뒤
+    // device 이벤트에서 저장·적용한다(_pendingInCfg).
+    const switching = cfg.type !== d.currentType || cfg.output !== d.output;
+    _pendingInCfg = switching ? { target: cfg.output, cfg: inCfg } : null;
+    api.engine.setDevice(cfg);
+    saveDevConfig(cfg);   // 다음에 켤 때 이 장치로 다시 붙는다
+    if (!switching) applyInputConfig(inCfg);
     host.hidden = true;
   });
 }
 // ── 입력 구성 (모노/스테레오 · 채널 선택) ────────────────
 // 장치를 다시 열면 엔진 기본값으로 돌아가므로 여기 값을 다시 밀어 넣는다.
 let _inCfg = { mode: 0, chL: 0, chR: 1, names: [] };
+// 입력 채널은 장치 이름별로 저장한다(pickInputConfig 설명 참고). IN_CFG_KEY 는 예전 형식
+// (장치 구분 없는 값 하나) — 새로 쓰지는 않고, 장치별 기록이 없을 때 한 번 이어받는 데만 쓴다.
 const IN_CFG_KEY = 'yss.inputConfig';
+const IN_CFG_DEV_KEY = 'yss.inputConfigByDevice';
+// 설정 창에서 장치를 바꾸면서 채널도 같이 고른 경우 — 그 채널은 "새 장치"의 것인데, 적용
+// 순간엔 아직 이전 장치가 열려 있다. 새 장치의 device 이벤트가 올 때까지 들고 있다가 그
+// 장치 이름으로 저장한다. { target: 요청한 장치 이름, cfg }
+let _pendingInCfg = null;
+function readStoredJson(key) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+function saveInputConfigFor(name, cfg) {
+  if (!name) return;
+  const map = readStoredJson(IN_CFG_DEV_KEY);
+  const next = map && typeof map === 'object' ? map : {};
+  next[name] = { mode: cfg.mode | 0, chL: cfg.chL | 0, chR: cfg.chR | 0 };
+  try { localStorage.setItem(IN_CFG_DEV_KEY, JSON.stringify(next)); } catch {}
+}
 function applyInputConfig(cfg) {
   _inCfg = { ..._inCfg, ...cfg };
   api.engine.inputConfig({ mode: _inCfg.mode, chL: _inCfg.chL, chR: _inCfg.chR });
-  try { localStorage.setItem(IN_CFG_KEY, JSON.stringify({ mode: _inCfg.mode, chL: _inCfg.chL, chR: _inCfg.chR })); } catch {}
+  saveInputConfigFor(_deviceInfo?.name, _inCfg);
 }
 // 설정 창이 열려 있을 때만 채널별 입력 미터를 갱신한다.
 function updateInputChannelMeters(chans) {
@@ -3782,13 +3893,6 @@ function updateInputChannelMeters(chans) {
     el.style.setProperty('--v', meterPct(v) + '%');
   }
 }
-function loadInputConfig() {
-  try {
-    const s = JSON.parse(localStorage.getItem(IN_CFG_KEY) || 'null');
-    if (s && typeof s === 'object') _inCfg = { ..._inCfg, mode: s.mode | 0, chL: s.chL | 0, chR: s.chR | 0 };
-  } catch {}
-}
-
 // ── 이벤트 ─────────────────────────────────────────
 function onEngineEvent(m) {
   switch (m.ev) {
@@ -3819,6 +3923,23 @@ function onEngineEvent(m) {
       _deviceInfo = { name: m.name, sr: m.sr, stemSr: m.stemSr, block: m.block, in: m.in, out: m.out,
                       roundtripMs: m.roundtripMs, srMismatch: !!m.srMismatch };
       _inCfg.names = Array.isArray(m.inNames) ? m.inNames : [];
+      // 설정 창에서 장치를 바꾸며 고른 채널 — 실제로 그 장치가 열렸을 때만 그 장치 몫으로
+      // 저장한다. 이름이 다른 device 이벤트(전환 전 장치가 닫히며 한 번 더 오는 경우 등)는
+      // 건너뛰고 기다린다. 전환이 실패해 다른 장치로 되돌아갔으면 'deviceFallback' 에서 버린다
+      // — 엉뚱한 장치의 저장값을 덮어쓰지 않는 게 우선이다.
+      if (_pendingInCfg && m.name === _pendingInCfg.target) {
+        saveInputConfigFor(m.name, _pendingInCfg.cfg);
+        _pendingInCfg = null;
+      }
+      // 이 장치 몫으로 저장된 채널을 쓴다(없으면 기본값). 예전 형식(장치 구분 없는 값)은
+      // 장치별 기록이 하나도 없을 때만 이어받는데, 재연결 확인 중('checking')에 스쳐 가는
+      // 기본 장치 이벤트에는 저장하지 않는다 — 안 그러면 그 임시 장치가 예전 값을 차지해
+      // 버려 정작 저장된 장치로 넘어갔을 땐 기본값으로 시작하게 된다.
+      {
+        const picked = pickInputConfig(readStoredJson(IN_CFG_DEV_KEY), readStoredJson(IN_CFG_KEY), m.name);
+        _inCfg = { ..._inCfg, ...picked.cfg };
+        if (picked.source === 'legacy' && _devReconnectPhase !== 'checking') saveInputConfigFor(m.name, picked.cfg);
+      }
       // 장치를 새로 열면 엔진이 기본값(모노 1번)으로 돌아간다 → 저장해둔 설정을 다시 밀어 넣는다.
       // 이미 같은 값이면 보내지 않아 device 이벤트가 무한히 되돌아오는 것을 막는다.
       const want = _inCfg;
@@ -3929,9 +4050,10 @@ function onEngineEvent(m) {
         el.classList.toggle('on', _pdcOn);
         el.textContent = _pdcOn ? tr('studio.p.pdcOn', { ms: ms.toFixed(1) }) : tr('studio.p.pdcOff', { ms: ms.toFixed(1) });
         el.title = _pdcOn
-          ? tr('studio.p.pdcTitle', { n: Math.round(m.samples || 0) })
+          ? tr('studio.p.pdcTitle', { n: Math.round(m.samples || 0), ms: ms.toFixed(1) })
           : tr('studio.lbl.pdcOffWarn');
       }
+      renderEngineStatus();   // 상태 표시의 지연 툴팁에 보정분이 들어간다
       break;
     }
     case 'recTracks': {
@@ -3983,6 +4105,9 @@ function onEngineEvent(m) {
       // 되살아난 엔진에 녹음 트랙이 통째로 사라졌다(실제 제보: 새 녹음트랙 만들고
       // 싱크룸 VST 로드 → 엔진이 크래시로 재시작되며 방금 만든 트랙이 없어짐).
       if (m.crashed) handleEngineCrash(m);   // 우리가 끝낸 것이 아니면 되살린다
+      // 위 복구 스냅샷은 이미 동기적으로 캐시를 읽어 갔다 — 이제 이 캐시는 죽은 프로세스의
+      // 슬롯 번호라 다음 프로세스에선 엉뚱한 플러그인을 가리킬 수 있다. 비우고 세대를 올린다.
+      _fxStateCache = {}; _engineGen++;
       _started = false; _playing = false;
       setEngineStatus('off');
       $('st-engine-dot').classList.remove('on');
@@ -3996,7 +4121,7 @@ function onEngineEvent(m) {
     case 'error': setEngineStatus('error'); break;
     // ASIO 로 못 갈아타서 되돌아왔다. 조용히 넘어가면 사용자는 왜 지연이 큰지,
     // 왜 자기 오인페가 안 잡히는지 알 방법이 없다.
-    case 'deviceFallback': flashTake(tr('studio.m.asioFallback')); break;
+    case 'deviceFallback': _pendingInCfg = null; flashTake(tr('studio.m.asioFallback')); break;
     case 'log':
       // 엔진 로그는 개발자용 영문이라 사용자에게 띄우지 않는다.
       // (녹음 준비·파일 쓰기 같은 정상 동작까지 걸려 알림으로 새어 나왔다)
@@ -4064,6 +4189,18 @@ function renderEngineStatus() {
   : s.kind === 'failed'      ? tr('studio.lbl.audioOpenFail')
   : s.kind === 'error'       ? tr('studio.lbl.audioError')
   :                            tr('studio.lbl.audioOff');
+  // 장치가 열려 있으면 지연 내역을 툴팁으로 — 숫자 하나로는 어디서 늦어지는지 알 수 없다
+  const lat = s.kind === 'device' ? latencyText() : null;
+  el.title = lat ? tr('studio.lbl.latencyTitle', lat) : '';
+}
+// 지연 내역을 화면 문구용 값으로(ms, 소수 1자리). 장치 정보가 없으면 null.
+function latencyText() {
+  const d = _deviceInfo;
+  if (!d || !(d.sr > 0)) return null;
+  const b = latencyBreakdown({ sr: d.sr, block: d.block, roundtripMs: d.roundtripMs, pdcMs: _pdcMs, pdcOn: _pdcOn });
+  const f = (v) => v.toFixed(1);
+  // 1~2ms 수준의 보정은 체감이 안 되는데 경고를 띄우면 소음이다 — 2ms 이상일 때만 안내
+  return { total: f(b.monitorMs), buf: f(b.bufferMs), drv: f(b.driverMs), pdc: f(b.pdcMs), hasPdc: b.pdcMs >= 2 };
 }
 
 // ── 오디오 엔진 시작 ───────────────────────────────
@@ -4179,7 +4316,6 @@ function wire() {
     renderWaves();
     renderEngineStatus();   // 실시간 값이 들어가는 자리라 data-i18n 대상이 아니다 → 직접 다시 그림
   });
-  loadInputConfig();   // 저장된 입력 구성 — device 이벤트에서 엔진에 반영된다
   buildFaderScales();
   updateBusStrips();   // 트랙이 없는 첫 화면에선 버스도 잠금
   // 마스터 볼륨 — 좌측 믹서 페이더 (하단바 슬라이더는 제거됨)
@@ -4515,6 +4651,7 @@ export async function initStudio() {
   if (_studioBooted) return;            // 아래는 스튜디오에 처음 들어왔을 때 한 번만
   _studioBooted = true;
   startAutosave();
+  startFxSnapshots();
   offerRecovery();                      // 지난번에 저장하지 못하고 끝났으면 여기서 제안한다
 
   // 창을 닫으려 할 때 메인이 저장을 시킨다. 끝났는지 알려 주어야 닫힐지가 정해진다.
