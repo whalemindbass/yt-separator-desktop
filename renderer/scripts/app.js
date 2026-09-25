@@ -175,6 +175,7 @@ const sDiskRefresh   = $('s-disk-refresh');
 const sCleanup       = $('s-cleanup');
 const sModels        = $('s-models');
 const sAutoUpdateCB  = $('s-auto-update');
+const sTelemetryCB   = $('s-telemetry');
 const sCheckUpdate   = $('s-check-update');
 const sUpdateStatus  = $('s-update-status');
 const sAppInfo       = $('s-app-info');
@@ -202,6 +203,7 @@ async function refreshSettingsView() {
   try {
     const s = await api.settings.get();
     sAutoUpdateCB.checked = s.autoUpdateEnabled !== false;
+    if (sTelemetryCB) sTelemetryCB.checked = s.telemetryEnabled !== false;
   } catch {}
 
   // Downloads dir (영상) / Stems dir (스템)
@@ -335,6 +337,9 @@ sClipboardCB?.addEventListener('change', () => {
 sWaveformCB?.addEventListener('change', () => {
   localStorage.setItem('waveformDisplay', sWaveformCB.checked ? '1' : '0');
   window.dispatchEvent(new Event('waveform-pref-changed'));
+});
+sTelemetryCB?.addEventListener('change', async () => {
+  await api.settings.set({ telemetryEnabled: sTelemetryCB.checked });
 });
 sAutoUpdateCB?.addEventListener('change', async () => {
   await api.settings.set({ autoUpdateEnabled: sAutoUpdateCB.checked });

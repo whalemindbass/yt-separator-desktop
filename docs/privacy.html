@@ -159,7 +159,7 @@
   <main>
     <div class="container">
       <h1 data-i18n="title">개인정보 처리방침</h1>
-      <p class="updated"><span data-i18n="updated.label">최종 개정</span>: 2026-07-20</p>
+      <p class="updated"><span data-i18n="updated.label">최종 개정</span>: 2026-09-25</p>
 
       <div class="intro" data-i18n="intro">
         본 방침은 YT Separator 웹사이트 (<code>ytseparator.com</code>) 및 데스크톱 앱과 관련하여 어떤 정보가 어떻게 처리되는지 설명합니다. 앱의 오디오·영상 데이터는 서버로 전송되지 않고 사용자 컴퓨터에서 처리됩니다.
@@ -174,11 +174,12 @@
         <li data-i18n="s1a.i3"><strong>서버 로그</strong>: 사이트는 GitHub Pages 로 호스팅되며 Cloudflare 프록시를 거칩니다. IP · User-Agent 등 표준 웹 서버 로그가 일시적으로 기록될 수 있습니다.</li>
       </ul>
 
-      <h3 data-i18n="s1b.h">데스크톱 앱 (YT Separator)</h3>
+      <h3 data-i18n="s1b.h">데스크톱 앱 (underdaw)</h3>
       <ul>
-        <li data-i18n="s1b.i1"><strong>수집 없음</strong>: 앱은 텔레메트리·분석·사용 기록을 원격 서버로 전송하지 않습니다.</li>
+        <li data-i18n="s1b.i1"><strong>익명 사용 통계(끌 수 있음)</strong>: 앱 개선을 위해 설치별 임의 ID·앱 버전·배포 형태·OS 이름·기능 사용 여부(첫 분리·스튜디오 진입·녹음·내보내기)만 하루 한 번 보냅니다. 곡·파일·장치 정보와 IP는 저장하지 않으며, 앱 설정 → 개인정보에서 끌 수 있습니다.</li>
         <li data-i18n="s1b.i2"><strong>로컬 저장</strong>: 라이브러리·설정·처리 결과는 사용자 컴퓨터에만 저장됩니다.</li>
         <li data-i18n="s1b.i3"><strong>업데이트 확인</strong>: 새 버전 확인을 위해 GitHub Releases API 에 접속합니다 (IP · User-Agent 만).</li>
+        <li data-i18n="s1b.i5"><strong>오류 제보</strong>: 사용자가 직접 제보할 때만, 입력한 내용과 (선택 시) 진단 정보(앱 버전·화면·오디오 장치 상태·최근 오류)를 보냅니다. 남용 방지를 위해 IP는 해시로만 보관합니다.</li>
         <li data-i18n="s1b.i4"><strong>YouTube 다운로드</strong>: 사용자가 요청한 URL 에서만 콘텐츠를 받아옵니다 (yt-dlp 사용). 어떤 URL을 처리했는지는 기록되지 않습니다.</li>
       </ul>
 
@@ -245,8 +246,9 @@
         's1a.i1':'광고 관련: Google AdSense 가 표준 광고 쿠키·식별자를 통해 방문·상호작용 데이터를 수집합니다. 우리 서버는 이 데이터를 저장하지 않습니다.',
         's1a.i2':'언어 선택: 브라우저 localStorage 에 언어 설정 (yss:site-lang) 을 저장합니다. 서버 전송 X.',
         's1a.i3':'서버 로그: 사이트는 GitHub Pages 로 호스팅되며 Cloudflare 프록시를 거칩니다. IP · User-Agent 등 표준 웹 서버 로그가 일시적으로 기록될 수 있습니다.',
-        's1b.h':'데스크톱 앱 (YT Separator)',
-        's1b.i1':'수집 없음: 앱은 텔레메트리·분석·사용 기록을 원격 서버로 전송하지 않습니다.',
+        's1b.h':'데스크톱 앱 (underdaw)',
+        's1b.i1':'익명 사용 통계(끌 수 있음): 앱 개선을 위해 설치별 임의 ID·앱 버전·배포 형태·OS 이름·기능 사용 여부(첫 분리·스튜디오 진입·녹음·내보내기)만 하루 한 번 보냅니다. 곡·파일·장치 정보와 IP는 저장하지 않으며, 앱 설정 → 개인정보에서 끌 수 있습니다.',
+        's1b.i5':'오류 제보: 사용자가 직접 제보할 때만, 입력한 내용과 (선택 시) 진단 정보(앱 버전·화면·오디오 장치 상태·최근 오류)를 보냅니다. 남용 방지를 위해 IP는 해시로만 보관합니다.',
         's1b.i2':'로컬 저장: 라이브러리·설정·처리 결과는 사용자 컴퓨터에만 저장됩니다.',
         's1b.i3':'업데이트 확인: 새 버전 확인을 위해 GitHub Releases API 에 접속합니다 (IP · User-Agent 만).',
         's1b.i4':'YouTube 다운로드: 사용자가 요청한 URL 에서만 콘텐츠를 받아옵니다 (yt-dlp 사용). 어떤 URL을 처리했는지는 기록되지 않습니다.',
@@ -285,8 +287,9 @@
         's1a.i1':'Ads: Google AdSense collects standard visit and interaction data via advertising cookies and identifiers. Our own servers do not store this data.',
         's1a.i2':'Language preference: stored in your browser localStorage (yss:site-lang). Not transmitted to any server.',
         's1a.i3':'Server logs: the site is hosted on GitHub Pages and proxied by Cloudflare. Standard web-server logs (IP, User-Agent) may be temporarily recorded.',
-        's1b.h':'Desktop app (YT Separator)',
-        's1b.i1':'No telemetry: the app does not send any analytics or usage data to any remote server.',
+        's1b.h':'Desktop app (underdaw)',
+        's1b.i1':'Anonymous usage stats (can be turned off): to improve the app, it sends only a random per-install ID, app version, distribution type, OS name and whether features were used (first separation, studio open, recording, export), once a day. No song, file or device information and no IP address is stored. Turn it off in Settings → Privacy.',
+        's1b.i5':'Error reports: only when you send one yourself — what you typed plus, if you choose, diagnostics (app version, screen, audio device state, recent errors). IP addresses are kept only as a hash to prevent abuse.',
         's1b.i2':'Local storage: your library, settings and processed files are kept solely on your computer.',
         's1b.i3':'Update check: the app contacts the GitHub Releases API to check for new versions (IP and User-Agent only).',
         's1b.i4':'YouTube downloads: content is fetched only from URLs you explicitly request (via yt-dlp). Which URLs you process is not recorded.',

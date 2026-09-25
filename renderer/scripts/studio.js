@@ -4648,6 +4648,7 @@ export async function initStudio() {
   startEngine(false).catch(() => {});   // 탭에 들어오면 알아서 연결 (실패 시 버튼으로 재시도)
   if (_studioBooted) return;            // 아래는 스튜디오에 처음 들어왔을 때 한 번만
   _studioBooted = true;
+  api.telemetry?.step('studio_open');   // 익명 통계 — 처음 한 번만 실제로 보내진다(main 이 판단)
   startAutosave();
   startFxSnapshots();
   offerRecovery();                      // 지난번에 저장하지 못하고 끝났으면 여기서 제안한다

@@ -549,7 +549,17 @@ app.whenReady().then(() => {
     if (s.autoUpdateEnabled === false) return;
     checkForUpdates();
   }, 3000);
+  telemetry.start();
 });
+
+// ── 익명 사용 통계 (telemetry.js 설명 참고) ────────────────
+const { createTelemetry } = require('./telemetry');
+const telemetry = createTelemetry({
+  app, net, readSettings, isDev,
+  channel: () => (isWindowsStoreBuild() ? 'store' : isPortableBuild() ? 'portable' : 'nsis'),
+  osName: `${process.platform} ${require('os').release()}`,
+});
+ipcMain.handle('telemetry:step', (_ev, name) => { telemetry.step(String(name || '')); return true; });
 
 // ── Auto-updater ────────────────────────────────────────
 // electron-updater가 GitHub Releases에서 latest.yml + Setup.exe 조회.
@@ -1142,6 +1152,8 @@ function getEngine() {
     audioEngine = new AudioEngine();
     audioEngine.on('event', (m) => {
       if (m && (m.ev === 'exportDone' || m.ev === 'exportError')) engineExporting = false;
+      if (m && m.ev === 'take') telemetry.step('recording');
+      if (m && m.ev === 'exportDone') telemetry.step('export');
       try { mainWindow?.webContents.send('engine:event', m); } catch {}
     });
     audioEngine.on('log',   (s) => { try { mainWindow?.webContents.send('engine:event', { ev: 'log', msg: String(s) }); } catch {} });
@@ -2031,6 +2043,7 @@ ipcMain.handle('video:export', async (event, payload) => {
     try { fs.rmSync(outPath, { force: true }); } catch {}
     result = await runOnce(false);
   }
+  if (result && result.ok) telemetry.step('export');
   return result;
   } catch (e) {
     // 위 주석대로(필터그래프 조립은 과거에도 예상 못한 세그먼트 모양에 걸려 던진 적이
@@ -2735,6 +2748,7 @@ ipcMain.handle('library:register', (_ev, entry) => {
     items.push(rec);
   }
   writeLibrary(items);
+  telemetry.step('separation');
   return { ok: true, id: rec.id };
 });
 

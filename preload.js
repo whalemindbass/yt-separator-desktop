@@ -187,6 +187,10 @@ contextBridge.exposeInMainWorld('yssApi', {
     setTab:          (id, tab)         => ipcRenderer.invoke('library:setTab', id, tab),
   },
 
+  // 익명 사용 통계 — 사용 단계 도달 알림(main 의 telemetry.js 가 보낼지 판단)
+  telemetry: {
+    step: (name) => ipcRenderer.invoke('telemetry:step', name),
+  },
   // 연습 기록(사용 시간) — library.json 처럼 실제 파일에 저장(usageLog.json)
   usage: {
     load: ()     => ipcRenderer.invoke('usage:load'),
