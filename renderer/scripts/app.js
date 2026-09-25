@@ -114,6 +114,25 @@ function switchView(name) {
   document.getElementById('brand-home')?.classList.toggle('on', name === 'home');
 }
 $('brand-home').addEventListener('click', () => switchView('home'));
+
+// 첫 실행 안내 — 라이브러리가 비어 있는 동안만 "새 분리" 화면 위에 3단계를 보여준다.
+// 닫거나 곡이 하나라도 생기면 다시 안 뜬다(곡이 생긴 사용자는 이미 흐름을 안다).
+const FIRST_GUIDE_KEY = 'yss:firstGuideDone';
+async function initFirstGuide() {
+  const el = $('first-guide'); if (!el) return;
+  let done = false;
+  try { done = localStorage.getItem(FIRST_GUIDE_KEY) === '1'; } catch {}
+  if (done) return;
+  let n = 0;
+  try { n = (await api.library.list())?.length || 0; } catch { return; }
+  if (n > 0) { try { localStorage.setItem(FIRST_GUIDE_KEY, '1'); } catch {} return; }
+  el.hidden = false;
+  $('first-guide-close')?.addEventListener('click', () => {
+    el.hidden = true;
+    try { localStorage.setItem(FIRST_GUIDE_KEY, '1'); } catch {}
+  }, { once: true });
+}
+initFirstGuide();
 tabs.forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
 
 initReport();   // 오류 제보 (상단바 · 설정)

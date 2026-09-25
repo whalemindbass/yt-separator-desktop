@@ -289,6 +289,19 @@
       <h2 data-i18n="sep.heading">스템 분리</h2>
       <p class="muted" data-i18n="sep.subtext">영상·오디오를 악기별 스템으로 나눕니다. 처리는 전부 이 컴퓨터에서 이뤄집니다.</p>
 
+      <!-- 첫 실행 안내 — 라이브러리가 비어 있고 아직 닫지 않았을 때만(app.js initFirstGuide) -->
+      <section id="first-guide" class="first-guide" hidden>
+        <header>
+          <b data-i18n="guide.title">처음이세요? 이렇게 시작해 보세요</b>
+          <button id="first-guide-close" class="link-btn" type="button" data-i18n="guide.close">알겠어요</button>
+        </header>
+        <ol>
+          <li><span class="n">1</span><div><b data-i18n="guide.s1">곡 넣기</b><p data-i18n="guide.s1d">영상 주소를 붙여넣고 [다운로드]를 누르거나, [내 파일 분리]로 파일을 고르세요.</p></div></li>
+          <li><span class="n">2</span><div><b data-i18n="guide.s2">분리하기</b><p data-i18n="guide.s2d">[스템 분리 시작]을 누르면 이 컴퓨터에서 악기별로 나눠요. 모델은 4-stem 그대로 두면 돼요.</p></div></li>
+          <li><span class="n">3</span><div><b data-i18n="guide.s3">연습·녹음</b><p data-i18n="guide.s3d">끝나면 라이브러리에서 파트를 켜고 끄며 연습하고, 스튜디오에서 내 연주를 녹음하세요.</p></div></li>
+        </ol>
+      </section>
+
       <!-- 처리 방식 먼저 고르게 한다 — 한 곡씩 바로 결과를 보며 할지, 여러 개 모아 뒀다 한 번에
            돌릴지는 서로 화면 구성이 아예 달라서(단일=진행률+완료 카드, 일괄=대기열 목록)
            섞어 두면 지금 뭘 보고 있는 건지 헷갈린다. 아래는 고른 쪽만 보인다. -->
