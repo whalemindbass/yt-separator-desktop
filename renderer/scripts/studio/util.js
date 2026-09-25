@@ -150,6 +150,39 @@ export function buildWaveSvg(ch, color, N = 1400) {
     peaks[i] = p; rms[i] = cnt ? Math.sqrt(s2 / cnt) : 0;
     if (p > mx) mx = p;
   }
+  return wavePolySvg(peaks, rms, mx, N, color);
+}
+
+/**
+ * 미리 요약된 파형(버킷마다 피크·RMS — 영상편집은 메인 프로세스의 ffmpeg 가 파일을 흘려 읽으며
+ * 만든다)의 [s0, s1) 구간을 N 점으로 모아 buildWaveSvg 와 똑같은 모양의 SVG 로 그린다.
+ * 원본 샘플 전체를 렌더러 메모리에 올리지 않아도 된다(큰/긴 영상에서 렌더러 OOM 크래시가
+ * 났던 원인). N 이 구간 버킷 수보다 많으면(크게 확대) 같은 버킷을 여러 점이 나눠 쓴다.
+ */
+export function buildWaveSvgFromEnvelope(envPeaks, envRms, s0, s1, color, N = 1400) {
+  if (!envPeaks || !envRms) return '';
+  s0 = Math.max(0, s0 | 0);
+  s1 = Math.min(envPeaks.length, s1 | 0);
+  const len = s1 - s0;
+  if (len <= 0) return '';
+  let mx = 1e-6;
+  const peaks = new Float32Array(N), rms = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const a = s0 + Math.floor(i * len / N);
+    const b = Math.max(a + 1, s0 + Math.floor((i + 1) * len / N));
+    let p = 0, s2 = 0;
+    for (let j = a; j < b; j++) {
+      if (envPeaks[j] > p) p = envPeaks[j];
+      s2 += envRms[j] * envRms[j];
+    }
+    peaks[i] = p; rms[i] = Math.sqrt(s2 / (b - a));
+    if (p > mx) mx = p;
+  }
+  return wavePolySvg(peaks, rms, mx, N, color);
+}
+
+// 피크(흐린 외곽)·RMS(본체) 두 겹 폴리곤 + 가운데 선 — buildWaveSvg·buildWaveSvgFromEnvelope 공용
+function wavePolySvg(peaks, rms, mx, N, color) {
   const poly = (arr, scale) => {
     let a = '', b = '';
     for (let i = 0; i < N; i++) { const h = Math.min(1, arr[i] / mx) * 22 * scale; a += `${i},${(25 - h).toFixed(1)} `; }

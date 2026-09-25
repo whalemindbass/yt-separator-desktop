@@ -161,6 +161,27 @@ const expect = (label, got, want) => {
     expect('값 없으면 0          ', `${r5.bufferMs}/${r5.monitorMs}`, '0/0');
   }
 
+  console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
+  {
+    // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷
+    const P = new Float32Array(400), Rm = new Float32Array(400);
+    for (let i = 0; i < 200; i++) { P[i] = 0.8; Rm[i] = 0.5; }
+    const loud = U.buildWaveSvgFromEnvelope(P, Rm, 0, 200, '#fff', 100);
+    const quiet = U.buildWaveSvgFromEnvelope(P, Rm, 200, 400, '#fff', 100);
+    expect('svg 로 시작          ', loud.startsWith('<svg'), true);
+    expect('폴리곤 둘            ', (loud.match(/<polygon/g) || []).length, 2);
+    expect('viewBox = N          ', loud.includes('viewBox="0 0 100 50"'), true);
+    // 무음 구간은 중앙선(25)에서 안 벗어나고, 소리 구간은 꽉 찬다(자기 최대로 정규화 → 3.0/47.0)
+    expect('무음 구간은 평평     ', /\b(3\.0|47\.0)\b/.test(quiet), false);
+    expect('소리 구간은 꽉 참    ', loud.includes(',3.0 ') && loud.includes(',47.0 '), true);
+    // 크게 확대(버킷보다 점이 많음) — 같은 버킷을 나눠 써도 NaN 이 없어야 한다
+    const zoom = U.buildWaveSvgFromEnvelope(P, Rm, 10, 13, '#fff', 300);
+    expect('확대해도 NaN 없음    ', zoom.includes('NaN'), false);
+    expect('빈 구간은 빈 문자    ', U.buildWaveSvgFromEnvelope(P, Rm, 50, 50, '#fff'), '');
+    expect('범위 밖은 잘라냄     ', U.buildWaveSvgFromEnvelope(P, Rm, 390, 999, '#fff', 10).startsWith('<svg'), true);
+    expect('입력 없으면 빈 문자  ', U.buildWaveSvgFromEnvelope(null, null, 0, 10, '#fff'), '');
+  }
+
   console.log(`\n통과 ${pass} · 실패 ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('테스트 실패:', e); process.exit(1); });

@@ -1352,6 +1352,74 @@ ipcMain.handle('video:detectSilence', async (_ev, file, start, end, opts) => {
     });
   });
 });
+// 영상편집 파형 — 요약본(버킷마다 피크·RMS)만 만들어 넘긴다.
+// 예전엔 렌더러가 파일 전체를 fetch 로 메모리에 올린 뒤 decodeAudioData 로 비압축 PCM 까지
+// 통째로 풀어 뒀다 — 큰 영상(1.2GB 등)을 올리자마자 렌더러가 OOM 으로 죽었다(실사용 제보).
+// 여기선 ffmpeg 가 파일을 흘려 읽고(16kHz 모노로 줄여서) 버킷 단위로 바로 접어 버리므로,
+// 파일 크기·길이와 무관하게 요약본 크기(초당 400버킷 × 8바이트, 1시간 ≈ 11MB)만 남는다.
+// 초당 400 = 영상편집 최대 확대(400px/초)에서 픽셀 하나당 버킷 하나.
+const WAVE_ENV_RATE = 400;
+const WAVE_ENV_SR = 16000;
+const _waveEnvCache = new Map();   // `${file}:${mtime}:${size}` → Promise<결과> (최근 것 몇 개만)
+const WAVE_ENV_CACHE_MAX = 6;
+function computeWaveEnvelope(file) {
+  return new Promise((resolve) => {
+    const per = WAVE_ENV_SR / WAVE_ENV_RATE;   // 버킷 하나에 들어가는 샘플 수
+    let cap = WAVE_ENV_RATE * 600;              // 10분치로 시작해 모자라면 두 배씩
+    let peaks = new Float32Array(cap), rms = new Float32Array(cap);
+    let n = 0, cnt = 0, pk = 0, sq = 0, carry = null;
+    const push = () => {
+      if (n === cap) {
+        cap *= 2;
+        const p2 = new Float32Array(cap); p2.set(peaks); peaks = p2;
+        const r2 = new Float32Array(cap); r2.set(rms); rms = r2;
+      }
+      peaks[n] = pk; rms[n] = Math.sqrt(sq / cnt); n++;
+      cnt = 0; pk = 0; sq = 0;
+    };
+    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', file,
+      '-vn', '-ac', '1', '-ar', String(WAVE_ENV_SR), '-f', 's16le', '-'];
+    let proc;
+    try { proc = spawn(FFMPEG_BIN, args, { windowsHide: true }); }
+    catch (e) { return resolve({ ok: false, error: String(e.message || e) }); }
+    let stderr = '';
+    proc.stderr.on('data', (d) => { if (stderr.length < 4000) stderr += d; });
+    proc.stdout.on('data', (chunk) => {
+      // 16비트 샘플이 청크 경계에서 쪼개질 수 있다 — 남은 1바이트를 다음 청크 앞에 붙인다
+      let buf = carry ? Buffer.concat([carry, chunk]) : chunk;
+      const even = buf.length & ~1;
+      carry = even < buf.length ? buf.subarray(even) : null;
+      for (let i = 0; i < even; i += 2) {
+        const v = buf.readInt16LE(i) / 32768;
+        const a = v < 0 ? -v : v;
+        if (a > pk) pk = a;
+        sq += v * v;
+        if (++cnt === per) push();
+      }
+    });
+    proc.on('error', (e) => resolve({ ok: false, error: String(e.message || e) }));
+    proc.on('close', (code) => {
+      if (cnt > 0) push();   // 마지막 덜 찬 버킷
+      if (!n) return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.slice(-300)}` });
+      resolve({ ok: true, rate: WAVE_ENV_RATE, peaks: peaks.slice(0, n), rms: rms.slice(0, n) });
+    });
+  });
+}
+ipcMain.handle('video:waveEnvelope', async (_ev, file) => {
+  if (typeof file !== 'string') return { ok: false, error: '잘못된 경로' };
+  let st;
+  try { st = fs.statSync(file); } catch { return { ok: false, error: '파일 없음' }; }
+  const key = `${file}:${st.mtimeMs}:${st.size}`;
+  let job = _waveEnvCache.get(key);
+  if (!job) {
+    job = computeWaveEnvelope(file);
+    _waveEnvCache.set(key, job);
+    while (_waveEnvCache.size > WAVE_ENV_CACHE_MAX) _waveEnvCache.delete(_waveEnvCache.keys().next().value);
+    // 실패는 캐시하지 않는다 — 일시적인 문제(파일 잠김 등)였으면 다음에 다시 시도할 수 있게
+    job.then((r) => { if (!r.ok) _waveEnvCache.delete(key); });
+  }
+  return job;
+});
 // GPU(NVENC) 인코더 사용 가능 여부 — `ffmpeg -encoders` 목록에 h264_nvenc 가 있는지로
 // 판단한다(실제 하드웨어/드라이버 없이도 목록엔 있을 수 있다 — 그건 export 쪽 실패 시
 // libx264 로 자동 재시도하는 걸로 대응한다, 여기선 그냥 "시도해볼 만한지"만 빠르게 본다).

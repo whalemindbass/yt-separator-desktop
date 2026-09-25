@@ -104,6 +104,7 @@ contextBridge.exposeInMainWorld('yssApi', {
   },
   video: {
     probeAudio: (file) => ipcRenderer.invoke('video:probeAudio', file),
+    waveEnvelope: (file) => ipcRenderer.invoke('video:waveEnvelope', file),
     export: (payload) => ipcRenderer.invoke('video:export', payload),
     exportCancel: () => ipcRenderer.invoke('video:exportCancel'),
     gpuInfo: () => ipcRenderer.invoke('video:gpuInfo'),
