@@ -4792,8 +4792,8 @@ body { background: var(--bg) !important; }
    틈(--gap-block)을 줘서 공간감을 만든다. 상단 탭바·툴바·하단 트랜스포트 바는 VS Code 의
    타이틀바/상태바처럼 가장자리까지 평평하게 그대로 둔다 — 블록은 그 사이에만 뜬다.
    틈 색(--gutter)은 블록보다 한 단계 어둡게, 블록 테두리는 그 경계만 살짝 잡아 준다. */
-:root, :root[data-theme="dark"] { --gutter: #07090c; --gap-block: 6px; --r-block: 8px; --block-border: rgba(255,255,255,.16); }
-:root[data-theme="light"] { --gutter: #dce2e7; --block-border: rgba(15,20,30,.16); }
+:root, :root[data-theme="dark"] { --gutter: #07090c; --gap-block: 6px; --r-block: 8px; --block-border: rgba(255,255,255,.10); }
+:root[data-theme="light"] { --gutter: #dce2e7; --block-border: rgba(15,20,30,.12); }
 
 /* 스튜디오 */
 .daw-midrow { gap: var(--gap-block); padding: var(--gap-block); background: var(--gutter); }
