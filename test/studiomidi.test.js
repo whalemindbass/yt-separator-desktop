@@ -53,6 +53,15 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   expect('HUD 표시', await js(`!!document.getElementById('daw-kb-hud')`), true);
   expect('하단 ⌨ 버튼 켜짐', await js(`document.getElementById('st-kb').classList.contains('on')`), true);
   expect('레인 ⌨ 배경 = 강조색(초록)', await js(`(() => { const b = document.querySelector('.daw-lane-instr [data-m="kb"]'); const a = document.createElement('i'); a.style.color = 'var(--accent)'; document.body.appendChild(a); const acc = getComputedStyle(a).color; a.remove(); return getComputedStyle(b).backgroundColor === acc; })()`), true);
+  expect('키보드 가이드 45키', await js(`document.querySelectorAll('#daw-kb-hud .kbk').length`), 45);
+  expect('가이드: Z=C3 흰건반, S=C# 검은건반', await js(`(() => { const z = document.querySelector('.kbk[data-code="KeyZ"]'), s = document.querySelector('.kbk[data-code="KeyS"]');
+    return z.classList.contains('white') && z.querySelector('i').textContent === 'C3' && s.classList.contains('black') && s.querySelector('i').textContent === 'C#'; })()`), true);
+  expect('가이드: A 는 매핑 없음', await js(`document.querySelector('.kbk[data-code="KeyA"]').classList.contains('none')`), true);
+  await key(null, 'Z', 'keyDown'); await wait(80);
+  expect('누르는 키 불 들어옴', await js(`document.querySelector('.kbk[data-code="KeyZ"]').classList.contains('down')`), true);
+  if (process.env.SHOT) fs.writeFileSync(process.env.SHOT, (await win.webContents.capturePage()).toPNG());
+  await key(null, 'Z', 'keyUp'); await wait(80);
+  expect('떼면 불 꺼짐', await js(`document.querySelector('.kbk[data-code="KeyZ"]').classList.contains('down')`), false);
   sent.length = 0;
   await tap('Z'); await tap('Q'); await tap('S');
   const ons = cmds('noteOn').map(c => c.pitch), offs = cmds('noteOff').map(c => c.pitch);
@@ -63,6 +72,7 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   await key(null, 'Right', 'keyDown'); await key(null, 'Right', 'keyUp');
   await tap('Z');
   expect('→ 옥타브 올림: Z→60', cmds('noteOn').map(c => c.pitch).join(','), '60');
+  expect('가이드도 옥타브 따라감: Z=C4', await js(`document.querySelector('.kbk[data-code="KeyZ"] i').textContent`), 'C4');
   await key(null, 'Left', 'keyDown'); await key(null, 'Left', 'keyUp');
 
   // 연주 중 녹음 트랙을 고르면 연주 모드가 꺼진다(그 트랙엔 건반이 없다)

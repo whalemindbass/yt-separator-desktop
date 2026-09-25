@@ -4880,10 +4880,28 @@ body { background: var(--bg) !important; }
 .daw-kb-btn.on, .st-kb.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 /* 레인 버튼 그룹의 .daw-ms.on(트랙색 14%) 규칙이 더 구체적이라 위 규칙을 덮는다 — M/S 처럼 같은 급으로 올린다 */
 .daw-btn-grp .daw-ms[data-m="kb"].on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
-.daw-kb-hud { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px;
-  padding: 6px 12px; border-radius: 999px; background: color-mix(in srgb, var(--elev) 92%, transparent); border: 1px solid var(--border-mid);
+.daw-kb-hud { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 8; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 10px 12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--elev) 94%, transparent); border: 1px solid var(--border-mid);
   box-shadow: var(--shadow-pop); font-size: 12px; color: var(--tx-2); pointer-events: none; white-space: nowrap; }
-.daw-kb-hud b { color: var(--accent); font-weight: 700; }
+.daw-kb-hud .kbg-bar { display: flex; align-items: center; gap: 10px; }
+.daw-kb-hud .kbg-bar b { color: var(--accent); font-weight: 700; }
 .daw-kb-hud .k { color: var(--tx-3); font-size: 11px; }
+/* 키보드 가이드 — 키 하나 24px, 줄마다 실제 배열처럼 --off(키 폭 배수)만큼 밀린다 */
+.kbg { --kw: 24px; display: flex; flex-direction: column; gap: 3px; }
+.kbg-row { display: flex; gap: 3px; padding-left: calc(var(--off) * (var(--kw) + 3px)); }
+.kbk { width: var(--kw); height: 26px; border-radius: 4px; border: 1px solid var(--border); background: var(--sunken, var(--bg));
+  display: flex; flex-direction: column; justify-content: space-between; padding: 2px 3px; box-sizing: border-box; }
+.kbk b { font: 600 8.5px/1 var(--sans); color: var(--tx-4); }
+.kbk i { font: 700 8px/1 var(--mono); font-style: normal; text-align: right; }
+.kbk.none { opacity: .45; }
+/* 흰건반·검은건반은 테마와 무관하게 실제 피아노 색 — 테마 글자색으로 칠하면 라이트 테마에서 뒤집힌다 */
+.kbk.white { background: #eef0f3; border-color: #c9ced6; }
+.kbk.white b { color: #7a828e; }
+.kbk.white i { color: #1a1e25; }
+.kbk.black { background: #1b1f26; border-color: #3a414c; }
+.kbk.black b { color: #8c95a1; }
+.kbk.black i { color: #4fd6a8; }
+.kbk.down { background: var(--accent) !important; border-color: var(--accent) !important; transform: translateY(1px); }
+.kbk.down b, .kbk.down i { color: var(--accent-fg) !important; }
 .daw-fx-builtin { cursor: default; opacity: .9; }
 .daw-fx-builtin .m { font-size: 10.5px; color: var(--tx-3); margin-top: 2px; }

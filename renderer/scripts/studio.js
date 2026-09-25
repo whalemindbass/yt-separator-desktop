@@ -2465,7 +2465,7 @@ function syncKbButtons() {
     btn.classList.toggle('on', on); btn.setAttribute('aria-pressed', String(on));
   });
 }
-function kbReleaseAll() { for (const h of _kbHeld.values()) api.engine.noteOff(h.track, h.pitch); _kbHeld.clear(); }
+function kbReleaseAll() { for (const [code, h] of _kbHeld) { api.engine.noteOff(h.track, h.pitch); markKbKey(code, false); } _kbHeld.clear(); }
 async function setKbMode(on) {
   if (on && !kbTargetTrack()) return;   // 악기 트랙을 선택했을 때만(버튼도 그때만 켜진다)
   _kbOn = !!on;
@@ -2474,14 +2474,33 @@ async function setKbMode(on) {
   renderKbHud();
   if (_kbOn) try { document.activeElement?.blur?.(); } catch {}   // 슬라이더에 포커스가 남아 있으면 화살표가 거기로 간다
 }
+// 실제 키보드 배열 가이드 — 어느 키가 어느 음인지 보여 주고, 누르는 키는 불이 들어온다.
+// 줄마다 실제 키보드처럼 조금씩 밀려 있다(단위 = 키 폭).
+const KB_GUIDE_ROWS = [
+  { off: 0,    keys: [['Digit1', '1'], ['Digit2', '2'], ['Digit3', '3'], ['Digit4', '4'], ['Digit5', '5'], ['Digit6', '6'], ['Digit7', '7'], ['Digit8', '8'], ['Digit9', '9'], ['Digit0', '0'], ['Minus', '-'], ['Equal', '=']] },
+  { off: 0.5,  keys: [['KeyQ', 'Q'], ['KeyW', 'W'], ['KeyE', 'E'], ['KeyR', 'R'], ['KeyT', 'T'], ['KeyY', 'Y'], ['KeyU', 'U'], ['KeyI', 'I'], ['KeyO', 'O'], ['KeyP', 'P'], ['BracketLeft', '['], ['BracketRight', ']']] },
+  { off: 0.75, keys: [['KeyA', 'A'], ['KeyS', 'S'], ['KeyD', 'D'], ['KeyF', 'F'], ['KeyG', 'G'], ['KeyH', 'H'], ['KeyJ', 'J'], ['KeyK', 'K'], ['KeyL', 'L'], ['Semicolon', ';'], ['Quote', "'"]] },
+  { off: 1.25, keys: [['KeyZ', 'Z'], ['KeyX', 'X'], ['KeyC', 'C'], ['KeyV', 'V'], ['KeyB', 'B'], ['KeyN', 'N'], ['KeyM', 'M'], ['Comma', ','], ['Period', '.'], ['Slash', '/']] },
+];
+function kbGuideHtml() {
+  return KB_GUIDE_ROWS.map(row => `<div class="kbg-row" style="--off:${row.off}">${row.keys.map(([code, cap]) => {
+    const n = kbNoteFor(code, _kbOct);
+    if (n == null) return `<span class="kbk none" data-code="${code}"><b>${esc(cap)}</b></span>`;
+    const nm = noteName(n), black = nm.includes('#');
+    const label = nm.startsWith('C') && !black ? nm : nm.replace(/-?\d+$/, '');   // 옥타브 숫자는 C 에만
+    return `<span class="kbk ${black ? 'black' : 'white'}${_kbHeld.has(code) ? ' down' : ''}" data-code="${code}"><b>${esc(cap)}</b><i>${label}</i></span>`;
+  }).join('')}</div>`).join('');
+}
+function markKbKey(code, down) { document.querySelector(`#daw-kb-hud .kbk[data-code="${code}"]`)?.classList.toggle('down', down); }
 function renderKbHud() {
   let hud = $('daw-kb-hud');
   if (!_kbOn) { hud?.remove(); return; }
   if (!hud) { hud = document.createElement('div'); hud.id = 'daw-kb-hud'; hud.className = 'daw-kb-hud'; document.querySelector('.daw-tracks')?.appendChild(hud); }
   const t = kbTargetTrack();
   const lo = kbNoteFor('KeyZ', _kbOct), hi = kbNoteFor('BracketRight', _kbOct);
-  hud.innerHTML = `<b>⌨ ${esc(t ? selTrackLabel(t.id) : '')}</b><span>${lo != null ? noteName(lo) : ''}–${hi != null ? noteName(hi) : 'G9'}</span>`
-    + `<span class="k">Z–M · Q–U</span><span class="k">←/→ ${tr('studio.midi.octave')}</span><span class="k">Esc ${tr('studio.midi.off')}</span>`;
+  hud.innerHTML = `<div class="kbg">${kbGuideHtml()}</div>`
+    + `<div class="kbg-bar"><b>⌨ ${esc(t ? selTrackLabel(t.id) : '')}</b><span>${lo != null ? noteName(lo) : ''}–${hi != null ? noteName(hi) : 'G9'}</span>`
+    + `<span class="k">←/→ ${tr('studio.midi.octave')}</span><span class="k">Esc ${tr('studio.midi.off')}</span></div>`;
 }
 function kbStudioActive() { const main = document.querySelector('main[data-view="studio"]'); return !!(main && !main.hidden && _started); }
 const KB_SWALLOW = /^(Key|Digit|Comma|Period|Slash|Semicolon|Quote|Bracket|Minus|Equal|Backslash|Backquote)/;
@@ -2510,11 +2529,13 @@ function wireKeyboardPlay() {
     const tt = kbTargetTrack(); if (!tt) return;
     _kbHeld.set(e.code, { track: tt.id, pitch });
     api.engine.noteOn(tt.id, pitch, 0.8);
+    markKbKey(e.code, true);
   }, true);
   document.addEventListener('keyup', (e) => {
     const h = _kbHeld.get(e.code); if (!h) return;
     _kbHeld.delete(e.code);
     api.engine.noteOff(h.track, h.pitch);
+    markKbKey(e.code, false);
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
   window.addEventListener('blur', () => { if (_kbHeld.size) kbReleaseAll(); });
