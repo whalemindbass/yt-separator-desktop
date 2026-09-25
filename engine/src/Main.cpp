@@ -2,6 +2,7 @@
 //   stdin  : 한 줄당 JSON 명령 { "cmd": "...", ... }
 //            loadStems{paths[]} play stop seek{pos} recordArm{file?} recordStop
 //            scanPlugins loadFx{index} showEditor quit
+//            noteOn{track,pitch,vel} noteOff{track,pitch} midiClip{id,trackId,start,len,notes[[on,len,pitch,vel]]} midiClipRemove{id}
 //   stdout : 한 줄당 JSON 이벤트 { "ev": "..." }
 //            ready device plugins fx stems pos take error
 //   stderr : 사람용 진단 로그
@@ -189,6 +190,97 @@ static void applyClipFades (AudioBuffer<float>& buf, int64 pos, int64 len, int64
 }
 
 
+// ── 악기 트랙(type 2) — 내장 신스 ─────────────────────────────────────
+// 악기 VST(VSTi)가 없어도 타이핑 키보드로 바로 소리가 나게 하는 기본 음색. 사인 배음 몇 개에
+// 음이 높을수록 빨리 줄어드는 감쇠를 걸어 부드러운 건반(일렉 피아노 비슷한) 소리를 낸다.
+// 체인 첫 슬롯이 악기 VST 면 이건 쓰지 않는다(그 VSTi 가 MIDI 를 받아 소리를 낸다).
+struct KeysSound : public SynthesiserSound
+{
+    bool appliesToNote (int) override    { return true; }
+    bool appliesToChannel (int) override { return true; }
+};
+struct KeysVoice : public SynthesiserVoice
+{
+    bool canPlaySound (SynthesiserSound* s) override { return dynamic_cast<KeysSound*> (s) != nullptr; }
+    void startNote (int note, float vel, SynthesiserSound*, int) override
+    {
+        const double sr = getSampleRate() > 0 ? getSampleRate() : 44100.0;
+        inc = MathConstants<double>::twoPi * MidiMessage::getMidiNoteInHertz (note) / sr;
+        ph = 0.0; env = 1.0f; rel = 1.0f; releasing = false; atk = 0;
+        atkLen = jmax (1, (int) (sr * 0.004));
+        level = 0.22f * jlimit (0.05f, 1.0f, vel);
+        const double decaySec = jlimit (0.5, 4.0, 2.6 * std::pow (0.5, (note - 48) / 24.0));
+        decay    = (float) std::exp (-1.0 / (sr * decaySec));
+        relDecay = (float) std::exp (-1.0 / (sr * 0.12));
+    }
+    void stopNote (float, bool allowTailOff) override
+    {
+        if (allowTailOff) releasing = true;
+        else { level = 0.0f; clearCurrentNote(); }
+    }
+    void pitchWheelMoved (int) override {}
+    void controllerMoved (int, int) override {}
+    void renderNextBlock (AudioBuffer<float>& out, int start, int num) override
+    {
+        if (level <= 0.0f) return;
+        const int chans = out.getNumChannels();
+        for (int i = 0; i < num; ++i)
+        {
+            const float a = atk < atkLen ? (float) atk++ / (float) atkLen : 1.0f;
+            const float e2 = env * env;
+            const float v = (float) (0.62 * std::sin (ph) + 0.26 * e2 * std::sin (2.0 * ph) + 0.12 * e2 * env * std::sin (3.0 * ph));
+            const float smp = v * level * env * rel * a;
+            for (int c = 0; c < chans; ++c) out.addSample (c, start + i, smp);
+            ph += inc; if (ph > MathConstants<double>::twoPi) ph -= MathConstants<double>::twoPi;
+            env *= decay;
+            if (releasing) rel *= relDecay;
+            if (env * rel < 0.0004f) { level = 0.0f; clearCurrentNote(); break; }
+        }
+    }
+    double ph = 0.0, inc = 0.0;
+    float env = 1.0f, rel = 1.0f, decay = 0.9999f, relDecay = 0.999f, level = 0.0f;
+    bool releasing = false;
+    int atk = 0, atkLen = 1;
+};
+static std::unique_ptr<Synthesiser> makeKeysSynth (double sr)
+{
+    auto syn = std::make_unique<Synthesiser>();
+    for (int i = 0; i < 24; ++i) syn->addVoice (new KeysVoice());
+    syn->addSound (new KeysSound());
+    syn->setCurrentPlaybackSampleRate (sr > 0 ? sr : 44100.0);
+    return syn;
+}
+
+// MIDI 클립 — 노트 위치·길이는 전부 장치 샘플 단위(렌더러가 BPM/그리드로 계산해 보낸다).
+// on 은 클립 시작 기준. 클립 길이를 넘는 노트는 클립 끝에서 끊는다.
+struct MidiNote { int64 on = 0; int64 len = 0; int pitch = 60; float vel = 0.8f; };
+struct MidiClipPlay
+{
+    int64 id = 0;
+    int trackId = 0;
+    int64 start = 0;
+    int64 len = 0;
+    std::vector<MidiNote> notes;
+};
+// [from, from+n) 구간에 걸리는 노트 on/off 를 buf 에 샘플 오프셋으로 넣는다(재생·내보내기 공용).
+static void addClipMidi (const MidiClipPlay& c, int64 from, int n, MidiBuffer& buf)
+{
+    const int64 to = from + n;
+    if (c.start >= to || c.start + c.len <= from) return;
+    for (const auto& nt : c.notes)
+    {
+        if (nt.on >= c.len) continue;
+        const int64 s0 = c.start + nt.on;
+        const int64 s1 = c.start + jmin (nt.on + jmax<int64> (1, nt.len), c.len);
+        if (s0 >= from && s0 < to)
+            buf.addEvent (MidiMessage::noteOn (1, jlimit (0, 127, nt.pitch), (uint8) jlimit (1, 127, (int) std::lround (nt.vel * 127.0f))), (int) (s0 - from));
+        if (s1 >= from && s1 < to)
+            buf.addEvent (MidiMessage::noteOff (1, jlimit (0, 127, nt.pitch)), (int) (s1 - from));
+    }
+}
+// MIDI 녹음 이벤트(오디오 스레드가 기록) — vel 0 = note off
+struct MidiRecEvent { int64 pos; int pitch; float vel; };
+
 // 트랙별 녹음 세션 — armed 된 트랙마다 하나씩(녹음 중일 때만) 만든다. 여러 트랙을 동시에
 // 각자 다른 파일·다른 입력 채널로 녹음하기 위함(예전엔 이게 엔진 전역에 하나뿐이라 트랙
 // 하나만 녹음 가능했다 — 실사용 문의: "인풋1/인풋2를 트랙 두 개에 동시에 따로 녹음 가능?").
@@ -237,6 +329,15 @@ struct RecTrack
     std::atomic<bool> armed { false };
     // 이 트랙의 진행 중인 녹음 세션(armed 상태에서 recordArm 이후에만 존재).
     std::unique_ptr<RecSession> rec;
+    // ── 악기 트랙(type 2) 전용 ──
+    std::unique_ptr<Synthesiser> synth;       // 내장 신스 — 체인 첫 슬롯이 악기 VST 가 아닐 때 소리를 낸다
+    MidiMessageCollector liveIn;              // 타이핑 키보드 실시간 노트(message 스레드 → 오디오 스레드)
+    MidiBuffer liveBlock, blockMidi;          // 오디오 스레드 스크래치(생성/aboutToStart 에서 ensureSize)
+    std::atomic<bool> panic { false };        // 정지·시크 시 울리던 음 끊기
+    std::atomic<bool> midiRecOn { false };    // MIDI 녹음 중(recordArm ~ recordStop)
+    std::atomic<int64> midiRecStart { -1 };   // 녹음이 실제로 시작된 타임라인 위치(첫 재생 블록)
+    SpinLock midiRecLock;
+    std::vector<MidiRecEvent> midiRecEvents;  // 미리 reserve — 오디오 스레드는 용량 안에서만 push
 };
 
 // 센드 버스 A/B — 트랙에서 보낸 신호를 모아 자체 FX 를 태우고 마스터로 합류.
@@ -352,14 +453,14 @@ static bool configurePlugin (AudioPluginInstance& inst, double sr, int block, in
 // 채널 수만큼 넓은 wideBuf 로 복사 → processBlock → 결과의 첫 2채널만 buf 로 되돌린다.
 // wideOut 이 1(모노 리턴)이면 양쪽에 같은 신호를 채운다.
 static void runWide (AudioPluginInstance& plugin, int wideIn, int wideOut, AudioBuffer<float>& wideBuf,
-                      AudioBuffer<float>& buf, int n)
+                      AudioBuffer<float>& buf, int n, MidiBuffer* midi = nullptr)
 {
     wideBuf.setSize (jmax (wideIn, wideOut), n, false, false, true);
     wideBuf.clear();
     for (int c = 0; c < jmin (2, wideIn); ++c)
         wideBuf.copyFrom (c, 0, buf, jmin (c, buf.getNumChannels() - 1), 0, n);
     MidiBuffer mm;
-    plugin.processBlock (wideBuf, mm);
+    plugin.processBlock (wideBuf, midi != nullptr ? *midi : mm);
     for (int c = 0; c < jmin (2, wideOut); ++c) buf.copyFrom (c, 0, wideBuf, c, 0, n);
     if (wideOut == 1 && buf.getNumChannels() > 1) buf.copyFrom (1, 0, buf, 0, 0, n);
 }
@@ -427,7 +528,8 @@ public:
     // 시크·재생/정지 전환은 파형이 순간적으로 튀어 '틱' 소리가 난다.
     // 다음 블록에서 직전 출력 값과 매끄럽게 이어붙이도록 디클릭을 예약한다.
     void play()  { declickPending = true; playing = true;  std::cerr << "[engine] play @" << playhead.load() << "\n"; }
-    void stop()  { declickPending = true; playing = false; std::cerr << "[engine] stop @" << playhead.load() << "\n"; }
+    void stop()  { declickPending = true; playing = false; panicInstruments(); std::cerr << "[engine] stop @" << playhead.load() << "\n"; }
+    void panicInstruments() { for (auto& rt : recTracks) if (rt->type == 2) rt->panic = true; }
     void seek0() { setPos (0); std::cerr << "[engine] seek 0\n"; }
 
     void setPos (int64 p)
@@ -435,6 +537,7 @@ public:
         declickPending = true;
         playhead = p;
         for (auto& s : stems) seekStem (*s, p);
+        panicInstruments();   // 재생 중 시크하면 울리던 클립 노트의 off 가 영영 안 온다
     }
 
     // ---- 녹음 ----
@@ -485,6 +588,18 @@ public:
         { const ScopedLock sl (takesLock); rt->rec = std::move (sess); }   // 포인터 교체 — 오디오 스레드와 경합 지점
         activeRecCount.fetch_add (1, std::memory_order_relaxed);
         std::cerr << "[engine] armed (rec on next play block) track " << trackId << "\n";
+    }
+
+    // 악기 트랙 MIDI 녹음 시작 — 오디오 파일 대신 노트 이벤트를 모은다. 실제 시작 위치는
+    // 첫 재생 블록에서 정한다(오디오 녹음 recordedStart 와 같은 규칙).
+    void armMidiRecord (int trackId)
+    {
+        auto* rt = findRec (trackId);
+        if (rt == nullptr || rt->type != 2 || ! rt->armed.load()) return;
+        { const SpinLock::ScopedLockType sl (rt->midiRecLock); rt->midiRecEvents.clear(); }
+        rt->midiRecStart = -1;
+        rt->midiRecOn = true;
+        std::cerr << "[engine] midi rec armed track " << trackId << "\n";
     }
 
     void stopRecord()
@@ -584,6 +699,7 @@ public:
             o->setProperty ("index", i);
             o->setProperty ("name", scanned[i].name);
             o->setProperty ("manufacturer", scanned[i].manufacturerName);
+            o->setProperty ("instrument", scanned[i].isInstrument);
             list.add (var (o));
         }
         auto* r = ev ("plugins");
@@ -607,6 +723,7 @@ public:
             o->setProperty ("name", s->plugin->getName());
             o->setProperty ("hasEditor", s->plugin->hasEditor());
             o->setProperty ("bypass", s->bypass.load());
+            o->setProperty ("instrument", s->desc.isInstrument);
             list.add (var (o));
         }
         auto* r = ev ("fxChain");
@@ -644,6 +761,7 @@ public:
             o->setProperty ("name", s->plugin->getName());
             o->setProperty ("hasEditor", s->plugin->hasEditor());
             o->setProperty ("bypass", s->bypass.load());
+            o->setProperty ("instrument", s->desc.isInstrument);
             if (s->wideOut > 0) { o->setProperty ("wideIn", s->wideIn); o->setProperty ("wideOut", s->wideOut); }
             list.add (var (o));
         }
@@ -679,7 +797,21 @@ public:
         slot->desc = scanned[index];
         slot->wideIn = wIn; slot->wideOut = wOut;
         slot->plugin = std::move (inst);
-        { const ScopedLock sl (*lk); chain->push_back (std::move (slot)); }
+        // 악기 트랙에 악기 VST 를 넣으면 체인 맨 앞(소리 원천 자리)으로 — 이미 악기가 있으면 교체한다.
+        // 악기 VST 는 입력 오디오를 안 받으니 뒤에 붙으면 앞 신호를 지워버린다.
+        std::unique_ptr<FxSlot> replaced;
+        {
+            const ScopedLock sl (*lk);
+            auto* rt = findRec (trackId);
+            if (rt != nullptr && rt->type == 2 && slot->desc.isInstrument)
+            {
+                if (! chain->empty() && (*chain)[0] && (*chain)[0]->desc.isInstrument) { replaced = std::move ((*chain)[0]); chain->erase (chain->begin()); }
+                chain->insert (chain->begin(), std::move (slot));
+                rt->panic = true;
+            }
+            else chain->push_back (std::move (slot));
+        }
+        replaced.reset();   // 락 밖에서 — 에디터 창 소멸은 message 스레드에서
         recomputePdc();
         emitChainId (trackId, *chain);
     }
@@ -703,6 +835,7 @@ public:
 
     bool  isPlaying()   const { return playing.load(); }
     bool  isMonitorOn() const { return monitorInputOn.load(); }
+    bool  hasInstrument() const { for (auto& t : recTracks) if (t->type == 2) return true; return false; }   // 정지 중에도 치면 미터가 움직여야 한다
     int64 getPlayhead() const { return playhead.load(); }
 
     // ---- 오디오 디바이스 설정 ----
@@ -1132,12 +1265,14 @@ public:
         auto t = std::make_unique<RecTrack>();
         const int newId = nextRecId++;
         t->id = newId; t->type = type;
+        if (type == 2) initInstrument (*t);
         // 새 트랙 기본 입력 채널 = 지금 엔진 전역 설정(오디오 설정 모달 값) — 트랙마다 따로
         // 바꾸기 전까진 그 값을 그대로 물려받는다.
         t->inMode = inMode.load(); t->inChL = inChL.load(); t->inChR = inChR.load();
         const bool noneArmedYet = firstArmedTrackId() == 0;
         { const ScopedLock sl (takesLock); recTracks.push_back (std::move (t)); }
-        if (type == 0 && noneArmedYet) { auto* nt = findRec (newId); if (nt) nt->armed = true; }   // 녹음 트랙만, 아무도 armed 아니면 자동 arm
+        if (type == 0 && noneArmedYet) { auto* nt = findRec (newId); if (nt) nt->armed = true; }
+        if (type == 2) { auto* nt = findRec (newId); if (nt) nt->armed = true; }   // 악기 트랙은 만들자마자 녹음 대상(치면 바로 기록)   // 녹음 트랙만, 아무도 armed 아니면 자동 arm
         recomputeSolos();   // 다른 모든 트랙/스템 변경 지점은 이걸 부른다 — 여기만 빠져 있었다
         emitRecTracks();
     }
@@ -1149,18 +1284,74 @@ public:
             const ScopedLock sl (takesLock);
             takesPlay.erase (std::remove_if (takesPlay.begin(), takesPlay.end(),
                                  [id] (auto& t) { return t->trackId == id; }), takesPlay.end());
+            midiClips.erase (std::remove_if (midiClips.begin(), midiClips.end(),
+                                 [id] (auto& c) { return c->trackId == id; }), midiClips.end());
             recTracks.erase (std::remove_if (recTracks.begin(), recTracks.end(),
                                  [id] (auto& t) { return t->id == id; }), recTracks.end());
         }
         recomputeSolos();
         emitRecTracks();
     }
+    // 악기 트랙 준비 — 내장 신스·실시간 입력 큐·스크래치. message 스레드(트랙 생성/장치 시작)에서만.
+    void initInstrument (RecTrack& t)
+    {
+        const double sr = deviceSampleRate > 0 ? deviceSampleRate : 44100.0;
+        t.synth = makeKeysSynth (sr);
+        t.liveIn.reset (sr);
+        t.liveBlock.ensureSize (2048);
+        t.blockMidi.ensureSize (8192);
+        t.midiRecEvents.reserve (65536);
+    }
+    // ── 타이핑 키보드 실시간 노트 ──
+    void noteEvent (int trackId, int pitch, float vel)
+    {
+        auto* rt = findRec (trackId);
+        if (rt == nullptr || rt->type != 2) return;
+        auto m = vel > 0.0f ? MidiMessage::noteOn (1, jlimit (0, 127, pitch), jlimit (0.01f, 1.0f, vel))
+                            : MidiMessage::noteOff (1, jlimit (0, 127, pitch));
+        m.setTimeStamp (Time::getMillisecondCounterHiRes() * 0.001);
+        rt->liveIn.addMessageToQueue (m);
+    }
+    // ── MIDI 클립 (렌더러가 전체 내용을 보내 갈아끼운다) ──
+    void setMidiClip (const var& c)
+    {
+        auto clip = std::make_unique<MidiClipPlay>();
+        clip->id = (int64) (double) c["id"];
+        clip->trackId = (int) c["trackId"];
+        clip->start = jmax<int64> (0, (int64) (double) c["start"]);
+        clip->len = jmax<int64> (1, (int64) (double) c["len"]);
+        if (auto* a = c["notes"].getArray())
+            for (auto& v : *a)
+                if (auto* q = v.getArray(); q != nullptr && q->size() >= 3)
+                {
+                    MidiNote nt;
+                    nt.on = jmax<int64> (0, (int64) (double) (*q)[0]);
+                    nt.len = jmax<int64> (1, (int64) (double) (*q)[1]);
+                    nt.pitch = jlimit (0, 127, (int) (*q)[2]);
+                    nt.vel = q->size() > 3 ? jlimit (0.01f, 1.0f, (float) (double) (*q)[3]) : 0.8f;
+                    clip->notes.push_back (nt);
+                }
+        std::sort (clip->notes.begin(), clip->notes.end(), [] (const MidiNote& a, const MidiNote& b) { return a.on < b.on; });
+        const ScopedLock sl (takesLock);
+        for (auto& old : midiClips) if (old->id == clip->id) { old = std::move (clip); return; }
+        midiClips.push_back (std::move (clip));
+    }
+    void removeMidiClip (int64 id)
+    {
+        {
+            const ScopedLock sl (takesLock);
+            midiClips.erase (std::remove_if (midiClips.begin(), midiClips.end(),
+                                 [id] (auto& c) { return c->id == id; }), midiClips.end());
+        }
+        panicInstruments();
+    }
+    void clearMidiClips() { { const ScopedLock sl (takesLock); midiClips.clear(); } panicInstruments(); }
     // 오디오 트랙은 녹음 대상 불가. 라디오(단일 선택)가 아니라 토글 — 여러 트랙을 동시에
     // arm 할 수 있다(실사용 문의: 인풋1/인풋2 동시 녹음). 이미 녹음 중인 트랙을 arm 해제하면
     // 그 녹음도 같이 끝낸다.
     void armRec (int id)
     {
-        auto* rt = findRec (id); if (rt == nullptr || rt->type != 0) return;
+        auto* rt = findRec (id); if (rt == nullptr || rt->type == 1) return;
         const bool next = ! rt->armed.load();
         rt->armed = next;
         if (! next) finishRecordingFor (*rt);
@@ -1171,7 +1362,7 @@ public:
     {
         recTracksGen = gen;
         for (auto& rt : recTracks) clearChain (*rt);
-        { const ScopedLock sl (takesLock); takesPlay.clear(); recTracks.clear(); }
+        { const ScopedLock sl (takesLock); takesPlay.clear(); midiClips.clear(); recTracks.clear(); }
         if (auto* a = list.getArray())
             for (auto& v : *a)
             {
@@ -1182,6 +1373,7 @@ public:
                 if (! v["pan"].isVoid())  t->pan  = jlimit (-1.0f, 1.0f, (float) (double) v["pan"]);
                 if (! v["mute"].isVoid()) t->mute = (bool) v["mute"];
                 if (! v["solo"].isVoid()) t->solo = (bool) v["solo"];
+                if (t->type == 2) { initInstrument (*t); t->armed = true; }
                 applySends (*t, v["sends"]);
                 t->inMode = inMode.load(); t->inChL = inChL.load(); t->inChR = inChR.load();
                 const ScopedLock sl (takesLock);
@@ -1495,7 +1687,10 @@ public:
         struct TRK { float gain; bool audible; std::vector<WideFx> fx; std::vector<TR> takes;
                      bool autoOn; std::vector<AutoPoint> autoPts; int latency = 0;
                      AudioBuffer<float> pdc; int pdcW = 0; int pdcD = 0; float send[kNumBuses] {};
-                     float panL = 1.0f, panR = 1.0f; };
+                     float panL = 1.0f, panR = 1.0f;
+                     // 악기 트랙 — 클립 스냅샷 + (체인 첫 슬롯이 악기 VST 가 아니면) 내장 신스
+                     bool instrument = false, vstInstr = false;
+                     std::unique_ptr<Synthesiser> synth; std::vector<MidiClipPlay> clips; MidiBuffer midi; };
         std::vector<TRK> trks;
         {
             const bool trackSolo = mineOnly ? anyRecSolo.load() : anySolo;   // 내 녹음만이면 스템 솔로 무시
@@ -1510,6 +1705,7 @@ public:
                 {   // 위 스템 FX 와 같은 이유로 감싼다 — 녹음 트랙 FX 가 죽으면 그 트랙만이 아니라
                     // export 전체(스템까지 포함해 이미 쓴 파일)를 날리는 게 더 나쁘다.
                     const ScopedLock fl (rt->fxLock);
+                    const bool slot0Instr = rt->type == 2 && ! rt->chain.empty() && rt->chain[0] && rt->chain[0]->desc.isInstrument;
                     for (auto& slot : rt->chain)
                     {
                         if (! slot || ! slot->plugin || slot->bypass.load()) continue;
@@ -1523,6 +1719,7 @@ public:
                             if (! configurePlugin (*inst, sr, block, wIn, wOut)) continue;
                             inst->setStateInformation (mb.getData(), (int) mb.getSize());
                             tk.latency += jmax (0, inst->getLatencySamples());
+                            if (slot0Instr && slot.get() == rt->chain[0].get()) tk.vstInstr = true;   // 첫 번째로 들어가니 fx[0] 이 곧 악기
                             tk.fx.push_back ({ std::move (inst), wIn, wOut, {} });
                         }
                         catch (const std::exception& ex)
@@ -1537,6 +1734,19 @@ public:
                     TR tr; tr.buf = t->buf; tr.start = t->start; tr.len = t->len; tr.inOffset = t->inOffset; tr.fadeIn = t->fadeIn; tr.fadeOut = t->fadeOut;   // 스냅샷
                     total = jmax (total, t->start + t->len);
                     tk.takes.push_back (std::move (tr));
+                }
+                if (rt->type == 2)
+                {
+                    tk.instrument = true;
+                    const bool slot0Instr = ! rt->chain.empty() && rt->chain[0] && rt->chain[0]->desc.isInstrument;
+                    if (! slot0Instr) tk.synth = makeKeysSynth (sr);   // 실시간과 같은 규칙 — 악기 VST 자리면 내장 신스 안 씀
+                    tk.midi.ensureSize (8192);
+                    for (auto& c : midiClips)
+                    {
+                        if (c->trackId != rt->id) continue;
+                        tk.clips.push_back (*c);   // 스냅샷
+                        total = jmax (total, c->start + c->len + (int64) (sr * 0.5));   // 마지막 음 릴리즈 꼬리
+                    }
                 }
                 trks.push_back (std::move (tk));
             }
@@ -1700,13 +1910,23 @@ public:
                     }
                     any = true;
                 }
-                if (! any && tk.fx.empty()) continue;
+                if (tk.instrument)
+                {
+                    tk.midi.clear();
+                    for (auto& c : tk.clips) addClipMidi (c, pos, n, tk.midi);
+                    if (tk.synth) tk.synth->renderNextBlock (tbuf, tk.midi, 0, n);
+                }
+                else if (! any && tk.fx.empty()) continue;
                 {
                     AudioBuffer<float> pb (tbuf.getArrayOfWritePointers(), 2, n);
+                    bool firstFx = true;
                     for (auto& f : tk.fx)
                     {
-                        if (f.wideOut > 0) runWide (*f.plugin, f.wideIn, f.wideOut, f.wideBuf, pb, n);
-                        else { MidiBuffer mm; f.plugin->processBlock (pb, mm); }
+                        MidiBuffer none;
+                        MidiBuffer& mb = (firstFx && tk.vstInstr) ? tk.midi : none;
+                        firstFx = false;
+                        if (f.wideOut > 0) runWide (*f.plugin, f.wideIn, f.wideOut, f.wideBuf, pb, n, &mb);
+                        else f.plugin->processBlock (pb, mb);
                     }
                 }
                 if (tk.pdcD > 0) applyDelayLine (tbuf, n, tk.pdc, tk.pdcW, tk.pdcD);
@@ -1784,6 +2004,7 @@ public:
 
         prepareStems (block);
         for (auto& rt : recTracks) { const ScopedLock sl (rt->fxLock); for (auto& s : rt->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
+        for (auto& rt : recTracks) if (rt->type == 2) { if (rt->synth) rt->synth->setCurrentPlaybackSampleRate (deviceSampleRate); rt->liveIn.reset (deviceSampleRate); }
         for (auto& st : stems) { const ScopedLock sl (st->fxLock); for (auto& s : st->chain) if (s && s->plugin) s->plugin->prepareToPlay (deviceSampleRate, block); }
         // PDC 링버퍼 — 최대 1초까지 보정. 오디오 스레드에서 절대 재할당하지 않도록 여기서 확보
         pdcCapacity = (int) (deviceSampleRate * 1.0) + block + 8;
@@ -2038,10 +2259,19 @@ public:
                     const float g = (audible ? fader : 0.0f) * mg;   // 페이더는 FX 뒤(post-FX)
                     float pL, pR; panGains (rt->pan.load(), pL, pR);
                     const float tgtL = g * pL, tgtR = g * pR;
-                    if (rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;
+                    // 악기 트랙은 뮤트여도 건너뛰지 않는다 — 건너뛰면 그동안 온 note off 를 놓쳐
+                    // 뮤트를 풀었을 때 음이 끝없이 이어진다.
+                    if (rt->type != 2 && rt->curGainL == 0.0f && rt->curGainR == 0.0f && tgtL == 0.0f && tgtR == 0.0f) continue;
 
                     fxBuf.setSize (2, numSamples, false, false, true);   // 플러그인 구성(2in/2out)과 일치
                     fxBuf.clear();
+
+                    if (rt->type == 2)
+                    {
+                        renderInstrumentTrack (*rt, numSamples, phStart, phRead);
+                    }
+                    else
+                    {
 
                     // 테이크·입력은 유니티로 버스에 모음 (게인은 FX 뒤에 적용). 메모리 버퍼에서 직접(디스크 I/O 없음)
                     if (playing.load())
@@ -2096,6 +2326,7 @@ public:
                                     else { MidiBuffer mm; s->plugin->processBlock (fxBuf, mm); }
                                 }
                     }
+                    }   // type != 2
                     // post-FX 페이더 + 팬(L/R 결합 램프) + peak
                     const float* rtL = fxBuf.getReadPointer (0);
                     const float* rtR = fxBuf.getReadPointer (jmin (1, fxBuf.getNumChannels() - 1));
@@ -2298,11 +2529,107 @@ public:
         }
     }
 
+    // 악기 트랙 한 블록 — (정지/시크 패닉) + 실시간 노트 + 클립 노트 → 악기(VSTi 또는 내장 신스) → 나머지 FX.
+    // 결과는 fxBuf 에 담긴다(이후 페이더·팬·미터·센드는 다른 트랙과 똑같이). takesLock 안에서 불린다.
+    void renderInstrumentTrack (RecTrack& rt, int numSamples, int64 phStart, int64 phRead)
+    {
+        auto& midi = rt.blockMidi;
+        midi.clear();
+        if (rt.panic.exchange (false))
+        {
+            midi.addEvent (MidiMessage::allNotesOff (1), 0);
+            midi.addEvent (MidiMessage::allSoundOff (1), 0);
+            if (rt.synth) rt.synth->allNotesOff (1, false);
+        }
+        rt.liveBlock.clear();
+        rt.liveIn.removeNextBlockOfMessages (rt.liveBlock, numSamples);
+        const bool isPlaying = playing.load();
+        if (! rt.liveBlock.isEmpty())
+        {
+            // MIDI 녹음 — 치는 순간 들리던 소리는 출력 지연만큼 전에 만든 것이라 그만큼 당겨 적는다
+            if (rt.midiRecOn.load() && isPlaying)
+            {
+                if (rt.midiRecStart.load() < 0) rt.midiRecStart = phStart;
+                const SpinLock::ScopedTryLockType sl (rt.midiRecLock);
+                if (sl.isLocked())
+                    for (const auto meta : rt.liveBlock)
+                    {
+                        const auto m = meta.getMessage();
+                        if (! m.isNoteOnOrOff()) continue;
+                        if (rt.midiRecEvents.size() >= rt.midiRecEvents.capacity()) break;
+                        const float vel = m.isNoteOn() ? m.getFloatVelocity() : 0.0f;
+                        rt.midiRecEvents.push_back ({ phStart + meta.samplePosition - outLatSamp, m.getNoteNumber(), vel });
+                    }
+            }
+            midi.addEvents (rt.liveBlock, 0, numSamples, 0);
+        }
+        else if (rt.midiRecOn.load() && isPlaying && rt.midiRecStart.load() < 0)
+            rt.midiRecStart = phStart;
+        if (isPlaying)
+        {
+            // 클립은 오디오 테이크처럼 미리 읽되(phRead), PDC 로 늦춰야 할 만큼은 이벤트 위치를 뒤로 민다
+            const int64 from = phRead - (int64) rt.pdcDelay.load();
+            for (auto& c : midiClips)
+                if (c->trackId == rt.id) addClipMidi (*c, from, numSamples, midi);
+        }
+
+        const ScopedTryLock fl (rt.fxLock);
+        const bool locked = fl.isLocked();
+        const bool vstInstr = locked && ! rt.chain.empty() && rt.chain[0] && rt.chain[0]->plugin && rt.chain[0]->desc.isInstrument;
+        if (! vstInstr && rt.synth) rt.synth->renderNextBlock (fxBuf, midi, 0, numSamples);
+        if (! locked) return;
+        bool first = true;
+        for (auto& s : rt.chain)
+        {
+            const bool isInstr = first && vstInstr;
+            first = false;
+            if (! s || ! s->plugin || s->bypass.load()) continue;
+            MidiBuffer empty;
+            MidiBuffer& mb = isInstr ? midi : empty;
+            if (s->wideOut > 0) runWide (*s->plugin, s->wideIn, s->wideOut, s->wideBuf, fxBuf, numSamples, &mb);
+            else s->plugin->processBlock (fxBuf, mb);
+        }
+    }
+
+    // MIDI 녹음 마무리 — 모은 on/off 를 노트로 짝지어 midiTake 이벤트로 보낸다(클립 생성은 렌더러 몫).
+    void finishMidiRecording (RecTrack& rt)
+    {
+        if (! rt.midiRecOn.exchange (false)) return;
+        std::vector<MidiRecEvent> evs;
+        { const SpinLock::ScopedLockType sl (rt.midiRecLock); evs.swap (rt.midiRecEvents); rt.midiRecEvents.reserve (65536); }
+        const int64 start = rt.midiRecStart.exchange (-1);
+        const int64 endPos = playhead.load();
+        Array<var> notes;
+        int64 openOn[128]; float openVel[128];
+        for (int i = 0; i < 128; ++i) openOn[i] = -1;
+        auto close = [&] (int p, int64 at)
+        {
+            if (openOn[p] < 0) return;
+            Array<var> n; n.add ((double) openOn[p]); n.add ((double) jmax<int64> (1, at - openOn[p])); n.add (p); n.add (openVel[p]);
+            notes.add (var (n));
+            openOn[p] = -1;
+        };
+        for (auto& e : evs)
+        {
+            const int p = jlimit (0, 127, e.pitch);
+            if (e.vel > 0.0f) { close (p, e.pos); openOn[p] = e.pos; openVel[p] = e.vel; }
+            else close (p, e.pos);
+        }
+        for (int p = 0; p < 128; ++p) close (p, jmax (endPos, openOn[p] + 1));   // 누른 채 정지하면 정지 위치에서 끊는다
+        auto* o = ev ("midiTake");
+        o->setProperty ("trackId", rt.id);
+        o->setProperty ("start", (double) (start >= 0 ? jmax<int64> (0, start - outLatSamp) : -1));
+        o->setProperty ("end", (double) endPos);
+        o->setProperty ("notes", var (notes));
+        emit (var (o));
+    }
+
 private:
     // 트랙 하나의 녹음 세션을 마무리(있으면) — writer flush+close, take 이벤트 하나 발행.
     // armRecord(재시작 전 정리)/armRec(arm 해제)/removeRecTrack/stopRecord/소멸자에서 부른다.
     void finishRecordingFor (RecTrack& rt)
     {
+        if (rt.type == 2) { finishMidiRecording (rt); return; }
         std::unique_ptr<RecSession> sess;
         { const ScopedLock sl (takesLock); sess = std::move (rt.rec); }   // 포인터만 짧게 잠그고 뺀다
         if (sess == nullptr) return;
@@ -2409,6 +2736,7 @@ private:
 
     // 녹음 테이크 재생
     std::vector<std::unique_ptr<TakePlay>> takesPlay;
+    std::vector<std::unique_ptr<MidiClipPlay>> midiClips;   // 악기 트랙 클립 — takesLock 으로 보호
     CriticalSection takesLock;
 
     // 부가: 레벨/튜너/메트로놈
@@ -2458,7 +2786,7 @@ public:
         { auto* o = ev ("level"); o->setProperty ("peak", engine.inputLevel());
           o->setProperty ("chans", var (engine.inputChannelLevels())); emit (var (o)); }
         // 트랙 미터 — 재생 중 or 모니터링 중 + 2틱=10Hz. JSON 스팸이 pos 이벤트 정체시켜 영상 싱크 반복 스냅 방지
-        if ((engine.isPlaying() || engine.isMonitorOn()) && (tick % 2 == 0))
+        if ((engine.isPlaying() || engine.isMonitorOn() || engine.hasInstrument()) && (tick % 2 == 0))
         {
             Array<var> list;
             const bool anyLevel = engine.collectMeters (list);
@@ -2509,8 +2837,15 @@ static void dispatch (Engine& engine, const var& c)
         {
             engine.armRecord (engine.firstArmedTrackId(), File (c["file"].toString()));
         }
+        if (auto* mt = c["midiTracks"].getArray())   // 악기 트랙은 파일 없이 노트만 모은다
+            for (auto& v : *mt) engine.armMidiRecord ((int) v);
     }
     else if (cmd == "recordStop")  engine.stopRecord();
+    else if (cmd == "noteOn")      engine.noteEvent ((int) c["track"], (int) c["pitch"], c["vel"].isVoid() ? 0.8f : (float) (double) c["vel"]);
+    else if (cmd == "noteOff")     engine.noteEvent ((int) c["track"], (int) c["pitch"], 0.0f);
+    else if (cmd == "midiClip")    engine.setMidiClip (c);
+    else if (cmd == "midiClipRemove") engine.removeMidiClip ((int64) (double) c["id"]);
+    else if (cmd == "midiClear")   engine.clearMidiClips();
     else if (cmd == "recTrackSetInput") engine.setRecTrackInput ((int) c["id"], c["mode"], c["chL"], c["chR"]);
     else if (cmd == "takeRemove")  engine.removeTake ((int64) (double) c["id"]);
     else if (cmd == "takeClear")   engine.clearTakes();
