@@ -11,15 +11,25 @@
  *   npm run release -- --no-bump    # 현재 버전 그대로 재빌드/재업로드
  *   npm run release -- --no-git     # 커밋/푸시 스킵 (dist 재발행만)
  *   npm run release -- --skip-tests  # 테스트 건너뛰기 (권장하지 않음)
+ *   npm run release -- --notes notes.md   # 릴리즈 노트를 채운 채로 공개(권장)
  *
  * 하는 일:
  *   1) 로컬 clean 확인 (변경사항 있으면 중단)
  *   2) package.json 버전 bump
  *   3) 버전 커밋 + main push
  *   4) dist/ 잔재 정리 (latest.yml, *.blockmap)
- *   5) electron-builder 로 빌드 + GitHub Releases 업로드
- *   6) 릴리즈 assets 검증 → latest.yml 누락 시 수동 업로드
- *   7) 결과 URL 출력
+ *   5) electron-builder 로 빌드만(업로드는 안 함)
+ *   6) 릴리즈를 초안(draft)으로 찾거나 만든다 — 같은 태그 중복이 있으면 정리
+ *   7) 에셋 업로드 + 정합성 검증
+ *   8) 노트를 채우고 초안을 공개 — 이때 처음으로 "최신 릴리즈"가 된다
+ *
+ * 업로드를 electron-builder 에 맡기지 않는 이유: --publish always 는 NSIS·포터블 퍼블리셔가
+ * 동시에 돌면서 둘 다 "릴리즈가 없으니 만든다"를 시도한다. 대개 한쪽이 422 로 져서
+ * electron-builder 가 비정상 종료 → 매 릴리즈마다 NSIS 를 한 번 더 빌드했고, v1.9.21 에선
+ * 둘 다 이겨서 같은 태그의 릴리즈가 두 개 생겼다(그러면 GitHub 가 둘 다 수정을 거부해
+ * 노트조차 못 채운다). 어차피 이 스크립트가 에셋 4개를 전부 다시 올리고 있었다.
+ * 초안으로 만들어 두고 다 올린 뒤에 공개하면, 올리는 도중에 앱이 업데이트를 확인해서
+ * latest.yml 404 를 보는 틈도 사라진다.
  */
 
 const { execSync } = require('child_process');
@@ -38,6 +48,8 @@ const bumpKind  = args.find(a => ['patch', 'minor', 'major'].includes(a)) || 'pa
 const skipBump  = args.includes('--no-bump');
 const skipGit   = args.includes('--no-git');
 const skipBuild = args.includes('--no-build');
+const notesIdx  = args.indexOf('--notes');
+const notesFile = notesIdx >= 0 ? args[notesIdx + 1] : null;
 
 // ── 유틸 ────────────────────────────────────────
 const C = { r: '\x1b[31m', g: '\x1b[32m', y: '\x1b[33m', c: '\x1b[36m', dim: '\x1b[2m', x: '\x1b[0m' };
@@ -105,6 +117,25 @@ function uploadAsset(releaseId, name, filePath) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /**
+ * 태그로 릴리즈를 찾는다(초안 포함 — /releases/tags/{tag} 는 공개된 것만 돌려준다).
+ * 같은 태그가 여러 개면 GitHub 가 그중 어느 것도 수정하지 못하게 막으므로(422 already_exists)
+ * 에셋이 가장 많은(같으면 먼저 만든) 하나만 남기고 나머지를 지운다. 없으면 초안으로 만든다.
+ */
+async function getOrCreateDraftRelease(tag, title) {
+  const list = await ghApi(`/repos/${REPO}/releases?per_page=50`);
+  const same = (list || []).filter(r => r.tag_name === tag)
+    .sort((a, b) => ((b.assets || []).length - (a.assets || []).length) || (a.id - b.id));
+  for (const dup of same.slice(1)) {
+    await ghApi(`/repos/${REPO}/releases/${dup.id}`, 'DELETE');
+    warn(`같은 태그의 중복 릴리즈 ${dup.id} 삭제 (에셋 ${(dup.assets || []).length}개)`);
+  }
+  if (same[0]) return same[0];
+  const created = await ghApi(`/repos/${REPO}/releases`, 'POST', { tag_name: tag, name: title, draft: true });
+  done(`릴리즈 ${tag} 초안 생성`);
+  return created;
+}
+
+/**
  * 180MB 업로드는 중간에 끊긴다 ('socket hang up'). 끊기면 릴리즈에 옛 파일이 남거나
  * 아무것도 없는 채로 latest.yml 만 올라가 자동 업데이트가 죽는다. 그래서 매 시도마다
  * 같은 이름의 에셋을 지우고 새로 올린 뒤, 크기가 로컬과 같은지 확인될 때까지 반복한다.
@@ -170,7 +201,10 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
   const version = pkg.version;
   const tag = `v${version}`;
+  const product = pkg.build?.productName || pkg.name;
   done(`대상 버전: ${tag}`);
+  // 노트 파일은 빌드 전에 확인한다 — 몇 분 빌드한 뒤에 경로 오타로 멈추면 아깝다
+  if (notesFile && !fs.existsSync(notesFile)) die(`노트 파일이 없어요: ${notesFile}`);
 
   // 3) 버전 커밋 + push
   if (!skipGit && !skipBump) {
@@ -191,25 +225,25 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
     }
   }
 
-  // 5) 빌드 + electron-builder publish
+  // 5) 빌드만 — 업로드는 아래에서 이 스크립트가 직접 한다(맨 위 설명 참고)
   if (!skipBuild) {
-    log('electron-builder 빌드 + 업로드 (몇 분 소요)...');
+    log('electron-builder 빌드 (몇 분 소요)...');
     try {
-      sh('npx electron-builder --win --publish always', {
+      sh('npx electron-builder --win --publish never', {
         env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
       });
     } catch (e) {
-      warn(`electron-builder 종료 코드 비정상 (일부 asset 업로드는 성공했을 수 있음). 검증 계속...`);
+      warn(`electron-builder 종료 코드 비정상. 산출물 확인 계속...`);
     }
   }
 
-  // 6) 릴리즈 존재 확인
-  log(`릴리즈 ${tag} 검증...`);
+  // 6) 릴리즈 준비 — 초안으로(다 올리고 검증한 뒤에 공개한다)
+  log(`릴리즈 ${tag} 준비...`);
   let release;
   try {
-    release = await ghApi(`/repos/${REPO}/releases/tags/${tag}`);
+    release = await getOrCreateDraftRelease(tag, `${product} ${tag}`);
   } catch (e) {
-    die(`릴리즈 ${tag} 를 찾을 수 없어요: ${e.message}`);
+    die(`릴리즈 ${tag} 준비 실패: ${e.message}`);
   }
   if (!release?.id) die(`릴리즈 ${tag} id 획득 실패`);
 
@@ -240,7 +274,6 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   //    비대칭이었다 — 그래서 이제 둘 다 무조건 덮어쓴다(업로드 자체는 몇 초면 끝난다).
   const localLatestYml = fs.readFileSync(localLatest, 'utf-8');
   const latestSize = parseInt((localLatestYml.match(/^\s*size:\s*(\d+)/m) || [])[1] || '0', 10);
-  const product          = pkg.build?.productName || pkg.name;
   const expectedSetup    = `${product}-Setup.exe`;
   const expectedBlockmap = `${expectedSetup}.blockmap`;
   const expectedPortable = `${product}.exe`;
@@ -280,13 +313,23 @@ if (!token) die('GH_TOKEN 환경변수가 필요합니다.\n  PowerShell: $env:G
   }
   done('에셋 정합성 확인');
 
-  // 릴리즈 노트가 비어 있으면 앱의 업데이트 창이 엉뚱한 것을 보여준다.
-  //   본문이 비면 electron-updater 가 GitHub atom 피드로 떨어지고, 거기서는 태그가 가리키는
-  //   커밋 메시지가 나온다 — releases 레포의 아무 커밋 메시지가 사용자에게 패치 노트로 뜬다.
-  //   실제로 v1.4.10 에서 "docs: point download links..." 가 그렇게 노출됐다.
-  if (!String(final.body || '').trim()) {
+  // 9) 노트 채우고 공개 — 초안은 이 순간 처음으로 "최신 릴리즈"가 된다.
+  //   노트가 비어 있으면 앱의 업데이트 창이 엉뚱한 것을 보여준다: 본문이 비면 electron-updater
+  //   가 GitHub atom 피드로 떨어지고, 거기서는 태그가 가리키는 커밋 메시지가 나온다 — releases
+  //   레포의 아무 커밋 메시지가 사용자에게 패치 노트로 뜬다(v1.4.10 에서 실제로 노출됐다).
+  const patch = { name: `${product} ${tag}` };
+  if (notesFile) patch.body = fs.readFileSync(notesFile, 'utf-8');
+  if (final.draft) { patch.draft = false; patch.make_latest = 'true'; }
+  const published = await ghApi(`/repos/${REPO}/releases/${release.id}`, 'PATCH', patch);
+  if (final.draft) done(`릴리즈 ${tag} 공개`);
+  // 공개 직후 "최신"이 정말 이 릴리즈를 가리키는지 — 자동 업데이트와 다운로드 링크가 전부 여길 본다
+  try {
+    const latest = await ghApi(`/repos/${REPO}/releases/latest`);
+    if (latest?.id !== release.id) warn(`최신 릴리즈가 ${latest?.tag_name} 를 가리킨다 — ${tag} 가 아님. 확인 필요`);
+  } catch (e) { warn(`최신 릴리즈 확인 실패: ${e.message}`); }
+  if (!String(published?.body || '').trim()) {
     warn(`릴리즈 노트가 비어 있다 — 앱 업데이트 창에 엉뚱한 커밋 메시지가 뜬다. 지금 채워라:`);
-    console.log(`   ${C.dim}gh release edit ${tag} --repo ${REPO} --title "underdaw ${tag}" --notes-file <파일>${C.x}`);
+    console.log(`   ${C.dim}gh release edit ${tag} --repo ${REPO} --notes-file <파일>   (다음부턴 npm run release -- --notes <파일>)${C.x}`);
   }
 
   console.log();
