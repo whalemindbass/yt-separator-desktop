@@ -4417,6 +4417,7 @@ function wire() {
   }, { passive: false });
 
   $('daw-tscroll').addEventListener('scroll', () => updatePlayhead(_lastSec));
+  wireHScroll();
 
   // 오디오 파일 임포트 — 버튼 + 타임라인 드래그드롭
   $('st-file-menu').addEventListener('click', (e) => {
@@ -4648,6 +4649,29 @@ function wire() {
 }
 
 let _studioBooted = false;
+// 트랙 하단 가로 스크롤바 — #daw-tscroll 의 기본 가로바는 sticky 트랙 컨트롤 칸 밑까지 깔려서
+// 숨겨 두고(CSS), 컨트롤 칸 오른쪽부터 시작하는 별도 바(#daw-hscroll)를 둔다. 폭·위치는
+// 타임라인 쪽이 기준이고, 바를 끌면 거꾸로 타임라인을 옮긴다. 서로 scroll 이벤트를 부르니
+// 같은 값이면 쓰지 않아서 되먹임이 멈춘다.
+function wireHScroll() {
+  const sc = $('daw-tscroll'), bar = $('daw-hscroll'), inner = $('daw-hscroll-inner');
+  if (!sc || !bar || !inner) return;
+  const sync = () => {
+    const over = sc.scrollWidth - sc.clientWidth;
+    bar.hidden = over <= 1;
+    if (bar.hidden) return;
+    bar.style.marginRight = (sc.offsetWidth - sc.clientWidth) + 'px';   // 세로 스크롤바 폭만큼 비켜서 끝을 맞춘다
+    inner.style.width = (sc.scrollWidth - HEAD_W) + 'px';
+    if (bar.scrollLeft !== sc.scrollLeft) bar.scrollLeft = sc.scrollLeft;
+  };
+  sc.addEventListener('scroll', sync);
+  bar.addEventListener('scroll', () => { if (sc.scrollLeft !== bar.scrollLeft) sc.scrollLeft = bar.scrollLeft; });
+  const ro = new ResizeObserver(sync);
+  ro.observe(sc);
+  if ($('daw-lanes')) ro.observe($('daw-lanes'));
+  sync();
+}
+
 export async function initStudio() {
   wire();
   startEngine(false).catch(() => {});   // 탭에 들어오면 알아서 연결 (실패 시 버튼으로 재시도)

@@ -3010,6 +3010,9 @@ body { display: flex; flex-direction: column; }
 .daw-tscroll { flex: 1; min-height: 0; overflow: auto; position: relative; }
 /* 가로 스크롤은 휠로 하므로 가로 스크롤바 숨김(컨트롤 컬럼 침범 방지). 세로바는 유지 */
 .daw-tscroll::-webkit-scrollbar:horizontal { height: 0; }
+/* 대신 쓰는 하단 가로바 — 트랙 컨트롤 칸(172px) 오른쪽부터 */
+.daw-hscroll { flex: none; height: 10px; margin-left: 172px; overflow-x: auto; overflow-y: hidden; }
+.daw-hscroll > div { height: 1px; }
 .daw-tscroll.drop-hi { box-shadow: inset 0 0 0 2px var(--accent); }
 .daw-tscroll.drop-hi::after { content: "여기에 놓아 임포트"; position: absolute; inset: 0; display: grid; place-items: center; font: 700 13px var(--sans); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); pointer-events: none; z-index: 20; }
 .daw-lanes { position: relative; display: flex; flex-direction: column; min-height: 100%; }
