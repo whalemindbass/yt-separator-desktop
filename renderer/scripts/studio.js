@@ -1631,10 +1631,12 @@ function updatePlayIcon() {
   if (pb) { pb.classList.toggle('on', _playing); pb.setAttribute('aria-pressed', String(_playing)); }
 }
 function playStudio() {
+  setTimeout(() => _pr?.setPlaying(_playing), 0);   // 피아노롤 재생 버튼 표시 동기화
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
 }
 function stopStudio() {
+  setTimeout(() => _pr?.setPlaying(_playing), 0);   // 피아노롤 재생 버튼 표시 동기화
   _playing = false; api.engine.stop(); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
   if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
   clearRecLive();
@@ -2523,9 +2525,21 @@ function openMidiEditor(id) {
     },
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
+    onPlay: () => {
+      if (_playing) { stopStudio(); return; }
+      const c = find(); if (!c) return;
+      if (!_recArmed) { api.engine.seek(secToSamples(c.start)); syncVideo(c.start); updatePlayhead(c.start); }
+      playStudio();
+    },
+    // 임시 솔로 — 엔진에만 보낸다. 트랙의 저장된 솔로 상태(rt.solo)는 안 바꾸고, 끌 때 그 값으로 되돌린다.
+    onSolo: (on) => {
+      const c = find(); if (!c) return;
+      const rt = _recTracks.find(r => r.id === c.trackId); if (!rt) return;
+      api.engine.recTrack(rt.id, { solo: on ? true : !!rt.solo });
+    },
     onClose: () => { _pr = null; },
   });
-  if (_pr) { const c = find(); _pr.setPlayhead((_lastSec || 0) - c.start); }
+  if (_pr) { const c = find(); _pr.setPlayhead((_lastSec || 0) - c.start); _pr.setPlaying(_playing); }
 }
 // S = 재생선 위치에서 선택한 MIDI 클립을 둘로. 걸쳐 있는 노트는 앞 클립에서 자르고 뒤 클립엔 안 넣는다.
 function splitSelectedMidi() {

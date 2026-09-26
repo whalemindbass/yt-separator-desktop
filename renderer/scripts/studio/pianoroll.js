@@ -36,6 +36,11 @@ export function openPianoRoll(o) {
       <button class="btn btn-sm pr-q" type="button"></button>
       <button class="pr-x" type="button" title="${o.tr('studio.pr.close')}">✕</button>
     </div>
+    <div class="pr-bar">
+      <button class="pr-play" type="button" title="${o.tr('studio.pr.playTitle')}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 3.2v9.6L12.5 8z"/></svg></button>
+      <button class="pr-solo" type="button" aria-pressed="false" title="${o.tr('studio.pr.soloTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"/><rect x="2.2" y="9" width="2.6" height="4.2" rx="1"/><rect x="11.2" y="9" width="2.6" height="4.2" rx="1"/></svg><span>${o.tr('studio.pr.solo')}</span></button>
+      <span class="pr-time"></span>
+    </div>
     <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div></div></div></div>
     <div class="pr-vel"><div class="pr-vel-lbl">${o.tr('studio.pr.velocity')}</div><div class="pr-vel-view"><div class="pr-vel-in"></div></div></div>`;
   o.host.appendChild(root);
@@ -49,14 +54,31 @@ export function openPianoRoll(o) {
   const pitchAt = (y) => Math.max(0, Math.min(127, 127 - Math.floor(y / ROW)));
 
   // 건반 — C 에만 이름을 쓴다. 누르면 그 음을 들려준다.
-  $q('.pr-keys').innerHTML = Array.from({ length: 128 }, (_, i) => {
-    const p = 127 - i, nm = noteName(p), black = nm.includes('#');
-    return `<div class="pr-key ${black ? 'b' : 'w'}${nm.startsWith('C') && !black ? ' c' : ''}" data-p="${p}">${nm.startsWith('C') && !black ? nm : ''}</div>`;
-  }).join('');
+  // 실제 피아노처럼 — 흰건반은 옥타브(12줄 = 168px)를 7등분한 폭으로 깔고, 검은건반은 자기 줄
+  // 높이 그대로 60% 폭으로 그 위에 얹는다. 줄(음 하나 = 14px)과 격자 줄은 그대로 맞는다.
+  {
+    const keys = $q('.pr-keys');
+    keys.style.height = (128 * ROW) + 'px';
+    const WHITE = [0, 2, 4, 5, 7, 9, 11], WH = (12 * ROW) / 7;
+    let html = '';
+    for (let c = 0; c <= 120; c += 12) {
+      const blockBottom = (127 - c) * ROW + ROW;   // 이 옥타브 C 줄의 아래 끝
+      WHITE.forEach((off, i) => {
+        const p = c + off; if (p > 127) return;
+        const top = blockBottom - (i + 1) * WH;
+        html += `<div class="pr-key w${off === 0 ? ' c' : ''}" data-p="${p}" style="top:${top.toFixed(2)}px;height:${WH.toFixed(2)}px">${off === 0 ? `<span>${noteName(p)}</span>` : ''}</div>`;
+      });
+    }
+    for (let p = 0; p <= 127; p++) {
+      if (!noteName(p).includes('#')) continue;
+      html += `<div class="pr-key b" data-p="${p}" style="top:${rowOf(p) * ROW}px;height:${ROW}px"></div>`;
+    }
+    keys.innerHTML = html;
+  }
   $q('.pr-keys').addEventListener('pointerdown', (e) => {
     const k = e.target.closest('.pr-key'); if (!k) return;
-    const p = Number(k.dataset.p); o.onPreview(p, true);
-    const up = () => { o.onPreview(p, false); document.removeEventListener('pointerup', up); };
+    const p = Number(k.dataset.p); o.onPreview(p, true); k.classList.add('on');
+    const up = () => { o.onPreview(p, false); k.classList.remove('on'); document.removeEventListener('pointerup', up); };
     document.addEventListener('pointerup', up);
   });
 
@@ -255,11 +277,17 @@ export function openPianoRoll(o) {
   }
   document.addEventListener('keydown', onKey, true);
   $q('.pr-x').addEventListener('click', () => close());
+  // 재생 바 — 재생은 클립 처음부터(연주 중이면 정지). "이 트랙만"은 피아노롤이 열려 있는 동안만의 임시 솔로.
+  const playBtn = $q('.pr-play'), soloBtn = $q('.pr-solo');
+  playBtn.addEventListener('click', () => { o.onPlay(); });
+  let soloOn = false;
+  soloBtn.addEventListener('click', () => { soloOn = !soloOn; soloBtn.classList.toggle('on', soloOn); soloBtn.setAttribute('aria-pressed', String(soloOn)); o.onSolo(soloOn); });
   $q('.pr-q').addEventListener('click', () => { o.onQuantize(); });
   const gs = $q('.pr-gridsel select');
   if (gs) { gs.value = o.quantLabel(); gs.addEventListener('change', () => { o.setDiv(gs.value); redraw(); }); }
 
   function close() {
+    if (soloOn) { soloOn = false; o.onSolo(false); }
     document.removeEventListener('keydown', onKey, true);
     root.remove();
     o.onClose();
@@ -274,7 +302,11 @@ export function openPianoRoll(o) {
   return {
     close,
     refresh() { const c = clip(); if (!c) { close(); return; } sel = new Set([...sel].filter(n => c.notes.includes(n))); redraw(); },
-    setPlayhead(relSec) { const ph = $q('.pr-ph'); ph.style.left = (relSec * pps) + 'px'; ph.hidden = relSec < 0; },
+    setPlayhead(relSec) {
+      const ph = $q('.pr-ph'); ph.style.left = (relSec * pps) + 'px'; ph.hidden = relSec < 0;
+      const t = Math.max(0, relSec); $q('.pr-time').textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+    },
+    setPlaying(on) { playBtn.innerHTML = on ? '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>' : '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 3.2v9.6L12.5 8z"/></svg>'; playBtn.classList.toggle('on', !!on); },
     clipId: clip0.id,
   };
 }

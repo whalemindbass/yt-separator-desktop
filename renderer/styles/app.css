@@ -4922,12 +4922,18 @@ body { background: var(--bg) !important; }
 .pr-x:hover { background: var(--elev); color: var(--tx-1); }
 .pr-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
 .pr-canvas { position: relative; }
-.pr-keys { position: sticky; left: 0; z-index: 3; width: 52px; float: left; }
-.pr-key { height: 14px; box-sizing: border-box; border-bottom: 1px solid #0003; font: 600 8.5px/13px var(--sans); padding-right: 4px; text-align: right; cursor: pointer; }
-.pr-key.w { background: #e9ecf0; color: #5a626e; }
-.pr-key.b { background: #1b1f26; }
-.pr-key.c { border-bottom-color: #0006; }
-.pr-key:active { background: var(--accent); color: var(--accent-fg); }
+.pr-keys { position: sticky; left: 0; z-index: 3; width: 52px; float: left; background: #1b1f26; box-shadow: 2px 0 4px rgba(0,0,0,.35); }
+/* 흰건반 — 살짝 광택, 오른쪽 끝 둥글게. 검은건반 — 짧게(60%) 얹고 그림자 */
+.pr-key { position: absolute; left: 0; box-sizing: border-box; cursor: pointer; }
+.pr-key.w { right: 0; background: linear-gradient(to right, #d9dde2 0%, #f7f8fa 18%, #ffffff 70%, #eceff2 100%);
+  border-bottom: 1px solid #9aa2ad; border-radius: 0 3px 3px 0; box-shadow: inset -1px 0 0 #c3c9d1; }
+.pr-key.w span { position: absolute; right: 5px; bottom: 2px; font: 700 8.5px/1 var(--sans); color: #6b7380; }
+.pr-key.b { width: 62%; z-index: 2; background: linear-gradient(to right, #0d0f12 0%, #2a2f37 75%, #16191e 100%);
+  border-radius: 0 3px 3px 0; box-shadow: 1px 1px 2px rgba(0,0,0,.6), inset 0 -2px 0 rgba(255,255,255,.06); }
+.pr-key.w:hover { background: linear-gradient(to right, #d9dde2 0%, #eef6f2 30%, #f4fbf8 100%); }
+.pr-key.b:hover { background: linear-gradient(to right, #0d0f12 0%, #34403a 75%, #16191e 100%); }
+.pr-key.on, .pr-key:active { background: var(--accent) !important; }
+.pr-key.on span, .pr-key:active span { color: var(--accent-fg); }
 .pr-grid { position: absolute; left: 52px; top: 0; right: 0; bottom: 0; cursor: crosshair; }
 .pr-lines, .pr-notes { position: absolute; inset: 0; }
 .pr-lines { pointer-events: none; }
@@ -4957,3 +4963,14 @@ body { background: var(--bg) !important; }
 .pr-vel-in i::before { content: ''; position: absolute; top: -3px; left: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
 .pr-vel-in i.sel { background: var(--tx-1); }
 .pr-vel-in i.sel::before { background: var(--tx-1); }
+
+/* 피아노롤 재생 바 */
+.pr-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 70%, var(--bg)); }
+.pr-play { width: 30px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-1); cursor: pointer; }
+.pr-play svg { width: 14px; height: 14px; }
+.pr-play:hover { border-color: var(--accent); color: var(--accent); }
+.pr-play.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.pr-solo { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-2); font-size: 12px; cursor: pointer; }
+.pr-solo svg { width: 14px; height: 14px; }
+.pr-solo.on { background: color-mix(in srgb, var(--solo, var(--accent)) 22%, transparent); border-color: var(--solo, var(--accent)); color: var(--tx-1); }
+.pr-time { margin-left: 4px; font: 500 12px/1 var(--mono); color: var(--tx-3); }

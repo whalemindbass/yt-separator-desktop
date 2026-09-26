@@ -221,8 +221,22 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
     expect('세기 줄 드래그 → 첫 노트 세기 약해짐(<0.3)', firstVel < 0.3, true);
     await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
     await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(150);
+    // 재생 바 — ▶ = 클립 처음부터 재생, 다시 누르면 정지 / "이 트랙만" = 임시 솔로
+    sent.length = 0;
+    await js(`document.querySelector('.pr-play').click(); true`); await wait(400);
+    expect('▶ → 클립 시작으로 이동 후 재생', cmds('seek').length >= 1 && cmds('play').length === 1, true);
+    expect('재생 중 버튼 ■ 표시', await js(`document.querySelector('.pr-play').classList.contains('on')`), true);
+    await js(`document.querySelector('.pr-play').click(); true`); await wait(300);
+    expect('다시 누르면 정지', cmds('stop').length >= 1 && !(await js(`document.querySelector('.pr-play').classList.contains('on')`)), true);
+    const tidNow = await js(`Number(document.querySelector('.daw-lane-instr').dataset.recid)`);
+    sent.length = 0;
+    await js(`document.querySelector('.pr-solo').click(); true`); await wait(100);
+    expect('이 트랙만 → 엔진 솔로 켬', cmds('recTrack').some(c => c.id === tidNow && c.solo === true), true);
+    expect('레인 S 버튼은 그대로(임시)', await js(`!document.querySelector('.daw-lane-instr [data-m="solo"]').classList.contains('on')`), true);
+    sent.length = 0;
     await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp'); await wait(150);
     expect('Esc → 닫힘', await js(`!document.querySelector('.pr')`), true);
+    expect('닫으면 솔로 원래대로(꺼짐)', cmds('recTrack').some(c => c.id === tidNow && c.solo === false), true);
   }
   section('7) 타임라인 — S 분할');
   {
