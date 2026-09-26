@@ -227,6 +227,13 @@ const expect = (label, got, want) => {
     expect('내림: 기준점 0.1 반영      ', PR.floorToGrid(0.3, 0.1, 0.125).toFixed(3), '0.225');
     expect('반올림: 1.31 → 1.25       ', PR.roundToGrid(1.31, 0, 0.125), 1.25);
     expect('반올림: 1.32 → 1.375      ', PR.roundToGrid(1.32, 0, 0.125), 1.375);
+    const cb = PR.copyNotes([{ t: 1.5, d: 0.25, p: 64, v: 0.7 }, { t: 1.0, d: 0.5, p: 67, v: 0.8 }, { t: 1.0, d: 0.5, p: 60, v: 0.9 }]);
+    expect('복사: 가장 앞 기준 상대 시각·정렬', cb.map(n => n.t + ':' + n.p).join(' '), '0:60 0:67 0.5:64');
+    const pa = PR.pasteNotes(cb, 2, 72);
+    expect('붙여넣기: 기준음(C)이 자리(2s, C5)로', pa[0].t + ':' + pa[0].p, '2:72');
+    expect('붙여넣기: 음정·간격 유지', pa.map(n => (n.t - 2) + ':' + (n.p - 72)).join(' '), '0:0 0:7 0.5:4');
+    expect('붙여넣기: 음높이 없으면 그대로', PR.pasteNotes(cb, 0, null).map(n => n.p).join(','), '60,67,64');
+    expect('붙여넣기: 127 넘으면 막음', Math.max(...PR.pasteNotes(cb, 0, 125).map(n => n.p)), 127);
   }
 
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');

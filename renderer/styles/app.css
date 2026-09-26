@@ -4985,3 +4985,7 @@ body { background: var(--bg) !important; }
 .pr-ruler-in i.bar b { position: absolute; left: 4px; top: 4px; font: 600 10px/1 var(--mono); color: var(--tx-3); }
 .pr-marq { position: absolute; z-index: 4; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
 .pr-marq[hidden] { display: none; }
+
+/* 피아노롤 붙여넣기 자리(우클릭) */
+.pr-anchor { position: absolute; z-index: 3; box-sizing: border-box; border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 2px; pointer-events: none; }
+.pr-anchor[hidden] { display: none; }

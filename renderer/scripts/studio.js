@@ -2547,6 +2547,7 @@ function openMidiEditor(id) {
     },
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
+    flash: (m) => flashTake(m),
     onSeek: (sec) => {   // 피아노롤 눈금자 — 녹음 중엔 재생 위치를 못 옮긴다(타임라인과 같은 규칙)
       if (_recArmed) return;
       const t = Math.max(0, sec);

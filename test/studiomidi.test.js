@@ -234,6 +234,59 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
         expect(`${mod}+끌기 → 보이는 노트 선택(노트 추가 안 됨)`, nsel > 0 && nall === 4, true);
       }
     }
+    // FL 방식 노트 편집 — 우클릭으로 붙일 자리, Ctrl+C/V 는 노트만(클립 안 생김), Ctrl+B, Shift+끌기, 우클릭 끌어 지우기
+    {
+      const ctrl = async (k) => { win.webContents.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: ['control'] }); await wait(40); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: ['control'] }); await wait(150); };
+      const nNotes = () => js(`document.querySelectorAll('.pr-note').length`);
+      const nClips = () => js(`document.querySelectorAll('.daw-midi-clip').length`);
+      const base = await nNotes(), baseClips = await nClips();
+      // 붙일 자리: C5(72) 줄, 클립 끝 쪽 빈 칸
+      const sp = await js(`(() => { const sc = document.querySelector('.pr-scroll'); sc.scrollTop = (127 - 72) * 14 - 80; const g = document.querySelector('.pr-grid').getBoundingClientRect(); const endX = parseFloat(document.querySelector('.pr-end').style.left); return { x: g.left + endX * 0.55, y: g.top + (127 - 72) * 14 + 7 }; })()`);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(sp.x), y: Math.round(sp.y), button: 'right', clickCount: 1 }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(sp.x), y: Math.round(sp.y), button: 'right', clickCount: 1 }); await wait(120);
+      expect('빈 칸 우클릭 → 붙일 자리 표시', await js(`!document.querySelector('.pr-anchor').hidden`), true);
+      await ctrl('A'); await ctrl('C');
+      expect('Ctrl+C 로 타임라인 클립 안 생김', await nClips(), baseClips);
+      // 화면의 노트를 (x px, 음) 으로 읽어 붙이기 전/후를 비교한다 — 새로 생긴 것 = 붙인 노트
+      const readNotes = () => js(`[...document.querySelectorAll('.pr-note')].map(e => [Math.round(parseFloat(e.style.left)), 127 - Math.round((parseFloat(e.style.top) - 1) / 14)])`);
+      const beforeN = await readNotes();
+      await ctrl('V');
+      expect('Ctrl+V → 노트 두 배', await nNotes(), base * 2);
+      expect('Ctrl+V 로 타임라인 클립 안 생김', await nClips(), baseClips);
+      const afterN = await readNotes();
+      const pool = beforeN.map(n => n.join(','));
+      const pasted = afterN.filter(n => { const k = n.join(','); const i = pool.indexOf(k); if (i >= 0) { pool.splice(i, 1); return false; } return true; });
+      const rel = (arr) => { const a = arr.slice().sort((x, y) => x[0] - y[0] || x[1] - y[1]); return a.map(n => [n[0] - a[0][0], n[1] - a[0][1]]); };
+      const ra = rel(pasted), rb = rel(beforeN);   // 가로는 화면 픽셀 반올림 탓에 ±1px 허용, 음정은 정확히
+      expect('붙인 노트: 음정·간격 관계 유지', ra.length === rb.length && ra.every((n, i) => Math.abs(n[0] - rb[i][0]) <= 1 && n[1] === rb[i][1]), true);
+      expect('붙인 첫 음 = 찍은 자리 음(C5=72)', pasted.slice().sort((x, y) => x[0] - y[0] || x[1] - y[1])[0]?.[1], 72);
+      await ctrl('Z');
+      expect('Ctrl+Z → 원래 노트 수', await nNotes(), base);
+      await ctrl('A'); await ctrl('B');
+      expect('Ctrl+B → 뒤에 복제(두 배)', await nNotes(), base * 2);
+      await ctrl('Z');
+      // Shift+끌기 = 복사해서 끌기
+      const nb = await js(`(() => { const b = document.querySelector('.pr-note').getBoundingClientRect(); return { x: b.left + 5, y: b.top + 5 }; })()`);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(nb.x), y: Math.round(nb.y), button: 'left', clickCount: 1 }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(nb.x), y: Math.round(nb.y), button: 'left', clickCount: 1 }); await wait(80);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(nb.x), y: Math.round(nb.y), button: 'left', clickCount: 1, modifiers: ['shift'] }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(nb.x + 120), y: Math.round(nb.y - 28), modifiers: ['shift'] }); await wait(60);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(nb.x + 120), y: Math.round(nb.y - 28), button: 'left', clickCount: 1, modifiers: ['shift'] }); await wait(150);
+      expect('Shift+끌기 → 복사본 하나 더', await nNotes(), base + 1);
+      await ctrl('Z');
+      // Shift+클릭만(안 끌기) → 복제본 안 남음
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(nb.x), y: Math.round(nb.y), button: 'left', clickCount: 1, modifiers: ['shift'] }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(nb.x), y: Math.round(nb.y), button: 'left', clickCount: 1, modifiers: ['shift'] }); await wait(120);
+      expect('Shift+클릭만 → 겹친 복제본 없음', await nNotes(), base);
+      // 우클릭한 채 끌기 = 지나가는 노트 지우기(첫 노트 → 둘째 노트)
+      const two = await js(`(() => { const n = [...document.querySelectorAll('.pr-note')].sort((a, b) => parseFloat(a.style.left) - parseFloat(b.style.left)).slice(0, 2).map(e => { const b = e.getBoundingClientRect(); return { x: b.left + 4, y: b.top + 6 }; }); return n; })()`);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(two[0].x), y: Math.round(two[0].y), button: 'right', clickCount: 1 }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(two[1].x), y: Math.round(two[1].y), modifiers: ['rightButtonDown'] }); await wait(60);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(two[1].x), y: Math.round(two[1].y), button: 'right', clickCount: 1 }); await wait(150);
+      expect('우클릭 끌기 → 노트 2개 지움', await nNotes(), base - 2);
+      await ctrl('Z');
+      expect('Ctrl+Z → 복원', await nNotes(), base);
+    }
     // 눈금자 클릭 → 재생선 이동
     {
       sent.length = 0;

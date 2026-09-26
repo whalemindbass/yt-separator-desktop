@@ -14,6 +14,23 @@ const MIN_PPS = 20, MAX_PPS = 800;
 export function floorToGrid(abs, origin, step) { return origin + Math.floor((abs - origin) / step + 1e-6) * step; }
 /** 격자 반올림(끌어서 옮길 때) */
 export function roundToGrid(abs, origin, step) { return origin + Math.round((abs - origin) / step) * step; }
+/** 복사 — 선택 노트를 가장 앞 노트 기준 상대 시각으로(음높이는 그대로) */
+export function copyNotes(notes) {
+  if (!notes.length) return [];
+  const t0 = Math.min(...notes.map(n => n.t));
+  return notes.map(n => ({ t: n.t - t0, d: n.d, p: n.p, v: n.v })).sort((a, b) => a.t - b.t || a.p - b.p);
+}
+/**
+ * 붙여넣기 — 기준 음(가장 앞, 같으면 가장 낮은 음)이 at(시각)·pitch(음높이)에 오고 나머지는 시간 간격·음정을
+ * 그대로 유지한다. pitch 가 없으면 원래 음높이 그대로. 범위를 벗어나는 음은 0~127 로 막는다.
+ */
+export function pasteNotes(clipNotes, at, pitch) {
+  if (!clipNotes || !clipNotes.length) return [];
+  const ref = clipNotes[0];   // copyNotes 가 시각→음높이 순으로 정렬해 둔다
+  const dp = pitch == null ? 0 : pitch - ref.p;
+  return clipNotes.map(n => ({ t: Math.max(0, at + n.t), d: n.d, p: Math.max(0, Math.min(127, n.p + dp)), v: n.v }));
+}
+let _noteClipboard = null;   // 피아노롤을 닫았다 다른 클립에서 열어도 남는다(FL 과 같다)
 
 /**
  * @param {object} o
@@ -42,7 +59,7 @@ export function openPianoRoll(o) {
       <span class="pr-time"></span>
     </div>
     <div class="pr-ruler" title="${o.tr('studio.pr.rulerTitle')}"><div class="pr-ruler-sp"></div><div class="pr-ruler-view"><div class="pr-ruler-in"></div></div></div>
-    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div><div class="pr-marq" hidden></div></div></div></div>
+    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div><div class="pr-marq" hidden></div><div class="pr-anchor" hidden></div></div></div></div>
     <div class="pr-vel"><div class="pr-vel-lbl">${o.tr('studio.pr.velocity')}</div><div class="pr-vel-view"><div class="pr-vel-in"></div></div></div>`;
   o.host.appendChild(root);
   const $q = (s) => root.querySelector(s);
@@ -193,7 +210,18 @@ export function openPianoRoll(o) {
     const up = () => { document.removeEventListener('pointermove', paint); document.removeEventListener('pointerup', up); if (changed) commit(before); };
     document.addEventListener('pointermove', paint); document.addEventListener('pointerup', up);
   });
-  function redraw() { drawLines(); drawNotes(); drawVel(); drawRuler(); }
+  let anchor = null;   // 우클릭으로 찍은 붙여넣기 자리 { t(클립 기준), p }
+  let phRel = -1;      // 마지막으로 받은 재생선(클립 기준)
+  function drawAnchor() {
+    const el = $q('.pr-anchor');
+    if (!anchor) { el.hidden = true; return; }
+    el.hidden = false;
+    el.style.left = (anchor.t * pps) + 'px';
+    el.style.top = (rowOf(anchor.p) * ROW) + 'px';
+    el.style.width = Math.max(6, o.stepSec() * pps) + 'px';
+    el.style.height = ROW + 'px';
+  }
+  function redraw() { drawLines(); drawNotes(); drawVel(); drawRuler(); drawAnchor(); }
   const snapshot = () => { const c = clip(); return c ? { ...c, notes: c.notes.map(n => ({ ...n })) } : null; };
   function commit(before) {
     const c = clip(); if (!c) return;
@@ -211,23 +239,43 @@ export function openPianoRoll(o) {
     const noteEl = e.target.closest('.pr-note');
     const { x, y } = localPos(e);
     const step = o.stepSec(), origin = o.origin();
-    if (e.button === 2) {   // 우클릭 = 지우기
-      if (!noteEl) return;
+    if (e.button === 2) {
+      if (!noteEl) {   // 빈 칸 우클릭 = 붙여넣기 자리(그 칸의 격자 시작 + 그 음)
+        const abs = floorToGrid(c.start + x / pps, origin, step);
+        anchor = { t: Math.max(0, abs - c.start), p: pitchAt(y) };
+        drawAnchor(); return;
+      }
+      // 노트 우클릭 = 지우기, 누른 채 끌면 지나가는 노트를 다 지운다(FL)
       const before = snapshot();
-      const n = c.notes[Number(noteEl.dataset.i)];
-      c.notes = c.notes.filter(m => m !== n); sel.delete(n);
-      commit(before); return;
+      const eraseAt = (px, py) => {
+        const hit = c.notes.filter(m => { const x0 = m.t * pps, x1 = x0 + Math.max(4, m.d * pps), y0 = rowOf(m.p) * ROW; return px >= x0 && px <= x1 && py >= y0 && py < y0 + ROW; });
+        if (!hit.length) return false;
+        c.notes = c.notes.filter(m => !hit.includes(m)); hit.forEach(m => sel.delete(m));
+        drawNotes(); drawVel(); return true;
+      };
+      let erased = eraseAt(x, y);
+      const mv = (ev) => { const q = localPos(ev); if (eraseAt(q.x, q.y)) erased = true; };
+      const upR = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', upR); if (erased) commit(before); };
+      document.addEventListener('pointermove', mv); document.addEventListener('pointerup', upR);
+      return;
     }
     if (e.button !== 0) return;
     e.preventDefault();
     const before = snapshot();
-    let n, mode;
+    let n, mode, clonedFrom = null;
     if (noteEl) {
       n = c.notes[Number(noteEl.dataset.i)];
       const r = noteEl.getBoundingClientRect();
       mode = (r.right - e.clientX) <= 6 ? 'resize' : 'move';
       if (e.ctrlKey || e.metaKey) { if (sel.has(n)) sel.delete(n); else sel.add(n); drawNotes(); drawVel(); return; }
       if (!sel.has(n)) sel = new Set([n]);
+      if (e.shiftKey && mode === 'move') {   // Shift+끌기 = 복사해서 끌기 — 원본은 제자리, 복제본이 움직인다
+        const clones = [...sel].map(m => ({ ...m }));
+        const idx = [...sel].indexOf(n);
+        clonedFrom = { src: new Set(sel), clones: new Set(clones) };
+        c.notes.push(...clones);
+        sel = new Set(clones); n = clones[idx];
+      }
     } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
       // 빈 곳에서 Ctrl/Shift + 끌기 = 범위 선택(Ctrl: 새로, Shift: 기존에 더하기). 스쳐 지나간 노트가 잡힌다.
       const add = e.shiftKey, base = add ? new Set(sel) : new Set();
@@ -267,13 +315,15 @@ export function openPianoRoll(o) {
       const q = localPos(ev);
       if (mode === 'resize') {
         for (const g of orig) {
-          const endAbs = roundToGrid(c.start + g.t + g.d + (q.x - x0) / pps, origin, step);
+          const rawEnd = c.start + g.t + g.d + (q.x - x0) / pps;
+          const endAbs = ev.altKey ? rawEnd : roundToGrid(rawEnd, origin, step);   // Alt = 격자 무시(FL)
           g.m.d = Math.max(step / 2, endAbs - (c.start + g.t));
         }
         lastLen = n.d;
       } else {
         const dp = Math.round((y0 - q.y) / ROW);
-        const anchorAbs = roundToGrid(c.start + orig.find(g => g.m === n).t + (q.x - x0) / pps, origin, step);
+        const rawAbs = c.start + orig.find(g => g.m === n).t + (q.x - x0) / pps;
+        const anchorAbs = ev.altKey ? rawAbs : roundToGrid(rawAbs, origin, step);
         const dt = anchorAbs - (c.start + orig.find(g => g.m === n).t);
         const minT = Math.min(...orig.map(g => g.t));
         const dtc = Math.max(dt, -minT);   // 클립 앞으로는 못 나간다
@@ -288,6 +338,9 @@ export function openPianoRoll(o) {
       document.removeEventListener('pointerup', up);
       document.removeEventListener('pointercancel', up);
       if (mode === 'move' && noteEl) lastLen = n.d;
+      if (!changed && clonedFrom) {   // Shift+클릭만 하고 안 끌었으면 복제본을 거둔다(겹친 채 남지 않게)
+        c.notes = c.notes.filter(m => !clonedFrom.clones.has(m)); sel = clonedFrom.src; drawNotes(); drawVel(); return;
+      }
       if (changed) commit(before);
     };
     document.addEventListener('pointermove', move);
@@ -320,6 +373,40 @@ export function openPianoRoll(o) {
       c.notes = c.notes.filter(n => !sel.has(n)); sel = new Set(); commit(before); return;
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { stop(); sel = new Set(c.notes); drawNotes(); drawVel(); return; }
+    // 노트 복사·잘라내기·붙여넣기 — 타임라인의 클립 복사로 새지 않게 여기서 끝낸다
+    if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyC' || e.code === 'KeyX')) {
+      stop(); if (!sel.size) return;
+      _noteClipboard = copyNotes([...sel]);
+      if (e.code === 'KeyX') { const before = snapshot(); c.notes = c.notes.filter(n => !sel.has(n)); sel = new Set(); commit(before); }
+      o.flash?.(o.tr('studio.p.copied', { n: _noteClipboard.length }));
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
+      stop(); if (!_noteClipboard || !_noteClipboard.length) return;
+      const before = snapshot();
+      // 자리: 우클릭으로 찍어 둔 칸(음높이까지) → 없으면 재생선(클립 안일 때) → 없으면 클립 처음, 음높이는 그대로
+      const at = anchor ? anchor.t : (phRel >= 0 && phRel <= c.dur ? floorToGrid(c.start + phRel, o.origin(), o.stepSec()) - c.start : 0);
+      const added = pasteNotes(_noteClipboard, Math.max(0, at), anchor ? anchor.p : null);
+      c.notes.push(...added); sel = new Set(added);
+      commit(before); return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyB' && sel.size) {   // FL Ctrl+B — 선택을 바로 뒤에 복제
+      stop(); const before = snapshot();
+      const ns = [...sel], step = o.stepSec();
+      const t0 = Math.min(...ns.map(n => n.t)), t1 = Math.max(...ns.map(n => n.t + n.d));
+      const span = Math.max(step, Math.ceil((t1 - t0) / step - 1e-6) * step);
+      const added = ns.map(n => ({ ...n, t: n.t + span }));
+      c.notes.push(...added); sel = new Set(added);
+      commit(before); return;
+    }
+    if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && sel.size && !e.ctrlKey && !e.altKey) {   // 격자 한 칸씩
+      stop(); const before = snapshot();
+      const d = (e.code === 'ArrowRight' ? 1 : -1) * o.stepSec();
+      const minT = Math.min(...[...sel].map(n => n.t));
+      const dd = Math.max(d, -minT);
+      for (const n of sel) n.t += dd;
+      commit(before); return;
+    }
     if ((e.code === 'ArrowUp' || e.code === 'ArrowDown') && sel.size && !e.ctrlKey && !e.altKey) {
       stop(); const before = snapshot();
       const d = (e.code === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 12 : 1);
@@ -355,6 +442,7 @@ export function openPianoRoll(o) {
     close,
     refresh() { const c = clip(); if (!c) { close(); return; } sel = new Set([...sel].filter(n => c.notes.includes(n))); redraw(); },
     setPlayhead(relSec) {
+      phRel = relSec;
       const ph = $q('.pr-ph'); ph.style.left = (relSec * pps) + 'px'; ph.hidden = relSec < 0;
       const t = Math.max(0, relSec); $q('.pr-time').textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
     },
