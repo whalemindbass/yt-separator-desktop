@@ -5023,3 +5023,24 @@ body { background: var(--bg) !important; }
 /* 바깥 입력(타이핑 키보드·MIDI 컨트롤러)으로 친 음 */
 .pr-key.lit { background: var(--accent) !important; }
 .pr-key.lit span { color: var(--accent-fg); }
+
+/* ── 코드 트랙(작곡용) — 눈금자 아래 한 줄 ── */
+.daw-chord-wrap { flex: none; height: 26px; display: flex; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 80%, var(--timeline)); }
+.daw-chord-head { width: 172px; flex: none; box-sizing: border-box; display: flex; align-items: center; padding: 0 10px; border-right: 1px solid var(--border); font: 700 10.5px/1 var(--sans); letter-spacing: .04em; color: var(--tx-3); background: var(--surface); }
+.daw-chord-view { position: relative; flex: 1; overflow: hidden; cursor: copy; }
+.daw-chord-in { position: absolute; left: 0; top: 0; bottom: 0; }
+.daw-chord { position: absolute; top: 3px; bottom: 3px; box-sizing: border-box; border-radius: 5px; display: flex; align-items: center; overflow: hidden; cursor: grab;
+  background: color-mix(in srgb, var(--accent) 16%, var(--elev)); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.daw-chord b { flex: 1; min-width: 0; padding: 0 8px; font: 700 11.5px/1 var(--sans); color: var(--tx-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.daw-chord .h { flex: none; width: 6px; align-self: stretch; cursor: ew-resize; }
+.daw-chord.sel { border-color: var(--tx-1); box-shadow: 0 0 0 1px var(--tx-1) inset; }
+.daw-chord.cur { background: color-mix(in srgb, var(--accent) 38%, var(--elev)); }
+.daw-chord-pop { width: 316px; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.daw-chord-pop .cp-row { display: flex; gap: 6px; }
+.daw-chord-pop .cp-ok { flex: none !important; width: auto !important; min-width: 0; padding: 0 12px; }
+.daw-chord-pop .cp-in { flex: 1 1 auto; width: auto; min-width: 0; height: 28px; padding: 0 8px; font: 700 14px/1 var(--sans); background: var(--surface); color: var(--tx-1); border: 1px solid var(--border-mid); border-radius: 6px; }
+.daw-chord-pop .cp-lbl { font-size: 10.5px; color: var(--tx-3); margin-top: 2px; }
+.daw-chord-pop .cp-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
+.daw-chord-pop .cp-grid button { min-width: 0; padding: 0; width: auto; text-align: center; justify-content: center; height: 24px; border-radius: 5px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-2); font: 600 11px/1 var(--sans); cursor: pointer; }
+.daw-chord-pop .cp-grid button:hover { border-color: var(--border-mid); color: var(--tx-1); }
+.daw-chord-pop .cp-grid button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }

@@ -236,6 +236,25 @@ const expect = (label, got, want) => {
     expect('붙여넣기: 127 넘으면 막음', Math.max(...PR.pasteNotes(cb, 0, 125).map(n => n.p)), 127);
   }
 
+  console.log('11f) 코드 트랙');
+  {
+    expect('am7 → Am7            ', U.normalizeChordName('am7'), 'Am7');
+    expect('c#m → C#m            ', U.normalizeChordName(' c#m '), 'C#m');
+    expect('f/a → F/A            ', U.normalizeChordName('f/a'), 'F/A');
+    expect('B♭maj7 → Bbmaj7      ', U.normalizeChordName('B♭maj7'), 'Bbmaj7');
+    expect('N.C. 그대로           ', U.normalizeChordName('N.C.'), 'N.C.');
+    expect('빈 값 → null          ', U.normalizeChordName('  '), null);
+    const cs = [{ id: 1, start: 0, end: 2, name: 'C' }, { id: 2, start: 4, end: 6, name: 'G' }];
+    expect('빈 자리에 넣기        ', JSON.stringify(U.placeChord(cs, 2, 2)), '{"start":2,"end":4}');
+    expect('뒤 블록에 닿으면 줄임  ', JSON.stringify(U.placeChord(cs, 3, 2)), '{"start":3,"end":4}');
+    expect('블록 안이면 null      ', U.placeChord(cs, 1, 2), null);
+    expect('이동: 뒤 블록 넘지 않음', JSON.stringify(U.clampChordEdit(cs, 1, 3, 5, 'move', 0.5)), '{"start":2,"end":4}');
+    expect('이동: 0 앞으로 안 감  ', JSON.stringify(U.clampChordEdit(cs, 1, -1, 1, 'move', 0.5)), '{"start":0,"end":2}');
+    expect('오른쪽 끝: 뒤 블록까지', JSON.stringify(U.clampChordEdit(cs, 1, 0, 9, 'r', 0.5)), '{"start":0,"end":4}');
+    expect('왼쪽 끝: 앞 블록까지  ', JSON.stringify(U.clampChordEdit(cs, 2, 1, 6, 'l', 0.5)), '{"start":2,"end":6}');
+    expect('최소 길이 지킴        ', JSON.stringify(U.clampChordEdit(cs, 2, 4, 4.1, 'r', 0.5)), '{"start":4,"end":4.5}');
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷

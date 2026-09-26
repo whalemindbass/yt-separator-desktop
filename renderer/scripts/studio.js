@@ -7,7 +7,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
          METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange,
          pickInputConfig, mergeFxCache, latencyBreakdown,
-         kbNoteFor, noteName, isTypingTarget, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
+         kbNoteFor, noteName, isTypingTarget, normalizeChordName, placeChord, clampChordEdit, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -1223,6 +1223,7 @@ function layout() {
     r.style.width = (HEAD_W + w) + 'px';
     renderAutoLaneInto(r, Number(r.dataset.autoid));   // 배율 변경 시 곡선 다시 그림
   });
+  renderChordTrack(w);
   const ruler = $('daw-ruler');
   ruler.style.width = w + 'px'; ruler.innerHTML = '';
   const spb = secPerBar();
@@ -1613,6 +1614,8 @@ function updatePlayhead(sec) {
   ph.style.height = tracksHeight() + 'px';
   const pos = $('st-pos'); if (pos) pos.textContent = fmtTC(sec);
   $('daw-ruler').style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
+  const chIn = $('daw-chord-in'); if (chIn) chIn.style.transform = `translateX(${-$('daw-tscroll').scrollLeft}px)`;
+  highlightChordAt(sec);
   if (_playing && !_phRafOn) { _phRafOn = true; requestAnimationFrame(_phTick); }
 }
 // 재생 중 20Hz pos 사이를 rAF 로 부드럽게 진행 — 마지막 emit 시각·값 기준으로 초당 1초씩 앞으로
@@ -1907,7 +1910,7 @@ async function loadSong(item, opts) {
   _stemPaths = it.stemPaths || null; _songName = it.name || ''; _videoPath = it.videoPath || null;
   _modelKey = it.modelKey || '4stem';
   _libraryItemId = it.id || null;   // 채보 결과를 이 id 로 라이브러리에 저장/복원한다
-  _takes = []; _midiClips = []; _selMidi = null; api.engine.midiClear?.(); _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
+  _takes = []; _midiClips = []; _selMidi = null; api.engine.midiClear?.(); _chords = []; _selChord = null; _stemOffset = 0; _gridOffset = 0; _beats = []; _detBpm = 0; _beatInterval = 0; _auto = new Map(); clearUndo();
   _speed = 1; _speedBase = null; _speedStemPaths = null; _keySemitones = 0; _baseDur = 0;
   updateSpeedBtnLabel();
   _projectPath = null; markClean();   // 라이브러리 곡 = 미저장 새 편집 상태
@@ -2526,6 +2529,184 @@ function syncKbButtons() {
 // 악기 트랙을 골라 두고 녹음을 켰을 때 — 연주 모드가 꺼져 있으면 쳐도 아무것도 안 들어가고,
 // R 을 꺼 뒀으면(새 악기 트랙은 켜진 채 시작해서, "녹음 켜기"로 눌렀다가 오히려 끄기 쉽다)
 // 그 트랙엔 기록이 안 된다. 둘 다 "녹음이 가끔 안 된다"로 보였던 경우라 여기서 잡아 준다.
+// ── 코드 트랙(작곡용) ─────────────────────────────────────────────
+// 눈금자 아래 한 줄. 손으로 적는 코드 블록 { id, start, end, name }(초). 곡 분석(TAB 코드 줄)과 무관.
+// 빈 곳 더블클릭/우클릭 = 그 마디에 1마디 블록, 끌기 = 이동, 양 끝 = 길이(박 단위, Alt = 자유), 겹치지 않게.
+let _chords = [], _selChord = null, _chordSeq = 0, _chordCur = null;
+const chordsSnapshot = () => _chords.map(c => ({ ...c }));
+function setChords(arr) {
+  _chords = arr.map(c => ({ ...c }));
+  if (!_chords.some(c => c.id === _selChord)) _selChord = null;
+  renderChordTrack(); markDirty();
+}
+function pushChordUndo(before, label) {
+  const after = chordsSnapshot();
+  pushUndo(() => setChords(before), () => setChords(after), label);
+  markDirty();
+}
+const chordBeatSnap = (t, ev) => {
+  if (ev && ev.altKey) return Math.max(0, t);
+  const b = secPerBeat();
+  return Math.max(0, _gridOffset + Math.round((t - _gridOffset) / b) * b);
+};
+function renderChordTrack(w) {
+  const inn = $('daw-chord-in'); if (!inn) return;
+  inn.style.width = (w != null ? w : timelineW()) + 'px';
+  inn.innerHTML = _chords.map(c => `<div class="daw-chord${c.id === _selChord ? ' sel' : ''}${c.id === _chordCur ? ' cur' : ''}" data-id="${c.id}" style="left:${(c.start * _pxPerSec).toFixed(1)}px;width:${Math.max(6, (c.end - c.start) * _pxPerSec).toFixed(1)}px"><i class="h l"></i><b>${esc(c.name)}</b><i class="h r"></i></div>`).join('');
+  inn.style.transform = `translateX(${-($('daw-tscroll')?.scrollLeft || 0)}px)`;
+}
+function highlightChordAt(sec) {
+  const c = _chords.find(x => sec >= x.start && sec < x.end);
+  const id = c ? c.id : null;
+  if (id === _chordCur) return;
+  _chordCur = id;
+  document.querySelectorAll('.daw-chord.cur').forEach(e => e.classList.remove('cur'));
+  if (id != null) document.querySelector(`.daw-chord[data-id="${id}"]`)?.classList.add('cur');
+}
+function chordSecAt(clientX) { const r = $('daw-chord-view').getBoundingClientRect(); return Math.max(0, (clientX - r.left + ($('daw-tscroll')?.scrollLeft || 0)) / _pxPerSec); }
+function addChordAt(sec) {
+  const bar = secPerBar();
+  let start = _gridOffset + Math.floor((sec - _gridOffset) / bar) * bar;
+  if (start < 0) start += bar * Math.ceil(-start / bar);
+  // 그 마디가 이미 차 있으면(앞 블록이 마디 중간에서 끝나는 경우 등) 누른 박부터
+  let spot = placeChord(_chords, start, bar) || placeChord(_chords, chordBeatSnap(sec), bar);
+  if (!spot) { flashTake(tr('studio.ch.noRoom')); return; }
+  const before = chordsSnapshot();
+  const prev = [..._chords].filter(c => c.end <= spot.start + 1e-9).sort((a, b) => b.end - a.end)[0];
+  const c = { id: ++_chordSeq, start: spot.start, end: spot.end, name: prev ? prev.name : 'C' };
+  _chords.push(c); _chords.sort((a, b) => a.start - b.start);
+  _selChord = c.id; renderChordTrack(); markDirty();
+  openChordEditor(c.id, before);
+}
+function deleteSelectedChord() {
+  const c = _chords.find(x => x.id === _selChord); if (!c) return false;
+  const before = chordsSnapshot();
+  _chords = _chords.filter(x => x.id !== c.id); _selChord = null;
+  renderChordTrack(); pushChordUndo(before, tr('studio.ch.delete'));
+  return true;
+}
+function duplicateChord(id) {
+  const c = _chords.find(x => x.id === id); if (!c) return;
+  const spot = placeChord(_chords, c.end, c.end - c.start);
+  if (!spot) { flashTake(tr('studio.ch.noRoom')); return; }
+  const before = chordsSnapshot();
+  const nc = { id: ++_chordSeq, start: spot.start, end: spot.end, name: c.name };
+  _chords.push(nc); _chords.sort((a, b) => a.start - b.start); _selChord = nc.id;
+  renderChordTrack(); pushChordUndo(before, tr('studio.ch.duplicate'));
+}
+const CHORD_ROOTS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const CHORD_QUALS = ['', 'm', '7', 'maj7', 'm7', 'sus4', 'sus2', 'dim', 'aug', '6', 'm6', '9', 'add9', 'm7b5'];
+// 이름 편집 — 입력칸 + 근음/종류 버튼. Enter·확인·바깥 클릭 = 적용, Esc = 취소.
+// newBefore: 방금 새로 만든 블록이면 그 전 상태(취소하면 블록째 없앤다, 적용하면 "추가" 한 번으로 실행취소)
+function openChordEditor(id, newBefore) {
+  document.querySelector('.daw-ctx')?.remove();
+  const c = _chords.find(x => x.id === id); if (!c) return;
+  const el = document.querySelector(`.daw-chord[data-id="${id}"]`);
+  const r = el ? el.getBoundingClientRect() : { left: 200, bottom: 200 };
+  const parse = (name) => { const m = /^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/.exec(name || ''); return m ? { root: m[1], qual: m[2], bass: m[3] || '' } : { root: 'C', qual: '', bass: '' }; };
+  let st = parse(c.name);
+  const pop = document.createElement('div');
+  pop.className = 'daw-ctx daw-chord-pop';
+  pop.style.left = Math.max(8, r.left) + 'px'; pop.style.top = (r.bottom + 4) + 'px';
+  pop.innerHTML = `
+    <div class="cp-row"><input class="cp-in" type="text" maxlength="16" spellcheck="false" value="${esc(c.name)}"><button class="btn btn-sm pri cp-ok" type="button">${tr('studio.ch.ok')}</button></div>
+    <div class="cp-lbl">${tr('studio.ch.root')}</div><div class="cp-grid cp-roots">${CHORD_ROOTS.map(x => `<button type="button" data-root="${x}">${x}</button>`).join('')}</div>
+    <div class="cp-lbl">${tr('studio.ch.quality')}</div><div class="cp-grid cp-quals">${CHORD_QUALS.map(x => `<button type="button" data-qual="${x}">${x || tr('studio.ch.major')}</button>`).join('')}</div>
+    <div class="cp-lbl">${tr('studio.ch.bass')}</div><div class="cp-grid cp-bass"><button type="button" data-bass="">—</button>${CHORD_ROOTS.map(x => `<button type="button" data-bass="${x}">/${x}</button>`).join('')}</div>`;
+  document.body.appendChild(pop);
+  const pr = pop.getBoundingClientRect();
+  if (pr.right > innerWidth - 8) pop.style.left = Math.max(8, innerWidth - pr.width - 8) + 'px';
+  if (pr.bottom > innerHeight - 8) pop.style.top = Math.max(8, r.top - pr.height - 4) + 'px';
+  const inp = pop.querySelector('.cp-in');
+  const paint = () => {
+    pop.querySelectorAll('[data-root]').forEach(b => b.classList.toggle('on', b.dataset.root === st.root));
+    pop.querySelectorAll('[data-qual]').forEach(b => b.classList.toggle('on', b.dataset.qual === st.qual));
+    pop.querySelectorAll('[data-bass]').forEach(b => b.classList.toggle('on', b.dataset.bass === st.bass));
+  };
+  const fromParts = () => { inp.value = st.root + st.qual + (st.bass ? '/' + st.bass : ''); paint(); };
+  paint();
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.root != null) { st.root = b.dataset.root; fromParts(); }
+    else if (b.dataset.qual != null) { st.qual = b.dataset.qual; fromParts(); }
+    else if (b.dataset.bass != null) { st.bass = b.dataset.bass; fromParts(); }
+    else if (b.classList.contains('cp-ok')) done(true);
+  });
+  inp.addEventListener('input', () => { st = parse(normalizeChordName(inp.value) || ''); paint(); });
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') done(true); else if (e.key === 'Escape') done(false); });
+  let closed = false;
+  const outside = (ev) => { if (!pop.contains(ev.target)) done(true); };
+  function done(apply) {
+    if (closed) return; closed = true;
+    document.removeEventListener('mousedown', outside, true);
+    pop.remove();
+    const cc = _chords.find(x => x.id === id); if (!cc) return;
+    const name = normalizeChordName(inp.value);
+    if (!apply || !name) {
+      if (newBefore) { _chords = _chords.filter(x => x.id !== id); _selChord = null; renderChordTrack(); }   // 새로 만든 걸 취소 = 없던 일
+      return;
+    }
+    const before = newBefore || chordsSnapshot();
+    if (!newBefore && name === cc.name) return;
+    cc.name = name; renderChordTrack();
+    pushChordUndo(before, newBefore ? tr('studio.ch.add') : tr('studio.ch.rename'));
+  }
+  setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+  inp.focus(); inp.select();
+}
+function wireChordTrack() {
+  const view = $('daw-chord-view'); if (!view) return;
+  view.addEventListener('dblclick', (e) => {
+    const b = e.target.closest('.daw-chord');
+    if (b) openChordEditor(Number(b.dataset.id)); else addChordAt(chordSecAt(e.clientX));
+  });
+  view.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const b = e.target.closest('.daw-chord');
+    if (!b) { const sec = chordSecAt(e.clientX); openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.ch.add'), fn: () => addChordAt(sec) }]); return; }
+    const id = Number(b.dataset.id);
+    _selChord = id; renderChordTrack();
+    openDropdownAt(e.clientX, e.clientY, [
+      { label: tr('studio.ch.rename'), fn: () => openChordEditor(id) },
+      { label: tr('studio.ch.duplicate'), fn: () => duplicateChord(id) },
+      { label: tr('studio.ch.delete'), fn: () => { _selChord = id; deleteSelectedChord(); } },
+    ]);
+  });
+  view.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const b = e.target.closest('.daw-chord'); if (!b) { if (_selChord != null) { _selChord = null; renderChordTrack(); } return; }
+    e.preventDefault(); e.stopPropagation();
+    if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); }
+    const id = Number(b.dataset.id), c = _chords.find(x => x.id === id); if (!c) return;
+    _selChord = id; b.classList.add('sel');
+    document.querySelectorAll('.daw-chord.sel').forEach(x => { if (x !== b) x.classList.remove('sel'); });
+    // 끝 잡기는 요소가 아니라 가장자리 거리로 — 좁은 블록에선 손잡이 요소를 정확히 누르기 어렵다
+    const br = b.getBoundingClientRect(), edge = Math.min(8, br.width / 4);
+    const mode = e.clientX >= br.right - edge ? 'r' : e.clientX <= br.left + edge ? 'l' : 'move';
+    const x0 = e.clientX, s0 = c.start, e0 = c.end, before = chordsSnapshot();
+    let moved = false;
+    const move = (ev) => {
+      const d = (ev.clientX - x0) / _pxPerSec;
+      if (!moved && Math.abs(ev.clientX - x0) < 3) return;
+      moved = true;
+      let ns = s0, ne = e0;
+      if (mode === 'move') { ns = chordBeatSnap(s0 + d, ev); ne = ns + (e0 - s0); }
+      else if (mode === 'l') ns = chordBeatSnap(s0 + d, ev);
+      else ne = chordBeatSnap(e0 + d, ev);
+      const cl = clampChordEdit(_chords, id, ns, ne, mode, Math.min(secPerBeat(), e0 - s0));
+      c.start = cl.start; c.end = cl.end;
+      b.style.left = (c.start * _pxPerSec) + 'px'; b.style.width = Math.max(6, (c.end - c.start) * _pxPerSec) + 'px';
+    };
+    const up = () => {
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+      if (!moved || (c.start === s0 && c.end === e0)) return;
+      _chords.sort((a, b2) => a.start - b2.start);
+      pushChordUndo(before, mode === 'move' ? tr('studio.ch.move') : tr('studio.ch.resize'));
+    };
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+  });
+}
+
 function addEmptyMidiClip(trackId, atSec) {
   const bar = secPerBar();
   let start = _gridOffset + Math.floor((atSec - _gridOffset) / bar) * bar;   // 누른 자리의 마디 시작
@@ -3632,7 +3813,7 @@ async function buildProjectObject(opts = {}) {
     : null;
   // sampleRate 를 같이 적는다. takes[].start 와 stems.offset 만 샘플 단위라,
   // 어느 레이트로 잰 샘플인지 모르면 다른 레이트로 연 사람에게서 그 비율만큼 어긋난다.
-  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, keySemitones: _keySemitones, master, buses, stems, tracks, takes, midiClips, tab };
+  return { kind: 'yssproj', version: 2, sampleRate: sr, name: _songName || tr('studio.lbl.project'), savedAt: new Date().toISOString(), bpm: _bpm, detBpm: _detBpm, beatInterval: _beatInterval, gridOffset: _gridOffset, beats: _beats, speed: _speed, speedBase: _speedBase, speedStemPaths: _speedStemPaths, keySemitones: _keySemitones, master, buses, stems, tracks, takes, midiClips, chordTrack: _chords.map(c => ({ start: c.start, end: c.end, name: c.name })), tab };
 }
 // 저장 상태 (프로젝트 경로 + 변경 여부)
 let _projectPath = null;   // 저장된 .yssproj 경로 (없으면 미저장)
@@ -3660,7 +3841,7 @@ function updateProjectLabel() {
 // 스템도 클립도 녹음 트랙도 없으면 저장할 것이 없다 — 저장 가드와 충돌 복구가 같이 쓴다.
 // 이게 갈라져 있던 탓에, 빈 상태로 엔진이 재시작하면 복구는 dirty 를 켰는데
 // 저장은 "저장할 게 없다"며 끄지 않아 사용자가 저장 안내에 갇혔다.
-const hasSaveableContent = () => !!(_stemPaths || _takes.length || _midiClips.length || _recTracks.length);
+const hasSaveableContent = () => !!(_stemPaths || _takes.length || _midiClips.length || _chords.length || _recTracks.length);
 
 // 저장 전엔 take 가 "저장 안 한 프로젝트" 임시 세션 폴더에 있었을 수 있다(녹음부터 하고
 // 나중에 저장하는 흔한 순서) — 저장 경로가 정해지면 그 프로젝트의 media/ 로 옮기고,
@@ -4000,6 +4181,12 @@ async function applyProject(p) {
       if (t.fadeIn || t.fadeOut) { tk.fadeIn = t.fadeIn || 0; tk.fadeOut = t.fadeOut || 0; commitFade(tk); }
     }
   }
+  // 3-0) 코드 트랙
+  _chords = (Array.isArray(p.chordTrack) ? p.chordTrack : [])
+    .filter(c => c && c.end > c.start && c.name)
+    .map(c => ({ id: ++_chordSeq, start: Math.max(0, c.start), end: c.end, name: String(c.name).slice(0, 16) }));
+  _selChord = null;
+  renderChordTrack();
   // 3-1) MIDI 클립
   for (const c of (Array.isArray(p.midiClips) ? p.midiClips : [])) {
     let tid = c.trackId;
@@ -4174,6 +4361,7 @@ function startMarquee(e) {
 // ── 다중선택 클립보드 (복사/잘라내기/붙여넣기/삭제) ──
 function selectedTakes() { return _takes.filter(t => _selClips.has(t.id)); }
 function clearClipSelection() {
+  if (_selChord != null) { _selChord = null; document.querySelectorAll('.daw-chord.sel').forEach(x => x.classList.remove('sel')); }
   // MIDI 클립 선택도 같이 푼다 — 안 그러면 빈 곳을 눌러 선택이 풀린 것처럼 보여도 Delete 가 그 클립을 지운다
   if (_selMidi != null) { _selMidi = null; document.querySelectorAll('.daw-midi-clip.sel').forEach(x => x.classList.remove('sel')); }
   if (_selClips.size) { _selClips = new Set(); _selClipId = null; renderTakes(); }
@@ -4235,6 +4423,7 @@ function pasteClips() {
   flashTake(tr('studio.p.pasted', { n: made.length }));
 }
 function deleteSelectedClips() {
+  if (_selChord != null && deleteSelectedChord()) return;
   if (_selMidi != null && deleteSelectedMidi()) return;
   const sel = selectedTakes(); if (!sel.length) return;
   const removed = sel.map(t => ({ ...t }));
@@ -5105,7 +5294,7 @@ function wire() {
   document.querySelector('.daw-ruler-ctrl')?.addEventListener('pointerdown', (e) => e.stopPropagation());   // 코너에서 스크럽 방지
   $('daw-ruler-wrap').addEventListener('pointerdown', (e) => {
     if (e.target.closest('.daw-ruler-ctrl, .daw-eh')) return;   // 토글 셀·범위핸들은 각자 처리
-    if (!_dur && !_takes.length && !_recTracks.length) return;   // 임포트만 있어도 동작
+    if (!_dur && !_takes.length && !_recTracks.length && !_chords.length) return;   // 임포트·코드 트랙만 있어도 동작
     e.preventDefault();
     const wrap = $('daw-ruler-wrap'), sc = $('daw-tscroll');
     const toSec = (cx) => { const r = wrap.getBoundingClientRect(); return Math.max(0, Math.min(fullSec(), (cx - r.left - HEAD_W + sc.scrollLeft) / _pxPerSec)); };
@@ -5135,6 +5324,7 @@ function wire() {
   $('st-kb-cfg')?.addEventListener('click', (e) => { e.stopPropagation(); openQuantPopoverAt(e.clientX, e.clientY); });
   wireKeyboardPlay();
   wireMidiInputs();
+  wireChordTrack();
   // 빈 화면의 행동 버튼 — 기존 메뉴와 같은 동작을 그대로 부른다(동작이 갈라지지 않게)
   $('empty-load-song')?.addEventListener('click', openSongPicker);
   $('empty-open-proj')?.addEventListener('click', () => openProject());

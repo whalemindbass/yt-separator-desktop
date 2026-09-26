@@ -281,3 +281,40 @@ export function isTypingTarget(el) {
   if (tag === 'INPUT') return TEXT_INPUT_TYPES.has(String(el.type || '').toLowerCase());
   return false;
 }
+
+// ── 코드 트랙(작곡용 — 손으로 적는 코드 블록, 곡 분석과 무관) ─────────────────────
+// 블록: { id, start, end, name } (초). 겹치지 않게 유지한다.
+/** 코드 이름 정리 — 근음은 대문자(am7 → Am7, c#m → C#m, f/a → F/A). 근음이 아니면(N.C. 등) 그대로. 빈 값이면 null */
+export function normalizeChordName(s) {
+  const t = String(s == null ? '' : s).trim().slice(0, 16);
+  if (!t) return null;
+  const m = /^([a-gA-G])([#b♯♭]?)(.*?)(?:\/([a-gA-G])([#b♯♭]?))?$/.exec(t);
+  if (!m) return t;
+  const acc = (a) => a === '♯' ? '#' : a === '♭' ? 'b' : a;
+  const root = m[1].toUpperCase() + acc(m[2]);
+  return root + m[3] + (m[4] ? '/' + m[4].toUpperCase() + acc(m[5]) : '');
+}
+/** start 자리에 len 길이 블록을 넣을 수 있는 구간 — 다른 블록 안이면 null, 뒤 블록에 닿으면 거기까지로 줄인다 */
+export function placeChord(chords, start, len) {
+  if (chords.some(c => start >= c.start - 1e-9 && start < c.end - 1e-9)) return null;
+  const next = chords.filter(c => c.start > start + 1e-9).reduce((m, c) => Math.min(m, c.start), Infinity);
+  const end = Math.min(start + len, next);
+  return end - start > 1e-6 ? { start, end } : null;
+}
+/** 이동·길이 조절 결과를 이웃 블록 사이로 제한한다. mode: 'move' | 'l' | 'r' */
+export function clampChordEdit(chords, id, start, end, mode, minLen) {
+  const others = chords.filter(c => c.id !== id);
+  const self = chords.find(c => c.id === id);
+  const ref = self ? self.start : start;
+  const prevEnd = others.filter(c => c.end <= ref + 1e-9).reduce((m, c) => Math.max(m, c.end), 0);
+  const nextStart = others.filter(c => c.start >= ref - 1e-9).reduce((m, c) => Math.min(m, c.start), Infinity);
+  if (mode === 'move') {
+    const len = end - start;
+    let s = Math.max(prevEnd, start);
+    if (s + len > nextStart) s = nextStart - len;
+    s = Math.max(prevEnd, s);
+    return { start: s, end: Math.min(nextStart, s + len) };
+  }
+  if (mode === 'l') return { start: Math.max(prevEnd, Math.min(start, end - minLen)), end };
+  return { start, end: Math.min(nextStart, Math.max(end, start + minLen)) };
+}
