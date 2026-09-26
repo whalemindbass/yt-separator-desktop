@@ -71,7 +71,8 @@ export function openPianoRoll(o) {
   let pps = 0;               // 초당 픽셀 — 처음엔 클립이 화면 폭에 맞게
   let sel = new Set();       // 선택된 노트(객체 참조 대신 인덱스가 흔들리지 않게 노트 객체 자체를 담는다)
   let lastLen = null;        // 마지막으로 놓거나 늘린 길이 — 새 노트 기본값(FL 과 같은 동작)
-  // 스냅 — 끄면 놓기·이동·길이가 격자에 안 붙는다. Alt 는 그 순간만 반대로(스튜디오 자석과 같은 규칙).
+  // 스냅 — 노트 "길이"에만 적용된다(끄면 끝을 자유롭게 늘인다, Alt 는 그 순간만 반대로).
+  // 찍기·붙일 자리는 항상 격자에 딱 맞고, 이동도 격자(Alt 만 자유) — 박자에 맞게 찍는 게 기본이다.
   let snapOn = o.getSnap ? o.getSnap() !== false : true;
   const snapFor = (ev) => snapOn !== !!(ev && ev.altKey);
   const MIN_D = 0.02;
@@ -249,7 +250,7 @@ export function openPianoRoll(o) {
     const step = o.stepSec(), origin = o.origin();
     if (e.button === 2) {
       if (!noteEl) {   // 빈 칸 우클릭 = 붙여넣기 자리(그 칸의 격자 시작 + 그 음)
-        const abs = snapFor(e) ? floorToGrid(c.start + x / pps, origin, step) : c.start + x / pps;
+        const abs = floorToGrid(c.start + x / pps, origin, step);
         anchor = { t: Math.max(0, abs - c.start), p: pitchAt(y) };
         drawAnchor(); return;
       }
@@ -308,7 +309,7 @@ export function openPianoRoll(o) {
     } else {
       // 빈 칸 = 새 노트 — 클릭한 칸의 격자 시작에, 마지막 길이로
       sel = new Set();
-      const abs = snapFor(e) ? floorToGrid(c.start + x / pps, origin, step) : c.start + x / pps;
+      const abs = floorToGrid(c.start + x / pps, origin, step);
       n = { t: Math.max(0, abs - c.start), d: lastLen || step, p: pitchAt(y), v: 0.8 };
       c.notes.push(n); sel = new Set([n]);
       mode = 'move';
@@ -332,7 +333,7 @@ export function openPianoRoll(o) {
       } else {
         const dp = Math.round((y0 - q.y) / ROW);
         const rawAbs = c.start + orig.find(g => g.m === n).t + (q.x - x0) / pps;
-        const anchorAbs = snapFor(ev) ? roundToGrid(rawAbs, origin, step) : rawAbs;
+        const anchorAbs = ev.altKey ? rawAbs : roundToGrid(rawAbs, origin, step);   // 이동은 격자(Alt = 자유)
         const dt = anchorAbs - (c.start + orig.find(g => g.m === n).t);
         const minT = Math.min(...orig.map(g => g.t));
         const dtc = Math.max(dt, -minT);   // 클립 앞으로는 못 나간다

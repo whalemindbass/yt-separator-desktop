@@ -331,7 +331,7 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
       void sr; void stepSamples;
       // 120BPM 1/16 = 0.125초 — 스냅이 꺼졌으면 시작이 그 배수가 아닐 가능성이 매우 높다(클릭 자리에 +3px)
       const onGrid = added ? Math.abs((added[0] / 48000 / 0.125) - Math.round(added[0] / 48000 / 0.125)) < 0.02 || Math.abs((added[0] / 44100 / 0.125) - Math.round(added[0] / 44100 / 0.125)) < 0.02 : true;
-      expect('스냅 끔 → 격자 밖 자리에 놓임', !!added && !onGrid, true);
+      expect('스냅 꺼도 찍은 노트는 박자(격자)에 딱 맞음', !!added && onGrid, true);
       // 오른쪽 끝을 조금(7px)만 끌어도 길이가 그만큼 는다(격자 단위가 아님)
       const nr = await js(`(() => { const e = [...document.querySelectorAll('.pr-note')].find(x => Math.round(127 - (parseFloat(x.style.top) - 1) / 14) === 65); const b = e.getBoundingClientRect(); return { x: b.right - 2, y: b.top + 5, w: b.width }; })()`);
       win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(nr.x), y: Math.round(nr.y), button: 'left', clickCount: 1 }); await wait(40);
