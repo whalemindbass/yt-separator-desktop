@@ -4947,3 +4947,13 @@ body { background: var(--bg) !important; }
 .pr-ph { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent); pointer-events: none; z-index: 2; }
 .pr-ph[hidden] { display: none; }
 .daw-midi-clip .daw-trim.r { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 3; }
+
+/* 피아노롤 세기(벨로시티) 줄 */
+.pr-vel { flex: none; height: 64px; display: flex; border-top: 1px solid var(--border-mid); background: var(--surface); }
+.pr-vel-lbl { width: 52px; flex: none; font: 600 10px/1 var(--sans); color: var(--tx-3); display: flex; align-items: flex-start; justify-content: center; padding-top: 6px; border-right: 1px solid var(--border); }
+.pr-vel-view { position: relative; flex: 1; overflow: hidden; cursor: ns-resize; }
+.pr-vel-in { position: absolute; left: 0; top: 0; bottom: 0; }
+.pr-vel-in i { position: absolute; bottom: 3px; width: 3px; margin-left: -1px; background: var(--c); border-radius: 1px; }
+.pr-vel-in i::before { content: ''; position: absolute; top: -3px; left: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.pr-vel-in i.sel { background: var(--tx-1); }
+.pr-vel-in i.sel::before { background: var(--tx-1); }

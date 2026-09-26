@@ -36,7 +36,8 @@ export function openPianoRoll(o) {
       <button class="btn btn-sm pr-q" type="button"></button>
       <button class="pr-x" type="button" title="${o.tr('studio.pr.close')}">✕</button>
     </div>
-    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div></div></div></div>`;
+    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div></div></div></div>
+    <div class="pr-vel"><div class="pr-vel-lbl">${o.tr('studio.pr.velocity')}</div><div class="pr-vel-view"><div class="pr-vel-in"></div></div></div>`;
   o.host.appendChild(root);
   const $q = (s) => root.querySelector(s);
   const scroll = $q('.pr-scroll'), canvas = $q('.pr-canvas'), grid = $q('.pr-grid'), notesEl = $q('.pr-notes'), lines = $q('.pr-lines');
@@ -106,7 +107,40 @@ export function openPianoRoll(o) {
       notesEl.appendChild(el);
     });
   }
-  function redraw() { drawLines(); drawNotes(); }
+  // 세기(벨로시티) 줄 — 노트마다 막대 하나. 위아래로 끌면 세기, 끌면서 옆으로 쓸면 지나간 노트를 다 칠한다.
+  const velIn = $q('.pr-vel-in'), velView = $q('.pr-vel-view');
+  const VEL_H = 64;
+  function drawVel() {
+    const c = clip(); if (!c) return;
+    velIn.style.width = (widthSec() * pps) + 'px';
+    velIn.innerHTML = c.notes.map((n, i) => `<i class="${sel.has(n) ? 'sel' : ''}" data-i="${i}" style="left:${(n.t * pps).toFixed(1)}px;height:${Math.round((n.v || 0.8) * (VEL_H - 6))}px"></i>`).join('');
+    velIn.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+  }
+  scroll.addEventListener('scroll', () => { velIn.style.transform = `translateX(${-scroll.scrollLeft}px)`; });
+  velView.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const c = clip(); if (!c || !c.notes.length) return;
+    e.preventDefault();
+    const before = snapshot();
+    let changed = false;
+    const paint = (ev) => {
+      const r = velView.getBoundingClientRect();
+      const x = ev.clientX - r.left + scroll.scrollLeft, y = ev.clientY - r.top;
+      const v = Math.max(0.05, Math.min(1, 1 - (y - 3) / (VEL_H - 6)));
+      const tAt = x / pps;
+      // 커서 아래 노트(시작점이 4px 안) — 선택된 노트가 걸리면 선택 전체를 같은 세기로
+      const hit = c.notes.filter(n => Math.abs(n.t * pps - x) <= 4);
+      if (!hit.length) return;
+      const targets = hit.some(n => sel.has(n)) ? [...sel] : hit;
+      for (const n of targets) n.v = Math.round(v * 100) / 100;
+      changed = true; void tAt;
+      drawVel(); drawNotes();
+    };
+    paint(e);
+    const up = () => { document.removeEventListener('pointermove', paint); document.removeEventListener('pointerup', up); if (changed) commit(before); };
+    document.addEventListener('pointermove', paint); document.addEventListener('pointerup', up);
+  });
+  function redraw() { drawLines(); drawNotes(); drawVel(); }
   const snapshot = () => { const c = clip(); return c ? { ...c, notes: c.notes.map(n => ({ ...n })) } : null; };
   function commit(before) {
     const c = clip(); if (!c) return;
@@ -139,7 +173,7 @@ export function openPianoRoll(o) {
       n = c.notes[Number(noteEl.dataset.i)];
       const r = noteEl.getBoundingClientRect();
       mode = (r.right - e.clientX) <= 6 ? 'resize' : 'move';
-      if (e.ctrlKey || e.metaKey) { if (sel.has(n)) sel.delete(n); else sel.add(n); drawNotes(); return; }
+      if (e.ctrlKey || e.metaKey) { if (sel.has(n)) sel.delete(n); else sel.add(n); drawNotes(); drawVel(); return; }
       if (!sel.has(n)) sel = new Set([n]);
     } else {
       // 빈 칸 = 새 노트 — 클릭한 칸의 격자 시작에, 마지막 길이로
@@ -148,7 +182,7 @@ export function openPianoRoll(o) {
       n = { t: Math.max(0, abs - c.start), d: lastLen || step, p: pitchAt(y), v: 0.8 };
       c.notes.push(n); sel = new Set([n]);
       mode = 'move';
-      o.onPreview(n.p, true); setTimeout(() => o.onPreview(n.p, false), 180);
+      o.onPreview(n.p, true, n.v); setTimeout(() => o.onPreview(n.p, false), 180);
     }
     const group = [...sel];
     const orig = group.map(m => ({ m, t: m.t, p: m.p, d: m.d }));
@@ -173,7 +207,7 @@ export function openPianoRoll(o) {
         if (n.p !== lastPitch) { o.onPreview(lastPitch, false); o.onPreview(n.p, true); setTimeout(() => o.onPreview(n.p, false), 150); lastPitch = n.p; }
       }
       changed = true;
-      drawNotes();
+      drawNotes(); drawVel();
     };
     const up = () => {
       document.removeEventListener('pointermove', move);
@@ -211,7 +245,7 @@ export function openPianoRoll(o) {
       stop(); const before = snapshot();
       c.notes = c.notes.filter(n => !sel.has(n)); sel = new Set(); commit(before); return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { stop(); sel = new Set(c.notes); drawNotes(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { stop(); sel = new Set(c.notes); drawNotes(); drawVel(); return; }
     if ((e.code === 'ArrowUp' || e.code === 'ArrowDown') && sel.size && !e.ctrlKey && !e.altKey) {
       stop(); const before = snapshot();
       const d = (e.code === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 12 : 1);

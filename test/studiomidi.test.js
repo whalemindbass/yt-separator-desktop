@@ -211,6 +211,16 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
     await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
     await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(200);
     expect('Ctrl+Z → 노트 4개로 복원(피아노롤 갱신)', await js(`document.querySelectorAll('.pr-note').length`), 4);
+    // 세기 줄 — 첫 노트 막대를 위에서 아래로 끌면 세기가 약해진다
+    const vb = await js(`(() => { const i = document.querySelector('.pr-vel-in i[data-i="0"]').getBoundingClientRect(); const v = document.querySelector('.pr-vel-view').getBoundingClientRect(); return { x: i.left + 1, top: v.top + 4, bot: v.bottom - 6 }; })()`);
+    sent.length = 0;
+    await mouse('mouseDown', vb.x, vb.top); await mouse('mouseMove', vb.x, vb.bot); await mouse('mouseUp', vb.x, vb.bot);
+    await wait(150);
+    const vc = cmds('midiClip').pop();
+    const firstVel = vc ? vc.notes.slice().sort((a, b) => a[0] - b[0])[0][3] : 1;
+    expect('세기 줄 드래그 → 첫 노트 세기 약해짐(<0.3)', firstVel < 0.3, true);
+    await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
+    await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(150);
     await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp'); await wait(150);
     expect('Esc → 닫힘', await js(`!document.querySelector('.pr')`), true);
   }
@@ -226,6 +236,26 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
     await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
     await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(250);
     expect('Ctrl+Z → 다시 하나', await js(`document.querySelectorAll('.daw-midi-clip').length`), 1);
+  }
+  section('8) MIDI 클립 복사·붙여넣기');
+  {
+    const ctrl = async (k) => { win.webContents.sendInputEvent({ type: 'keyDown', keyCode: k, modifiers: ['control'] }); await wait(40); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: k, modifiers: ['control'] }); await wait(200); };
+    const r = await js(`(() => { const b = document.querySelector('.daw-midi-clip').getBoundingClientRect(); return { x: b.left + 8, y: b.top + b.height * 0.6, right: b.right }; })()`);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(50);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(150);
+    await ctrl('C');
+    // 클립 오른쪽 빈 곳 클릭 = 재생선을 거기로(선택은 풀림)
+    const ex = Math.round(r.right + 120);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: ex, y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(50);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: ex, y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(150);
+    sent.length = 0;
+    await ctrl('V');
+    expect('Ctrl+V → 클립 둘', await js(`document.querySelectorAll('.daw-midi-clip').length`), 2);
+    const pasted = cmds('midiClip').pop();
+    expect('붙인 클립이 재생선(뒤쪽)에', !!(pasted && pasted.start > 0), true);
+    expect('붙인 클립 노트 수 같음(4)', pasted && pasted.notes.length, 4);
+    await ctrl('Z');
+    expect('Ctrl+Z → 하나', await js(`document.querySelectorAll('.daw-midi-clip').length`), 1);
   }
 
   fs.writeFileSync(path.join(os.tmpdir(), 'yss-studiomidi.png'), (await win.webContents.capturePage()).toPNG());
