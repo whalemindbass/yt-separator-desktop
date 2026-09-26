@@ -7,7 +7,7 @@ import { FADER_POS, FADER_UNITY_POS, faderToGain, gainToFader, dbText } from './
 import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
          METER_BLOCKS, METER_FLOOR_DB, METER_GATE, noteCrashAndCheckLoop, inputConfigInRange,
          pickInputConfig, mergeFxCache, latencyBreakdown,
-         kbNoteFor, noteName, isTypingTarget, normalizeChordName, placeChord, clampChordEdit, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
+         kbNoteFor, noteName, isTypingTarget, normalizeChordName, placeChord, clampChordEdit, chordTones, voiceChord, quantizeNotes, quantStepSec, QUANT_DIVS, clipFromMidiTake, midiClipForEngine } from './studio/util.js';
 // 번역 함수는 tr 로 받는다 — 이 파일은 t 를 트랙·테이크 루프 변수로 많이 써서
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
@@ -2554,6 +2554,7 @@ function renderChordTrack(w) {
   inn.style.width = (w != null ? w : timelineW()) + 'px';
   inn.innerHTML = _chords.map(c => `<div class="daw-chord${c.id === _selChord ? ' sel' : ''}${c.id === _chordCur ? ' cur' : ''}" data-id="${c.id}" style="left:${(c.start * _pxPerSec).toFixed(1)}px;width:${Math.max(6, (c.end - c.start) * _pxPerSec).toFixed(1)}px"><i class="h l"></i><b>${esc(c.name)}</b><i class="h r"></i></div>`).join('');
   inn.style.transform = `translateX(${-($('daw-tscroll')?.scrollLeft || 0)}px)`;
+  _pr?.refresh();
 }
 function highlightChordAt(sec) {
   const c = _chords.find(x => sec >= x.start && sec < x.end);
@@ -2562,6 +2563,7 @@ function highlightChordAt(sec) {
   _chordCur = id;
   document.querySelectorAll('.daw-chord.cur').forEach(e => e.classList.remove('cur'));
   if (id != null) document.querySelector(`.daw-chord[data-id="${id}"]`)?.classList.add('cur');
+  if (_kbOn) renderKbHud();   // 키보드 가이드의 코드톤 표시도 지금 코드로
 }
 function chordSecAt(clientX) { const r = $('daw-chord-view').getBoundingClientRect(); return Math.max(0, (clientX - r.left + ($('daw-tscroll')?.scrollLeft || 0)) / _pxPerSec); }
 function addChordAt(sec) {
@@ -2748,6 +2750,25 @@ function openMidiEditor(id) {
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
     flash: (m) => flashTake(m),
+    getChords: () => _chords,
+    // 코드로 채우기 — 이 클립 범위에 걸친 코드마다 그 구간 길이로 코드 음을 깐다(기존 노트는 그대로 둔다)
+    onFillChords: () => {
+      const c = find(); if (!c) return;
+      const list = _chords.filter(ch => ch.end > c.start && ch.start < c.start + c.dur);
+      if (!list.length) { flashTake(tr('studio.pr.fillNone')); return; }
+      const before = midiSnapshot(c);
+      let added = 0;
+      for (const ch of list) {
+        const s0 = Math.max(ch.start, c.start), s1 = Math.min(ch.end, c.start + c.dur);
+        for (const p of voiceChord(ch.name)) { c.notes.push({ t: s0 - c.start, d: Math.max(0.02, s1 - s0), p, v: 0.75 }); added++; }
+      }
+      if (!added) { flashTake(tr('studio.pr.fillNone')); return; }
+      c.notes.sort((a, b) => a.t - b.t || a.p - b.p);
+      pushMidiClip(c); renderTakes(); layout();
+      const after = midiSnapshot(c);
+      pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.pr.fill'));
+      markDirty();
+    },
     getRowH: () => { try { return localStorage.getItem('yss:prRowH'); } catch { return null; } },
     setRowH: (h) => { try { localStorage.setItem('yss:prRowH', String(h)); } catch {} },
     getSnap: () => { try { return localStorage.getItem('yss:prSnap') !== '0'; } catch { return true; } },
@@ -2923,12 +2944,15 @@ const KB_GUIDE_ROWS = [
   { off: 1.25, keys: [['KeyZ', 'Z'], ['KeyX', 'X'], ['KeyC', 'C'], ['KeyV', 'V'], ['KeyB', 'B'], ['KeyN', 'N'], ['KeyM', 'M'], ['Comma', ','], ['Period', '.'], ['Slash', '/']] },
 ];
 function kbGuideHtml() {
+  const cur = _chords.find(x => x.id === _chordCur);
+  const ct = cur ? chordTones(cur.name) : null;
   return KB_GUIDE_ROWS.map(row => `<div class="kbg-row" style="--off:${row.off}">${row.keys.map(([code, cap]) => {
     const n = kbNoteFor(code, _kbOct);
     if (n == null) return `<span class="kbk none" data-code="${code}"><b>${esc(cap)}</b></span>`;
     const nm = noteName(n), black = nm.includes('#');
     const label = nm.startsWith('C') && !black ? nm : nm.replace(/-?\d+$/, '');   // 옥타브 숫자는 C 에만
-    return `<span class="kbk ${black ? 'black' : 'white'}${_kbHeld.has(code) ? ' down' : ''}" data-code="${code}"><b>${esc(cap)}</b><i>${label}</i></span>`;
+    const tone = ct && ct.pcs.includes(n % 12) ? (n % 12 === ct.root ? ' ct rt' : ' ct') : '';
+    return `<span class="kbk ${black ? 'black' : 'white'}${tone}${_kbHeld.has(code) ? ' down' : ''}" data-code="${code}"><b>${esc(cap)}</b><i>${label}</i></span>`;
   }).join('')}</div>`).join('');
 }
 function markKbKey(code, down) { document.querySelector(`#daw-kb-hud .kbk[data-code="${code}"]`)?.classList.toggle('down', down); }
@@ -2939,7 +2963,7 @@ function renderKbHud() {
   const t = kbTargetTrack();
   const lo = kbNoteFor('KeyZ', _kbOct), hi = kbNoteFor('BracketRight', _kbOct);
   hud.innerHTML = `<div class="kbg">${kbGuideHtml()}</div>`
-    + `<div class="kbg-bar"><b>⌨ ${esc(t ? selTrackLabel(t.id) : '')}</b><span>${lo != null ? noteName(lo) : ''}–${hi != null ? noteName(hi) : 'G9'}</span>`
+    + `<div class="kbg-bar"><b>⌨ ${esc(t ? selTrackLabel(t.id) : '')}</b>${(() => { const cc = _chords.find(x => x.id === _chordCur); return cc ? `<span class="kbg-chord">${esc(cc.name)}</span>` : ''; })()}<span>${lo != null ? noteName(lo) : ''}–${hi != null ? noteName(hi) : 'G9'}</span>`
     + `<span class="k">←/→ ${tr('studio.midi.octave')}</span><span class="k">Esc ${tr('studio.midi.off')}</span></div>`;
 }
 function kbStudioActive() { const main = document.querySelector('main[data-view="studio"]'); return !!(main && !main.hidden && _started); }

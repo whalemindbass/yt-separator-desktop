@@ -318,3 +318,35 @@ export function clampChordEdit(chords, id, start, end, mode, minLen) {
   if (mode === 'l') return { start: Math.max(prevEnd, Math.min(start, end - minLen)), end };
   return { start, end: Math.min(nextStart, Math.max(end, start + minLen)) };
 }
+// 코드 이름 → 구성음. 근음을 못 읽으면(N.C. 등) null. 모르는 종류는 앞부분(m/dim/aug/sus 등)으로 짐작하고, 그래도 없으면 장3화음.
+const CHORD_IV = {
+  '': [0, 4, 7], M: [0, 4, 7], maj: [0, 4, 7], m: [0, 3, 7], min: [0, 3, 7], '-': [0, 3, 7],
+  '5': [0, 7], '6': [0, 4, 7, 9], m6: [0, 3, 7, 9], '7': [0, 4, 7, 10], maj7: [0, 4, 7, 11], M7: [0, 4, 7, 11],
+  m7: [0, 3, 7, 10], mM7: [0, 3, 7, 11], m7b5: [0, 3, 6, 10], dim: [0, 3, 6], dim7: [0, 3, 6, 9], aug: [0, 4, 8], '+': [0, 4, 8],
+  sus2: [0, 2, 7], sus4: [0, 5, 7], sus: [0, 5, 7], '7sus4': [0, 5, 7, 10], '9': [0, 4, 7, 10, 14], maj9: [0, 4, 7, 11, 14],
+  m9: [0, 3, 7, 10, 14], add9: [0, 4, 7, 14], madd9: [0, 3, 7, 14], '11': [0, 4, 7, 10, 14, 17], '13': [0, 4, 7, 10, 14, 21],
+};
+const PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const pcOf = (letter, acc) => (PC[letter] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0) + 12) % 12;
+export function chordTones(name) {
+  const n = normalizeChordName(name); if (!n) return null;
+  const m = /^([A-G])([#b]?)(.*?)(?:\/([A-G])([#b]?))?$/.exec(n);
+  if (!m) return null;
+  const root = pcOf(m[1], m[2]);
+  const q = m[3];
+  let iv = CHORD_IV[q];
+  if (!iv) {   // 모르는 표기 — 흔한 머리말로 짐작
+    const key = Object.keys(CHORD_IV).filter(k => k && q.startsWith(k)).sort((a, b) => b.length - a.length)[0];
+    iv = key ? CHORD_IV[key] : CHORD_IV[''];
+  }
+  const bass = m[4] ? pcOf(m[4], m[5]) : root;
+  return { root, bass, intervals: iv.slice(), pcs: [...new Set(iv.map(i => (root + i) % 12))] };
+}
+/** 코드를 실제 음으로 — 근음을 C3~B3 에 두고 위로 쌓는다(가운데 C 근처), 베이스음은 한 옥타브 아래 */
+export function voiceChord(name) {
+  const t = chordTones(name); if (!t) return [];
+  const base = 48 + t.root;
+  const upper = t.intervals.map(i => base + i);
+  const bassNote = 36 + t.bass;
+  return [...new Set([bassNote, ...upper])].sort((a, b) => a - b);
+}

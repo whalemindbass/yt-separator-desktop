@@ -4880,7 +4880,7 @@ body { background: var(--bg) !important; }
 .daw-kb-btn.on, .st-kb.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 /* 레인 버튼 그룹의 .daw-ms.on(트랙색 14%) 규칙이 더 구체적이라 위 규칙을 덮는다 — M/S 처럼 같은 급으로 올린다 */
 .daw-btn-grp .daw-ms[data-m="kb"].on { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
-.daw-kb-hud { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 8; display: flex; flex-direction: column; align-items: center; gap: 8px;
+.daw-kb-hud { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40;   /* 피아노롤(z 30) 위에도 보여야 한다 */ display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 10px 12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--elev) 94%, transparent); border: 1px solid var(--border-mid);
   box-shadow: var(--shadow-pop); font-size: 12px; color: var(--tx-2); pointer-events: none; white-space: nowrap; }
 .daw-kb-hud .kbg-bar { display: flex; align-items: center; gap: 10px; }
@@ -5044,3 +5044,16 @@ body { background: var(--bg) !important; }
 .daw-chord-pop .cp-grid button { min-width: 0; padding: 0; width: auto; text-align: center; justify-content: center; height: 24px; border-radius: 5px; border: 1px solid var(--border); background: var(--elev); color: var(--tx-2); font: 600 11px/1 var(--sans); cursor: pointer; }
 .daw-chord-pop .cp-grid button:hover { border-color: var(--border-mid); color: var(--tx-1); }
 .daw-chord-pop .cp-grid button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+/* 피아노롤 — 코드 구성음 줄 · 눈금자 아래 코드 이름 */
+.pr-chords { position: absolute; inset: 0; pointer-events: none; }
+.pr-chords i { position: absolute; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.pr-chords i.rt { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.pr-ruler.has-ch { height: 36px; }
+.pr-ruler-ch { position: absolute; left: 0; bottom: 0; height: 14px; pointer-events: none; }
+.pr-ruler-ch span { position: absolute; top: 0; height: 13px; overflow: hidden; white-space: nowrap; font: 700 10px/13px var(--sans); color: var(--accent); padding-left: 3px; border-left: 2px solid var(--accent); box-sizing: border-box; }
+.pr-ruler.has-ch .pr-ruler-in { bottom: 14px; }
+/* 키보드 가이드 — 지금 코드의 구성음 키 */
+.kbk.ct { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent) inset; }
+.kbk.ct.rt { box-shadow: 0 0 0 2px var(--accent) inset, 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent); }
+.kbg-chord { font: 700 12px/1 var(--sans); color: var(--tx-1); background: color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 5px; padding: 3px 7px; }

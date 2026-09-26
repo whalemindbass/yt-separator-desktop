@@ -255,6 +255,20 @@ const expect = (label, got, want) => {
     expect('최소 길이 지킴        ', JSON.stringify(U.clampChordEdit(cs, 2, 4, 4.1, 'r', 0.5)), '{"start":4,"end":4.5}');
   }
 
+  console.log('11g) 코드 구성음 · 쌓기');
+  {
+    expect('C → C E G            ', U.chordTones('C').pcs.join(','), '0,4,7');
+    expect('Am7 → A C E G        ', U.chordTones('Am7').pcs.sort((a, b) => a - b).join(','), '0,4,7,9');
+    expect('F#m7b5               ', U.chordTones('F#m7b5').pcs.sort((a, b) => a - b).join(','), '0,4,6,9');
+    expect('Bbmaj7 근음 10        ', U.chordTones('Bbmaj7').root, 10);
+    expect('G/B 베이스 B(11)      ', U.chordTones('G/B').bass, 11);
+    expect('소문자도 됨(am)       ', U.chordTones('am').pcs.sort((a, b) => a - b).join(','), '0,4,9');
+    expect('모르는 표기 m(maj9) → 단조 짐작', U.chordTones('Cm(maj9)').intervals.slice(0, 3).join(','), '0,3,7');
+    expect('N.C. → null           ', U.chordTones('N.C.'), null);
+    expect('C 쌓기: 베이스 C2 + C3 E3 G3', U.voiceChord('C').join(','), '36,48,52,55');
+    expect('G/B 쌓기: 베이스 B2   ', U.voiceChord('G/B')[0], 47);
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷

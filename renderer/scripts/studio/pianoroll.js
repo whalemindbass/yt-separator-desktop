@@ -4,7 +4,7 @@
 // 박(origin = _gridOffset)에 맞춘다 — 클립이 박 중간에서 시작해도 격자는 곡 기준이다.
 // 편집 결과는 이 모듈이 클립 객체를 직접 고치고 onCommit(before) 로 알린다. 스튜디오 쪽이
 // 엔진 전송·실행취소·저장 표시를 맡는다. 실행취소로 클립이 바뀌면 스튜디오가 refresh() 를 부른다.
-import { noteName } from './util.js';
+import { noteName, chordTones } from './util.js';
 
 let ROW = 14;            // 음 하나 높이(px) — +/− 로 세로 배율을 바꾸면 달라진다(열 때마다 기억한 값)
 const MIN_ROW = 7, MAX_ROW = 34;
@@ -54,6 +54,7 @@ export function openPianoRoll(o) {
       <span class="pr-sp"></span>
       <label class="pr-gridsel">${o.tr('studio.midi.grid')} <select>${(o.divs || []).map(d => `<option value="${d}">${d.replace('T', ' ' + o.tr('studio.midi.triplet'))}</option>`).join('')}</select></label>
       <button class="pr-snap" type="button" aria-pressed="true" title="${o.tr('studio.pr.snapTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 3v5a4 4 0 0 0 8 0V3"/><path d="M4 5.5h2.2M9.8 5.5H12"/></svg><span>${o.tr('studio.pr.snap')}</span></button>
+      <button class="btn btn-sm pr-fill" type="button" title="${o.tr('studio.pr.fillTitle')}">${o.tr('studio.pr.fill')}</button>
       <button class="btn btn-sm pr-q" type="button"></button>
       <button class="pr-x" type="button" title="${o.tr('studio.pr.close')}">✕</button>
     </div>
@@ -64,8 +65,8 @@ export function openPianoRoll(o) {
       <button class="pr-solo" type="button" aria-pressed="false" title="${o.tr('studio.pr.soloTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"/><rect x="2.2" y="9" width="2.6" height="4.2" rx="1"/><rect x="11.2" y="9" width="2.6" height="4.2" rx="1"/></svg><span>${o.tr('studio.pr.solo')}</span></button>
       <span class="pr-time"></span>
     </div>
-    <div class="pr-ruler" title="${o.tr('studio.pr.rulerTitle')}"><div class="pr-ruler-sp"></div><div class="pr-ruler-view"><div class="pr-ruler-in"></div></div></div>
-    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div><div class="pr-marq" hidden></div><div class="pr-anchor" hidden></div></div></div></div>
+    <div class="pr-ruler" title="${o.tr('studio.pr.rulerTitle')}"><div class="pr-ruler-sp"></div><div class="pr-ruler-view"><div class="pr-ruler-in"></div><div class="pr-ruler-ch"></div></div></div>
+    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-chords"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div><div class="pr-marq" hidden></div><div class="pr-anchor" hidden></div></div></div></div>
     <div class="pr-vel"><div class="pr-vel-lbl">${o.tr('studio.pr.velocity')}</div><div class="pr-vel-view"><div class="pr-vel-in"></div></div></div>`;
   o.host.appendChild(root);
   const $q = (s) => root.querySelector(s);
@@ -246,7 +247,28 @@ export function openPianoRoll(o) {
     el.style.width = Math.max(6, o.stepSec() * pps) + 'px';
     el.style.height = ROW + 'px';
   }
-  function redraw() { drawLines(); drawNotes(); drawVel(); drawRuler(); drawAnchor(); }
+  // 코드 트랙 연동 — 코드가 걸친 시간 구간마다 그 구성음 줄을 칠하고(근음은 더 진하게), 눈금자 아래 줄에 이름
+  function drawChords() {
+    const c = clip(); if (!c) return;
+    const layer = $q('.pr-chords'), lbl = $q('.pr-ruler-ch');
+    const list = (o.getChords ? o.getChords() : []).filter(ch => ch.end > c.start && ch.start < c.start + widthSec());
+    let bands = '', labels = '';
+    for (const ch of list) {
+      const x0 = Math.max(0, (ch.start - c.start) * pps), x1 = (ch.end - c.start) * pps;
+      labels += `<span style="left:${x0.toFixed(1)}px;width:${Math.max(0, x1 - x0 - 2).toFixed(1)}px">${ch.name.replace(/[<&]/g, '')}</span>`;
+      const t = chordTones(ch.name); if (!t) continue;
+      for (let p = 0; p < 128; p++) {
+        const pc = p % 12; if (!t.pcs.includes(pc)) continue;
+        bands += `<i class="${pc === t.root ? 'rt' : ''}" style="left:${x0.toFixed(1)}px;width:${Math.max(1, x1 - x0).toFixed(1)}px;top:${rowOf(p) * ROW}px;height:${ROW}px"></i>`;
+      }
+    }
+    layer.innerHTML = bands;
+    lbl.innerHTML = labels;
+    lbl.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+    $q('.pr-ruler').classList.toggle('has-ch', list.length > 0);
+  }
+  scroll.addEventListener('scroll', () => { const l = $q('.pr-ruler-ch'); if (l) l.style.transform = `translateX(${-scroll.scrollLeft}px)`; });
+  function redraw() { drawLines(); drawChords(); drawNotes(); drawVel(); drawRuler(); drawAnchor(); }
   const snapshot = () => { const c = clip(); return c ? { ...c, notes: c.notes.map(n => ({ ...n })) } : null; };
   function commit(before) {
     const c = clip(); if (!c) return;
@@ -468,6 +490,7 @@ export function openPianoRoll(o) {
   let soloOn = false;
   soloBtn.addEventListener('click', () => { soloOn = !soloOn; soloBtn.classList.toggle('on', soloOn); soloBtn.setAttribute('aria-pressed', String(soloOn)); o.onSolo(soloOn); });
   $q('.pr-q').addEventListener('click', () => { o.onQuantize(); });
+  $q('.pr-fill').addEventListener('click', () => { o.onFillChords?.(); });
   const snapBtn = $q('.pr-snap');
   const paintSnap = () => { snapBtn.classList.toggle('on', snapOn); snapBtn.setAttribute('aria-pressed', String(snapOn)); };
   paintSnap();

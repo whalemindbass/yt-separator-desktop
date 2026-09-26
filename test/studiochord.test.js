@@ -82,6 +82,40 @@ const { bootMain, expect, section, wait, finish, skip } = require('./harness');
   await wait(150);
   expect('재생선이 Am7 안 → Am7 강조', await js(`document.querySelector('.daw-chord.cur b')?.textContent`), 'Am7');
 
+  section('5b) 피아노롤 연동 — 구성음 줄 · 코드 이름 · 코드로 채우기 · 키보드 가이드 코드톤');
+  {
+    // 악기 트랙 + 빈 클립(1마디 = Am7 자리)
+    await js(`document.getElementById('st-add-instr').click(); true`);
+    for (let i = 0; i < 20 && !(await js(`!!document.querySelector('.daw-lane-instr')`)); i++) await wait(150);
+    const la = await js(`(() => { const r = document.querySelector('.daw-lane-instr .daw-area').getBoundingClientRect(); return { l: r.left, t: r.top + r.height / 2 }; })()`);
+    const bb = await blocks();
+    // 빈 MIDI 클립은 누른 마디에 1마디 — Am7 마디(bb[0])를 눌러 Am7 구간에 만든다
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(la.l + bb[0].left + 5), y: Math.round(la.t), button: 'right', clickCount: 1 }); await wait(40);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(la.l + bb[0].left + 5), y: Math.round(la.t), button: 'right', clickCount: 1 }); await wait(150);
+    await js(`[...document.querySelectorAll('.daw-dropdown *')].find(e => e.children.length === 0 && /MIDI/.test(e.textContent))?.click(); true`);
+    await wait(400);
+    expect('피아노롤 열림', await js(`!!document.querySelector('.pr')`), true);
+    expect('눈금자 아래 코드 이름 Am7', await js(`[...document.querySelectorAll('.pr-ruler-ch span')].map(e => e.textContent).join(',').includes('Am7')`), true);
+    // Am7 구성음 A C E G — 한 옥타브(12줄)에 4줄, 근음 A 줄은 진하게
+    const bandInfo = await js(`(() => { const endX = parseFloat(document.querySelector('.pr-end').style.left); const b = [...document.querySelectorAll('.pr-chords i')].filter(i => parseFloat(i.style.left) < endX - 1); const ph = parseFloat(document.querySelector('.pr-row').style.height); const pcs = new Set(b.map(i => (127 - Math.round(parseFloat(i.style.top) / ph)) % 12)); return { pcs: [...pcs].sort((a, c) => a - c).join(','), roots: [...new Set(b.filter(i => i.classList.contains('rt')).map(i => (127 - Math.round(parseFloat(i.style.top) / ph)) % 12))].join(',') }; })()`);
+    expect('구성음 줄 = A C E G(0,4,7,9)', bandInfo.pcs, '0,4,7,9');
+    expect('근음 줄 = A(9)', bandInfo.roots, '9');
+    await js(`document.querySelector('.pr-fill').click(); true`); await wait(200);
+    const ns = await js(`[...document.querySelectorAll('.pr-note')].map(e => 127 - Math.round((parseFloat(e.style.top) - 1) / parseFloat(document.querySelector('.pr-row').style.height))).sort((a, b) => a - b).join(',')`);
+    expect('코드로 채우기 → Am7 = A2 + A3 C4 E4 G4', ns, '45,57,60,64,67');
+    await key('Z', ['control']);
+    expect('Ctrl+Z → 비움', await js(`document.querySelectorAll('.pr-note').length`), 0);
+    // 키보드 가이드 — 재생선이 Am7 안이면 A·C·E·G 키가 코드톤
+    await key('Escape'); await wait(100);
+    await js(`document.querySelector('.daw-lane-instr [data-m="kb"]').click(); true`); await wait(200);
+    const ctKeys = await js(`[...document.querySelectorAll('#daw-kb-hud .kbk.ct i')].map(e => e.textContent.replace(/[0-9-]/g, ''))`);
+    expect('가이드 코드톤에 A·C·E·G 포함', ['A', 'C', 'E', 'G'].every(n => ctKeys.includes(n)) && !ctKeys.includes('D'), true);
+    expect('가이드에 지금 코드 이름', await js(`document.querySelector('.kbg-chord')?.textContent`), 'Am7');
+    // 피아노롤이 열려 있어도 가이드가 위에 보인다(가운데 지점을 덮는 게 가이드인지)
+    expect('가이드가 피아노롤 위에 보임', await js(`(() => { const h = document.getElementById('daw-kb-hud'); if (!h) return false; const r = h.getBoundingClientRect(); const pr = document.querySelector('.pr'); const zH = +getComputedStyle(h).zIndex, zP = pr ? +getComputedStyle(pr).zIndex : 0; return r.width > 0 && zH > zP; })()`), true);
+    await key('Escape'); await wait(100);
+  }
+
   section('6) 저장 · 다시 열기');
   await key('S', ['control']);
   for (let i = 0; i < 40 && !fs.existsSync(PROJ); i++) await wait(150);
