@@ -2567,6 +2567,8 @@ function openMidiEditor(id) {
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
     flash: (m) => flashTake(m),
+    getRowH: () => { try { return localStorage.getItem('yss:prRowH'); } catch { return null; } },
+    setRowH: (h) => { try { localStorage.setItem('yss:prRowH', String(h)); } catch {} },
     getSnap: () => { try { return localStorage.getItem('yss:prSnap') !== '0'; } catch { return true; } },
     setSnap: (on) => { try { localStorage.setItem('yss:prSnap', on ? '1' : '0'); } catch {} },
     // ● = 이 클립에 녹음 — 트랙을 녹음 대상으로 켜고(꺼져 있으면), 연주 모드 켜고, 재생선부터 녹음.
@@ -2588,7 +2590,7 @@ function openMidiEditor(id) {
       ['Ctrl/Shift+' + tr('studio.pr.k.drag'), tr('studio.pr.d.marquee')], [tr('studio.pr.k.rclick'), tr('studio.pr.d.erase')],
       [tr('studio.pr.k.rclickEmpty'), tr('studio.pr.d.pasteSpot')], ['Ctrl+C / X / V', tr('studio.pr.d.clip')], ['Ctrl+B', tr('studio.pr.d.dup')],
       ['Ctrl+A', tr('studio.pr.d.all')], ['Delete', tr('studio.pr.d.del')], ['↑ ↓', tr('studio.pr.d.pitch')], ['Shift+↑ ↓', tr('studio.pr.d.octave')],
-      ['← →', tr('studio.pr.d.nudge')], ['Ctrl+' + tr('studio.pr.k.wheel'), tr('studio.pr.d.zoom')], ['Space', tr('studio.pr.d.play')], ['Esc', tr('studio.pr.d.close')],
+      ['← →', tr('studio.pr.d.nudge')], ['Ctrl+' + tr('studio.pr.k.wheel'), tr('studio.pr.d.zoom')], ['+ / −', tr('studio.pr.d.vzoom')], ['Shift+' + tr('studio.pr.k.wheel'), tr('studio.pr.d.hscroll')], ['Space', tr('studio.pr.d.play')], ['Esc', tr('studio.pr.d.close')],
     ],
     onSeek: (sec) => {   // 피아노롤 눈금자 — 녹음 중엔 재생 위치를 못 옮긴다(타임라인과 같은 규칙)
       if (_recArmed) return;

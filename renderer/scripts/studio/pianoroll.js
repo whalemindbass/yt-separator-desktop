@@ -6,7 +6,8 @@
 // 엔진 전송·실행취소·저장 표시를 맡는다. 실행취소로 클립이 바뀌면 스튜디오가 refresh() 를 부른다.
 import { noteName } from './util.js';
 
-const ROW = 14;          // 음 하나 높이(px)
+let ROW = 14;            // 음 하나 높이(px) — +/− 로 세로 배율을 바꾸면 달라진다(열 때마다 기억한 값)
+const MIN_ROW = 7, MAX_ROW = 34;
 const KEYS_W = 52;       // 왼쪽 건반 폭
 const MIN_PPS = 20, MAX_PPS = 800;
 
@@ -41,6 +42,7 @@ let _noteClipboard = null;   // 피아노롤을 닫았다 다른 클립에서 �
 export function openPianoRoll(o) {
   const clip0 = o.getClip();
   if (!clip0) return null;
+  { const h = Number(o.getRowH?.()); if (h >= MIN_ROW && h <= MAX_ROW) ROW = h; }
   const root = document.createElement('div');
   root.className = 'pr';
   root.style.setProperty('--c', o.color || 'var(--accent)');
@@ -83,7 +85,7 @@ export function openPianoRoll(o) {
   // 건반 — C 에만 이름을 쓴다. 누르면 그 음을 들려준다.
   // 실제 피아노처럼 — 흰건반은 옥타브(12줄 = 168px)를 7등분한 폭으로 깔고, 검은건반은 자기 줄
   // 높이 그대로 60% 폭으로 그 위에 얹는다. 줄(음 하나 = 14px)과 격자 줄은 그대로 맞는다.
-  {
+  function buildKeys() {
     const keys = $q('.pr-keys');
     keys.style.height = (128 * ROW) + 'px';
     const WHITE = [0, 2, 4, 5, 7, 9, 11], WH = (12 * ROW) / 7;
@@ -101,7 +103,9 @@ export function openPianoRoll(o) {
       html += `<div class="pr-key b" data-p="${p}" style="top:${rowOf(p) * ROW}px;height:${ROW}px"></div>`;
     }
     keys.innerHTML = html;
+    keys.classList.toggle('tight', ROW < 11);   // 줄이 낮으면 C 이름을 숨긴다(안 그러면 겹친다)
   }
+  buildKeys();
   $q('.pr-keys').addEventListener('pointerdown', (e) => {
     const k = e.target.closest('.pr-key'); if (!k) return;
     const p = Number(k.dataset.p); o.onPreview(p, true); k.classList.add('on');
@@ -122,7 +126,7 @@ export function openPianoRoll(o) {
     // 128 줄 — 검은건반 줄은 어둡게, C 줄 위에 옥타브 경계선
     for (let i = 0; i < 128; i++) {
       const p = 127 - i, nm = noteName(p);
-      html += `<div class="pr-row${nm.includes('#') ? ' b' : ''}${p % 12 === 0 ? ' c' : ''}" style="top:${i * ROW}px"></div>`;
+      html += `<div class="pr-row${nm.includes('#') ? ' b' : ''}${p % 12 === 0 ? ' c' : ''}" style="top:${i * ROW}px;height:${ROW}px"></div>`;
     }
     // 세로선 — 격자(연하게) · 박 · 마디(진하게). 화면 밖까지 다 그리되 너무 촘촘하면 격자선은 뺀다.
     const drawStep = step * pps >= 6 ? step : beat;
@@ -155,6 +159,8 @@ export function openPianoRoll(o) {
     rulerIn.style.transform = `translateX(${-scroll.scrollLeft}px)`;
   }
   scroll.addEventListener('scroll', () => { rulerIn.style.transform = `translateX(${-scroll.scrollLeft}px)`; });
+  // 눈금자 위 휠 = 좌우 스크롤(세로로 굴려도 가로로)
+  $q('.pr-ruler').addEventListener('wheel', (e) => { e.preventDefault(); scroll.scrollLeft += e.deltaY || e.deltaX; }, { passive: false });
   rulerView.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -359,6 +365,11 @@ export function openPianoRoll(o) {
   });
   // Ctrl+휠 = 가로 확대/축소(커서 자리 고정)
   scroll.addEventListener('wheel', (e) => {
+    if (e.shiftKey && !(e.ctrlKey || e.metaKey)) {   // Shift+휠 = 좌우 스크롤
+      e.preventDefault();
+      scroll.scrollLeft += e.deltaY || e.deltaX;
+      return;
+    }
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
     const r = scroll.getBoundingClientRect();
@@ -381,6 +392,19 @@ export function openPianoRoll(o) {
     if ((e.code === 'Delete' || e.code === 'Backspace') && sel.size) {
       stop(); const before = snapshot();
       c.notes = c.notes.filter(n => !sel.has(n)); sel = new Set(); commit(before); return;
+    }
+    // +/− = 세로 배율(음 한 줄 높이). 화면 가운데 음을 그대로 둔다. 연주 모드 중엔 = − 가 건반이라 숫자패드 +/− 로.
+    if (!e.ctrlKey && !e.altKey && (e.code === 'Equal' || e.code === 'Minus' || e.code === 'NumpadAdd' || e.code === 'NumpadSubtract')) {
+      stop();
+      const up = e.code === 'Equal' || e.code === 'NumpadAdd';
+      const next = Math.max(MIN_ROW, Math.min(MAX_ROW, Math.round(ROW * (up ? 1.2 : 1 / 1.2))));
+      if (next === ROW) return;
+      const midPitch = 127 - (scroll.scrollTop + scroll.clientHeight / 2) / ROW;
+      ROW = next;
+      o.setRowH?.(ROW);
+      buildKeys(); redraw();
+      scroll.scrollTop = Math.max(0, (127 - midPitch) * ROW - scroll.clientHeight / 2);
+      return;
     }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { stop(); sel = new Set(c.notes); drawNotes(); drawVel(); return; }
     // 노트 복사·잘라내기·붙여넣기 — 타임라인의 클립 복사로 새지 않게 여기서 끝낸다

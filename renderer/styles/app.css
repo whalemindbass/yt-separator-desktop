@@ -4937,7 +4937,7 @@ body { background: var(--bg) !important; }
 .pr-grid { position: absolute; left: 52px; top: 0; right: 0; bottom: 0; cursor: crosshair; }
 .pr-lines, .pr-notes { position: absolute; inset: 0; }
 .pr-lines { pointer-events: none; }
-.pr-row { position: absolute; left: 0; right: 0; height: 14px; border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 4%, transparent); }
+.pr-row { position: absolute; left: 0; right: 0; border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 4%, transparent); }
 .pr-row.b { background: color-mix(in srgb, #000 22%, transparent); }
 :root[data-theme="light"] .pr-row.b { background: color-mix(in srgb, #000 5%, transparent); }
 .pr-row.c { border-bottom-color: color-mix(in srgb, var(--tx-1) 14%, transparent); }
@@ -4995,7 +4995,8 @@ body { background: var(--bg) !important; }
 .pr-keyhelp svg { width: 14px; height: 14px; }
 .pr-keyhelp:hover, .pr-keyhelp:focus-visible { color: var(--tx-1); border-color: var(--border-mid); }
 .pr-keyhelp-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: none; grid-template-columns: auto 1fr; gap: 5px 12px; padding: 10px 12px;
-  background: var(--elev); border: 1px solid var(--border-mid); border-radius: 10px; box-shadow: var(--shadow-pop); white-space: nowrap; }
+  background: var(--elev); border: 1px solid var(--border-mid); border-radius: 10px; box-shadow: var(--shadow-pop); white-space: nowrap;
+  pointer-events: none; }   /* 목록 위로 마우스가 지나가도 hover 가 이어지지 않게 — 표시에서 벗어나면 바로 닫혀 격자를 안 가린다 */
 .pr-keyhelp:hover .pr-keyhelp-pop, .pr-keyhelp:focus-visible .pr-keyhelp-pop { display: grid; }
 .pr-keyhelp-pop .row { display: contents; }
 .pr-keyhelp-pop kbd { font: 600 11px/1.4 var(--mono); color: var(--tx-1); background: var(--surface); border: 1px solid var(--border-mid); border-radius: 4px; padding: 0 5px; justify-self: start; }
@@ -5014,3 +5015,5 @@ body { background: var(--bg) !important; }
 .pr-rec.on { background: var(--danger); border-color: var(--danger); color: #fff; }
 .pr-live { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .pr-live i { position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--danger) 55%, transparent); border: 1px dashed var(--danger); box-sizing: border-box; }
+
+.pr-keys.tight .pr-key.w span { display: none; }

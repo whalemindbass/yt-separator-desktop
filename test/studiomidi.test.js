@@ -20,6 +20,8 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   const { app, js } = await bootMain({ settle: 2500, width: 1400, height: 900 });
   const win = BrowserWindow.getAllWindows()[0];
   const key = async (code, keyCode, type) => { win.webContents.sendInputEvent({ type, keyCode }); await wait(30); };
+  // Ctrl 조합을 흉내 낸 뒤엔 Control 자체도 떼 준다 — 안 그러면 뒤이은 휠·클릭이 Ctrl 이 눌린 채로 들어간다
+  const releaseMods = async () => { for (const k of ['Control', 'Shift', 'Alt']) win.webContents.sendInputEvent({ type: 'keyUp', keyCode: k }); await wait(20); };
   const tap = async (keyCode, holdMs = 150) => { await key(null, keyCode, 'keyDown'); await wait(holdMs); await key(null, keyCode, 'keyUp'); };
   win.focus(); win.webContents.focus();
 
@@ -305,16 +307,60 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
       // 마우스 hover 는 앞 단계의 끌기들 뒤라 테스트 창에서 상태가 묵는다(단독 실행에선 정상 확인) —
       // 같은 규칙에 걸린 키보드 포커스(:focus-visible)로 목록이 뜨는지 본다.
       await js(`document.querySelector('.pr-keyhelp').focus({ focusVisible: true }); true`); await wait(80);
-      expect('포커스/호버 → 단축키 목록 보임(18줄)', await js(`getComputedStyle(document.querySelector('.pr-keyhelp-pop')).display !== 'none' && document.querySelectorAll('.pr-keyhelp-pop kbd').length === 18`), true);
+      expect('포커스/호버 → 단축키 목록 보임(20줄)', await js(`getComputedStyle(document.querySelector('.pr-keyhelp-pop')).display !== 'none' && document.querySelectorAll('.pr-keyhelp-pop kbd').length === 20`), true);
       await js(`document.querySelector('.pr-keyhelp').blur(); true`);
-      void hb;
+      // 마우스를 단축키 표시 밖으로 — 목록이 떠 있으면 아래 격자·눈금자를 덮는다
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(hb.x), y: Math.round(hb.y + 400) }); await wait(100);
     }
     sent.length = 0;
     await js(`document.querySelector('.pr-home').click(); true`); await wait(150);
     expect('|◀ → 클립 시작으로 seek', cmds('seek').length >= 1, true);
     expect('|◀ → 재생선 맨 앞(0px)', await js(`Math.round(parseFloat(document.querySelector('.pr-ph').style.left))`), 0);
+    // +/− 세로 배율 · 눈금자 휠/Shift+휠 = 좌우 스크롤
+    {
+      await releaseMods();
+      const rowH = () => js(`parseFloat(document.querySelector('.pr-row').style.height)`);
+      const h0 = await rowH();
+      await tap('=', 30); await wait(100);
+      const h1 = await rowH();
+      expect('+ → 줄 높이 커짐', h1 > h0, true);
+      expect('건반도 같이 커짐(검은건반 = 줄 높이)', await js(`parseFloat(document.querySelector('.pr-key.b').style.height)`), h1);
+      await tap('-', 30); await wait(100);
+      expect('− → 원래대로', await rowH(), h0);
+      await js(`(() => { const sc = document.querySelector('.pr-scroll'); sc.scrollLeft = 0; return true; })()`);
+      // 가로로 넘치게 확대해 둔다
+      const zoomX = async (dir, n) => { for (let i = 0; i < n; i++) {
+        const g = await js(`(() => { const r = document.querySelector('.pr-scroll').getBoundingClientRect(); return { x: Math.round(r.left + 200), y: Math.round(r.top + 100) }; })()`);
+        win.webContents.sendInputEvent({ type: 'mouseWheel', x: g.x, y: g.y, deltaX: 0, deltaY: dir * 120, modifiers: ['control'] }); await wait(80);
+      } };
+      let zoomedIn = 2;
+      await zoomX(1, 2);
+      // 넘치는 폭이 모자라면(배율 한계 등) 한 번 더
+      if (!(await js(`(() => { const sc = document.querySelector('.pr-scroll'); return sc.scrollWidth > sc.clientWidth + 150; })()`))) { await zoomX(1, 1); zoomedIn++; }
+      const canScroll = await js(`(() => { const sc = document.querySelector('.pr-scroll'); return sc.scrollWidth > sc.clientWidth + 50; })()`);
+      expect('확대해서 가로 스크롤 생김', canScroll, true);
+      const rl = await js(`(() => { const r = document.querySelector('.pr-ruler-view').getBoundingClientRect(); return { x: Math.round(r.left + 100), y: Math.round(r.top + 10) }; })()`);
+      const mid = await js(`(() => { const sc = document.querySelector('.pr-scroll'); sc.scrollLeft = Math.round((sc.scrollWidth - sc.clientWidth) / 2); return sc.scrollLeft; })()`);
+      await releaseMods();
+      win.webContents.sendInputEvent({ type: 'mouseWheel', x: rl.x, y: rl.y, deltaX: 0, deltaY: -120 }); await wait(120);
+      const s1 = await js(`document.querySelector('.pr-scroll').scrollLeft`);
+      expect('눈금자 위 휠 → 좌우 스크롤', s1 !== mid, true);
+      await releaseMods();
+      const gp = await js(`(() => { const r = document.querySelector('.pr-scroll').getBoundingClientRect(); return { x: Math.round(r.left + 200), y: Math.round(r.top + 100) }; })()`);
+      const top0 = await js(`document.querySelector('.pr-scroll').scrollTop`);
+      win.webContents.sendInputEvent({ type: 'mouseWheel', x: gp.x, y: gp.y, deltaX: 0, deltaY: -120, modifiers: ['shift'] }); await wait(120);
+      const s2 = await js(`document.querySelector('.pr-scroll').scrollLeft`), top1 = await js(`document.querySelector('.pr-scroll').scrollTop`);
+      expect('Shift+휠 → 좌우 스크롤(세로는 그대로)', s2 !== s1 && top1 === top0, true);
+      // 확대 원래대로(폭으로 확인) — 뒤 단계가 픽셀 폭을 잰다
+      await zoomX(-1, zoomedIn);
+      // 휠 이벤트가 늦게 처리될 수 있다 — 폭이 멈출 때까지 기다린다(안 그러면 뒤 단계가 잰 좌표가 틀어진다)
+      for (let i = 0, prev = -1; i < 20; i++) { const w = await js(`document.querySelector('.pr-canvas').offsetWidth`); if (w === prev) break; prev = w; await wait(120); }
+      await releaseMods();
+      await js(`document.querySelector('.pr-scroll').scrollLeft = 0; true`);
+    }
     // 스냅 토글 — 끄면 격자 밖 자리·길이도 자유롭게
     {
+      await releaseMods();
       const nNotes = () => js(`document.querySelectorAll('.pr-note').length`);
       expect('스냅 기본 켜짐', await js(`document.querySelector('.pr-snap').classList.contains('on')`), true);
       await js(`document.querySelector('.pr-snap').click(); true`);
