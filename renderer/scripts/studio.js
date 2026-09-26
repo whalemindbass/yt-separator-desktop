@@ -1641,12 +1641,12 @@ function updatePlayIcon() {
   if (pb) { pb.classList.toggle('on', _playing); pb.setAttribute('aria-pressed', String(_playing)); }
 }
 function playStudio() {
-  setTimeout(() => _pr?.setPlaying(_playing), 0);   // 피아노롤 재생 버튼 표시 동기화
+  setTimeout(() => { _pr?.setPlaying(_playing); _pr?.setRecording(_recArmed); }, 0);   // 피아노롤 재생·녹음 버튼 표시 동기화
   _playStart = _lastSec;   // 재생 시작점 기억(정지 시 복귀)
   _playing = true; api.engine.play(); syncVideo(_playStart); updatePlayIcon();
 }
 function stopStudio() {
-  setTimeout(() => _pr?.setPlaying(_playing), 0);   // 피아노롤 재생 버튼 표시 동기화
+  setTimeout(() => { _pr?.setPlaying(_playing); _pr?.setRecording(_recArmed); }, 0);   // 피아노롤 재생·녹음 버튼 표시 동기화
   _playing = false; api.engine.stop(); const v = $('daw-video'); if (v) v.pause(); updatePlayIcon();
   if (_recArmed) { _recArmed = false; $('st-rec').classList.remove('armed'); $('st-rec').setAttribute('aria-pressed', 'false'); api.engine.recordStop(); }
   clearRecLive();
@@ -2452,9 +2452,28 @@ function deleteSelectedMidi() {
 // 엔진이 모은 녹음 노트 → 클립 하나. 음을 하나도 안 쳤으면 클립을 만들지 않는다.
 function onMidiTake(m) {
   clearMidiLive();
+  _pr?.setLive(null);
   const clip = clipFromMidiTake(m, deviceSr());
   if (!clip || !_recTracks.some(r => r.id === m.trackId)) return;
   if (_quant.onRec) clip.notes = quantizeNotes(clip.notes, clip.start, _gridOffset, quantStepSec(_quant.div, secPerBeat()), _quant.strength);
+  // 피아노롤이 이 트랙의 클립을 열고 있으면 — 새 클립을 만들지 않고 그 클립에 합친다(FL 패턴 녹음과 같다)
+  const open = _pr ? _midiClips.find(x => x.id === _pr.clipId && x.trackId === m.trackId) : null;
+  if (open) {
+    const before = midiSnapshot(open);
+    for (const n of clip.notes) {
+      const t = clip.start + n.t - open.start;
+      if (t < 0) continue;   // 클립 앞에서 친 음은 버린다
+      open.notes.push({ ...n, t });
+    }
+    open.notes.sort((a, b) => a.t - b.t || a.p - b.p);
+    const end = open.notes.reduce((mx, n) => Math.max(mx, n.t + n.d), 0);
+    if (end > open.dur) open.dur = end;
+    pushMidiClip(open); renderTakes(); layout();
+    const after = midiSnapshot(open);
+    pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.lbl.record'));
+    markDirty();
+    return;
+  }
   const c = addMidiClip({ trackId: m.trackId, ...clip });
   renderTakes(); layout();
   const snap = midiSnapshot(c);
@@ -2548,6 +2567,29 @@ function openMidiEditor(id) {
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
     flash: (m) => flashTake(m),
+    getSnap: () => { try { return localStorage.getItem('yss:prSnap') !== '0'; } catch { return true; } },
+    setSnap: (on) => { try { localStorage.setItem('yss:prSnap', on ? '1' : '0'); } catch {} },
+    // ● = 이 클립에 녹음 — 트랙을 녹음 대상으로 켜고(꺼져 있으면), 연주 모드 켜고, 재생선부터 녹음.
+    // 녹음이 끝나면 새 클립이 아니라 열려 있는 이 클립에 합쳐진다(onMidiTake).
+    onRecord: async () => {
+      if (_recArmed) { stopStudio(); return; }
+      const c = find(); if (!c) return;
+      selectTrack(c.trackId);
+      const rt = _recTracks.find(r => r.id === c.trackId);
+      if (rt && !rt.armed) {
+        api.engine.recArm(rt.id);
+        for (let i = 0; i < 20 && !_recTracks.find(r => r.id === c.trackId)?.armed; i++) await new Promise(r => setTimeout(r, 50));
+      }
+      armRecPlay();
+    },
+    shortcuts: [
+      [tr('studio.pr.k.click'), tr('studio.pr.d.add')], [tr('studio.pr.k.drag'), tr('studio.pr.d.move')], [tr('studio.pr.k.dragEnd'), tr('studio.pr.d.len')],
+      ['Shift+' + tr('studio.pr.k.drag'), tr('studio.pr.d.copyDrag')], ['Alt+' + tr('studio.pr.k.drag'), tr('studio.pr.d.noSnap')],
+      ['Ctrl/Shift+' + tr('studio.pr.k.drag'), tr('studio.pr.d.marquee')], [tr('studio.pr.k.rclick'), tr('studio.pr.d.erase')],
+      [tr('studio.pr.k.rclickEmpty'), tr('studio.pr.d.pasteSpot')], ['Ctrl+C / X / V', tr('studio.pr.d.clip')], ['Ctrl+B', tr('studio.pr.d.dup')],
+      ['Ctrl+A', tr('studio.pr.d.all')], ['Delete', tr('studio.pr.d.del')], ['↑ ↓', tr('studio.pr.d.pitch')], ['Shift+↑ ↓', tr('studio.pr.d.octave')],
+      ['← →', tr('studio.pr.d.nudge')], ['Ctrl+' + tr('studio.pr.k.wheel'), tr('studio.pr.d.zoom')], ['Space', tr('studio.pr.d.play')], ['Esc', tr('studio.pr.d.close')],
+    ],
     onSeek: (sec) => {   // 피아노롤 눈금자 — 녹음 중엔 재생 위치를 못 옮긴다(타임라인과 같은 규칙)
       if (_recArmed) return;
       const t = Math.max(0, sec);
@@ -2568,7 +2610,7 @@ function openMidiEditor(id) {
     },
     onClose: () => { _pr = null; },
   });
-  if (_pr) { const c = find(); _pr.setPlayhead((_lastSec || 0) - c.start); _pr.setPlaying(_playing); }
+  if (_pr) { const c = find(); _pr.setPlayhead((_lastSec || 0) - c.start); _pr.setPlaying(_playing); _pr.setRecording(_recArmed); }
 }
 // S = 재생선 위치에서 선택한 MIDI 클립을 둘로. 걸쳐 있는 노트는 앞 클립에서 자르고 뒤 클립엔 안 넣는다.
 function splitSelectedMidi() {
@@ -2620,6 +2662,7 @@ function drawMidiLive() {
   let lo = 127, hi = 0;
   for (const n of L.notes) { if (n.p < lo) lo = n.p; if (n.p > hi) hi = n.p; }
   const span = Math.max(12, hi - lo + 1), top = hi + Math.floor((span - (hi - lo + 1)) / 2), hPct = 100 / span;
+  if (_pr) { const pc = _midiClips.find(x => x.id === _pr.clipId); if (pc && pc.trackId === L.trackId) _pr.setLive(L.notes, now); }
   box.innerHTML = L.notes.map(n => {
     const x0 = (n.t0 - L.start) * _pxPerSec, w = Math.max(2, ((n.t1 != null ? n.t1 : now) - n.t0) * _pxPerSec);
     return `<i style="left:${x0.toFixed(1)}px;width:${w.toFixed(1)}px;top:${((top - n.p) * hPct).toFixed(2)}%;height:max(2px,${hPct.toFixed(2)}%)"></i>`;
@@ -2634,7 +2677,7 @@ function midiLiveNote(pitch, on) {
   else { for (let i = _midiLive.notes.length - 1; i >= 0; i--) { const n = _midiLive.notes[i]; if (n.p === pitch && n.t1 == null) { n.t1 = now; break; } } }
   drawMidiLive();
 }
-function clearMidiLive() { _midiLive = null; document.querySelectorAll('.daw-midi-live').forEach(e => e.remove()); }
+function clearMidiLive() { _midiLive = null; document.querySelectorAll('.daw-midi-live').forEach(e => e.remove()); _pr?.setLive(null); }
 function midiRecAssist() {
   const sel = _recTracks.find(r => r.id === _selTrack && r.type === 2);
   if (!sel) return;

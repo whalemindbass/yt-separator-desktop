@@ -4989,3 +4989,28 @@ body { background: var(--bg) !important; }
 /* 피아노롤 붙여넣기 자리(우클릭) */
 .pr-anchor { position: absolute; z-index: 3; box-sizing: border-box; border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 2px; pointer-events: none; }
 .pr-anchor[hidden] { display: none; }
+
+/* 피아노롤 단축키 — 누르는 버튼이 아니라 올리면 목록이 뜨는 표시 */
+.pr-keyhelp { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--tx-3); font-size: 11.5px; cursor: help; outline: none; }
+.pr-keyhelp svg { width: 14px; height: 14px; }
+.pr-keyhelp:hover, .pr-keyhelp:focus-visible { color: var(--tx-1); border-color: var(--border-mid); }
+.pr-keyhelp-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: none; grid-template-columns: auto 1fr; gap: 5px 12px; padding: 10px 12px;
+  background: var(--elev); border: 1px solid var(--border-mid); border-radius: 10px; box-shadow: var(--shadow-pop); white-space: nowrap; }
+.pr-keyhelp:hover .pr-keyhelp-pop, .pr-keyhelp:focus-visible .pr-keyhelp-pop { display: grid; }
+.pr-keyhelp-pop .row { display: contents; }
+.pr-keyhelp-pop kbd { font: 600 11px/1.4 var(--mono); color: var(--tx-1); background: var(--surface); border: 1px solid var(--border-mid); border-radius: 4px; padding: 0 5px; justify-self: start; }
+.pr-keyhelp-pop .row > span { font-size: 12px; color: var(--tx-2); }
+.pr-home { width: 30px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--tx-1); cursor: pointer; }
+.pr-home svg { width: 13px; height: 13px; }
+.pr-home:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 피아노롤 스냅 토글 · 녹음 버튼 · 녹음 중 실시간 노트 */
+.pr-snap { height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-mid); background: transparent; color: var(--tx-3); font-size: 11.5px; cursor: pointer; }
+.pr-snap svg { width: 13px; height: 13px; }
+.pr-snap.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); color: var(--tx-1); }
+.pr-rec { width: 30px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid var(--border-mid); background: var(--elev); color: var(--danger); cursor: pointer; }
+.pr-rec svg { width: 14px; height: 14px; }
+.pr-rec:hover { border-color: var(--danger); }
+.pr-rec.on { background: var(--danger); border-color: var(--danger); color: #fff; }
+.pr-live { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.pr-live i { position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--danger) 55%, transparent); border: 1px dashed var(--danger); box-sizing: border-box; }

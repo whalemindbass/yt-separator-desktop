@@ -297,6 +297,77 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
       const phx = await js(`(() => { const ph = document.querySelector('.pr-ph').getBoundingClientRect(); const v = document.querySelector('.pr-ruler-view').getBoundingClientRect(); return Math.round(ph.left - v.left); })()`);
       expect('피아노롤 재생선이 클릭한 자리(±3px)', Math.abs(phx - 150) <= 3, true);
     }
+    // 단축키 표시 — 평소엔 목록 숨김, 올리면 보임 / |◀ = 클립 처음으로
+    expect('헤더에 긴 안내문 없음', await js(`!document.querySelector('.pr-hint')`), true);
+    expect('단축키 목록 평소엔 숨김', await js(`getComputedStyle(document.querySelector('.pr-keyhelp-pop')).display`), 'none');
+    {
+      const hb = await js(`(() => { const b = document.querySelector('.pr-keyhelp').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+      // 마우스 hover 는 앞 단계의 끌기들 뒤라 테스트 창에서 상태가 묵는다(단독 실행에선 정상 확인) —
+      // 같은 규칙에 걸린 키보드 포커스(:focus-visible)로 목록이 뜨는지 본다.
+      await js(`document.querySelector('.pr-keyhelp').focus({ focusVisible: true }); true`); await wait(80);
+      expect('포커스/호버 → 단축키 목록 보임(18줄)', await js(`getComputedStyle(document.querySelector('.pr-keyhelp-pop')).display !== 'none' && document.querySelectorAll('.pr-keyhelp-pop kbd').length === 18`), true);
+      await js(`document.querySelector('.pr-keyhelp').blur(); true`);
+      void hb;
+    }
+    sent.length = 0;
+    await js(`document.querySelector('.pr-home').click(); true`); await wait(150);
+    expect('|◀ → 클립 시작으로 seek', cmds('seek').length >= 1, true);
+    expect('|◀ → 재생선 맨 앞(0px)', await js(`Math.round(parseFloat(document.querySelector('.pr-ph').style.left))`), 0);
+    // 스냅 토글 — 끄면 격자 밖 자리·길이도 자유롭게
+    {
+      const nNotes = () => js(`document.querySelectorAll('.pr-note').length`);
+      expect('스냅 기본 켜짐', await js(`document.querySelector('.pr-snap').classList.contains('on')`), true);
+      await js(`document.querySelector('.pr-snap').click(); true`);
+      expect('스냅 끔', await js(`!document.querySelector('.pr-snap').classList.contains('on')`), true);
+      const base = await nNotes();
+      const spot = await js(`(() => { const sc = document.querySelector('.pr-scroll'); sc.scrollTop = (127 - 65) * 14 - 80; const g = document.querySelector('.pr-grid').getBoundingClientRect(); const endX = parseFloat(document.querySelector('.pr-end').style.left); return { x: g.left + endX * 0.37 + 3, y: g.top + (127 - 65) * 14 + 7 }; })()`);
+      sent.length = 0;
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(spot.x), y: Math.round(spot.y), button: 'left', clickCount: 1 }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(spot.x), y: Math.round(spot.y), button: 'left', clickCount: 1 }); await wait(150);
+      expect('스냅 끔 → 노트 추가', await nNotes(), base + 1);
+      const added = (cmds('midiClip').pop()?.notes || []).find(n => n[2] === 65);
+      const sr = added ? null : 0;
+      const stepSamples = await js(`(() => { return null; })()`);
+      void sr; void stepSamples;
+      // 120BPM 1/16 = 0.125초 — 스냅이 꺼졌으면 시작이 그 배수가 아닐 가능성이 매우 높다(클릭 자리에 +3px)
+      const onGrid = added ? Math.abs((added[0] / 48000 / 0.125) - Math.round(added[0] / 48000 / 0.125)) < 0.02 || Math.abs((added[0] / 44100 / 0.125) - Math.round(added[0] / 44100 / 0.125)) < 0.02 : true;
+      expect('스냅 끔 → 격자 밖 자리에 놓임', !!added && !onGrid, true);
+      // 오른쪽 끝을 조금(7px)만 끌어도 길이가 그만큼 는다(격자 단위가 아님)
+      const nr = await js(`(() => { const e = [...document.querySelectorAll('.pr-note')].find(x => Math.round(127 - (parseFloat(x.style.top) - 1) / 14) === 65); const b = e.getBoundingClientRect(); return { x: b.right - 2, y: b.top + 5, w: b.width }; })()`);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(nr.x), y: Math.round(nr.y), button: 'left', clickCount: 1 }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(nr.x + 7), y: Math.round(nr.y) }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(nr.x + 7), y: Math.round(nr.y), button: 'left', clickCount: 1 }); await wait(150);
+      const nw = await js(`(() => { const e = [...document.querySelectorAll('.pr-note')].find(x => Math.round(127 - (parseFloat(x.style.top) - 1) / 14) === 65); return e.getBoundingClientRect().width; })()`);
+      expect('스냅 끔 → 길이 7px 만큼 자유롭게', Math.abs((nw - nr.w) - 7) <= 1.5, true);
+      await js(`document.querySelector('.pr-snap').click(); true`);
+      expect('스냅 다시 켬(기억)', await js(`localStorage.getItem('yss:prSnap')`), '1');
+      const ctrlZ = async () => { win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(150); };
+      await ctrlZ(); await ctrlZ();
+      expect('되돌려 원래 노트 수', await nNotes(), base);
+    }
+    // 피아노롤 ● — 새 클립 대신 이 클립에 녹음이 합쳐진다
+    {
+      const nNotes = () => js(`document.querySelectorAll('.pr-note').length`);
+      const nClips = () => js(`document.querySelectorAll('.daw-midi-clip:not(.daw-midi-live)').length`);
+      const base = await nNotes(), baseClips = await nClips();
+      await js(`document.querySelector('.pr-home').click(); true`); await wait(100);
+      await js(`document.querySelector('.pr-rec').click(); true`); await wait(500);
+      expect('● → 녹음 중 표시', await js(`document.querySelector('.pr-rec').classList.contains('on')`), true);
+      expect('● → 연주 모드 켜짐', await js(`!!document.getElementById('daw-kb-hud')`), true);
+      await tap('N', 180); await wait(120);
+      await key(null, 'M', 'keyDown'); await wait(250);
+      expect('녹음 중 피아노롤에 실시간 노트', await js(`document.querySelectorAll('.pr-live i').length`), 2);
+      await key(null, 'M', 'keyUp'); await wait(100);
+      await js(`document.querySelector('.pr-rec').click(); true`);
+      for (let i = 0; i < 30 && (await nNotes()) === base; i++) await wait(150);
+      expect('녹음 끝 → 새 클립 안 생김', await nClips(), baseClips);
+      expect('녹음 끝 → 이 클립에 노트 2개 추가', await nNotes(), base + 2);
+      expect('실시간 노트 표시 사라짐', await js(`!document.querySelector('.pr-live')`), true);
+      await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp'); await wait(100);   // 연주 모드 끄기
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(200);
+      expect('Ctrl+Z → 녹음 전 노트 수', await nNotes(), base);
+    }
     // 재생 바 — ▶ = 클립 처음부터 재생, 다시 누르면 정지 / "이 트랙만" = 임시 솔로
     sent.length = 0;
     await js(`document.querySelector('.pr-play').click(); true`); await wait(400);

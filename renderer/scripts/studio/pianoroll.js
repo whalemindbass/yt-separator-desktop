@@ -47,14 +47,18 @@ export function openPianoRoll(o) {
   root.innerHTML = `
     <div class="pr-head">
       <b class="pr-title"></b>
-      <span class="pr-hint">${o.tr('studio.pr.hint')}</span>
+      <span class="pr-keyhelp" tabindex="0" aria-label="${o.tr('studio.pr.shortcuts')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1.5"/><path d="M4 6.8h.01M6.3 6.8h.01M8.6 6.8h.01M10.9 6.8h.01M5 10h6"/></svg>${o.tr('studio.pr.shortcuts')}
+        <span class="pr-keyhelp-pop" role="tooltip">${(o.shortcuts || []).map(([k, d]) => `<span class="row"><kbd>${k}</kbd><span>${d}</span></span>`).join('')}</span></span>
       <span class="pr-sp"></span>
       <label class="pr-gridsel">${o.tr('studio.midi.grid')} <select>${(o.divs || []).map(d => `<option value="${d}">${d.replace('T', ' ' + o.tr('studio.midi.triplet'))}</option>`).join('')}</select></label>
+      <button class="pr-snap" type="button" aria-pressed="true" title="${o.tr('studio.pr.snapTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 3v5a4 4 0 0 0 8 0V3"/><path d="M4 5.5h2.2M9.8 5.5H12"/></svg><span>${o.tr('studio.pr.snap')}</span></button>
       <button class="btn btn-sm pr-q" type="button"></button>
       <button class="pr-x" type="button" title="${o.tr('studio.pr.close')}">✕</button>
     </div>
     <div class="pr-bar">
+      <button class="pr-home" type="button" title="${o.tr('studio.pr.toStart')}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3" y="3.5" width="1.8" height="9" rx=".5"/><path d="M13 3.5v9L6 8z"/></svg></button>
       <button class="pr-play" type="button" title="${o.tr('studio.pr.playTitle')}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 3.2v9.6L12.5 8z"/></svg></button>
+      <button class="pr-rec" type="button" title="${o.tr('studio.pr.recTitle')}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.2" fill="currentColor"/></svg></button>
       <button class="pr-solo" type="button" aria-pressed="false" title="${o.tr('studio.pr.soloTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"/><rect x="2.2" y="9" width="2.6" height="4.2" rx="1"/><rect x="11.2" y="9" width="2.6" height="4.2" rx="1"/></svg><span>${o.tr('studio.pr.solo')}</span></button>
       <span class="pr-time"></span>
     </div>
@@ -67,6 +71,10 @@ export function openPianoRoll(o) {
   let pps = 0;               // 초당 픽셀 — 처음엔 클립이 화면 폭에 맞게
   let sel = new Set();       // 선택된 노트(객체 참조 대신 인덱스가 흔들리지 않게 노트 객체 자체를 담는다)
   let lastLen = null;        // 마지막으로 놓거나 늘린 길이 — 새 노트 기본값(FL 과 같은 동작)
+  // 스냅 — 끄면 놓기·이동·길이가 격자에 안 붙는다. Alt 는 그 순간만 반대로(스튜디오 자석과 같은 규칙).
+  let snapOn = o.getSnap ? o.getSnap() !== false : true;
+  const snapFor = (ev) => snapOn !== !!(ev && ev.altKey);
+  const MIN_D = 0.02;
   const clip = () => o.getClip();
   const rowOf = (p) => 127 - p;
   const pitchAt = (y) => Math.max(0, Math.min(127, 127 - Math.floor(y / ROW)));
@@ -241,7 +249,7 @@ export function openPianoRoll(o) {
     const step = o.stepSec(), origin = o.origin();
     if (e.button === 2) {
       if (!noteEl) {   // 빈 칸 우클릭 = 붙여넣기 자리(그 칸의 격자 시작 + 그 음)
-        const abs = floorToGrid(c.start + x / pps, origin, step);
+        const abs = snapFor(e) ? floorToGrid(c.start + x / pps, origin, step) : c.start + x / pps;
         anchor = { t: Math.max(0, abs - c.start), p: pitchAt(y) };
         drawAnchor(); return;
       }
@@ -300,7 +308,7 @@ export function openPianoRoll(o) {
     } else {
       // 빈 칸 = 새 노트 — 클릭한 칸의 격자 시작에, 마지막 길이로
       sel = new Set();
-      const abs = floorToGrid(c.start + x / pps, origin, step);
+      const abs = snapFor(e) ? floorToGrid(c.start + x / pps, origin, step) : c.start + x / pps;
       n = { t: Math.max(0, abs - c.start), d: lastLen || step, p: pitchAt(y), v: 0.8 };
       c.notes.push(n); sel = new Set([n]);
       mode = 'move';
@@ -316,14 +324,15 @@ export function openPianoRoll(o) {
       if (mode === 'resize') {
         for (const g of orig) {
           const rawEnd = c.start + g.t + g.d + (q.x - x0) / pps;
-          const endAbs = ev.altKey ? rawEnd : roundToGrid(rawEnd, origin, step);   // Alt = 격자 무시(FL)
-          g.m.d = Math.max(step / 2, endAbs - (c.start + g.t));
+          const snap = snapFor(ev);
+          const endAbs = snap ? roundToGrid(rawEnd, origin, step) : rawEnd;
+          g.m.d = Math.max(snap ? step / 2 : MIN_D, endAbs - (c.start + g.t));
         }
         lastLen = n.d;
       } else {
         const dp = Math.round((y0 - q.y) / ROW);
         const rawAbs = c.start + orig.find(g => g.m === n).t + (q.x - x0) / pps;
-        const anchorAbs = ev.altKey ? rawAbs : roundToGrid(rawAbs, origin, step);
+        const anchorAbs = snapFor(ev) ? roundToGrid(rawAbs, origin, step) : rawAbs;
         const dt = anchorAbs - (c.start + orig.find(g => g.m === n).t);
         const minT = Math.min(...orig.map(g => g.t));
         const dtc = Math.max(dt, -minT);   // 클립 앞으로는 못 나간다
@@ -419,9 +428,17 @@ export function openPianoRoll(o) {
   // 재생 바 — 재생은 클립 처음부터(연주 중이면 정지). "이 트랙만"은 피아노롤이 열려 있는 동안만의 임시 솔로.
   const playBtn = $q('.pr-play'), soloBtn = $q('.pr-solo');
   playBtn.addEventListener('click', () => { o.onPlay(); });
+  // |◀ = 클립 처음으로 — 재생선을 클립 시작에 두고 화면도 맨 앞으로
+  $q('.pr-home').addEventListener('click', () => { const c = clip(); if (!c) return; o.onSeek(c.start); scroll.scrollLeft = 0; });
   let soloOn = false;
   soloBtn.addEventListener('click', () => { soloOn = !soloOn; soloBtn.classList.toggle('on', soloOn); soloBtn.setAttribute('aria-pressed', String(soloOn)); o.onSolo(soloOn); });
   $q('.pr-q').addEventListener('click', () => { o.onQuantize(); });
+  const snapBtn = $q('.pr-snap');
+  const paintSnap = () => { snapBtn.classList.toggle('on', snapOn); snapBtn.setAttribute('aria-pressed', String(snapOn)); };
+  paintSnap();
+  snapBtn.addEventListener('click', () => { snapOn = !snapOn; paintSnap(); o.setSnap?.(snapOn); });
+  const recBtn = $q('.pr-rec');
+  recBtn.addEventListener('click', () => { o.onRecord(); });
   const gs = $q('.pr-gridsel select');
   if (gs) { gs.value = o.quantLabel(); gs.addEventListener('change', () => { o.setDiv(gs.value); redraw(); }); }
 
@@ -445,6 +462,18 @@ export function openPianoRoll(o) {
       phRel = relSec;
       const ph = $q('.pr-ph'); ph.style.left = (relSec * pps) + 'px'; ph.hidden = relSec < 0;
       const t = Math.max(0, relSec); $q('.pr-time').textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
+    },
+    setRecording(on) { recBtn.classList.toggle('on', !!on); },
+    // 녹음 중 실시간 노트 — 절대 시각(초) { p, t0, t1 } 목록, now = 지금 재생 위치
+    setLive(notes, now) {
+      const c = clip(); if (!c) return;
+      let box = $q('.pr-live');
+      if (!notes) { box?.remove(); return; }
+      if (!box) { box = document.createElement('div'); box.className = 'pr-live'; grid.appendChild(box); }
+      box.innerHTML = notes.map(n => {
+        const t0 = n.t0 - c.start, t1 = (n.t1 != null ? n.t1 : now) - c.start;
+        return `<i style="left:${(t0 * pps).toFixed(1)}px;width:${Math.max(3, (t1 - t0) * pps).toFixed(1)}px;top:${rowOf(n.p) * ROW + 1}px;height:${ROW - 2}px"></i>`;
+      }).join('');
     },
     setPlaying(on) { playBtn.innerHTML = on ? '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>' : '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 3.2v9.6L12.5 8z"/></svg>'; playBtn.classList.toggle('on', !!on); },
     clipId: clip0.id,
