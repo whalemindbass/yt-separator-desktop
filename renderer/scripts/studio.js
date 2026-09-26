@@ -12,6 +12,7 @@ import { esc, fmtTC, fmtDelta, rgbToHex, meterPct, buildWaveSvg,
 // 같은 이름이면 함수가 가려진다(런타임 TypeError).
 import { t as tr, getLocale, onLocaleChange } from './i18n.js';
 import { TabView, transcribeBass, cancelTranscribe, toMono } from './tabview.js';
+import { openPianoRoll } from './studio/pianoroll.js';
 import { ChordStripView } from './chordstrip.js';
 import { buildScore, beatAccents, estimateKey, computeBarChords } from '../workers/tab-score.js';
 import { detectChords, phaseFromChords, NON_HARMONY_STEMS } from '../workers/tab-chord.js';
@@ -1724,6 +1725,7 @@ function onPos(samples) {
   const t = samplesToSec(samples || 0);
   updatePlayhead(t);
   if (_recArmed && _playing) { updateRecLive(t); updateMidiLive(t); }
+  if (_pr) { const pc = _midiClips.find(x => x.id === _pr.clipId); if (pc) _pr.setPlayhead(t - pc.start); }
   const vdur = _dur > 0 ? _dur + _stemOffset : 0;
   if (vdur > 0) $('daw-vbar-fill').style.width = Math.min(100, Math.max(0, ((t - _stemOffset) / _dur) * 100)) + '%';
   syncVideo(t);
@@ -2291,6 +2293,7 @@ function addMidiClip(c, id) {
   return clip;
 }
 function removeMidiClip(id) {
+  if (_pr && _pr.clipId === id) _pr.close();
   _midiClips = _midiClips.filter(c => c.id !== id);
   api.engine.midiClipRemove(id);
   if (_selMidi === id) _selMidi = null;
@@ -2344,7 +2347,29 @@ function renderMidiClips(areas) {
     el.title = tr('studio.midi.clipTitle');
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); selectMidiClip(c.id); showMidiMenu(e.clientX, e.clientY, c.id); });
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); flashTake(tr('studio.midi.pianoRollSoon')); });
+    el.addEventListener('dblclick', (e) => { e.stopPropagation(); openMidiEditor(c.id); });
+    // 오른쪽 끝 = 클립 길이(격자 스냅). 넘치는 노트는 클립 끝에서 끊겨 들린다.
+    const hR = document.createElement('div'); hR.className = 'daw-trim r'; el.appendChild(hR);
+    hR.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      selectMidiClip(c.id);
+      const startX = e.clientX, dur0 = c.dur, before = midiSnapshot(c);
+      const move = (ev) => {
+        const endAbs = snapSec(c.start + dur0 + (ev.clientX - startX) / _pxPerSec, !magnetActiveFor(ev));
+        c.dur = Math.max(0.1, endAbs - c.start);
+        el.style.width = Math.max(3, c.dur * _pxPerSec) + 'px';
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+        if (c.dur === dur0) return;
+        pushMidiClip(c); renderTakes(); layout();
+        const after = midiSnapshot(c);
+        pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.u.clipTrim'));
+        markDirty();
+      };
+      document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    });
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
@@ -2469,6 +2494,59 @@ function syncKbButtons() {
 // 악기 트랙을 골라 두고 녹음을 켰을 때 — 연주 모드가 꺼져 있으면 쳐도 아무것도 안 들어가고,
 // R 을 꺼 뒀으면(새 악기 트랙은 켜진 채 시작해서, "녹음 켜기"로 눌렀다가 오히려 끄기 쉽다)
 // 그 트랙엔 기록이 안 된다. 둘 다 "녹음이 가끔 안 된다"로 보였던 경우라 여기서 잡아 준다.
+// ── 피아노롤 ──
+let _pr = null;   // 열려 있는 피아노롤(하나만)
+function openMidiEditor(id) {
+  _pr?.close();
+  const find = () => _midiClips.find(x => x.id === id);
+  const c0 = find(); if (!c0) return;
+  const rt = _recTracks.find(r => r.id === c0.trackId) || {};
+  selectMidiClip(id); selectTrack(c0.trackId);
+  _pr = openPianoRoll({
+    host: document.querySelector('.daw-content'),
+    getClip: find,
+    color: resolveColor(rt.color || 'var(--accent)'),
+    stepSec: () => quantStepSec(_quant.div, secPerBeat()),
+    origin: () => _gridOffset,
+    secPerBar,
+    divs: Object.keys(QUANT_DIVS),
+    quantLabel: () => _quant.div,
+    setDiv: (d) => { _quant.div = d; saveQuant(); },
+    title: () => { const cc = find(); return cc ? `${selTrackLabel(cc.trackId)} · ${tr('studio.midi.clipName', { n: cc.notes.length })}` : ''; },
+    tr,
+    onCommit: (before) => {
+      const c = find(); if (!c) return;
+      pushMidiClip(c); renderTakes(); layout();
+      const after = midiSnapshot(c);
+      pushUndo(() => setMidiClipState(before), () => setMidiClipState(after), tr('studio.pr.edit'));
+      markDirty();
+    },
+    onPreview: (p, on) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, 0.8); else api.engine.noteOff(c.trackId, p); },
+    onQuantize: () => quantizeMidiClip(id),
+    onClose: () => { _pr = null; },
+  });
+  if (_pr) { const c = find(); _pr.setPlayhead((_lastSec || 0) - c.start); }
+}
+// S = 재생선 위치에서 선택한 MIDI 클립을 둘로. 걸쳐 있는 노트는 앞 클립에서 자르고 뒤 클립엔 안 넣는다.
+function splitSelectedMidi() {
+  const c = _midiClips.find(x => x.id === _selMidi); if (!c) return false;
+  const cut = (_lastSec || 0) - c.start;
+  if (cut <= 0.01 || cut >= c.dur - 0.01) { flashTake(tr('studio.m.selectClipToSplit')); return true; }
+  const before = midiSnapshot(c);
+  const right = { trackId: c.trackId, start: c.start + cut, dur: c.dur - cut,
+    notes: c.notes.filter(n => n.t >= cut).map(n => ({ ...n, t: n.t - cut })) };
+  c.notes = c.notes.filter(n => n.t < cut).map(n => ({ ...n, d: Math.min(n.d, cut - n.t) }));
+  c.dur = cut;
+  pushMidiClip(c);
+  const nc = addMidiClip(right);
+  renderTakes(); layout();
+  const leftAfter = midiSnapshot(c), rightSnap = midiSnapshot(nc);
+  pushUndo(() => { removeMidiClip(rightSnap.id); setMidiClipState(before); },
+           () => { setMidiClipState(leftAfter); setMidiClipState(rightSnap); }, tr('studio.u.clipSplit'));
+  markDirty();
+  return true;
+}
+
 // ── MIDI 녹음 실시간 미리보기 ──
 // 엔진은 녹음을 멈춰야 노트를 넘겨준다(midiTake). 그 전까지는 치는 대로 여기서 그려 둔다 —
 // 오디오 녹음의 실시간 파형(updateRecLive)과 같은 역할. 멈추면 진짜 클립으로 갈아끼운다.
@@ -2765,6 +2843,7 @@ function renderTakes() {
     area.appendChild(el);
   }
   renderMidiClips(areas);
+  _pr?.refresh();   // 실행취소·퀀타이즈 등으로 클립이 바뀌면 열려 있는 피아노롤도 따라간다
 }
 const MIN_CLIP = 0.02;   // 최소 클립 길이(초)
 // 트림 핸들: dir -1=좌, +1=우. 드래그로 inOff/dur 갱신, up 시 엔진 커밋
@@ -2854,6 +2933,7 @@ function duplicateClip(tk) {
 }
 // 재생선 위치에서 선택 클립 분할
 function splitSelectedAtPlayhead() {
+  if (_selMidi != null && splitSelectedMidi()) return;
   const tk = _takes.find(t => t.id === _selClipId); if (!tk) { flashTake(tr('studio.m.selectClipToSplit')); return; }
   splitClip(tk, _lastSec);
 }

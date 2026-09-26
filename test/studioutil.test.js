@@ -219,6 +219,16 @@ const expect = (label, got, want) => {
     expect('null                  ', U.isTypingTarget(null), false);
   }
 
+  console.log('11e) 피아노롤 격자 스냅');
+  {
+    const PR = await import(pathToFileURL(path.join(__dirname, '..', 'renderer', 'scripts', 'studio', 'pianoroll.js')).href);
+    expect('내림: 1.37 → 1.25(0.125 격자, 기준 0)', PR.floorToGrid(1.37, 0, 0.125), 1.25);
+    expect('내림: 격자 위 그대로       ', PR.floorToGrid(1.25, 0, 0.125), 1.25);
+    expect('내림: 기준점 0.1 반영      ', PR.floorToGrid(0.3, 0.1, 0.125).toFixed(3), '0.225');
+    expect('반올림: 1.31 → 1.25       ', PR.roundToGrid(1.31, 0, 0.125), 1.25);
+    expect('반올림: 1.32 → 1.375      ', PR.roundToGrid(1.32, 0, 0.125), 1.375);
+  }
+
   console.log('12) buildWaveSvgFromEnvelope — 요약 파형(영상편집)');
   {
     // 앞 절반은 큰 소리, 뒤 절반은 무음인 400버킷

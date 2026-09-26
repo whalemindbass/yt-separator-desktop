@@ -184,6 +184,50 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
   expect('다시 열면 클립 보임', await js(`document.querySelectorAll('.daw-midi-clip').length`), 1);
   expect('다시 열어도 악기 트랙', await js(`document.querySelectorAll('.daw-lane-instr').length`), 1);
 
+  section('6) 피아노롤 — 노트 추가·음높이·삭제·실행취소·닫기');
+  {
+    const mouse = async (type, x, y) => { win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 }); await wait(60); };
+    await js(`document.querySelector('.daw-midi-clip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); true`);
+    await wait(300);
+    expect('더블클릭 → 피아노롤 열림', await js(`!!document.querySelector('.pr')`), true);
+    expect('노트 3개 보임', await js(`document.querySelectorAll('.pr-note').length`), 3);
+    // C4(60) 줄이 보이게 스크롤하고, 클립 끝 조금 앞 빈 칸을 클릭
+    const pt = await js(`(() => { const sc = document.querySelector('.pr-scroll'); sc.scrollTop = (127 - 60) * 14 - 60;
+      const g = document.querySelector('.pr-grid').getBoundingClientRect(); const endX = parseFloat(document.querySelector('.pr-end').style.left);
+      return { x: g.left + endX * 0.85, y: g.top + (127 - 60) * 14 + 7 }; })()`);
+    sent.length = 0;
+    await mouse('mouseDown', pt.x, pt.y); await mouse('mouseUp', pt.x, pt.y);
+    await wait(200);
+    expect('빈 칸 클릭 → 노트 추가(4개)', await js(`document.querySelectorAll('.pr-note').length`), 4);
+    const add = cmds('midiClip').pop();
+    expect('엔진에 C4(60) 포함 전송', !!(add && add.notes.some(n => n[2] === 60)), true);
+    expect('놓을 때 미리듣기 noteOn 60', cmds('noteOn').some(c => c.pitch === 60), true);
+    sent.length = 0;
+    await key(null, 'Up', 'keyDown'); await key(null, 'Up', 'keyUp'); await wait(150);
+    expect('↑ → 61 로', (cmds('midiClip').pop()?.notes || []).some(n => n[2] === 61), true);
+    await key(null, 'Delete', 'keyDown'); await key(null, 'Delete', 'keyUp'); await wait(150);
+    expect('Delete → 노트 3개', await js(`document.querySelectorAll('.pr-note').length`), 3);
+    expect('Delete 가 클립 통째로 지우지 않음', await js(`document.querySelectorAll('.daw-midi-clip').length`), 1);
+    await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
+    await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(200);
+    expect('Ctrl+Z → 노트 4개로 복원(피아노롤 갱신)', await js(`document.querySelectorAll('.pr-note').length`), 4);
+    await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp'); await wait(150);
+    expect('Esc → 닫힘', await js(`!document.querySelector('.pr')`), true);
+  }
+  section('7) 타임라인 — S 분할');
+  {
+    const r = await js(`(() => { const b = document.querySelector('.daw-midi-clip').getBoundingClientRect(); return { x: b.left + b.width * 0.5, y: b.top + b.height * 0.6 }; })()`);
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(50);
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(r.x), y: Math.round(r.y), button: 'left', clickCount: 1 }); await wait(200);
+    await tap('S', 40); await wait(250);
+    expect('S → 클립 둘로', await js(`document.querySelectorAll('.daw-midi-clip').length`), 2);
+    const totalNotes = await js(`[...document.querySelectorAll('.daw-midi-clip .daw-midi-notes')].reduce((a, e) => a + e.children.length, 0)`);
+    expect('노트 수 유지(4)', totalNotes, 4);
+    await win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Z', modifiers: ['control'] }); await wait(40);
+    await win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(250);
+    expect('Ctrl+Z → 다시 하나', await js(`document.querySelectorAll('.daw-midi-clip').length`), 1);
+  }
+
   fs.writeFileSync(path.join(os.tmpdir(), 'yss-studiomidi.png'), (await win.webContents.capturePage()).toPNG());
   finish(app);
 })().catch(e => { console.error(e); process.exit(1); });

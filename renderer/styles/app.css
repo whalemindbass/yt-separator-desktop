@@ -4907,3 +4907,43 @@ body { background: var(--bg) !important; }
 .daw-fx-builtin .m { font-size: 10.5px; color: var(--tx-3); margin-top: 2px; }
 /* 녹음 중 MIDI 미리보기 — 아직 확정 전이라 점선 테두리, 클릭은 통과 */
 .daw-midi-live { pointer-events: none; border-style: dashed !important; background: color-mix(in srgb, var(--danger) 10%, var(--timeline)); }
+
+/* ── 피아노롤 — 작업 영역(.daw-content) 위에 덮어 뜬다 ── */
+.daw-content { position: relative; }
+.pr { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--block-border); border-radius: var(--r-block); overflow: hidden; box-shadow: var(--shadow-pop); }
+.pr-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.pr-title { font-size: 12.5px; color: var(--tx-1); white-space: nowrap; }
+.pr-hint { font-size: 11px; color: var(--tx-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pr-sp { flex: 1; }
+.pr-gridsel { font-size: 11.5px; color: var(--tx-3); display: flex; align-items: center; gap: 6px; }
+.pr-gridsel select { height: 24px; font-size: 11.5px; background: var(--elev); color: var(--tx-1); border: 1px solid var(--border); border-radius: 6px; }
+.pr-x { width: 26px; height: 26px; border: 0; background: none; color: var(--tx-3); cursor: pointer; border-radius: 6px; }
+.pr-x:hover { background: var(--elev); color: var(--tx-1); }
+.pr-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; background: var(--timeline); }
+.pr-canvas { position: relative; }
+.pr-keys { position: sticky; left: 0; z-index: 3; width: 52px; float: left; }
+.pr-key { height: 14px; box-sizing: border-box; border-bottom: 1px solid #0003; font: 600 8.5px/13px var(--sans); padding-right: 4px; text-align: right; cursor: pointer; }
+.pr-key.w { background: #e9ecf0; color: #5a626e; }
+.pr-key.b { background: #1b1f26; }
+.pr-key.c { border-bottom-color: #0006; }
+.pr-key:active { background: var(--accent); color: var(--accent-fg); }
+.pr-grid { position: absolute; left: 52px; top: 0; right: 0; bottom: 0; cursor: crosshair; }
+.pr-lines, .pr-notes { position: absolute; inset: 0; }
+.pr-lines { pointer-events: none; }
+.pr-row { position: absolute; left: 0; right: 0; height: 14px; border-bottom: 1px solid color-mix(in srgb, var(--tx-1) 4%, transparent); }
+.pr-row.b { background: color-mix(in srgb, #000 22%, transparent); }
+:root[data-theme="light"] .pr-row.b { background: color-mix(in srgb, #000 5%, transparent); }
+.pr-row.c { border-bottom-color: color-mix(in srgb, var(--tx-1) 14%, transparent); }
+.pr-vl { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--tx-1) 5%, transparent); }
+.pr-vl.beat { background: color-mix(in srgb, var(--tx-1) 11%, transparent); }
+.pr-vl.bar { background: color-mix(in srgb, var(--tx-1) 24%, transparent); }
+.pr-note { position: absolute; box-sizing: border-box; border-radius: 3px; cursor: grab; overflow: hidden; white-space: nowrap;
+  background: color-mix(in srgb, var(--c) calc(var(--v, .8) * 100%), var(--timeline)); border: 1px solid color-mix(in srgb, var(--c) 70%, #000);
+  font: 700 8.5px/10px var(--sans); color: #0b0d10; padding-left: 3px; }
+.pr-note::after { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.pr-note.sel { outline: 2px solid var(--tx-1); outline-offset: -1px; }
+.pr-end { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed color-mix(in srgb, var(--c) 60%, transparent); pointer-events: none; }
+.pr-ph { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent); pointer-events: none; z-index: 2; }
+.pr-ph[hidden] { display: none; }
+.daw-midi-clip .daw-trim.r { position: absolute; right: 0; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 3; }
