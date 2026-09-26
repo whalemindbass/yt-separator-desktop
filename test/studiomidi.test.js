@@ -414,6 +414,24 @@ const cmds = (name) => sent.filter(c => c.cmd === name);
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Z', modifiers: ['control'] }); await wait(200);
       expect('Ctrl+Z → 녹음 전 노트 수', await nNotes(), base);
     }
+    // 바깥 입력에 건반 반응 — 타이핑 키보드 · MIDI 컨트롤러(Web MIDI 경로)
+    {
+      await releaseMods();
+      await js(`document.querySelector('.pr-scroll').scrollTop = (127 - 60) * parseFloat(document.querySelector('.pr-row').style.height) - 100; true`);
+      if (!(await js(`!!document.getElementById('daw-kb-hud')`))) await js(`document.getElementById('st-kb').click(); true`);
+      await wait(100);
+      await key(null, 'Z', 'keyDown'); await wait(80);
+      expect('타이핑 Z → 피아노롤 C3 건반 불', await js(`document.querySelector('.pr-key[data-p="48"]').classList.contains('lit')`), true);
+      await key(null, 'Z', 'keyUp'); await wait(80);
+      expect('떼면 꺼짐', await js(`document.querySelector('.pr-key[data-p="48"]').classList.contains('lit')`), false);
+      await key(null, 'Escape', 'keyDown'); await key(null, 'Escape', 'keyUp'); await wait(80);   // 연주 모드 끄기
+      sent.length = 0;
+      await js(`window.__yssMidiInput([0x90, 64, 100]); true`); await wait(80);
+      expect('MIDI 노트온 → 엔진 noteOn(64, 세기 100/127)', cmds('noteOn').some(c => c.pitch === 64 && Math.abs(c.vel - 100 / 127) < 0.01), true);
+      expect('MIDI 노트온 → 건반 불(E4)', await js(`document.querySelector('.pr-key[data-p="64"]').classList.contains('lit')`), true);
+      await js(`window.__yssMidiInput([0x90, 64, 0]); true`); await wait(80);   // 세기 0 노트온 = 노트오프
+      expect('MIDI 노트오프 → 엔진 noteOff + 건반 꺼짐', cmds('noteOff').some(c => c.pitch === 64) && !(await js(`document.querySelector('.pr-key[data-p="64"]').classList.contains('lit')`)), true);
+    }
     // 재생 바 — ▶ = 클립 처음부터 재생, 다시 누르면 정지 / "이 트랙만" = 임시 솔로
     sent.length = 0;
     await js(`document.querySelector('.pr-play').click(); true`); await wait(400);

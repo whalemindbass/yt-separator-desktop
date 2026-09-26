@@ -146,13 +146,23 @@ export function openPianoRoll(o) {
   const rulerIn = $q('.pr-ruler-in'), rulerView = $q('.pr-ruler-view');
   function drawRuler() {
     const c = clip(); if (!c) return;
-    const bar = o.secPerBar(), beat = bar / 4, origin = o.origin(), W = widthSec();
+    const bar = o.secPerBar(), beat = bar / 4, origin = o.origin(), W = widthSec(), step = o.stepSec();
+    // 격자와 같은 간격으로 눈금 — 확대하면 박마다 "마디.박" 번호까지. 예전엔 마디 번호만 있어서
+    // 크게 확대하면 한 화면에 마디 경계가 없어 눈금이 빠진 것처럼 보였다(제보).
+    const tickStep = step * pps >= 6 ? step : beat;
+    const beatPx = beat * pps, labelBeats = beatPx >= 34;
+    const near = (a, unit) => { const k = (a - origin) / unit; return Math.abs(k - Math.round(k)) < 1e-4; };
     let html = '';
-    const a0 = floorToGrid(c.start, origin, beat);
-    for (let a = a0; a <= c.start + W; a += beat) {
+    const a0 = floorToGrid(c.start, origin, tickStep);
+    for (let a = a0; a <= c.start + W + 1e-9; a += tickStep) {
       const x = (a - c.start) * pps; if (x < -1) continue;
-      const bi = (a - origin) / bar, onBar = Math.abs(bi - Math.round(bi)) < 1e-4;
-      html += onBar ? `<i class="bar" style="left:${x.toFixed(1)}px"><b>${Math.round(bi) + 1}</b></i>` : `<i style="left:${x.toFixed(1)}px"></i>`;
+      if (near(a, bar)) { html += `<i class="bar" style="left:${x.toFixed(1)}px"><b>${Math.round((a - origin) / bar) + 1}</b></i>`; continue; }
+      if (near(a, beat)) {
+        const bi = Math.floor((a - origin) / bar + 1e-6), be = Math.round(((a - origin) - bi * bar) / beat) + 1;
+        html += `<i class="beat" style="left:${x.toFixed(1)}px">${labelBeats ? `<b>${bi + 1}.${be}</b>` : ''}</i>`;
+        continue;
+      }
+      html += `<i style="left:${x.toFixed(1)}px"></i>`;
     }
     rulerIn.innerHTML = html;
     rulerIn.style.width = (W * pps) + 'px';
@@ -489,6 +499,8 @@ export function openPianoRoll(o) {
       const t = Math.max(0, relSec); $q('.pr-time').textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
     },
     setRecording(on) { recBtn.classList.toggle('on', !!on); },
+    // 바깥(타이핑 키보드·MIDI 컨트롤러)에서 친 음 — 왼쪽 건반에 불을 켠다/끈다
+    keyLit(p, on) { $q(`.pr-key[data-p="${p}"]`)?.classList.toggle('lit', !!on); },
     // 녹음 중 실시간 노트 — 절대 시각(초) { p, t0, t1 } 목록, now = 지금 재생 위치
     setLive(notes, now) {
       const c = clip(); if (!c) return;

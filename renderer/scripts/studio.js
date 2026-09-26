@@ -2686,7 +2686,45 @@ function midiRecAssist() {
   if (!sel.armed) { flashTake(tr('studio.midi.recNotArmed')); return; }
   if (!_kbOn) setKbMode(true);
 }
-function kbReleaseAll() { for (const [code, h] of _kbHeld) { api.engine.noteOff(h.track, h.pitch); markKbKey(code, false); } _kbHeld.clear(); }
+function kbReleaseAll() { for (const [code, h] of _kbHeld) { playNote(h.track, h.pitch, 0, false); markKbKey(code, false); } _kbHeld.clear(); }
+// 연주 한 음 — 타이핑 키보드·MIDI 컨트롤러 공용. 엔진으로 보내고, 피아노롤 건반에 불, 녹음 중이면 실시간 미리보기.
+function playNote(track, pitch, vel, on) {
+  if (on) api.engine.noteOn(track, pitch, vel || 0.8); else api.engine.noteOff(track, pitch);
+  if (_pr) { const pc = _midiClips.find(x => x.id === _pr.clipId); if (pc && pc.trackId === track) _pr.keyLit(pitch, on); }
+  midiLiveNote(pitch, on);
+}
+// ── MIDI 컨트롤러(Web MIDI) — 연결된 입력 장치 전부. 켜는 스위치 없이, 스튜디오에서 악기 트랙을
+// 선택해 두면 그 트랙으로 바로 연주된다(세기 그대로). 뗄 때는 누를 때의 트랙으로 끈다.
+const _midiInHeld = new Map();   // pitch → track
+function onMidiInput(e) {
+  const d = e.data; if (!d || d.length < 2) return;
+  const cmd = d[0] & 0xf0, pitch = d[1] & 0x7f, vel = d.length > 2 ? d[2] & 0x7f : 0;
+  if (cmd === 0x90 && vel > 0) {
+    if (!kbStudioActive()) return;
+    const t = kbTargetTrack(); if (!t) return;
+    if (_midiInHeld.has(pitch)) playNote(_midiInHeld.get(pitch), pitch, 0, false);
+    _midiInHeld.set(pitch, t.id);
+    playNote(t.id, pitch, vel / 127, true);
+  } else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) {
+    const tid = _midiInHeld.get(pitch); if (tid == null) return;
+    _midiInHeld.delete(pitch);
+    playNote(tid, pitch, 0, false);
+  } else if (cmd === 0xb0 && (pitch === 123 || pitch === 120)) {   // All Notes Off / All Sound Off
+    for (const [p, tid] of _midiInHeld) playNote(tid, p, 0, false);
+    _midiInHeld.clear();
+  }
+}
+// 테스트 훅 — 실제 장치 없이 컨트롤러 메시지를 흘려 넣어 경로를 검증한다(test/studiomidi.test.js)
+window.__yssMidiInput = (bytes) => onMidiInput({ data: Uint8Array.from(bytes) });
+async function wireMidiInputs() {
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const access = await navigator.requestMIDIAccess({ sysex: false });
+    const bind = () => access.inputs.forEach(inp => { inp.onmidimessage = onMidiInput; });
+    bind();
+    access.onstatechange = bind;   // 꽂고 뽑아도 다시 붙인다
+  } catch (err) { console.warn('[midi] Web MIDI unavailable', err); }
+}
 async function setKbMode(on) {
   if (on && !kbTargetTrack()) return;   // 악기 트랙을 선택했을 때만(버튼도 그때만 켜진다)
   _kbOn = !!on;
@@ -2749,16 +2787,14 @@ function wireKeyboardPlay() {
     if (e.repeat || _kbHeld.has(e.code)) return;
     const tt = kbTargetTrack(); if (!tt) return;
     _kbHeld.set(e.code, { track: tt.id, pitch });
-    api.engine.noteOn(tt.id, pitch, 0.8);
+    playNote(tt.id, pitch, 0.8, true);
     markKbKey(e.code, true);
-    midiLiveNote(pitch, true);
   }, true);
   document.addEventListener('keyup', (e) => {
     const h = _kbHeld.get(e.code); if (!h) return;
     _kbHeld.delete(e.code);
-    api.engine.noteOff(h.track, h.pitch);
+    playNote(h.track, h.pitch, 0, false);
     markKbKey(e.code, false);
-    midiLiveNote(h.pitch, false);
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
   window.addEventListener('blur', () => { if (_kbHeld.size) kbReleaseAll(); });
@@ -5098,6 +5134,7 @@ function wire() {
   $('st-kb')?.addEventListener('click', () => setKbMode(!_kbOn));
   $('st-kb-cfg')?.addEventListener('click', (e) => { e.stopPropagation(); openQuantPopoverAt(e.clientX, e.clientY); });
   wireKeyboardPlay();
+  wireMidiInputs();
   // 빈 화면의 행동 버튼 — 기존 메뉴와 같은 동작을 그대로 부른다(동작이 갈라지지 않게)
   $('empty-load-song')?.addEventListener('click', openSongPicker);
   $('empty-open-proj')?.addEventListener('click', () => openProject());
