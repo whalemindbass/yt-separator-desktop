@@ -504,6 +504,16 @@ function renderRecLanes() {
       selectTrack(rt.id);
       api.engine.recArm(rt.id);
     });
+    // 악기 트랙 빈 곳 우클릭 = 빈 MIDI 클립(그 마디에 1마디짜리) — 만들고 바로 피아노롤로
+    if (isInstr) {
+      const areaEl = lane.querySelector('.daw-area');
+      areaEl.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('.daw-take-clip')) return;
+        e.preventDefault(); e.stopPropagation();
+        const sec = Math.max(0, (e.clientX - areaEl.getBoundingClientRect().left) / _pxPerSec);
+        openDropdownAt(e.clientX, e.clientY, [{ label: tr('studio.midi.addEmptyClip'), fn: () => addEmptyMidiClip(rt.id, sec) }]);
+      });
+    }
     const kbBtn = lane.querySelector('[data-m="kb"]');
     if (kbBtn) kbBtn.addEventListener('click', (e) => {   // ⌨ = 이 악기 트랙을 타이핑 키보드로 연주
       e.stopPropagation();
@@ -2406,6 +2416,7 @@ function renderMidiClips(areas) {
 }
 function showMidiMenu(x, y, id) {
   openDropdownAt(x, y, [
+    { label: tr('studio.midi.openPianoRoll'), fn: () => openMidiEditor(id) },
     { label: tr('studio.midi.quantizeNow', { div: _quant.div }), fn: () => quantizeMidiClip(id) },
     { label: tr('studio.midi.quantSettings'), fn: () => openQuantPopoverAt(x, y) },
     { label: tr('studio.midi.duplicate'), fn: () => duplicateMidiClip(id) },
@@ -2496,6 +2507,17 @@ function syncKbButtons() {
 // 악기 트랙을 골라 두고 녹음을 켰을 때 — 연주 모드가 꺼져 있으면 쳐도 아무것도 안 들어가고,
 // R 을 꺼 뒀으면(새 악기 트랙은 켜진 채 시작해서, "녹음 켜기"로 눌렀다가 오히려 끄기 쉽다)
 // 그 트랙엔 기록이 안 된다. 둘 다 "녹음이 가끔 안 된다"로 보였던 경우라 여기서 잡아 준다.
+function addEmptyMidiClip(trackId, atSec) {
+  const bar = secPerBar();
+  let start = _gridOffset + Math.floor((atSec - _gridOffset) / bar) * bar;   // 누른 자리의 마디 시작
+  if (start < 0) start += bar * Math.ceil(-start / bar);
+  const c = addMidiClip({ trackId, start, dur: bar, notes: [] });
+  selectTrack(trackId); selectMidiClip(c.id); renderTakes(); layout();
+  const snap = midiSnapshot(c);
+  pushUndo(() => { removeMidiClip(snap.id); renderTakes(); layout(); }, () => setMidiClipState(snap), tr('studio.midi.addEmptyClip'));
+  markDirty();
+  openMidiEditor(c.id);
+}
 // ── 피아노롤 ──
 let _pr = null;   // 열려 있는 피아노롤(하나만)
 function openMidiEditor(id) {
@@ -2525,6 +2547,12 @@ function openMidiEditor(id) {
     },
     onPreview: (p, on, v) => { const c = find(); if (!c) return; if (on) api.engine.noteOn(c.trackId, p, v || 0.8); else api.engine.noteOff(c.trackId, p); },
     onQuantize: () => quantizeMidiClip(id),
+    onSeek: (sec) => {   // 피아노롤 눈금자 — 녹음 중엔 재생 위치를 못 옮긴다(타임라인과 같은 규칙)
+      if (_recArmed) return;
+      const t = Math.max(0, sec);
+      api.engine.seek(secToSamples(t)); syncVideo(t); updatePlayhead(t);
+      const c = find(); if (c) _pr?.setPlayhead(t - c.start);
+    },
     onPlay: () => {
       if (_playing) { stopStudio(); return; }
       const c = find(); if (!c) return;

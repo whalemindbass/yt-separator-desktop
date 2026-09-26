@@ -41,7 +41,8 @@ export function openPianoRoll(o) {
       <button class="pr-solo" type="button" aria-pressed="false" title="${o.tr('studio.pr.soloTitle')}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"/><rect x="2.2" y="9" width="2.6" height="4.2" rx="1"/><rect x="11.2" y="9" width="2.6" height="4.2" rx="1"/></svg><span>${o.tr('studio.pr.solo')}</span></button>
       <span class="pr-time"></span>
     </div>
-    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div></div></div></div>
+    <div class="pr-ruler" title="${o.tr('studio.pr.rulerTitle')}"><div class="pr-ruler-sp"></div><div class="pr-ruler-view"><div class="pr-ruler-in"></div></div></div>
+    <div class="pr-scroll"><div class="pr-canvas"><div class="pr-keys"></div><div class="pr-grid"><div class="pr-lines"></div><div class="pr-notes"></div><div class="pr-end"></div><div class="pr-ph"></div><div class="pr-marq" hidden></div></div></div></div>
     <div class="pr-vel"><div class="pr-vel-lbl">${o.tr('studio.pr.velocity')}</div><div class="pr-vel-view"><div class="pr-vel-in"></div></div></div>`;
   o.host.appendChild(root);
   const $q = (s) => root.querySelector(s);
@@ -111,6 +112,36 @@ export function openPianoRoll(o) {
     canvas.style.height = (128 * ROW) + 'px';
     $q('.pr-end').style.left = (c.dur * pps) + 'px';
   }
+  // 시간 눈금자 — 마디 번호. 누르거나 끌면 재생선이 그리로(피아노롤 안에서 재생 위치를 정한다).
+  const rulerIn = $q('.pr-ruler-in'), rulerView = $q('.pr-ruler-view');
+  function drawRuler() {
+    const c = clip(); if (!c) return;
+    const bar = o.secPerBar(), beat = bar / 4, origin = o.origin(), W = widthSec();
+    let html = '';
+    const a0 = floorToGrid(c.start, origin, beat);
+    for (let a = a0; a <= c.start + W; a += beat) {
+      const x = (a - c.start) * pps; if (x < -1) continue;
+      const bi = (a - origin) / bar, onBar = Math.abs(bi - Math.round(bi)) < 1e-4;
+      html += onBar ? `<i class="bar" style="left:${x.toFixed(1)}px"><b>${Math.round(bi) + 1}</b></i>` : `<i style="left:${x.toFixed(1)}px"></i>`;
+    }
+    rulerIn.innerHTML = html;
+    rulerIn.style.width = (W * pps) + 'px';
+    rulerIn.style.transform = `translateX(${-scroll.scrollLeft}px)`;
+  }
+  scroll.addEventListener('scroll', () => { rulerIn.style.transform = `translateX(${-scroll.scrollLeft}px)`; });
+  rulerView.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const seek = (ev) => {
+      const c = clip(); if (!c) return;
+      const r = rulerView.getBoundingClientRect();
+      const rel = Math.max(0, (ev.clientX - r.left + scroll.scrollLeft) / pps);
+      o.onSeek(c.start + rel);
+    };
+    seek(e);
+    const up = () => { document.removeEventListener('pointermove', seek); document.removeEventListener('pointerup', up); };
+    document.addEventListener('pointermove', seek); document.addEventListener('pointerup', up);
+  });
   function drawNotes() {
     const c = clip(); if (!c) return;
     $q('.pr-title').textContent = o.title ? o.title() : '';
@@ -162,7 +193,7 @@ export function openPianoRoll(o) {
     const up = () => { document.removeEventListener('pointermove', paint); document.removeEventListener('pointerup', up); if (changed) commit(before); };
     document.addEventListener('pointermove', paint); document.addEventListener('pointerup', up);
   });
-  function redraw() { drawLines(); drawNotes(); drawVel(); }
+  function redraw() { drawLines(); drawNotes(); drawVel(); drawRuler(); }
   const snapshot = () => { const c = clip(); return c ? { ...c, notes: c.notes.map(n => ({ ...n })) } : null; };
   function commit(before) {
     const c = clip(); if (!c) return;
@@ -197,9 +228,30 @@ export function openPianoRoll(o) {
       mode = (r.right - e.clientX) <= 6 ? 'resize' : 'move';
       if (e.ctrlKey || e.metaKey) { if (sel.has(n)) sel.delete(n); else sel.add(n); drawNotes(); drawVel(); return; }
       if (!sel.has(n)) sel = new Set([n]);
+    } else if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      // 빈 곳에서 Ctrl/Shift + 끌기 = 범위 선택(Ctrl: 새로, Shift: 기존에 더하기). 스쳐 지나간 노트가 잡힌다.
+      const add = e.shiftKey, base = add ? new Set(sel) : new Set();
+      const marq = $q('.pr-marq');
+      const x0 = x, y0 = y;
+      const paint = (ev) => {
+        const q = localPos(ev);
+        const l = Math.min(x0, q.x), rgt = Math.max(x0, q.x), t = Math.min(y0, q.y), b = Math.max(y0, q.y);
+        Object.assign(marq.style, { left: l + 'px', top: t + 'px', width: (rgt - l) + 'px', height: (b - t) + 'px' });
+        marq.hidden = false;
+        sel = new Set(base);
+        for (const n of c.notes) {
+          const nx0 = n.t * pps, nx1 = nx0 + Math.max(4, n.d * pps), ny0 = rowOf(n.p) * ROW, ny1 = ny0 + ROW;
+          if (nx1 >= l && nx0 <= rgt && ny1 >= t && ny0 <= b) sel.add(n);
+        }
+        drawNotes(); drawVel();
+      };
+      paint(e);
+      const up = () => { marq.hidden = true; document.removeEventListener('pointermove', paint); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
+      document.addEventListener('pointermove', paint); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+      return;
     } else {
       // 빈 칸 = 새 노트 — 클릭한 칸의 격자 시작에, 마지막 길이로
-      if (!(e.ctrlKey || e.metaKey)) sel = new Set();
+      sel = new Set();
       const abs = floorToGrid(c.start + x / pps, origin, step);
       n = { t: Math.max(0, abs - c.start), d: lastLen || step, p: pitchAt(y), v: 0.8 };
       c.notes.push(n); sel = new Set([n]);
